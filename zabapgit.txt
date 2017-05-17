@@ -13161,6 +13161,7 @@ CLASS lcl_objects_program IMPLEMENTATION.
         not_found = 1
         OTHERS    = 2.
     IF sy-subrc <> 0.
+* if moving code from SAPlink, see https://github.com/larshp/abapGit/issues/562
       lcx_exception=>raise( 'error from RS_CUA_INTERNAL_WRITE' ).
     ENDIF.
 
@@ -49145,5 +49146,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-05-11T11:51:04.473Z
+* abapmerge - 2017-05-17T11:23:28.870Z
 ****************************************************
