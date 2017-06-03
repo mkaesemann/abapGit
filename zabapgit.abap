@@ -3253,6 +3253,10 @@ CLASS lcl_xml_output IMPLEMENTATION.
 
     ASSERT NOT iv_name IS INITIAL.
 
+    IF ig_data IS INITIAL.
+      RETURN.
+    ENDIF.
+
     APPEND INITIAL LINE TO lt_stab ASSIGNING <ls_stab>.
     <ls_stab>-name = iv_name.
     GET REFERENCE OF ig_data INTO <ls_stab>-value.
@@ -16910,9 +16914,11 @@ CLASS lcl_object_oriented_base IMPLEMENTATION.
         rt_source = lo_oo_serializer->serialize_abap_clif_source( is_class_key ).
     ENDCASE.
   ENDMETHOD.
+
   METHOD lif_object_oriented_object_fnc~get_skip_test_classes.
     rv_skip = mv_skip_test_classes.
   ENDMETHOD.
+
   METHOD lif_object_oriented_object_fnc~get_class_properties.
     ASSERT 0 = 1. "Subclass responsibility
   ENDMETHOD.
@@ -18960,6 +18966,8 @@ CLASS lcl_object_dtel IMPLEMENTATION.
   ENDMETHOD.                    "delete
 
   METHOD lif_object~serialize.
+* fm DDIF_DTEL_GET bypasses buffer, so SELECTs are
+* done directly from here
 
     DATA: lv_name  TYPE ddobjname,
           ls_dd04v TYPE dd04v,
@@ -18968,18 +18976,29 @@ CLASS lcl_object_dtel IMPLEMENTATION.
     lv_name = ms_item-obj_name.
 
 
-    CALL FUNCTION 'DDIF_DTEL_GET'
-      EXPORTING
-        name          = lv_name
-        langu         = mv_language
-      IMPORTING
-        dd04v_wa      = ls_dd04v
-        tpara_wa      = ls_tpara
-      EXCEPTIONS
-        illegal_input = 1
-        OTHERS        = 2.
+    SELECT SINGLE * FROM dd04l
+      INTO CORRESPONDING FIELDS OF ls_dd04v
+      WHERE rollname = lv_name
+      AND as4local = 'A'
+      AND as4vers = '0000'.
     IF sy-subrc <> 0 OR ls_dd04v IS INITIAL.
-      lcx_exception=>raise( 'Error from DDIF_DTEL_GET' ).
+      lcx_exception=>raise( 'Not found in DD04L' ).
+    ENDIF.
+
+    SELECT SINGLE * FROM dd04t
+      INTO CORRESPONDING FIELDS OF ls_dd04v
+      WHERE rollname = lv_name
+      AND ddlanguage = mv_language
+      AND as4local = 'A'
+      AND as4vers = '0000'.
+
+    IF NOT ls_dd04v-memoryid IS INITIAL.
+      SELECT SINGLE tpara~paramid tparat~partext
+        FROM tpara LEFT JOIN tparat
+        ON tparat~paramid = tpara~paramid AND
+        tparat~sprache = mv_language
+        INTO ls_tpara
+        WHERE tpara~paramid = ls_dd04v-memoryid.
     ENDIF.
 
     CLEAR: ls_dd04v-as4user,
@@ -21687,7 +21706,14 @@ CLASS lcl_object_fugr IMPLEMENTATION.
 
   METHOD includes.
 
-    DATA: lv_program TYPE program,
+    TYPES: BEGIN OF ty_reposrc,
+             progname TYPE reposrc-progname,
+             cnam     TYPE reposrc-cnam,
+           END OF ty_reposrc.
+
+    DATA: lt_reposrc TYPE STANDARD TABLE OF ty_reposrc WITH DEFAULT KEY,
+          ls_reposrc LIKE LINE OF lt_reposrc,
+          lv_program TYPE program,
           lv_cnam    TYPE reposrc-cnam,
           lv_tabix   LIKE sy-tabix,
           lt_functab TYPE ty_rs38l_incl_tt.
@@ -21722,26 +21748,25 @@ CLASS lcl_object_fugr IMPLEMENTATION.
     APPEND INITIAL LINE TO rt_includes ASSIGNING <lv_include>.
     <lv_include> = |L{ ms_item-obj_name }T00|.
 
+    IF lines( rt_includes ) > 0.
+      SELECT progname cnam FROM reposrc
+        INTO TABLE lt_reposrc
+        FOR ALL ENTRIES IN rt_includes
+        WHERE progname = rt_includes-table_line
+        AND r3state = 'A'.
+      SORT lt_reposrc BY progname ASCENDING.
+    ENDIF.
+
     LOOP AT rt_includes ASSIGNING <lv_include>.
       lv_tabix = sy-tabix.
 
-* skip SAP standard includes
-      SELECT SINGLE cnam FROM reposrc INTO lv_cnam
-        WHERE progname = <lv_include>
-        AND r3state = 'A'
-        AND cnam = 'SAP'.
-      IF sy-subrc = 0.
+* skip SAP standard includes and also make sure the include exists
+      READ TABLE lt_reposrc INTO ls_reposrc
+        WITH KEY progname = <lv_include> BINARY SEARCH.
+      IF sy-subrc <> 0 OR ls_reposrc-cnam = 'SAP'.
         DELETE rt_includes INDEX lv_tabix.
-        CONTINUE.
       ENDIF.
 
-* also make sure the include exists
-      SELECT SINGLE cnam FROM reposrc INTO lv_cnam
-        WHERE progname = <lv_include>
-        AND r3state = 'A'.
-      IF sy-subrc <> 0.
-        DELETE rt_includes INDEX lv_tabix.
-      ENDIF.
     ENDLOOP.
 
     APPEND lv_program TO rt_includes.
@@ -49587,5 +49612,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-05-21T18:50:19.819Z
+* abapmerge - 2017-06-03T08:21:14.326Z
 ****************************************************
