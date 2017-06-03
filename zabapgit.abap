@@ -13103,7 +13103,8 @@ CLASS lcl_objects_program IMPLEMENTATION.
 
     INSERT TEXTPOOL iv_program
       FROM it_tpool
-      LANGUAGE lv_language.
+      LANGUAGE lv_language
+      STATE 'I'.
     IF sy-subrc <> 0.
       lcx_exception=>raise( 'error from INSERT TEXTPOOL' ).
     ENDIF.
@@ -49612,5 +49613,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-06-03T08:24:29.926Z
+* abapmerge - 2017-06-03T08:51:18.174Z
 ****************************************************
