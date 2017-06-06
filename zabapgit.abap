@@ -1251,10 +1251,6 @@ ENDCLASS.                    "lcl_zlib IMPLEMENTATION
 *&  Include           ZABAPGIT_HTML
 *&---------------------------------------------------------------------*
 
-DEFINE _add.
-  ro_html->add( &1 ) ##NO_TEXT.
-END-OF-DEFINITION.
-
 *----------------------------------------------------------------------*
 *       CLASS lcl_html DEFINITION
 *----------------------------------------------------------------------*
@@ -8010,23 +8006,23 @@ CLASS lcl_news DEFINITION CREATE PRIVATE FRIENDS ltcl_news.
 
     CLASS-METHODS:
       create " TODO REFACTOR
-        IMPORTING io_repo             TYPE REF TO lcl_repo
-        RETURNING VALUE(ro_instance)  TYPE REF TO lcl_news
-        RAISING lcx_exception.
+        IMPORTING io_repo            TYPE REF TO lcl_repo
+        RETURNING VALUE(ro_instance) TYPE REF TO lcl_news
+        RAISING   lcx_exception.
 
     METHODS:
       get_log
-        RETURNING VALUE(rt_log)      TYPE tt_log,
+        RETURNING VALUE(rt_log) TYPE tt_log,
       latest_version
-        RETURNING VALUE(rv_version)  TYPE string,
+        RETURNING VALUE(rv_version) TYPE string,
       has_news
-        RETURNING VALUE(rv_boolean)  TYPE abap_bool,
+        RETURNING VALUE(rv_boolean) TYPE abap_bool,
       has_important
-        RETURNING VALUE(rv_boolean)  TYPE abap_bool,
+        RETURNING VALUE(rv_boolean) TYPE abap_bool,
       has_updates
-        RETURNING VALUE(rv_boolean)  TYPE abap_bool,
+        RETURNING VALUE(rv_boolean) TYPE abap_bool,
       has_unseen
-        RETURNING VALUE(rv_boolean)  TYPE abap_bool.
+        RETURNING VALUE(rv_boolean) TYPE abap_bool.
 
   PRIVATE SECTION.
     DATA: mt_log              TYPE tt_log,
@@ -8043,22 +8039,22 @@ CLASS lcl_news DEFINITION CREATE PRIVATE FRIENDS ltcl_news.
     CLASS-METHODS:
       version_to_numeric
         IMPORTING iv_version        TYPE string
-        RETURNING value(rv_version) TYPE i,
+        RETURNING VALUE(rv_version) TYPE i,
       normalize_version
         IMPORTING iv_version        TYPE string
-        RETURNING value(rv_version) TYPE string,
+        RETURNING VALUE(rv_version) TYPE string,
       compare_versions
-        IMPORTING iv_a              TYPE string
-                  iv_b              TYPE string
-        RETURNING value(rv_result)  TYPE i,
+        IMPORTING iv_a             TYPE string
+                  iv_b             TYPE string
+        RETURNING VALUE(rv_result) TYPE i,
       parse_line
         IMPORTING iv_line            TYPE string
                   iv_current_version TYPE string
-        RETURNING value(rs_log)      TYPE ty_log,
+        RETURNING VALUE(rs_log)      TYPE ty_log,
       parse
         IMPORTING it_lines           TYPE string_table
                   iv_current_version TYPE string
-        RETURNING value(rt_log)      TYPE tt_log.
+        RETURNING VALUE(rt_log)      TYPE tt_log.
 
 ENDCLASS.               "lcl_news
 
@@ -8102,10 +8098,11 @@ CLASS lcl_news IMPLEMENTATION.
       WITH KEY path = lc_log_path filename = lc_log_filename.
 
     IF sy-subrc = 0.
-      CREATE OBJECT ro_instance EXPORTING
-        iv_rawdata          = <file>-data
-        iv_current_version  = gc_abap_version " TODO refactor
-        iv_lastseen_version = normalize_version( lv_last_seen ).
+      CREATE OBJECT ro_instance
+        EXPORTING
+          iv_rawdata          = <file>-data
+          iv_current_version  = gc_abap_version " TODO refactor
+          iv_lastseen_version = normalize_version( lv_last_seen ).
     ENDIF.
 
     IF ro_instance IS BOUND.
@@ -8140,10 +8137,10 @@ CLASS lcl_news IMPLEMENTATION.
 
   METHOD parse.
 
-    DATA: lv_tail                 TYPE i,
-          lv_first_version_found  TYPE abap_bool,
-          lv_version              TYPE string,
-          ls_log                  LIKE LINE OF rt_log.
+    DATA: lv_tail                TYPE i,
+          lv_first_version_found TYPE abap_bool,
+          lv_version             TYPE string,
+          ls_log                 LIKE LINE OF rt_log.
 
     FIELD-SYMBOLS: <line> LIKE LINE OF it_lines.
 
@@ -8238,8 +8235,8 @@ CLASS lcl_news IMPLEMENTATION.
 
   METHOD compare_versions.
 
-    DATA: lv_version_a  TYPE i,
-          lv_version_b  TYPE i.
+    DATA: lv_version_a TYPE i,
+          lv_version_b TYPE i.
 
     " Convert versions to numeric
     lv_version_a = version_to_numeric( iv_a ).
@@ -8286,8 +8283,7 @@ ENDCLASS.               "lcl_news
 *----------------------------------------------------------------------*
 * Definition of test class for news announcement
 *----------------------------------------------------------------------*
-CLASS ltcl_news DEFINITION FINAL
-  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+CLASS ltcl_news DEFINITION FINAL FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
 
   PRIVATE SECTION.
 
@@ -8309,8 +8305,8 @@ CLASS ltcl_news IMPLEMENTATION.
 
   METHOD version_to_numeric.
 
-    DATA: lv_version_exp  TYPE i VALUE 1023010,
-          lv_version_act  TYPE i.
+    DATA: lv_version_exp TYPE i VALUE 1023010,
+          lv_version_act TYPE i.
 
     lv_version_act = lcl_news=>version_to_numeric( '1.23.10' ).
 
@@ -8428,28 +8424,26 @@ CLASS ltcl_news IMPLEMENTATION.
 
   ENDMETHOD.                    "parse_line
 
-
-  DEFINE _add_news_log_entry.
-    CLEAR: ls_log.
-    ls_log-version      = &1.
-    ls_log-is_header    = &2.
-    ls_log-is_important = &3.
-    ls_log-pos_to_cur   = &4.
-    ls_log-text         = &5.
-    APPEND ls_log TO lt_log_exp.
-  END-OF-DEFINITION.
-
-  DEFINE _add_news_txt_entry.
-    APPEND &1 TO lt_lines.
-  END-OF-DEFINITION.
-
   METHOD parse.
 
-    DATA:
-          lt_log_exp  TYPE lcl_news=>tt_log,
-          lt_log_act  TYPE lcl_news=>tt_log,
-          ls_log      LIKE LINE OF lt_log_exp,
-          lt_lines    TYPE string_table.
+    DEFINE _add_news_log_entry.
+      CLEAR: ls_log.
+      ls_log-version      = &1.
+      ls_log-is_header    = &2.
+      ls_log-is_important = &3.
+      ls_log-pos_to_cur   = &4.
+      ls_log-text         = &5.
+      APPEND ls_log TO lt_log_exp.
+    END-OF-DEFINITION.
+
+    DEFINE _add_news_txt_entry.
+      APPEND &1 TO lt_lines.
+    END-OF-DEFINITION.
+
+    DATA: lt_log_exp TYPE lcl_news=>tt_log,
+          lt_log_act TYPE lcl_news=>tt_log,
+          ls_log     LIKE LINE OF lt_log_exp,
+          lt_lines   TYPE string_table.
 
     " Generate test data
     _add_news_txt_entry '======'.
@@ -36132,12 +36126,12 @@ CLASS lcl_gui_asset_manager IMPLEMENTATION.
 
   ENDMETHOD.  " get_images.
 
-* used by abapmerge
-  DEFINE _inline.
-    APPEND &1 TO lt_data.
-  END-OF-DEFINITION.
-
   METHOD get_inline_asset.
+
+* used by abapmerge
+    DEFINE _inline.
+      APPEND &1 TO lt_data.
+    END-OF-DEFINITION.
 
     DATA: lt_data TYPE ty_string_tt,
           lv_str  TYPE string.
@@ -37590,7 +37584,7 @@ CLASS lcl_gui_asset_manager IMPLEMENTATION.
     rv_link = '<link rel="stylesheet"'
            && ' type="text/css" href="'
            && 'https://cdnjs.cloudflare.com/ajax/libs/octicons/4.4.0/font/octicons.min.css'
-           && '">'. "#EC NOTEXT
+           && '">'.                                         "#EC NOTEXT
 
   ENDMETHOD.  " get_webfont_link
 
@@ -39362,8 +39356,8 @@ ENDCLASS.                       " lcl_syntax_xml IMPLEMENTATION
 *----------------------------------------------------------------------*
 *       CLASS ltcl_syntax_cases definition
 *----------------------------------------------------------------------*
-CLASS ltcl_syntax_cases DEFINITION FINAL
-  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+CLASS ltcl_syntax_cases DEFINITION FINAL FOR TESTING RISK LEVEL HARMLESS
+    DURATION SHORT.
 
   PRIVATE SECTION.
 
@@ -39877,8 +39871,8 @@ ENDCLASS.                       " ltcl_syntax_cases IMPLEMENTATION
 *----------------------------------------------------------------------*
 *
 *----------------------------------------------------------------------*
-CLASS ltcl_syntax_basic_logic DEFINITION FINAL
-  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+CLASS ltcl_syntax_basic_logic DEFINITION FINAL FOR TESTING RISK LEVEL HARMLESS
+    DURATION SHORT.
 
   PRIVATE SECTION.
 
@@ -40582,58 +40576,58 @@ CLASS lcl_gui_view_tutorial IMPLEMENTATION.
 
     CREATE OBJECT ro_html.
 
-    _add '<h1>Tutorial</h1>'.
-    _add '<hr>'.
+    ro_html->add( '<h1>Tutorial</h1>' ).
+    ro_html->add( '<hr>' ).
 
-    _add '<h2>Adding and cloning repos</h2>'.
-    _add '<p><ul>'.
+    ro_html->add( '<h2>Adding and cloning repos</h2>' ).
+    ro_html->add( '<p><ul>' ).
 
-    _add `<li>To clone a remote repo (e.g. from github) click `.
+    ro_html->add( `<li>To clone a remote repo (e.g. from github) click ` ).
     ro_html->add_a( iv_txt = '+ Clone' iv_act = gc_action-repo_clone ).
-    _add ' from the top menu. This will copy a remote repo to your system.</li>'.
+    ro_html->add( ' from the top menu. This will copy a remote repo to your system.</li>' ).
 
-    _add `<li>To add a local package as a repo click `.
+    ro_html->add( `<li>To add a local package as a repo click ` ).
     ro_html->add_a( iv_txt = '+ Offline' iv_act = gc_action-repo_newoffline ).
-    _add ' from the top menu. This will track a repo which already exist in'.
-    _add ' the system with abapGit. You''ll be able to attach it to remote origin'.
-    _add ' or just serialize as a zip file</li>'.
+    ro_html->add( ' from the top menu. This will track a repo which already exist in' ).
+    ro_html->add( ' the system with abapGit. You''ll be able to attach it to remote origin' ).
+    ro_html->add( ' or just serialize as a zip file</li>' ).
 
-    _add `<li>Go `.
+    ro_html->add( `<li>Go ` ).
     ro_html->add_a( iv_txt = 'Explore' iv_act = gc_action-go_explore ).
-    _add ' to find projects using abapGit</li>'.
+    ro_html->add( ' to find projects using abapGit</li>' ).
 
-    _add '</ul></p>'.
+    ro_html->add( '</ul></p>' ).
 
-    _add '<h2>Repository list and favorites</h2>'.
-    _add '<p><ul>'.
+    ro_html->add( '<h2>Repository list and favorites</h2>' ).
+    ro_html->add( '<p><ul>' ).
     ro_html->add( |<li>To choose a repo press {
                   lcl_html=>icon( 'three-bars/blue' ) } at the favorite bar.</li>| ).
     ro_html->add( |<li>To favorite a repo click {
                   lcl_html=>icon( 'star/darkgrey' ) } icon at repo toolbar.</li>| ).
-    _add '</ul></p>'.
+    ro_html->add( '</ul></p>' ).
 
-    _add '<h2>abapGit related repositories</h2>'.
-    _add '<p><ul>'.
-    _add '<li>'.
+    ro_html->add( '<h2>abapGit related repositories</h2>' ).
+    ro_html->add( '<p><ul>' ).
+    ro_html->add( '<li>' ).
     IF lcl_services_abapgit=>is_installed( ) = abap_true.
-      _add 'abapGit installed in package&nbsp;'.
-      _add lcl_services_abapgit=>c_package_abapgit.
+      ro_html->add( 'abapGit installed in package&nbsp;' ).
+      ro_html->add( lcl_services_abapgit=>c_package_abapgit ).
     ELSE.
       ro_html->add_a( iv_txt = 'install abapGit repo' iv_act = gc_action-abapgit_install ).
-      _add ' - To keep abapGit up-to-date (or also to contribute) you need to'.
-      _add 'install it as a repository.'.
+      ro_html->add( ' - To keep abapGit up-to-date (or also to contribute) you need to' ).
+      ro_html->add( 'install it as a repository.' ).
     ENDIF.
-    _add '</li>'.
-    _add '<li>'.
+    ro_html->add( '</li>' ).
+    ro_html->add( '<li>' ).
     IF lcl_services_abapgit=>is_installed_pi( ) = abap_true.
-      _add 'abapGit plugins installed in package&nbsp;'.
-      _add lcl_services_abapgit=>c_package_plugins.
+      ro_html->add( 'abapGit plugins installed in package&nbsp;' ).
+      ro_html->add( lcl_services_abapgit=>c_package_plugins ).
     ELSE.
       ro_html->add_a( iv_txt = 'install abapGit plugins' iv_act = gc_action-abapgit_install_pi ).
-      _add ' - you can also install plugins to extend supported object types'.
+      ro_html->add( ' - you can also install plugins to extend supported object types' ).
     ENDIF.
-    _add '</li>'.
-    _add '</ul></p>'.
+    ro_html->add( '</li>' ).
+    ro_html->add( '</ul></p>' ).
 
   ENDMETHOD. " render_content.
 
@@ -40904,7 +40898,7 @@ CLASS lcl_gui_page_commit IMPLEMENTATION.
   METHOD scripts.
 
     CREATE OBJECT ro_html.
-    _add 'setInitialFocus("comment");'.
+    ro_html->add( 'setInitialFocus("comment");' ).
 
   ENDMETHOD.    "scripts
 
@@ -41336,25 +41330,25 @@ CLASS lcl_gui_page_merge IMPLEMENTATION.
       iv_show_package = abap_false
       iv_show_branch  = abap_false ) ).
 
-    _add '<table>'.
-    _add '<tr>'.
-    _add '<td>Source:</td>'.
-    _add '<td>'.
-    _add ms_merge-source-name.
-    _add '</td></tr>'.
-    _add '<tr>'.
-    _add '<td>Target:</td>'.
-    _add '<td>'.
-    _add ms_merge-target-name.
-    _add '</td></tr>'.
-    _add '<tr>'.
-    _add '<td>Ancestor:</td>'.
-    _add '<td>'.
-    _add ms_merge-common-commit.
-    _add '</td></tr>'.
-    _add '</table>'.
+    ro_html->add( '<table>' ).
+    ro_html->add( '<tr>' ).
+    ro_html->add( '<td>Source:</td>' ).
+    ro_html->add( '<td>' ).
+    ro_html->add( ms_merge-source-name ).
+    ro_html->add( '</td></tr>' ).
+    ro_html->add( '<tr>' ).
+    ro_html->add( '<td>Target:</td>' ).
+    ro_html->add( '<td>' ).
+    ro_html->add( ms_merge-target-name ).
+    ro_html->add( '</td></tr>' ).
+    ro_html->add( '<tr>' ).
+    ro_html->add( '<td>Ancestor:</td>' ).
+    ro_html->add( '<td>' ).
+    ro_html->add( ms_merge-common-commit ).
+    ro_html->add( '</td></tr>' ).
+    ro_html->add( '</table>' ).
 
-    _add '<br>'.
+    ro_html->add( '<br>' ).
 
     APPEND LINES OF ms_merge-stree TO lt_files.
     APPEND LINES OF ms_merge-ttree TO lt_files.
@@ -42088,30 +42082,30 @@ CLASS lcl_gui_page_branch_overview IMPLEMENTATION.
     ro_html->add( build_menu( )->render( ) ).
 
 * see http://stackoverflow.com/questions/6081483/maximum-size-of-a-canvas-element
-    _add '<canvas id="gitGraph"></canvas>'.
+    ro_html->add( '<canvas id="gitGraph"></canvas>' ).
 
     ro_html->add( '<script type="text/javascript" src="https://cdnjs.' &&
       'cloudflare.com/ajax/libs/gitgraph.js/1.2.3/gitgraph.min.js">' &&
       '</script>' ) ##NO_TEXT.
 
-    _add '<script type="text/javascript">'.
-    _add 'var myTemplateConfig = {'.
+    ro_html->add( '<script type="text/javascript">' ).
+    ro_html->add( 'var myTemplateConfig = {' ).
     ro_html->add( 'colors: [ "#979797", "#008fb5", "#f1c109", "'
       && '#095256", "#087F8C", "#5AAA95", "#86A873", "#BB9F06" ],' ) ##NO_TEXT.
-    _add 'branch: {'.
-    _add '  lineWidth: 8,'.
-    _add '  spacingX: 50'.
-    _add '},'.
-    _add 'commit: {'.
-    _add '  spacingY: -40,'.
-    _add '  dot: { size: 12 },'.
-    _add '  message: { font: "normal 14pt Arial" }'.
-    _add '}'.
-    _add '};'.
-    _add 'var gitgraph = new GitGraph({'.
-    _add '  template: myTemplateConfig,'.
-    _add '  orientation: "vertical-reverse"'.
-    _add '});'.
+    ro_html->add( 'branch: {' ).
+    ro_html->add( '  lineWidth: 8,' ).
+    ro_html->add( '  spacingX: 50' ).
+    ro_html->add( '},' ).
+    ro_html->add( 'commit: {' ).
+    ro_html->add( '  spacingY: -40,' ).
+    ro_html->add( '  dot: { size: 12 },' ).
+    ro_html->add( '  message: { font: "normal 14pt Arial" }' ).
+    ro_html->add( '}' ).
+    ro_html->add( '};' ).
+    ro_html->add( 'var gitgraph = new GitGraph({' ).
+    ro_html->add( '  template: myTemplateConfig,' ).
+    ro_html->add( '  orientation: "vertical-reverse"' ).
+    ro_html->add( '});' ).
 
     LOOP AT mt_commits ASSIGNING <ls_commit>.
       IF sy-tabix = 1.
@@ -42146,7 +42140,7 @@ CLASS lcl_gui_page_branch_overview IMPLEMENTATION.
 
     ENDLOOP.
 
-    _add '</script>'.
+    ro_html->add( '</script>' ).
 
   ENDMETHOD.
 
@@ -46964,8 +46958,8 @@ CLASS ltcl_login_manager IMPLEMENTATION.
 
 ENDCLASS.
 
-CLASS ltcl_html_action_utils DEFINITION
-  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINAL
+CLASS ltcl_html_action_utils DEFINITION FOR TESTING RISK LEVEL HARMLESS
+  DURATION SHORT FINAL
   INHERITING FROM cl_aunit_assert.
 
   PUBLIC SECTION.
@@ -47023,8 +47017,7 @@ CLASS ltcl_html_action_utils IMPLEMENTATION.
 
 ENDCLASS. "ltcl_html_action_utils
 
-CLASS ltcl_path DEFINITION
-  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINAL
+CLASS ltcl_path DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINAL
   INHERITING FROM cl_aunit_assert.
 
   PUBLIC SECTION.
@@ -47181,8 +47174,8 @@ CLASS ltcl_path IMPLEMENTATION.
 
 ENDCLASS.   "ltcl_path
 
-CLASS ltcl_file_status DEFINITION
-  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINAL
+CLASS ltcl_file_status DEFINITION FOR TESTING RISK LEVEL HARMLESS
+  DURATION SHORT FINAL
   INHERITING FROM cl_aunit_assert.
 
   PUBLIC SECTION.
@@ -47282,8 +47275,8 @@ CLASS ltcl_file_status IMPLEMENTATION.
 
 ENDCLASS.   "ltcl_file_status
 
-CLASS ltcl_file_status2 DEFINITION
-  FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINAL
+CLASS ltcl_file_status2 DEFINITION FOR TESTING RISK LEVEL HARMLESS
+  DURATION SHORT FINAL
   INHERITING FROM cl_aunit_assert.
 
   PUBLIC SECTION.
@@ -49613,5 +49606,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-06-05T07:31:36.016Z
+* abapmerge - 2017-06-06T19:07:34.094Z
 ****************************************************
