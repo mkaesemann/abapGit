@@ -179,251 +179,255 @@ ENDCLASS. " lcl_password_dialog IMPLEMENTATION
 
 TYPE-POOLS seop.
 
-TYPES: ty_type    TYPE c LENGTH 6,
-       ty_bitbyte TYPE c LENGTH 8,
-       ty_sha1    TYPE c LENGTH 40.
+INTERFACE lif_defs.
 
-TYPES: BEGIN OF ty_file_signature,
-         path     TYPE string,
-         filename TYPE string,
-         sha1     TYPE ty_sha1,
-       END OF ty_file_signature.
+  TYPES: ty_type    TYPE c LENGTH 6,
+         ty_bitbyte TYPE c LENGTH 8,
+         ty_sha1    TYPE c LENGTH 40.
 
-TYPES: ty_file_signatures_tt TYPE STANDARD TABLE OF
-         ty_file_signature WITH DEFAULT KEY.
+  TYPES: BEGIN OF ty_file_signature,
+           path     TYPE string,
+           filename TYPE string,
+           sha1     TYPE lif_defs=>ty_sha1,
+         END OF ty_file_signature.
 
-TYPES: ty_file_signatures_ts TYPE SORTED TABLE OF
-         ty_file_signature WITH UNIQUE KEY path filename.
+  TYPES: ty_file_signatures_tt TYPE STANDARD TABLE OF
+           ty_file_signature WITH DEFAULT KEY.
 
-TYPES: BEGIN OF ty_file.
-        INCLUDE TYPE ty_file_signature.
-TYPES: data TYPE xstring,
-       END OF ty_file.
-TYPES: ty_files_tt TYPE STANDARD TABLE OF ty_file WITH DEFAULT KEY.
+  TYPES: ty_file_signatures_ts TYPE SORTED TABLE OF
+           ty_file_signature WITH UNIQUE KEY path filename.
 
-TYPES: ty_string_tt TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
+  TYPES: BEGIN OF ty_file.
+      INCLUDE TYPE ty_file_signature.
+  TYPES: data TYPE xstring,
+         END OF ty_file.
+  TYPES: ty_files_tt TYPE STANDARD TABLE OF ty_file WITH DEFAULT KEY.
 
-TYPES:
-  BEGIN OF ty_git_user,
-    name  TYPE string,
-    email TYPE string,
-  END OF ty_git_user.
+  TYPES: ty_string_tt TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
 
-TYPES:
-  BEGIN OF ty_comment,
-    committer TYPE ty_git_user,
-    author    TYPE ty_git_user,
-    comment   TYPE string,
-  END OF ty_comment.
+  TYPES:
+    BEGIN OF ty_git_user,
+      name  TYPE string,
+      email TYPE string,
+    END OF ty_git_user.
 
-TYPES: BEGIN OF ty_item,
-         obj_type TYPE tadir-object,
-         obj_name TYPE tadir-obj_name,
-         devclass TYPE devclass,
-       END OF ty_item,
-       ty_items_tt TYPE STANDARD TABLE OF ty_item WITH DEFAULT KEY,
-       ty_items_ts TYPE SORTED TABLE OF ty_item WITH UNIQUE KEY obj_type obj_name.
+  TYPES:
+    BEGIN OF ty_comment,
+      committer TYPE ty_git_user,
+      author    TYPE ty_git_user,
+      comment   TYPE string,
+    END OF ty_comment.
 
-TYPES: BEGIN OF ty_file_item,
-         file TYPE ty_file,
-         item TYPE ty_item,
-       END OF ty_file_item.
-TYPES: ty_files_item_tt TYPE STANDARD TABLE OF ty_file_item WITH DEFAULT KEY.
+  TYPES: BEGIN OF ty_item,
+           obj_type TYPE tadir-object,
+           obj_name TYPE tadir-obj_name,
+           devclass TYPE devclass,
+         END OF ty_item,
+         ty_items_tt TYPE STANDARD TABLE OF ty_item WITH DEFAULT KEY,
+         ty_items_ts TYPE SORTED TABLE OF ty_item WITH UNIQUE KEY obj_type obj_name.
 
-TYPES: BEGIN OF ty_metadata,
-         class        TYPE string,
-         version      TYPE string,
-         late_deser   TYPE abap_bool,
-         delete_tadir TYPE abap_bool,
-         ddic         TYPE abap_bool,
-       END OF ty_metadata.
+  TYPES: BEGIN OF ty_file_item,
+           file TYPE lif_defs=>ty_file,
+           item TYPE ty_item,
+         END OF ty_file_item.
+  TYPES: ty_files_item_tt TYPE STANDARD TABLE OF ty_file_item WITH DEFAULT KEY.
 
-TYPES: BEGIN OF ty_web_asset,
-         url     TYPE w3url,
-         base64  TYPE string,
-         content TYPE xstring,
-       END OF ty_web_asset.
-TYPES  tt_web_assets TYPE STANDARD TABLE OF ty_web_asset WITH DEFAULT KEY.
+  TYPES: BEGIN OF ty_metadata,
+           class        TYPE string,
+           version      TYPE string,
+           late_deser   TYPE abap_bool,
+           delete_tadir TYPE abap_bool,
+           ddic         TYPE abap_bool,
+         END OF ty_metadata.
 
-TYPES: BEGIN OF ty_repo_file,
-         path       TYPE string,
-         filename   TYPE string,
-         is_changed TYPE abap_bool,
-         rstate     TYPE char1,
-         lstate     TYPE char1,
-       END OF ty_repo_file.
-TYPES  tt_repo_files TYPE STANDARD TABLE OF ty_repo_file WITH DEFAULT KEY.
+  TYPES: BEGIN OF ty_web_asset,
+           url     TYPE w3url,
+           base64  TYPE string,
+           content TYPE xstring,
+         END OF ty_web_asset.
+  TYPES  tt_web_assets TYPE STANDARD TABLE OF ty_web_asset WITH DEFAULT KEY.
 
-TYPES: BEGIN OF ty_stage_files,
-         local  TYPE ty_files_item_tt,
-         remote TYPE ty_files_tt,
-       END OF ty_stage_files.
+  TYPES: BEGIN OF ty_repo_file,
+           path       TYPE string,
+           filename   TYPE string,
+           is_changed TYPE abap_bool,
+           rstate     TYPE char1,
+           lstate     TYPE char1,
+         END OF ty_repo_file.
+  TYPES  tt_repo_files TYPE STANDARD TABLE OF ty_repo_file WITH DEFAULT KEY.
 
-CONSTANTS: BEGIN OF gc_type,
-             commit TYPE ty_type VALUE 'commit',            "#EC NOTEXT
-             tree   TYPE ty_type VALUE 'tree',              "#EC NOTEXT
-             ref_d  TYPE ty_type VALUE 'ref_d',             "#EC NOTEXT
-             blob   TYPE ty_type VALUE 'blob',              "#EC NOTEXT
-           END OF gc_type.
+  TYPES: BEGIN OF ty_stage_files,
+           local  TYPE lif_defs=>ty_files_item_tt,
+           remote TYPE lif_defs=>ty_files_tt,
+         END OF ty_stage_files.
 
-TYPES: ty_chmod TYPE c LENGTH 6.
+  CONSTANTS: BEGIN OF gc_type,
+               commit TYPE lif_defs=>ty_type VALUE 'commit', "#EC NOTEXT
+               tree   TYPE lif_defs=>ty_type VALUE 'tree',  "#EC NOTEXT
+               ref_d  TYPE lif_defs=>ty_type VALUE 'ref_d', "#EC NOTEXT
+               blob   TYPE lif_defs=>ty_type VALUE 'blob',  "#EC NOTEXT
+             END OF gc_type.
 
-TYPES: BEGIN OF ty_object,
-         sha1 TYPE ty_sha1,
-         type TYPE ty_type,
-         data TYPE xstring,
-       END OF ty_object.
-TYPES: ty_objects_tt TYPE STANDARD TABLE OF ty_object WITH DEFAULT KEY.
+  TYPES: ty_chmod TYPE c LENGTH 6.
 
-TYPES: BEGIN OF ty_tadir,
-         pgmid    TYPE tadir-pgmid,
-         object   TYPE tadir-object,
-         obj_name TYPE tadir-obj_name,
-         devclass TYPE tadir-devclass,
-         korrnum  TYPE tadir-korrnum,
-         path     TYPE string,
-       END OF ty_tadir.
-TYPES: ty_tadir_tt TYPE STANDARD TABLE OF ty_tadir WITH DEFAULT KEY.
+  TYPES: BEGIN OF ty_object,
+           sha1 TYPE lif_defs=>ty_sha1,
+           type TYPE lif_defs=>ty_type,
+           data TYPE xstring,
+         END OF ty_object.
+  TYPES: ty_objects_tt TYPE STANDARD TABLE OF ty_object WITH DEFAULT KEY.
 
-TYPES: BEGIN OF ty_result,
-         obj_type TYPE tadir-object,
-         obj_name TYPE tadir-obj_name,
-         path     TYPE string,
-         filename TYPE string,
-         package  TYPE devclass,
-         match    TYPE sap_bool,
-         lstate   TYPE char1,
-         rstate   TYPE char1,
-       END OF ty_result.
-TYPES: ty_results_tt TYPE STANDARD TABLE OF ty_result WITH DEFAULT KEY.
+  TYPES: BEGIN OF ty_tadir,
+           pgmid    TYPE tadir-pgmid,
+           object   TYPE tadir-object,
+           obj_name TYPE tadir-obj_name,
+           devclass TYPE tadir-devclass,
+           korrnum  TYPE tadir-korrnum,
+           path     TYPE string,
+         END OF ty_tadir.
+  TYPES: ty_tadir_tt TYPE STANDARD TABLE OF ty_tadir WITH DEFAULT KEY.
 
-TYPES: ty_sval_tt TYPE STANDARD TABLE OF sval WITH DEFAULT KEY.
+  TYPES: BEGIN OF ty_result,
+           obj_type TYPE tadir-object,
+           obj_name TYPE tadir-obj_name,
+           path     TYPE string,
+           filename TYPE string,
+           package  TYPE devclass,
+           match    TYPE sap_bool,
+           lstate   TYPE char1,
+           rstate   TYPE char1,
+         END OF ty_result.
+  TYPES: ty_results_tt TYPE STANDARD TABLE OF ty_result WITH DEFAULT KEY.
 
-TYPES: ty_seocompotx_tt TYPE STANDARD TABLE OF seocompotx WITH DEFAULT KEY.
+  TYPES: ty_sval_tt TYPE STANDARD TABLE OF sval WITH DEFAULT KEY.
 
-TYPES: BEGIN OF ty_tpool.
-        INCLUDE TYPE textpool.
-TYPES:   split TYPE c LENGTH 8.
-TYPES: END OF ty_tpool.
+  TYPES: ty_seocompotx_tt TYPE STANDARD TABLE OF seocompotx WITH DEFAULT KEY.
 
-TYPES: ty_tpool_tt TYPE STANDARD TABLE OF ty_tpool WITH DEFAULT KEY.
+  TYPES: BEGIN OF ty_tpool.
+      INCLUDE TYPE textpool.
+  TYPES:   split TYPE c LENGTH 8.
+  TYPES: END OF ty_tpool.
 
-TYPES: BEGIN OF ty_sotr,
-         header  TYPE sotr_head,
-         entries TYPE sotr_text_tt,
-       END OF ty_sotr.
+  TYPES: ty_tpool_tt TYPE STANDARD TABLE OF ty_tpool WITH DEFAULT KEY.
 
-TYPES: ty_sotr_tt TYPE STANDARD TABLE OF ty_sotr WITH DEFAULT KEY.
+  TYPES: BEGIN OF ty_sotr,
+           header  TYPE sotr_head,
+           entries TYPE sotr_text_tt,
+         END OF ty_sotr.
 
-TYPES:
-  BEGIN OF ty_transport_to_branch,
-    branch_name TYPE string,
-    commit_text TYPE string,
-  END OF ty_transport_to_branch.
+  TYPES: ty_sotr_tt TYPE STANDARD TABLE OF ty_sotr WITH DEFAULT KEY.
 
-CONSTANTS: BEGIN OF gc_state, " https://git-scm.com/docs/git-status
-             unchanged TYPE char1 VALUE '',
-             added     TYPE char1 VALUE 'A',
-             modified  TYPE char1 VALUE 'M',
-             deleted   TYPE char1 VALUE 'D', "For future use
-             mixed     TYPE char1 VALUE '*',
-           END OF gc_state.
+  TYPES:
+    BEGIN OF ty_transport_to_branch,
+      branch_name TYPE string,
+      commit_text TYPE string,
+    END OF ty_transport_to_branch.
 
-CONSTANTS: BEGIN OF gc_chmod,
-             file       TYPE ty_chmod VALUE '100644',
-             executable TYPE ty_chmod VALUE '100755',
-             dir        TYPE ty_chmod VALUE '40000 ',
-           END OF gc_chmod.
+  CONSTANTS: BEGIN OF gc_state, " https://git-scm.com/docs/git-status
+               unchanged TYPE char1 VALUE '',
+               added     TYPE char1 VALUE 'A',
+               modified  TYPE char1 VALUE 'M',
+               deleted   TYPE char1 VALUE 'D', "For future use
+               mixed     TYPE char1 VALUE '*',
+             END OF gc_state.
 
-CONSTANTS: BEGIN OF gc_event_state,
-             not_handled         VALUE 0,
-             re_render           VALUE 1,
-             new_page            VALUE 2,
-             go_back             VALUE 3,
-             no_more_act         VALUE 4,
-             new_page_w_bookmark VALUE 5,
-             go_back_to_bookmark VALUE 6,
-             new_page_replacing  VALUE 7,
-           END OF gc_event_state.
+  CONSTANTS: BEGIN OF gc_chmod,
+               file       TYPE ty_chmod VALUE '100644',
+               executable TYPE ty_chmod VALUE '100755',
+               dir        TYPE ty_chmod VALUE '40000 ',
+             END OF gc_chmod.
 
-CONSTANTS: BEGIN OF gc_html_opt,
-             strong   TYPE c VALUE 'E',
-             cancel   TYPE c VALUE 'C',
-             crossout TYPE c VALUE 'X',
-           END OF gc_html_opt.
+  CONSTANTS: BEGIN OF gc_event_state,
+               not_handled         VALUE 0,
+               re_render           VALUE 1,
+               new_page            VALUE 2,
+               go_back             VALUE 3,
+               no_more_act         VALUE 4,
+               new_page_w_bookmark VALUE 5,
+               go_back_to_bookmark VALUE 6,
+               new_page_replacing  VALUE 7,
+             END OF gc_event_state.
 
-CONSTANTS: BEGIN OF gc_action_type,
-             sapevent  TYPE c VALUE 'E',
-             url       TYPE c VALUE 'U',
-             onclick   TYPE c VALUE 'C',
-             separator TYPE c VALUE 'S',
-             dummy     TYPE c VALUE '_',
-           END OF gc_action_type.
+  CONSTANTS: BEGIN OF gc_html_opt,
+               strong   TYPE c VALUE 'E',
+               cancel   TYPE c VALUE 'C',
+               crossout TYPE c VALUE 'X',
+             END OF gc_html_opt.
 
-CONSTANTS: gc_crlf    TYPE abap_cr_lf VALUE cl_abap_char_utilities=>cr_lf.
-CONSTANTS: gc_newline TYPE abap_char1 VALUE cl_abap_char_utilities=>newline.
+  CONSTANTS: BEGIN OF gc_action_type,
+               sapevent  TYPE c VALUE 'E',
+               url       TYPE c VALUE 'U',
+               onclick   TYPE c VALUE 'C',
+               separator TYPE c VALUE 'S',
+               dummy     TYPE c VALUE '_',
+             END OF gc_action_type.
 
-CONSTANTS: gc_english TYPE spras VALUE 'E'.
+  CONSTANTS: gc_crlf    TYPE abap_cr_lf VALUE cl_abap_char_utilities=>cr_lf.
+  CONSTANTS: gc_newline TYPE abap_char1 VALUE cl_abap_char_utilities=>newline.
 
-CONSTANTS: gc_root_dir     TYPE string VALUE '/',
-           gc_dot_abapgit  TYPE string VALUE '.abapgit.xml' ##NO_TEXT,
-           gc_author_regex TYPE string VALUE '^([\w\s\.@\-_1-9]+) <(.*)> (\d{10}) .\d{4}$' ##NO_TEXT.
+  CONSTANTS: gc_english TYPE spras VALUE 'E'.
 
-CONSTANTS: BEGIN OF gc_action,
-             repo_clone               TYPE string VALUE 'repo_clone',
-             repo_refresh             TYPE string VALUE 'repo_refresh',
-             repo_remove              TYPE string VALUE 'repo_remove',
-             repo_settings            TYPE string VALUE 'repo_settings',
-             repo_purge               TYPE string VALUE 'repo_purge',
-             repo_newoffline          TYPE string VALUE 'repo_newoffline',
-             repo_remote_attach       TYPE string VALUE 'repo_remote_attach',
-             repo_remote_detach       TYPE string VALUE 'repo_remote_detach',
-             repo_remote_change       TYPE string VALUE 'repo_remote_change',
-             repo_refresh_checksums   TYPE string VALUE 'repo_refresh_checksums',
-             repo_toggle_fav          TYPE string VALUE 'repo_toggle_fav',
-             repo_transport_to_branch TYPE string VALUE 'repo_transport_to_branch',
+  CONSTANTS: gc_root_dir     TYPE string VALUE '/',
+             gc_dot_abapgit  TYPE string VALUE '.abapgit.xml' ##NO_TEXT,
+             gc_author_regex TYPE string VALUE '^([\w\s\.@\-_1-9]+) <(.*)> (\d{10}).\d{4}$' ##NO_TEXT.
 
-             abapgit_home             TYPE string VALUE 'abapgit_home',
-             abapgit_wiki             TYPE string VALUE 'abapgit_wiki',
-             abapgit_install          TYPE string VALUE 'abapgit_install',
-             abapgit_install_pi       TYPE string VALUE 'abapgit_install_pi',
+  CONSTANTS: BEGIN OF gc_action,
+               repo_clone               TYPE string VALUE 'repo_clone',
+               repo_refresh             TYPE string VALUE 'repo_refresh',
+               repo_remove              TYPE string VALUE 'repo_remove',
+               repo_settings            TYPE string VALUE 'repo_settings',
+               repo_purge               TYPE string VALUE 'repo_purge',
+               repo_newoffline          TYPE string VALUE 'repo_newoffline',
+               repo_remote_attach       TYPE string VALUE 'repo_remote_attach',
+               repo_remote_detach       TYPE string VALUE 'repo_remote_detach',
+               repo_remote_change       TYPE string VALUE 'repo_remote_change',
+               repo_refresh_checksums   TYPE string VALUE 'repo_refresh_checksums',
+               repo_toggle_fav          TYPE string VALUE 'repo_toggle_fav',
+               repo_transport_to_branch TYPE string VALUE 'repo_transport_to_branch',
 
-             zip_import               TYPE string VALUE 'zip_import',
-             zip_export               TYPE string VALUE 'zip_export',
-             zip_package              TYPE string VALUE 'zip_package',
-             zip_transport            TYPE string VALUE 'zip_transport',
-             zip_object               TYPE string VALUE 'zip_object',
+               abapgit_home             TYPE string VALUE 'abapgit_home',
+               abapgit_wiki             TYPE string VALUE 'abapgit_wiki',
+               abapgit_install          TYPE string VALUE 'abapgit_install',
+               abapgit_install_pi       TYPE string VALUE 'abapgit_install_pi',
 
-             git_pull                 TYPE string VALUE 'git_pull',
-             git_reset                TYPE string VALUE 'git_reset',
-             git_branch_create        TYPE string VALUE 'git_branch_create',
-             git_branch_switch        TYPE string VALUE 'git_branch_switch',
-             git_branch_delete        TYPE string VALUE 'git_branch_delete',
-             git_commit               TYPE string VALUE 'git_commit',
+               zip_import               TYPE string VALUE 'zip_import',
+               zip_export               TYPE string VALUE 'zip_export',
+               zip_package              TYPE string VALUE 'zip_package',
+               zip_transport            TYPE string VALUE 'zip_transport',
+               zip_object               TYPE string VALUE 'zip_object',
 
-             db_delete                TYPE string VALUE 'db_delete',
-             db_update                TYPE string VALUE 'db_update',
-             db_display               TYPE string VALUE 'db_display',
-             db_edit                  TYPE string VALUE 'db_edit',
-             bg_update                TYPE string VALUE 'bg_update',
+               git_pull                 TYPE string VALUE 'git_pull',
+               git_reset                TYPE string VALUE 'git_reset',
+               git_branch_create        TYPE string VALUE 'git_branch_create',
+               git_branch_switch        TYPE string VALUE 'git_branch_switch',
+               git_branch_delete        TYPE string VALUE 'git_branch_delete',
+               git_commit               TYPE string VALUE 'git_commit',
 
-             go_main                  TYPE string VALUE 'go_main',
-             go_explore               TYPE string VALUE 'go_explore',
-             go_db                    TYPE string VALUE 'go_db',
-             go_background            TYPE string VALUE 'go_background',
-             go_background_run        TYPE string VALUE 'go_background_run',
-             go_diff                  TYPE string VALUE 'go_diff',
-             go_stage                 TYPE string VALUE 'go_stage',
-             go_commit                TYPE string VALUE 'go_commit',
-             go_branch_overview       TYPE string VALUE 'go_branch_overview',
-             go_playground            TYPE string VALUE 'go_playground',
-             go_debuginfo             TYPE string VALUE 'go_debuginfo',
-             go_settings              TYPE string VALUE 'go_settings',
-             go_tutorial              TYPE string VALUE 'go_tutorial',
+               db_delete                TYPE string VALUE 'db_delete',
+               db_update                TYPE string VALUE 'db_update',
+               db_display               TYPE string VALUE 'db_display',
+               db_edit                  TYPE string VALUE 'db_edit',
+               bg_update                TYPE string VALUE 'bg_update',
 
-             jump                     TYPE string VALUE 'jump',
-             jump_pkg                 TYPE string VALUE 'jump_pkg',
-           END OF gc_action.
+               go_main                  TYPE string VALUE 'go_main',
+               go_explore               TYPE string VALUE 'go_explore',
+               go_db                    TYPE string VALUE 'go_db',
+               go_background            TYPE string VALUE 'go_background',
+               go_background_run        TYPE string VALUE 'go_background_run',
+               go_diff                  TYPE string VALUE 'go_diff',
+               go_stage                 TYPE string VALUE 'go_stage',
+               go_commit                TYPE string VALUE 'go_commit',
+               go_branch_overview       TYPE string VALUE 'go_branch_overview',
+               go_playground            TYPE string VALUE 'go_playground',
+               go_debuginfo             TYPE string VALUE 'go_debuginfo',
+               go_settings              TYPE string VALUE 'go_settings',
+               go_tutorial              TYPE string VALUE 'go_tutorial',
+
+               jump                     TYPE string VALUE 'jump',
+               jump_pkg                 TYPE string VALUE 'jump_pkg',
+             END OF gc_action.
+
+ENDINTERFACE.
 
 
 ****************************************************
@@ -1273,7 +1277,7 @@ CLASS lcl_html DEFINITION FINAL.
       IMPORTING
         iv_txt   TYPE string
         iv_act   TYPE string
-        iv_typ   TYPE char1  DEFAULT gc_action_type-sapevent
+        iv_typ   TYPE char1  DEFAULT lif_defs=>gc_action_type-sapevent
         iv_opt   TYPE clike  OPTIONAL
         iv_class TYPE string OPTIONAL
         iv_id    TYPE string OPTIONAL
@@ -1289,7 +1293,7 @@ CLASS lcl_html DEFINITION FINAL.
       IMPORTING
                 iv_txt        TYPE string
                 iv_act        TYPE string
-                iv_typ        TYPE char1  DEFAULT gc_action_type-sapevent
+                iv_typ        TYPE char1  DEFAULT lif_defs=>gc_action_type-sapevent
                 iv_opt        TYPE clike  OPTIONAL
                 iv_class      TYPE string OPTIONAL
                 iv_id         TYPE string OPTIONAL
@@ -1510,7 +1514,7 @@ CLASS lcl_html IMPLEMENTATION.
       indent_line( CHANGING cs_context = ls_context cv_line = <line_c> ).
     ENDLOOP.
 
-    CONCATENATE LINES OF lt_temp INTO rv_html SEPARATED BY gc_newline.
+    CONCATENATE LINES OF lt_temp INTO rv_html SEPARATED BY lif_defs=>gc_newline.
 
   ENDMETHOD.                    "render
 
@@ -1536,13 +1540,13 @@ CLASS lcl_html IMPLEMENTATION.
 
     lv_class = iv_class.
 
-    IF iv_opt CA gc_html_opt-strong.
+    IF iv_opt CA lif_defs=>gc_html_opt-strong.
       lv_class = lv_class && ' emphasis' ##NO_TEXT.
     ENDIF.
-    IF iv_opt CA gc_html_opt-cancel.
+    IF iv_opt CA lif_defs=>gc_html_opt-cancel.
       lv_class = lv_class && ' attention' ##NO_TEXT.
     ENDIF.
-    IF iv_opt CA gc_html_opt-crossout.
+    IF iv_opt CA lif_defs=>gc_html_opt-crossout.
       lv_class = lv_class && ' crossout grey' ##NO_TEXT.
     ENDIF.
     IF lv_class IS NOT INITIAL.
@@ -1551,16 +1555,16 @@ CLASS lcl_html IMPLEMENTATION.
     ENDIF.
 
     lv_href  = ' href="#"'. " Default, dummy
-    IF iv_act IS NOT INITIAL OR iv_typ = gc_action_type-dummy.
+    IF iv_act IS NOT INITIAL OR iv_typ = lif_defs=>gc_action_type-dummy.
       CASE iv_typ.
-        WHEN gc_action_type-url.
+        WHEN lif_defs=>gc_action_type-url.
           lv_href  = | href="{ iv_act }"|.
-        WHEN gc_action_type-sapevent.
+        WHEN lif_defs=>gc_action_type-sapevent.
           lv_href  = | href="sapevent:{ iv_act }"|.
-        WHEN gc_action_type-onclick.
+        WHEN lif_defs=>gc_action_type-onclick.
           lv_href  = ' href="#"'.
           lv_click = | onclick="{ iv_act }"|.
-        WHEN gc_action_type-dummy.
+        WHEN lif_defs=>gc_action_type-dummy.
           lv_href  = ' href="#"'.
       ENDCASE.
     ENDIF.
@@ -1624,7 +1628,7 @@ CLASS lcl_html_toolbar DEFINITION FINAL.
         IMPORTING
           iv_txt TYPE string
           io_sub TYPE REF TO lcl_html_toolbar OPTIONAL
-          iv_typ TYPE c         DEFAULT gc_action_type-sapevent
+          iv_typ TYPE c         DEFAULT lif_defs=>gc_action_type-sapevent
           iv_act TYPE string    OPTIONAL
           iv_ico TYPE string    OPTIONAL
           iv_cur TYPE abap_bool OPTIONAL
@@ -1694,9 +1698,9 @@ CLASS lcl_html_toolbar IMPLEMENTATION.
   METHOD add.
     DATA ls_item TYPE ty_item.
 
-    ASSERT iv_typ = gc_action_type-separator  " sep doesn't have action
-      OR iv_typ = gc_action_type-onclick      " click may have no action (assigned in JS)
-      OR iv_typ = gc_action_type-dummy        " dummy may have no action
+    ASSERT iv_typ = lif_defs=>gc_action_type-separator  " sep doesn't have action
+      OR iv_typ = lif_defs=>gc_action_type-onclick      " click may have no action (assigned in JS)
+      OR iv_typ = lif_defs=>gc_action_type-dummy        " dummy may have no action
       OR iv_act IS INITIAL AND io_sub IS NOT INITIAL
       OR iv_act IS NOT INITIAL AND io_sub IS INITIAL. " Only one supplied
 
@@ -1751,7 +1755,7 @@ CLASS lcl_html_toolbar IMPLEMENTATION.
     ro_html->add( |<div class="{ lv_class }">| ).
     ro_html->add( '<ul><li>' ).
     ro_html->add_a( iv_txt = iv_label
-                    iv_typ = gc_action_type-dummy
+                    iv_typ = lif_defs=>gc_action_type-dummy
                     iv_act = '' ).
     ro_html->add( '<div class="minizone"></div>' ).
     ro_html->add( render_items( iv_sort = iv_sort ) ).
@@ -1794,7 +1798,7 @@ CLASS lcl_html_toolbar IMPLEMENTATION.
     LOOP AT mt_items ASSIGNING <item>.
       CLEAR: lv_class, lv_icon.
 
-      IF <item>-typ = gc_action_type-separator.
+      IF <item>-typ = lif_defs=>gc_action_type-separator.
         ro_html->add( |<li class="separator">{ <item>-txt }</li>| ).
         CONTINUE.
       ENDIF.
@@ -1828,7 +1832,7 @@ CLASS lcl_html_toolbar IMPLEMENTATION.
                         iv_opt   = <item>-opt ).
       ELSE.
         ro_html->add_a( iv_txt   = lv_icon && <item>-txt
-                        iv_typ   = gc_action_type-dummy
+                        iv_typ   = lif_defs=>gc_action_type-dummy
                         iv_act   = ''
                         iv_id    = <item>-id
                         iv_opt   = <item>-opt ).
@@ -1940,7 +1944,7 @@ CLASS lcl_convert DEFINITION FINAL.
 
     CLASS-METHODS x_to_bitbyte
       IMPORTING iv_x              TYPE x
-      RETURNING VALUE(rv_bitbyte) TYPE ty_bitbyte.
+      RETURNING VALUE(rv_bitbyte) TYPE lif_defs=>ty_bitbyte.
 
     CLASS-METHODS string_to_xstring_utf8
       IMPORTING iv_string         TYPE string
@@ -2103,14 +2107,14 @@ CLASS lcl_hash DEFINITION FINAL.
       RETURNING VALUE(rv_checksum) TYPE ty_adler32.
 
     CLASS-METHODS sha1
-      IMPORTING iv_type        TYPE ty_type
+      IMPORTING iv_type        TYPE lif_defs=>ty_type
                 iv_data        TYPE xstring
-      RETURNING VALUE(rv_sha1) TYPE ty_sha1
+      RETURNING VALUE(rv_sha1) TYPE lif_defs=>ty_sha1
       RAISING   lcx_exception.
 
     CLASS-METHODS sha1_raw
       IMPORTING iv_data        TYPE xstring
-      RETURNING VALUE(rv_sha1) TYPE ty_sha1
+      RETURNING VALUE(rv_sha1) TYPE lif_defs=>ty_sha1
       RAISING   lcx_exception.
 
 ENDCLASS.                    "lcl_hash DEFINITION
@@ -2429,7 +2433,7 @@ CLASS lcl_diff DEFINITION FINAL.
              update TYPE i,
            END OF ty_count.
 
-    DATA mt_beacons TYPE ty_string_tt READ-ONLY.
+    DATA mt_beacons TYPE lif_defs=>ty_string_tt READ-ONLY.
 
 * assumes data is UTF8 based with newlines
 * only works with lines up to 255 characters
@@ -2494,8 +2498,8 @@ CLASS lcl_diff IMPLEMENTATION.
     lv_new = lcl_convert=>xstring_to_string_utf8( iv_new ).
     lv_old = lcl_convert=>xstring_to_string_utf8( iv_old ).
 
-    SPLIT lv_new AT gc_newline INTO TABLE et_new.
-    SPLIT lv_old AT gc_newline INTO TABLE et_old.
+    SPLIT lv_new AT lif_defs=>gc_newline INTO TABLE et_new.
+    SPLIT lv_old AT lif_defs=>gc_newline INTO TABLE et_old.
 
   ENDMETHOD.                    "unpack
 
@@ -3050,7 +3054,7 @@ CLASS lcl_xml DEFINITION ABSTRACT.
   PROTECTED SECTION.
     DATA: mi_ixml     TYPE REF TO if_ixml,
           mi_xml_doc  TYPE REF TO if_ixml_document,
-          ms_metadata TYPE ty_metadata.
+          ms_metadata TYPE lif_defs=>ty_metadata.
 
     CONSTANTS: c_abapgit_tag             TYPE string VALUE 'abapGit' ##NO_TEXT,
                c_attr_version            TYPE string VALUE 'version' ##NO_TEXT,
@@ -3219,7 +3223,7 @@ CLASS lcl_xml_output DEFINITION FINAL INHERITING FROM lcl_xml CREATE PUBLIC.
                   ii_xml  TYPE REF TO if_ixml_element,
       render
         IMPORTING iv_normalize  TYPE sap_bool DEFAULT abap_true
-                  is_metadata   TYPE ty_metadata OPTIONAL
+                  is_metadata   TYPE lif_defs=>ty_metadata OPTIONAL
         RETURNING VALUE(rv_xml) TYPE string.
 
   PRIVATE SECTION.
@@ -3335,7 +3339,7 @@ CLASS lcl_xml_input DEFINITION FINAL INHERITING FROM lcl_xml CREATE PUBLIC.
         RETURNING VALUE(ri_raw) TYPE REF TO if_ixml_document,
 * todo, add read_xml to match add_xml in lcl_xml_output
       get_metadata
-        RETURNING VALUE(rs_metadata) TYPE ty_metadata.
+        RETURNING VALUE(rs_metadata) TYPE lif_defs=>ty_metadata.
 
   PRIVATE SECTION.
     METHODS: fix_xml.
@@ -3540,7 +3544,7 @@ CLASS lcl_persistence DEFINITION FINAL FRIENDS lcl_persistence_migrate.
     TYPES: BEGIN OF ty_repo_persi,
              url         TYPE string,
              branch_name TYPE string,
-             sha1        TYPE ty_sha1,
+             sha1        TYPE lif_defs=>ty_sha1,
              package     TYPE devclass,
              offline     TYPE sap_bool,
            END OF ty_repo_persi.
@@ -3553,13 +3557,13 @@ CLASS lcl_persistence DEFINITION FINAL FRIENDS lcl_persistence_migrate.
     METHODS update
       IMPORTING iv_url         TYPE ty_repo_persi-url
                 iv_branch_name TYPE ty_repo_persi-branch_name
-                iv_branch      TYPE ty_sha1
+                iv_branch      TYPE lif_defs=>ty_sha1
       RAISING   lcx_exception.
 
     METHODS add
       IMPORTING iv_url         TYPE string
                 iv_branch_name TYPE string
-                iv_branch      TYPE ty_sha1 OPTIONAL
+                iv_branch      TYPE lif_defs=>ty_sha1 OPTIONAL
                 iv_package     TYPE devclass
                 iv_offline     TYPE sap_bool DEFAULT abap_false
       RAISING   lcx_exception.
@@ -3632,14 +3636,14 @@ CLASS lcl_persistence IMPLEMENTATION.
 
   METHOD header_online.
     rs_header-tdid     = 'ST'.
-    rs_header-tdspras  = gc_english.
+    rs_header-tdspras  = lif_defs=>gc_english.
     rs_header-tdname   = 'ZABAPGIT'.
     rs_header-tdobject = 'TEXT'.
   ENDMETHOD.                    "header
 
   METHOD header_offline.
     rs_header-tdid     = 'ST'.
-    rs_header-tdspras  = gc_english.
+    rs_header-tdspras  = lif_defs=>gc_english.
     rs_header-tdname   = 'ZABAPGIT_OFFLINE'.
     rs_header-tdobject = 'TEXT'.
   ENDMETHOD.                    "header_offline
@@ -3960,7 +3964,7 @@ CLASS lcl_user IMPLEMENTATION.
     CALL FUNCTION 'READ_TEXT'
       EXPORTING
         id                      = 'ST'
-        language                = gc_english
+        language                = lif_defs=>gc_english
         name                    = iv_name
         object                  = 'TEXT'
       TABLES
@@ -3997,7 +4001,7 @@ CLASS lcl_user IMPLEMENTATION.
     APPEND ls_line TO lt_lines.
 
     ls_header-tdid       = 'ST'.
-    ls_header-tdspras    = gc_english.
+    ls_header-tdspras    = lif_defs=>gc_english.
     ls_header-tdname     = iv_name.
     ls_header-tdobject   = 'TEXT'.
 
@@ -4162,7 +4166,7 @@ CLASS lcl_dot_abapgit DEFINITION FINAL FRIENDS ltcl_dot_abapgit.
 *      set_master_language
 *        IMPORTING iv_language TYPE spras,
       get_signature
-        RETURNING VALUE(rs_signature) TYPE ty_file_signature
+        RETURNING VALUE(rs_signature) TYPE lif_defs=>ty_file_signature
         RAISING   lcx_exception.
 
   PRIVATE SECTION.
@@ -4306,7 +4310,7 @@ CLASS lcl_dot_abapgit IMPLEMENTATION.
     lv_name = iv_path && iv_filename.
 
     CONCATENATE ms_data-starting_folder '*' INTO lv_starting.
-    CONCATENATE '/' gc_dot_abapgit INTO lv_dot.
+    CONCATENATE '/' lif_defs=>gc_dot_abapgit INTO lv_dot.
 
     LOOP AT ms_data-ignore INTO lv_ignore.
       FIND ALL OCCURRENCES OF '/' IN lv_name MATCH COUNT lv_count.
@@ -4360,9 +4364,9 @@ CLASS lcl_dot_abapgit IMPLEMENTATION.
 
   METHOD get_signature.
 
-    rs_signature-path     = gc_root_dir.
-    rs_signature-filename = gc_dot_abapgit.
-    rs_signature-sha1     = lcl_hash=>sha1( iv_type = gc_type-blob
+    rs_signature-path     = lif_defs=>gc_root_dir.
+    rs_signature-filename = lif_defs=>gc_dot_abapgit.
+    rs_signature-sha1     = lcl_hash=>sha1( iv_type = lif_defs=>gc_type-blob
                                             iv_data = serialize( ) ).
 
   ENDMETHOD. "get_signature
@@ -4467,8 +4471,8 @@ CLASS lcl_persistence_repo DEFINITION FINAL.
 
   PUBLIC SECTION.
     TYPES: BEGIN OF ty_local_checksum,
-             item  TYPE ty_item,
-             files TYPE ty_file_signatures_tt,
+             item  TYPE lif_defs=>ty_item,
+             files TYPE lif_defs=>ty_file_signatures_tt,
            END OF ty_local_checksum.
 
     TYPES: ty_local_checksum_tt TYPE STANDARD TABLE OF ty_local_checksum WITH DEFAULT KEY.
@@ -4476,7 +4480,7 @@ CLASS lcl_persistence_repo DEFINITION FINAL.
     TYPES: BEGIN OF ty_repo_xml,
              url                TYPE string,
              branch_name        TYPE string,
-             sha1               TYPE ty_sha1,
+             sha1               TYPE lif_defs=>ty_sha1,
              package            TYPE devclass,
              offline            TYPE sap_bool,
              local_checksums    TYPE ty_local_checksum_tt,
@@ -4537,7 +4541,7 @@ CLASS lcl_persistence_repo DEFINITION FINAL.
     METHODS add
       IMPORTING iv_url         TYPE string
                 iv_branch_name TYPE string
-                iv_branch      TYPE ty_sha1 OPTIONAL
+                iv_branch      TYPE lif_defs=>ty_sha1 OPTIONAL
                 iv_package     TYPE devclass
                 iv_offline     TYPE sap_bool DEFAULT abap_false
                 is_dot_abapgit TYPE lcl_dot_abapgit=>ty_dot_abapgit
@@ -4855,7 +4859,7 @@ CLASS lcl_persistence_user DEFINITION FINAL CREATE PRIVATE FRIENDS lcl_app.
       BEGIN OF ty_repo_config,
         url              TYPE lcl_persistence_repo=>ty_repo-url,
         login            TYPE string,
-        git_user         TYPE ty_git_user,
+        git_user         TYPE lif_defs=>ty_git_user,
         last_change_seen TYPE string,
       END OF ty_repo_config.
 
@@ -4863,7 +4867,7 @@ CLASS lcl_persistence_user DEFINITION FINAL CREATE PRIVATE FRIENDS lcl_app.
 
     TYPES:
       BEGIN OF ty_user,
-        default_git_user TYPE ty_git_user,
+        default_git_user TYPE lif_defs=>ty_git_user,
         repo_show        TYPE lcl_persistence_repo=>ty_repo-key,
         hide_files       TYPE abap_bool,
         changes_only     TYPE abap_bool,
@@ -5728,7 +5732,7 @@ CLASS lcl_persistence_migrate IMPLEMENTATION.
     ls_dd25v-viewname   = lcl_persistence_db=>c_lock.
     ls_dd25v-aggtype    = 'E'.
     ls_dd25v-roottab    = lcl_persistence_db=>c_tabname.
-    ls_dd25v-ddlanguage = gc_english.
+    ls_dd25v-ddlanguage = lif_defs=>gc_english.
     ls_dd25v-ddtext     = c_text.
 
     APPEND INITIAL LINE TO lt_dd26e ASSIGNING <ls_dd26e>.
@@ -5821,7 +5825,7 @@ CLASS lcl_persistence_migrate IMPLEMENTATION.
     FIELD-SYMBOLS: <ls_dd03p> LIKE LINE OF lt_dd03p.
 
     ls_dd02v-tabname    = lcl_persistence_db=>c_tabname.
-    ls_dd02v-ddlanguage = gc_english.
+    ls_dd02v-ddlanguage = lif_defs=>gc_english.
     ls_dd02v-tabclass   = 'TRANSP'.
     ls_dd02v-ddtext     = c_text.
     ls_dd02v-contflag   = 'A'.
@@ -6899,7 +6903,6 @@ ENDCLASS.
 *&  Include  zabapgit_requirements
 *&---------------------------------------------------------------------*
 
-"! Helper class for checking requirements / dependencies
 *----------------------------------------------------------------------*
 *       CLASS lcl_requirement_helper DEFINITION
 *----------------------------------------------------------------------*
@@ -7126,13 +7129,13 @@ ENDCLASS.                    "lcl_requirement_helper IMPLEMENTATION
 *&  Include           ZABAPGIT_AUTHORIZATIONS
 *&---------------------------------------------------------------------*
 
-TYPES: ty_authorization TYPE string.
-
-CONSTANTS: BEGIN OF gc_authorization,
-             uninstall TYPE ty_authorization VALUE 'UNINSTALL',
-           END OF gc_authorization.
-
 INTERFACE lif_auth.
+  TYPES: ty_authorization TYPE string.
+
+  CONSTANTS: BEGIN OF gc_authorization,
+               uninstall TYPE ty_authorization VALUE 'UNINSTALL',
+             END OF gc_authorization.
+
   METHODS:
     is_allowed
       IMPORTING iv_authorization  TYPE ty_authorization
@@ -7151,7 +7154,7 @@ CLASS lcl_auth DEFINITION FINAL.
   PUBLIC SECTION.
     CLASS-METHODS:
       is_allowed
-        IMPORTING iv_authorization  TYPE ty_authorization
+        IMPORTING iv_authorization  TYPE lif_auth=>ty_authorization
                   iv_param          TYPE string OPTIONAL
         RETURNING VALUE(rv_allowed) TYPE abap_bool.
 
@@ -7198,7 +7201,7 @@ CLASS lcl_stage DEFINITION FINAL.
                END OF c_method.
 
     TYPES: BEGIN OF ty_stage,
-             file   TYPE ty_file,
+             file   TYPE lif_defs=>ty_file,
              method TYPE ty_method,
            END OF ty_stage.
 
@@ -7213,37 +7216,37 @@ CLASS lcl_stage DEFINITION FINAL.
     METHODS:
       constructor
         IMPORTING iv_branch_name  TYPE string
-                  iv_branch_sha1  TYPE ty_sha1
-                  iv_merge_source TYPE ty_sha1 OPTIONAL,
+                  iv_branch_sha1  TYPE lif_defs=>ty_sha1
+                  iv_merge_source TYPE lif_defs=>ty_sha1 OPTIONAL,
       get_branch_name
         RETURNING VALUE(rv_branch) TYPE string,
       get_branch_sha1
-        RETURNING VALUE(rv_branch) TYPE ty_sha1,
+        RETURNING VALUE(rv_branch) TYPE lif_defs=>ty_sha1,
       add
-        IMPORTING iv_path     TYPE ty_file-path
-                  iv_filename TYPE ty_file-filename
+        IMPORTING iv_path     TYPE lif_defs=>ty_file-path
+                  iv_filename TYPE lif_defs=>ty_file-filename
                   iv_data     TYPE xstring
         RAISING   lcx_exception,
       reset
-        IMPORTING iv_path     TYPE ty_file-path
-                  iv_filename TYPE ty_file-filename
+        IMPORTING iv_path     TYPE lif_defs=>ty_file-path
+                  iv_filename TYPE lif_defs=>ty_file-filename
         RAISING   lcx_exception,
       reset_all
         RAISING   lcx_exception,
       rm
-        IMPORTING iv_path     TYPE ty_file-path
-                  iv_filename TYPE ty_file-filename
+        IMPORTING iv_path     TYPE lif_defs=>ty_file-path
+                  iv_filename TYPE lif_defs=>ty_file-filename
         RAISING   lcx_exception,
       ignore
-        IMPORTING iv_path     TYPE ty_file-path
-                  iv_filename TYPE ty_file-filename
+        IMPORTING iv_path     TYPE lif_defs=>ty_file-path
+                  iv_filename TYPE lif_defs=>ty_file-filename
         RAISING   lcx_exception,
       lookup
-        IMPORTING iv_path          TYPE ty_file-path
-                  iv_filename      TYPE ty_file-filename
+        IMPORTING iv_path          TYPE lif_defs=>ty_file-path
+                  iv_filename      TYPE lif_defs=>ty_file-filename
         RETURNING VALUE(rv_method) TYPE ty_method,
       get_merge_source
-        RETURNING VALUE(rv_source) TYPE ty_sha1,
+        RETURNING VALUE(rv_source) TYPE lif_defs=>ty_sha1,
       count
         RETURNING VALUE(rv_count) TYPE i,
       get_all
@@ -7252,13 +7255,13 @@ CLASS lcl_stage DEFINITION FINAL.
   PRIVATE SECTION.
     DATA: mt_stage        TYPE ty_stage_tt,
           mv_branch_name  TYPE string,
-          mv_branch_sha1  TYPE ty_sha1,
-          mv_merge_source TYPE ty_sha1.
+          mv_branch_sha1  TYPE lif_defs=>ty_sha1,
+          mv_merge_source TYPE lif_defs=>ty_sha1.
 
     METHODS:
       append
-        IMPORTING iv_path     TYPE ty_file-path
-                  iv_filename TYPE ty_file-filename
+        IMPORTING iv_path     TYPE lif_defs=>ty_file-path
+                  iv_filename TYPE lif_defs=>ty_file-filename
                   iv_method   TYPE ty_method
                   iv_data     TYPE xstring OPTIONAL
         RAISING   lcx_exception.
@@ -7481,7 +7484,7 @@ CLASS lcl_git_branch_list DEFINITION FINAL.
   PUBLIC SECTION.
     TYPES: ty_git_branch_type TYPE char2.
     TYPES: BEGIN OF ty_git_branch,
-             sha1         TYPE ty_sha1,
+             sha1         TYPE lif_defs=>ty_sha1,
              name         TYPE string,
              type         TYPE ty_git_branch_type,
              is_head      TYPE abap_bool,
@@ -7599,7 +7602,7 @@ CLASS lcl_git_branch_list IMPLEMENTATION.
   METHOD parse_branch_list.
 
     DATA: lt_result      TYPE TABLE OF string,
-          lv_hash        TYPE ty_sha1,
+          lv_hash        TYPE lif_defs=>ty_sha1,
           lv_name        TYPE string,
           lv_head_params TYPE string,
           lv_char        TYPE c,
@@ -7609,7 +7612,7 @@ CLASS lcl_git_branch_list IMPLEMENTATION.
 
     CLEAR: et_list, ev_head_symref.
 
-    SPLIT iv_data AT gc_newline INTO TABLE lt_result.
+    SPLIT iv_data AT lif_defs=>gc_newline INTO TABLE lt_result.
 
     LOOP AT lt_result INTO lv_data.
       IF sy-tabix = 1.
@@ -7762,14 +7765,14 @@ CLASS lcl_repo DEFINITION ABSTRACT FRIENDS lcl_repo_srv.
       get_files_local
         IMPORTING io_log          TYPE REF TO lcl_log OPTIONAL
                   it_filter       TYPE scts_tadir OPTIONAL
-        RETURNING VALUE(rt_files) TYPE ty_files_item_tt
+        RETURNING VALUE(rt_files) TYPE lif_defs=>ty_files_item_tt
         RAISING   lcx_exception,
       get_local_checksums
         RETURNING VALUE(rt_checksums) TYPE lcl_persistence_repo=>ty_local_checksum_tt,
       get_local_checksums_per_file
-        RETURNING VALUE(rt_checksums) TYPE ty_file_signatures_tt,
+        RETURNING VALUE(rt_checksums) TYPE lif_defs=>ty_file_signatures_tt,
       get_files_remote
-        RETURNING VALUE(rt_files) TYPE ty_files_tt
+        RETURNING VALUE(rt_files) TYPE lif_defs=>ty_files_tt
         RAISING   lcx_exception,
       get_package
         RETURNING VALUE(rv_package) TYPE lcl_persistence_repo=>ty_repo-package,
@@ -7793,7 +7796,7 @@ CLASS lcl_repo DEFINITION ABSTRACT FRIENDS lcl_repo_srv.
         RAISING lcx_exception,
       refresh_local, " For testing purposes, maybe removed later
       update_local_checksums
-        IMPORTING it_files TYPE ty_file_signatures_tt
+        IMPORTING it_files TYPE lif_defs=>ty_file_signatures_tt
         RAISING   lcx_exception,
       rebuild_local_checksums
         RAISING   lcx_exception,
@@ -7805,15 +7808,15 @@ CLASS lcl_repo DEFINITION ABSTRACT FRIENDS lcl_repo_srv.
         RAISING   lcx_exception.
 
   PROTECTED SECTION.
-    DATA: mt_local              TYPE ty_files_item_tt,
-          mt_remote             TYPE ty_files_tt,
+    DATA: mt_local              TYPE lif_defs=>ty_files_item_tt,
+          mt_remote             TYPE lif_defs=>ty_files_tt,
           mv_do_local_refresh   TYPE abap_bool,
           mv_last_serialization TYPE timestamp,
           ms_data               TYPE lcl_persistence_repo=>ty_repo.
 
     METHODS:
       set
-        IMPORTING iv_sha1        TYPE ty_sha1 OPTIONAL
+        IMPORTING iv_sha1        TYPE lif_defs=>ty_sha1 OPTIONAL
                   it_checksums   TYPE lcl_persistence_repo=>ty_local_checksum_tt OPTIONAL
                   iv_url         TYPE lcl_persistence_repo=>ty_repo-url OPTIONAL
                   iv_branch_name TYPE lcl_persistence_repo=>ty_repo-branch_name OPTIONAL
@@ -7861,27 +7864,27 @@ CLASS lcl_repo_online DEFINITION INHERITING FROM lcl_repo FINAL.
         RAISING   lcx_exception,
       get_files_remote REDEFINITION,
       get_objects
-        RETURNING VALUE(rt_objects) TYPE ty_objects_tt
+        RETURNING VALUE(rt_objects) TYPE lif_defs=>ty_objects_tt
         RAISING   lcx_exception,
       deserialize REDEFINITION,
       status
         IMPORTING io_log            TYPE REF TO lcl_log OPTIONAL
-        RETURNING VALUE(rt_results) TYPE ty_results_tt
+        RETURNING VALUE(rt_results) TYPE lif_defs=>ty_results_tt
         RAISING   lcx_exception,
       reset_status,
       rebuild_local_checksums REDEFINITION,
       push
-        IMPORTING is_comment TYPE ty_comment
+        IMPORTING is_comment TYPE lif_defs=>ty_comment
                   io_stage   TYPE REF TO lcl_stage
         RAISING   lcx_exception.
 
   PRIVATE SECTION.
     DATA:
-      mt_objects     TYPE ty_objects_tt,
-      mv_branch      TYPE ty_sha1,
+      mt_objects     TYPE lif_defs=>ty_objects_tt,
+      mv_branch      TYPE lif_defs=>ty_sha1,
       mv_initialized TYPE abap_bool,
       mo_branches    TYPE REF TO lcl_git_branch_list,
-      mt_status      TYPE ty_results_tt.
+      mt_status      TYPE lif_defs=>ty_results_tt.
 
     METHODS:
       handle_stage_ignore
@@ -7902,7 +7905,7 @@ CLASS lcl_repo_offline DEFINITION INHERITING FROM lcl_repo FINAL.
   PUBLIC SECTION.
     METHODS:
       set_files_remote
-        IMPORTING it_files TYPE ty_files_tt
+        IMPORTING it_files TYPE lif_defs=>ty_files_tt
         RAISING   lcx_exception.
 
 ENDCLASS.                    "lcl_repo_offline DEFINITION
@@ -8071,7 +8074,7 @@ CLASS lcl_news IMPLEMENTATION.
       lc_log_path     TYPE string VALUE '/',
       lc_log_filename TYPE string VALUE 'changelog.txt'.
 
-    DATA: lt_remote      TYPE ty_files_tt,
+    DATA: lt_remote      TYPE lif_defs=>ty_files_tt,
           lv_last_seen   TYPE string,
           lv_url         TYPE string,
           lo_repo_online TYPE REF TO lcl_repo_online.
@@ -8524,7 +8527,7 @@ CLASS lcl_stage_logic DEFINITION FINAL.
     CLASS-METHODS:
       get
         IMPORTING io_repo         TYPE REF TO lcl_repo_online
-        RETURNING VALUE(rs_files) TYPE ty_stage_files
+        RETURNING VALUE(rs_files) TYPE lif_defs=>ty_stage_files
         RAISING   lcx_exception,
       count
         IMPORTING io_repo         TYPE REF TO lcl_repo_online
@@ -8535,9 +8538,9 @@ CLASS lcl_stage_logic DEFINITION FINAL.
     CLASS-METHODS:
       remove_ignored
         IMPORTING io_repo  TYPE REF TO lcl_repo_online
-        CHANGING  cs_files TYPE ty_stage_files,
+        CHANGING  cs_files TYPE lif_defs=>ty_stage_files,
       remove_identical
-        CHANGING cs_files TYPE ty_stage_files.
+        CHANGING cs_files TYPE lif_defs=>ty_stage_files.
 
 ENDCLASS.
 
@@ -8555,7 +8558,7 @@ CLASS lcl_stage_logic IMPLEMENTATION.
 
   METHOD count.
 
-    DATA: ls_files TYPE ty_stage_files.
+    DATA: ls_files TYPE lif_defs=>ty_stage_files.
 
     ls_files = get( io_repo ).
 
@@ -8577,7 +8580,7 @@ CLASS lcl_stage_logic IMPLEMENTATION.
           iv_path     = <ls_remote>-path
           iv_filename = <ls_remote>-filename ) = abap_true.
         DELETE cs_files-remote INDEX lv_index.
-      ELSEIF <ls_remote>-path = gc_root_dir AND <ls_remote>-filename = gc_dot_abapgit.
+      ELSEIF <ls_remote>-path = lif_defs=>gc_root_dir AND <ls_remote>-filename = lif_defs=>gc_dot_abapgit.
         " Remove .abapgit from remotes - it cannot be removed or ignored
         DELETE cs_files-remote INDEX lv_index.
       ENDIF.
@@ -10047,15 +10050,15 @@ CLASS lcl_git_transport DEFINITION FINAL.
       IMPORTING io_repo     TYPE REF TO lcl_repo_online
                 iv_deepen   TYPE abap_bool DEFAULT abap_true
                 it_branches TYPE lcl_git_branch_list=>ty_git_branch_list_tt OPTIONAL
-      EXPORTING et_objects  TYPE ty_objects_tt
-                ev_branch   TYPE ty_sha1
+      EXPORTING et_objects  TYPE lif_defs=>ty_objects_tt
+                ev_branch   TYPE lif_defs=>ty_sha1
       RAISING   lcx_exception.
 
 * local to remote
     CLASS-METHODS receive_pack
       IMPORTING iv_url         TYPE string
-                iv_old         TYPE ty_sha1
-                iv_new         TYPE ty_sha1
+                iv_old         TYPE lif_defs=>ty_sha1
+                iv_new         TYPE lif_defs=>ty_sha1
                 iv_branch_name TYPE string
                 iv_pack        TYPE xstring
       RAISING   lcx_exception.
@@ -10083,7 +10086,7 @@ CLASS lcl_git_transport DEFINITION FINAL.
                 iv_service     TYPE string
                 iv_branch_name TYPE string
       EXPORTING eo_client      TYPE REF TO lcl_http_client
-                ev_branch      TYPE ty_sha1
+                ev_branch      TYPE lif_defs=>ty_sha1
       RAISING   lcx_exception.
 
     CLASS-METHODS parse
@@ -10102,16 +10105,16 @@ CLASS lcl_git_pack DEFINITION FINAL FRIENDS ltcl_git_pack.
 
   PUBLIC SECTION.
     TYPES: BEGIN OF ty_node,
-             chmod TYPE ty_chmod,
+             chmod TYPE lif_defs=>ty_chmod,
              name  TYPE string,
-             sha1  TYPE ty_sha1,
+             sha1  TYPE lif_defs=>ty_sha1,
            END OF ty_node.
     TYPES: ty_nodes_tt TYPE STANDARD TABLE OF ty_node WITH DEFAULT KEY.
 
     TYPES: BEGIN OF ty_commit,
-             tree      TYPE ty_sha1,
-             parent    TYPE ty_sha1,
-             parent2   TYPE ty_sha1,
+             tree      TYPE lif_defs=>ty_sha1,
+             parent    TYPE lif_defs=>ty_sha1,
+             parent2   TYPE lif_defs=>ty_sha1,
              author    TYPE string,
              committer TYPE string,
              body      TYPE string,
@@ -10119,7 +10122,7 @@ CLASS lcl_git_pack DEFINITION FINAL FRIENDS ltcl_git_pack.
 
     CLASS-METHODS decode
       IMPORTING iv_data           TYPE xstring
-      RETURNING VALUE(rt_objects) TYPE ty_objects_tt
+      RETURNING VALUE(rt_objects) TYPE lif_defs=>ty_objects_tt
       RAISING   lcx_exception.
 
     CLASS-METHODS decode_tree
@@ -10133,7 +10136,7 @@ CLASS lcl_git_pack DEFINITION FINAL FRIENDS ltcl_git_pack.
       RAISING   lcx_exception.
 
     CLASS-METHODS encode
-      IMPORTING it_objects     TYPE ty_objects_tt
+      IMPORTING it_objects     TYPE lif_defs=>ty_objects_tt
       RETURNING VALUE(rv_data) TYPE xstring
       RAISING   lcx_exception.
 
@@ -10152,17 +10155,17 @@ CLASS lcl_git_pack DEFINITION FINAL FRIENDS ltcl_git_pack.
                c_version    TYPE x LENGTH 4 VALUE '00000002'.
 
     CLASS-METHODS decode_deltas
-      CHANGING ct_objects TYPE ty_objects_tt
+      CHANGING ct_objects TYPE lif_defs=>ty_objects_tt
       RAISING  lcx_exception.
 
     CLASS-METHODS type_and_length
-      IMPORTING is_object         TYPE ty_object
+      IMPORTING is_object         TYPE lif_defs=>ty_object
       RETURNING VALUE(rv_xstring) TYPE xstring
       RAISING   lcx_exception.
 
     CLASS-METHODS delta
-      IMPORTING is_object  TYPE ty_object
-      CHANGING  ct_objects TYPE ty_objects_tt
+      IMPORTING is_object  TYPE lif_defs=>ty_object
+      CHANGING  ct_objects TYPE lif_defs=>ty_objects_tt
       RAISING   lcx_exception.
 
     CLASS-METHODS delta_header
@@ -10175,7 +10178,7 @@ CLASS lcl_git_pack DEFINITION FINAL FRIENDS ltcl_git_pack.
 
     CLASS-METHODS get_type
       IMPORTING iv_x           TYPE x
-      RETURNING VALUE(rv_type) TYPE ty_type
+      RETURNING VALUE(rv_type) TYPE lif_defs=>ty_type
       RAISING   lcx_exception.
 
     CLASS-METHODS get_length
@@ -10282,7 +10285,7 @@ CLASS lcl_git_transport IMPLEMENTATION.
               lcl_git_utils=>get_null( ) &&
               ` ` &&
               lv_cap_list &&
-              gc_newline.                                   "#EC NOTEXT
+              lif_defs=>gc_newline.                                   "#EC NOTEXT
     lv_cmd_pkt = lcl_git_utils=>pkt_string( lv_line ).
 
     lv_buffer = lv_cmd_pkt && '0000'.
@@ -10378,22 +10381,22 @@ CLASS lcl_git_transport IMPLEMENTATION.
         lv_capa = 'side-band-64k no-progress multi_ack agent='
           && lcl_http=>get_agent( ) ##NO_TEXT.
         lv_line = 'want' && ` ` && <ls_branch>-sha1
-          && ` ` && lv_capa && gc_newline.                  "#EC NOTEXT
+          && ` ` && lv_capa && lif_defs=>gc_newline.                  "#EC NOTEXT
       ELSE.
         lv_line = 'want' && ` ` && <ls_branch>-sha1
-          && gc_newline.                                    "#EC NOTEXT
+          && lif_defs=>gc_newline.                                    "#EC NOTEXT
       ENDIF.
       lv_buffer = lv_buffer && lcl_git_utils=>pkt_string( lv_line ).
     ENDLOOP.
 
     IF iv_deepen = abap_true.
       lv_buffer = lv_buffer && lcl_git_utils=>pkt_string( 'deepen 1'
-        && gc_newline ).                                    "#EC NOTEXT
+        && lif_defs=>gc_newline ).                                    "#EC NOTEXT
     ENDIF.
 
     lv_buffer = lv_buffer
              && '0000'
-             && '0009done' && gc_newline.
+             && '0009done' && lif_defs=>gc_newline.
 
     lv_xstring = lo_client->send_receive_close(
       lcl_convert=>string_to_xstring_utf8( lv_buffer ) ).
@@ -10433,7 +10436,7 @@ CLASS lcl_git_pack IMPLEMENTATION.
 
     LOOP AT it_nodes ASSIGNING <ls_node>.
       APPEND INITIAL LINE TO lt_sort ASSIGNING <ls_sort>.
-      IF <ls_node>-chmod = gc_chmod-dir.
+      IF <ls_node>-chmod = lif_defs=>gc_chmod-dir.
         CONCATENATE <ls_node>-name '/' INTO <ls_sort>-sort.
       ELSE.
         <ls_sort>-sort = <ls_node>-name.
@@ -10462,13 +10465,13 @@ CLASS lcl_git_pack IMPLEMENTATION.
 
 
     CASE is_object-type.
-      WHEN gc_type-commit.
+      WHEN lif_defs=>gc_type-commit.
         lv_type = '001'.
-      WHEN gc_type-tree.
+      WHEN lif_defs=>gc_type-tree.
         lv_type = '010'.
-      WHEN gc_type-blob.
+      WHEN lif_defs=>gc_type-blob.
         lv_type = '011'.
-      WHEN gc_type-ref_d.
+      WHEN lif_defs=>gc_type-ref_d.
         lv_type = '111'.
       WHEN OTHERS.
         lcx_exception=>raise( 'Unexpected object type while encoding pack' ).
@@ -10518,7 +10521,7 @@ CLASS lcl_git_pack IMPLEMENTATION.
 
     DATA: lv_x           TYPE x,
           lv_length_bits TYPE string,
-          lv_bitbyte     TYPE ty_bitbyte.
+          lv_bitbyte     TYPE lif_defs=>ty_bitbyte.
 
 
     lv_x = cv_data(1).
@@ -10580,7 +10583,7 @@ CLASS lcl_git_pack IMPLEMENTATION.
     lv_string = ''.
 
     CONCATENATE 'tree' lv_tree_lower INTO lv_tmp SEPARATED BY space. "#EC NOTEXT
-    CONCATENATE lv_string lv_tmp gc_newline INTO lv_string.
+    CONCATENATE lv_string lv_tmp lif_defs=>gc_newline INTO lv_string.
 
     IF NOT is_commit-parent IS INITIAL.
       lv_parent_lower = is_commit-parent.
@@ -10588,7 +10591,7 @@ CLASS lcl_git_pack IMPLEMENTATION.
 
       CONCATENATE 'parent' lv_parent_lower
         INTO lv_tmp SEPARATED BY space.                     "#EC NOTEXT
-      CONCATENATE lv_string lv_tmp gc_newline INTO lv_string.
+      CONCATENATE lv_string lv_tmp lif_defs=>gc_newline INTO lv_string.
     ENDIF.
 
     IF NOT is_commit-parent2 IS INITIAL.
@@ -10597,18 +10600,18 @@ CLASS lcl_git_pack IMPLEMENTATION.
 
       CONCATENATE 'parent' lv_parent_lower
         INTO lv_tmp SEPARATED BY space.                     "#EC NOTEXT
-      CONCATENATE lv_string lv_tmp gc_newline INTO lv_string.
+      CONCATENATE lv_string lv_tmp lif_defs=>gc_newline INTO lv_string.
     ENDIF.
 
     CONCATENATE 'author' is_commit-author
       INTO lv_tmp SEPARATED BY space.                       "#EC NOTEXT
-    CONCATENATE lv_string lv_tmp gc_newline INTO lv_string.
+    CONCATENATE lv_string lv_tmp lif_defs=>gc_newline INTO lv_string.
 
     CONCATENATE 'committer' is_commit-committer
       INTO lv_tmp SEPARATED BY space.                       "#EC NOTEXT
-    CONCATENATE lv_string lv_tmp gc_newline INTO lv_string.
+    CONCATENATE lv_string lv_tmp lif_defs=>gc_newline INTO lv_string.
 
-    CONCATENATE lv_string gc_newline is_commit-body INTO lv_string.
+    CONCATENATE lv_string lif_defs=>gc_newline is_commit-body INTO lv_string.
 
     rv_data = lcl_convert=>string_to_xstring_utf8( lv_string ).
 
@@ -10617,7 +10620,7 @@ CLASS lcl_git_pack IMPLEMENTATION.
   METHOD get_type.
 
     DATA: lv_char3   TYPE c LENGTH 3,
-          lv_bitbyte TYPE ty_bitbyte.
+          lv_bitbyte TYPE lif_defs=>ty_bitbyte.
 
 
     lv_bitbyte = lcl_convert=>x_to_bitbyte( iv_x ).
@@ -10625,13 +10628,13 @@ CLASS lcl_git_pack IMPLEMENTATION.
 
     CASE lv_char3.
       WHEN '001'.
-        rv_type = gc_type-commit.
+        rv_type = lif_defs=>gc_type-commit.
       WHEN '010'.
-        rv_type = gc_type-tree.
+        rv_type = lif_defs=>gc_type-tree.
       WHEN '011'.
-        rv_type = gc_type-blob.
+        rv_type = lif_defs=>gc_type-blob.
       WHEN '111'.
-        rv_type = gc_type-ref_d.
+        rv_type = lif_defs=>gc_type-ref_d.
       WHEN OTHERS.
         lcx_exception=>raise( 'Todo, unknown type' ).
     ENDCASE.
@@ -10650,12 +10653,12 @@ CLASS lcl_git_pack IMPLEMENTATION.
 
     lv_string = lcl_convert=>xstring_to_string_utf8( iv_data ).
 
-    SPLIT lv_string AT gc_newline INTO TABLE lt_string.
+    SPLIT lv_string AT lif_defs=>gc_newline INTO TABLE lt_string.
 
     LOOP AT lt_string ASSIGNING <lv_string>.
       IF NOT rs_commit-committer IS INITIAL.
         CONCATENATE rs_commit-body <lv_string> INTO rs_commit-body
-          SEPARATED BY gc_newline.
+          SEPARATED BY lif_defs=>gc_newline.
       ELSE.
         SPLIT <lv_string> AT space INTO lv_word lv_trash.
         CASE lv_word.
@@ -10692,7 +10695,7 @@ CLASS lcl_git_pack IMPLEMENTATION.
 
   METHOD delta_header.
 
-    DATA: lv_bitbyte TYPE ty_bitbyte,
+    DATA: lv_bitbyte TYPE lif_defs=>ty_bitbyte,
           lv_bits    TYPE string,
           lv_x       TYPE x.
 
@@ -10718,7 +10721,7 @@ CLASS lcl_git_pack IMPLEMENTATION.
           lv_result  TYPE xstring,
 *          lv_bitbyte TYPE ty_bitbyte,
           lv_offset  TYPE i,
-          lv_sha1    TYPE ty_sha1,
+          lv_sha1    TYPE lif_defs=>ty_sha1,
           ls_object  LIKE LINE OF ct_objects,
           lv_len     TYPE i,
           lv_org     TYPE x,
@@ -10738,7 +10741,7 @@ CLASS lcl_git_pack IMPLEMENTATION.
     READ TABLE ct_objects ASSIGNING <ls_object> WITH KEY sha1 = is_object-sha1.
     IF sy-subrc <> 0.
       lcx_exception=>raise( |Base not found, { is_object-sha1 }| ).
-    ELSEIF <ls_object>-type = gc_type-ref_d.
+    ELSEIF <ls_object>-type = lif_defs=>gc_type-ref_d.
 * sanity check
       lcx_exception=>raise( 'Delta, base eq delta' ).
     ENDIF.
@@ -10833,7 +10836,7 @@ CLASS lcl_git_pack IMPLEMENTATION.
                         iv_total   = 1
                         iv_text    = 'Deltas' ) ##NO_TEXT.
 
-    LOOP AT ct_objects INTO ls_object WHERE type = gc_type-ref_d.
+    LOOP AT ct_objects INTO ls_object WHERE type = lif_defs=>gc_type-ref_d.
       DELETE ct_objects INDEX sy-tabix.
       APPEND ls_object TO lt_deltas.
     ENDLOOP.
@@ -10851,7 +10854,7 @@ CLASS lcl_git_pack IMPLEMENTATION.
                lc_null       TYPE x VALUE '00'.
 
     DATA: lv_xstring TYPE xstring,
-          lv_chmod   TYPE ty_chmod,
+          lv_chmod   TYPE lif_defs=>ty_chmod,
           lv_name    TYPE string,
           lv_string  TYPE string,
           lv_len     TYPE i,
@@ -10877,9 +10880,9 @@ CLASS lcl_git_pack IMPLEMENTATION.
 
         CLEAR ls_node.
         ls_node-chmod = lv_chmod.
-        IF ls_node-chmod <> gc_chmod-dir
-            AND ls_node-chmod <> gc_chmod-file
-            AND ls_node-chmod <> gc_chmod-executable.
+        IF ls_node-chmod <> lif_defs=>gc_chmod-dir
+            AND ls_node-chmod <> lif_defs=>gc_chmod-file
+            AND ls_node-chmod <> lif_defs=>gc_chmod-executable.
           lcx_exception=>raise( 'Unknown chmod' ).
         ENDIF.
 
@@ -10934,8 +10937,8 @@ CLASS lcl_git_pack IMPLEMENTATION.
           lv_zlib           TYPE x LENGTH 2,
           lv_objects        TYPE i,
           lv_len            TYPE i,
-          lv_sha1           TYPE ty_sha1,
-          lv_ref_delta      TYPE ty_sha1,
+          lv_sha1           TYPE lif_defs=>ty_sha1,
+          lv_ref_delta      TYPE lif_defs=>ty_sha1,
           lv_compressed_len TYPE i,
           lv_compressed     TYPE xstring,
           lv_decompressed   TYPE xstring,
@@ -10973,7 +10976,7 @@ CLASS lcl_git_pack IMPLEMENTATION.
       get_length( IMPORTING ev_length = lv_expected
                   CHANGING cv_data = lv_data ).
 
-      IF lv_type = gc_type-ref_d.
+      IF lv_type = lif_defs=>gc_type-ref_d.
         lv_ref_delta = lv_data(20).
         lv_data = lv_data+20.
       ENDIF.
@@ -11029,7 +11032,7 @@ CLASS lcl_git_pack IMPLEMENTATION.
 *************************
 
       CLEAR ls_object.
-      IF lv_type = gc_type-ref_d.
+      IF lv_type = lif_defs=>gc_type-ref_d.
         ls_object-sha1 = lv_ref_delta.
         TRANSLATE ls_object-sha1 TO LOWER CASE.
       ELSE.
@@ -11112,31 +11115,31 @@ CLASS lcl_git_porcelain DEFINITION FINAL FRIENDS ltcl_git_porcelain.
     TYPES: BEGIN OF ty_expanded,
              path  TYPE string,
              name  TYPE string,
-             sha1  TYPE ty_sha1,
-             chmod TYPE ty_chmod,
+             sha1  TYPE lif_defs=>ty_sha1,
+             chmod TYPE lif_defs=>ty_chmod,
            END OF ty_expanded.
 
     TYPES: ty_expanded_tt TYPE STANDARD TABLE OF ty_expanded WITH DEFAULT KEY.
 
     CLASS-METHODS pull
       IMPORTING io_repo    TYPE REF TO lcl_repo_online
-      EXPORTING et_files   TYPE ty_files_tt
-                et_objects TYPE ty_objects_tt
-                ev_branch  TYPE ty_sha1
+      EXPORTING et_files   TYPE lif_defs=>ty_files_tt
+                et_objects TYPE lif_defs=>ty_objects_tt
+                ev_branch  TYPE lif_defs=>ty_sha1
       RAISING   lcx_exception.
 
     CLASS-METHODS push
       IMPORTING io_repo          TYPE REF TO lcl_repo_online
-                is_comment       TYPE ty_comment
+                is_comment       TYPE lif_defs=>ty_comment
                 io_stage         TYPE REF TO lcl_stage
-      EXPORTING ev_branch        TYPE ty_sha1
-                et_updated_files TYPE ty_file_signatures_tt
+      EXPORTING ev_branch        TYPE lif_defs=>ty_sha1
+                et_updated_files TYPE lif_defs=>ty_file_signatures_tt
       RAISING   lcx_exception.
 
     CLASS-METHODS create_branch
       IMPORTING io_repo TYPE REF TO lcl_repo_online
                 iv_name TYPE string
-                iv_from TYPE ty_sha1
+                iv_from TYPE lif_defs=>ty_sha1
       RAISING   lcx_exception.
 
     CLASS-METHODS delete_branch
@@ -11145,8 +11148,8 @@ CLASS lcl_git_porcelain DEFINITION FINAL FRIENDS ltcl_git_porcelain.
       RAISING   lcx_exception.
 
     CLASS-METHODS full_tree
-      IMPORTING it_objects         TYPE ty_objects_tt
-                iv_branch          TYPE ty_sha1
+      IMPORTING it_objects         TYPE lif_defs=>ty_objects_tt
+                iv_branch          TYPE lif_defs=>ty_sha1
       RETURNING VALUE(rt_expanded) TYPE ty_expanded_tt
       RAISING   lcx_exception.
 
@@ -11155,7 +11158,7 @@ CLASS lcl_git_porcelain DEFINITION FINAL FRIENDS ltcl_git_porcelain.
     TYPES: BEGIN OF ty_tree,
              path TYPE string,
              data TYPE xstring,
-             sha1 TYPE ty_sha1,
+             sha1 TYPE lif_defs=>ty_sha1,
            END OF ty_tree.
 
     TYPES: ty_trees_tt TYPE STANDARD TABLE OF ty_tree WITH DEFAULT KEY.
@@ -11163,12 +11166,12 @@ CLASS lcl_git_porcelain DEFINITION FINAL FRIENDS ltcl_git_porcelain.
     TYPES: BEGIN OF ty_folder,
              path  TYPE string,
              count TYPE i,
-             sha1  TYPE ty_sha1,
+             sha1  TYPE lif_defs=>ty_sha1,
            END OF ty_folder.
 
     TYPES: ty_folders_tt TYPE STANDARD TABLE OF ty_folder WITH DEFAULT KEY.
 
-    CONSTANTS: c_zero TYPE ty_sha1 VALUE '0000000000000000000000000000000000000000'.
+    CONSTANTS: c_zero TYPE lif_defs=>ty_sha1 VALUE '0000000000000000000000000000000000000000'.
 
     CLASS-METHODS build_trees
       IMPORTING it_expanded     TYPE ty_expanded_tt
@@ -11180,26 +11183,26 @@ CLASS lcl_git_porcelain DEFINITION FINAL FRIENDS ltcl_git_porcelain.
       RETURNING VALUE(rt_folders) TYPE ty_folders_tt.
 
     CLASS-METHODS walk
-      IMPORTING it_objects TYPE ty_objects_tt
-                iv_sha1    TYPE ty_sha1
+      IMPORTING it_objects TYPE lif_defs=>ty_objects_tt
+                iv_sha1    TYPE lif_defs=>ty_sha1
                 iv_path    TYPE string
-      CHANGING  ct_files   TYPE ty_files_tt
+      CHANGING  ct_files   TYPE lif_defs=>ty_files_tt
       RAISING   lcx_exception.
 
     CLASS-METHODS walk_tree
-      IMPORTING it_objects         TYPE ty_objects_tt
-                iv_tree            TYPE ty_sha1
+      IMPORTING it_objects         TYPE lif_defs=>ty_objects_tt
+                iv_tree            TYPE lif_defs=>ty_sha1
                 iv_base            TYPE string
       RETURNING VALUE(rt_expanded) TYPE ty_expanded_tt
       RAISING   lcx_exception.
 
     CLASS-METHODS receive_pack
-      IMPORTING is_comment       TYPE ty_comment
+      IMPORTING is_comment       TYPE lif_defs=>ty_comment
                 io_repo          TYPE REF TO lcl_repo_online
                 it_trees         TYPE ty_trees_tt
-                it_blobs         TYPE ty_files_tt
+                it_blobs         TYPE lif_defs=>ty_files_tt
                 io_stage         TYPE REF TO lcl_stage
-      RETURNING VALUE(rv_branch) TYPE ty_sha1
+      RETURNING VALUE(rv_branch) TYPE lif_defs=>ty_sha1
       RAISING   lcx_exception.
 
 ENDCLASS.                    "lcl_porcelain DEFINITION
@@ -11215,7 +11218,7 @@ CLASS lcl_git_porcelain IMPLEMENTATION.
 
     DATA: lv_time    TYPE lcl_time=>ty_unixtime,
           lv_commit  TYPE xstring,
-          lt_objects TYPE ty_objects_tt,
+          lt_objects TYPE lif_defs=>ty_objects_tt,
           lv_pack    TYPE xstring,
           ls_object  LIKE LINE OF lt_objects,
           ls_commit  TYPE lcl_git_pack=>ty_commit.
@@ -11246,31 +11249,31 @@ CLASS lcl_git_porcelain IMPLEMENTATION.
     lv_commit = lcl_git_pack=>encode_commit( ls_commit ).
 
     CLEAR ls_object.
-    ls_object-sha1 = lcl_hash=>sha1( iv_type = gc_type-commit iv_data = lv_commit ).
-    ls_object-type = gc_type-commit.
+    ls_object-sha1 = lcl_hash=>sha1( iv_type = lif_defs=>gc_type-commit iv_data = lv_commit ).
+    ls_object-type = lif_defs=>gc_type-commit.
     ls_object-data = lv_commit.
     APPEND ls_object TO lt_objects.
 
     LOOP AT it_trees ASSIGNING <ls_tree>.
       CLEAR ls_object.
       ls_object-sha1 = <ls_tree>-sha1.
-      ls_object-type = gc_type-tree.
+      ls_object-type = lif_defs=>gc_type-tree.
       ls_object-data = <ls_tree>-data.
       APPEND ls_object TO lt_objects.
     ENDLOOP.
 
     LOOP AT it_blobs ASSIGNING <ls_blob>.
       CLEAR ls_object.
-      ls_object-sha1 = lcl_hash=>sha1( iv_type = gc_type-blob iv_data = <ls_blob>-data ).
+      ls_object-sha1 = lcl_hash=>sha1( iv_type = lif_defs=>gc_type-blob iv_data = <ls_blob>-data ).
 
-      READ TABLE lt_objects WITH KEY type = gc_type-blob sha1 = ls_object-sha1
+      READ TABLE lt_objects WITH KEY type = lif_defs=>gc_type-blob sha1 = ls_object-sha1
         TRANSPORTING NO FIELDS.
       IF sy-subrc = 0.
 * two identical files added at the same time, only add one blob to the pack
         CONTINUE.
       ENDIF.
 
-      ls_object-type = gc_type-blob.
+      ls_object-type = lif_defs=>gc_type-blob.
       ASSERT NOT <ls_blob>-data IS INITIAL.
       ls_object-data = <ls_blob>-data.
       APPEND ls_object TO lt_objects.
@@ -11279,7 +11282,7 @@ CLASS lcl_git_porcelain IMPLEMENTATION.
     lv_pack = lcl_git_pack=>encode( lt_objects ).
 
     rv_branch = lcl_hash=>sha1(
-      iv_type = gc_type-commit
+      iv_type = lif_defs=>gc_type-commit
       iv_data = lv_commit ).
 
     lcl_git_transport=>receive_pack(
@@ -11293,7 +11296,7 @@ CLASS lcl_git_porcelain IMPLEMENTATION.
 
   METHOD delete_branch.
 
-    DATA: lt_objects TYPE ty_objects_tt,
+    DATA: lt_objects TYPE lif_defs=>ty_objects_tt,
           lv_pack    TYPE xstring.
 
 
@@ -11312,7 +11315,7 @@ CLASS lcl_git_porcelain IMPLEMENTATION.
 
   METHOD create_branch.
 
-    DATA: lt_objects TYPE ty_objects_tt,
+    DATA: lt_objects TYPE lif_defs=>ty_objects_tt,
           lv_pack    TYPE xstring.
 
     IF iv_name CS ` `.
@@ -11335,10 +11338,10 @@ CLASS lcl_git_porcelain IMPLEMENTATION.
   METHOD push.
 
     DATA: lt_expanded TYPE ty_expanded_tt,
-          lt_blobs    TYPE ty_files_tt,
-          lv_sha1     TYPE ty_sha1,
+          lt_blobs    TYPE lif_defs=>ty_files_tt,
+          lv_sha1     TYPE lif_defs=>ty_sha1,
           lt_trees    TYPE ty_trees_tt,
-          lt_objects  TYPE ty_objects_tt,
+          lt_objects  TYPE lif_defs=>ty_objects_tt,
           lt_branches TYPE lcl_git_branch_list=>ty_git_branch_list_tt,
           lt_stage    TYPE lcl_stage=>ty_stage_tt.
 
@@ -11385,10 +11388,10 @@ CLASS lcl_git_porcelain IMPLEMENTATION.
             APPEND INITIAL LINE TO lt_expanded ASSIGNING <ls_exp>.
             <ls_exp>-name  = <ls_stage>-file-filename.
             <ls_exp>-path  = <ls_stage>-file-path.
-            <ls_exp>-chmod = gc_chmod-file.
+            <ls_exp>-chmod = lif_defs=>gc_chmod-file.
           ENDIF.
 
-          lv_sha1 = lcl_hash=>sha1( iv_type = gc_type-blob
+          lv_sha1 = lcl_hash=>sha1( iv_type = lif_defs=>gc_type-blob
                                     iv_data = <ls_stage>-file-data ).
           IF <ls_exp>-sha1 <> lv_sha1.
             <ls_exp>-sha1 = lv_sha1.
@@ -11431,7 +11434,7 @@ CLASS lcl_git_porcelain IMPLEMENTATION.
 
     READ TABLE it_objects INTO ls_object
       WITH KEY sha1 = iv_tree
-      type = gc_type-tree.
+      type = lif_defs=>gc_type-tree.
     IF sy-subrc <> 0.
       lcx_exception=>raise( 'tree not found' ).
     ENDIF.
@@ -11439,14 +11442,14 @@ CLASS lcl_git_porcelain IMPLEMENTATION.
 
     LOOP AT lt_nodes ASSIGNING <ls_node>.
       CASE <ls_node>-chmod.
-        WHEN gc_chmod-file
-            OR gc_chmod-executable.
+        WHEN lif_defs=>gc_chmod-file
+            OR lif_defs=>gc_chmod-executable.
           APPEND INITIAL LINE TO rt_expanded ASSIGNING <ls_exp>.
           <ls_exp>-path  = iv_base.
           <ls_exp>-name  = <ls_node>-name.
           <ls_exp>-sha1  = <ls_node>-sha1.
           <ls_exp>-chmod = <ls_node>-chmod.
-        WHEN gc_chmod-dir.
+        WHEN lif_defs=>gc_chmod-dir.
           lt_expanded = walk_tree(
             it_objects = it_objects
             iv_tree    = <ls_node>-sha1
@@ -11465,7 +11468,7 @@ CLASS lcl_git_porcelain IMPLEMENTATION.
           ls_commit TYPE lcl_git_pack=>ty_commit.
 
 
-    READ TABLE it_objects INTO ls_object WITH KEY sha1 = iv_branch type = gc_type-commit.
+    READ TABLE it_objects INTO ls_object WITH KEY sha1 = iv_branch type = lif_defs=>gc_type-commit.
     IF sy-subrc <> 0.
       lcx_exception=>raise( 'commit not found' ).
     ENDIF.
@@ -11491,7 +11494,7 @@ CLASS lcl_git_porcelain IMPLEMENTATION.
                                     IMPORTING et_objects = et_objects
                                               ev_branch = ev_branch ).
 
-    READ TABLE et_objects INTO ls_object WITH KEY sha1 = ev_branch type = gc_type-commit.
+    READ TABLE et_objects INTO ls_object WITH KEY sha1 = ev_branch type = lif_defs=>gc_type-commit.
     IF sy-subrc <> 0.
       lcx_exception=>raise( 'Commit/branch not found' ).
     ENDIF.
@@ -11578,7 +11581,7 @@ CLASS lcl_git_porcelain IMPLEMENTATION.
         lv_len = strlen( <ls_folder>-path ).
         IF strlen( <ls_sub>-path ) > lv_len AND <ls_sub>-path(lv_len) = <ls_folder>-path.
           APPEND INITIAL LINE TO lt_nodes ASSIGNING <ls_node>.
-          <ls_node>-chmod = gc_chmod-dir.
+          <ls_node>-chmod = lif_defs=>gc_chmod-dir.
 
 * extract folder name, this can probably be done easier using regular expressions
           <ls_node>-name = <ls_sub>-path+lv_len.
@@ -11592,7 +11595,7 @@ CLASS lcl_git_porcelain IMPLEMENTATION.
       CLEAR ls_tree.
       ls_tree-path = <ls_folder>-path.
       ls_tree-data = lcl_git_pack=>encode_tree( lt_nodes ).
-      ls_tree-sha1 = lcl_hash=>sha1( iv_type = gc_type-tree iv_data = ls_tree-data ).
+      ls_tree-sha1 = lcl_hash=>sha1( iv_type = lif_defs=>gc_type-tree iv_data = ls_tree-data ).
       APPEND ls_tree TO rt_trees.
 
       <ls_folder>-sha1 = ls_tree-sha1.
@@ -11611,7 +11614,7 @@ CLASS lcl_git_porcelain IMPLEMENTATION.
                    <ls_node> LIKE LINE OF lt_nodes.
 
 
-    READ TABLE it_objects ASSIGNING <ls_tree> WITH KEY sha1 = iv_sha1 type = gc_type-tree.
+    READ TABLE it_objects ASSIGNING <ls_tree> WITH KEY sha1 = iv_sha1 type = lif_defs=>gc_type-tree.
     IF sy-subrc <> 0.
       lcx_exception=>raise( 'Walk, tree not found' ).
     ENDIF.
@@ -11619,9 +11622,9 @@ CLASS lcl_git_porcelain IMPLEMENTATION.
     lt_nodes = lcl_git_pack=>decode_tree( <ls_tree>-data ).
 
     LOOP AT lt_nodes ASSIGNING <ls_node>.
-      IF <ls_node>-chmod = gc_chmod-file.
+      IF <ls_node>-chmod = lif_defs=>gc_chmod-file.
         READ TABLE it_objects ASSIGNING <ls_blob>
-          WITH KEY sha1 = <ls_node>-sha1 type = gc_type-blob.
+          WITH KEY sha1 = <ls_node>-sha1 type = lif_defs=>gc_type-blob.
         IF sy-subrc <> 0.
           lcx_exception=>raise( 'Walk, blob not found' ).
         ENDIF.
@@ -11635,7 +11638,7 @@ CLASS lcl_git_porcelain IMPLEMENTATION.
       ENDIF.
     ENDLOOP.
 
-    LOOP AT lt_nodes ASSIGNING <ls_node> WHERE chmod = gc_chmod-dir.
+    LOOP AT lt_nodes ASSIGNING <ls_node> WHERE chmod = lif_defs=>gc_chmod-dir.
       CONCATENATE iv_path <ls_node>-name '/' INTO lv_path.
       walk( EXPORTING it_objects = it_objects
                       iv_sha1 = <ls_node>-sha1
@@ -11669,7 +11672,7 @@ CLASS lcl_objects_activation DEFINITION FINAL.
       RAISING   lcx_exception.
 
     CLASS-METHODS add_item
-      IMPORTING is_item TYPE ty_item
+      IMPORTING is_item TYPE lif_defs=>ty_item
       RAISING   lcx_exception.
 
     CLASS-METHODS activate
@@ -11814,7 +11817,7 @@ CLASS lcl_objects_files DEFINITION.
   PUBLIC SECTION.
     METHODS:
       constructor
-        IMPORTING is_item TYPE ty_item,
+        IMPORTING is_item TYPE lif_defs=>ty_item,
       add_string
         IMPORTING iv_extra  TYPE clike OPTIONAL
                   iv_ext    TYPE string
@@ -11829,7 +11832,7 @@ CLASS lcl_objects_files DEFINITION.
         IMPORTING iv_extra     TYPE clike OPTIONAL
                   io_xml       TYPE REF TO lcl_xml_output
                   iv_normalize TYPE sap_bool DEFAULT abap_true
-                  is_metadata  TYPE ty_metadata OPTIONAL
+                  is_metadata  TYPE lif_defs=>ty_metadata OPTIONAL
         RAISING   lcx_exception,
 * needed since type-check during dynamic call fails even if the object is compatible
       add_xml_from_plugin
@@ -11851,7 +11854,7 @@ CLASS lcl_objects_files DEFINITION.
                   it_abap  TYPE STANDARD TABLE
         RAISING   lcx_exception,
       add
-        IMPORTING is_file TYPE ty_file,
+        IMPORTING is_file TYPE lif_defs=>ty_file,
       add_raw
         IMPORTING iv_extra TYPE clike OPTIONAL
                   iv_ext   TYPE string
@@ -11863,16 +11866,16 @@ CLASS lcl_objects_files DEFINITION.
         RETURNING VALUE(rv_data) TYPE xstring
         RAISING   lcx_exception,
       get_files
-        RETURNING VALUE(rt_files) TYPE ty_files_tt,
+        RETURNING VALUE(rt_files) TYPE lif_defs=>ty_files_tt,
       set_files
-        IMPORTING it_files TYPE ty_files_tt,
+        IMPORTING it_files TYPE lif_defs=>ty_files_tt,
       get_accessed_files
-        RETURNING VALUE(rt_files) TYPE ty_file_signatures_tt.
+        RETURNING VALUE(rt_files) TYPE lif_defs=>ty_file_signatures_tt.
 
   PRIVATE SECTION.
-    DATA: ms_item           TYPE ty_item,
-          mt_accessed_files TYPE ty_file_signatures_tt,
-          mt_files          TYPE ty_files_tt.
+    DATA: ms_item           TYPE lif_defs=>ty_item,
+          mt_accessed_files TYPE lif_defs=>ty_file_signatures_tt,
+          mt_files          TYPE lif_defs=>ty_files_tt.
 
     METHODS:
       read_file
@@ -11938,7 +11941,7 @@ INTERFACE lif_object.
     jump
       RAISING lcx_exception,
     get_metadata
-      RETURNING VALUE(rs_metadata) TYPE ty_metadata,
+      RETURNING VALUE(rs_metadata) TYPE lif_defs=>ty_metadata,
     has_changed_since
       IMPORTING iv_timestamp      TYPE timestamp
       RETURNING VALUE(rv_changed) TYPE abap_bool
@@ -12015,19 +12018,19 @@ CLASS lcl_objects_files IMPLEMENTATION.
 
     lv_abap = lcl_convert=>xstring_to_string_utf8( lv_data ).
 
-    SPLIT lv_abap AT gc_newline INTO TABLE rt_abap.
+    SPLIT lv_abap AT lif_defs=>gc_newline INTO TABLE rt_abap.
 
   ENDMETHOD.                    "read_abap
 
   METHOD add_abap.
 
     DATA: lv_source TYPE string,
-          ls_file   TYPE ty_file.
+          ls_file   TYPE lif_defs=>ty_file.
 
 
-    CONCATENATE LINES OF it_abap INTO lv_source SEPARATED BY gc_newline.
+    CONCATENATE LINES OF it_abap INTO lv_source SEPARATED BY lif_defs=>gc_newline.
 * when editing files via eg. GitHub web interface it adds a newline at end of file
-    lv_source = lv_source && gc_newline.
+    lv_source = lv_source && lif_defs=>gc_newline.
 
     ls_file-path = '/'.
     ls_file-filename = filename( iv_extra = iv_extra
@@ -12040,7 +12043,7 @@ CLASS lcl_objects_files IMPLEMENTATION.
 
   METHOD add_string.
 
-    DATA: ls_file TYPE ty_file.
+    DATA: ls_file TYPE lif_defs=>ty_file.
 
 
     ls_file-path = '/'.
@@ -12055,7 +12058,7 @@ CLASS lcl_objects_files IMPLEMENTATION.
   METHOD add_xml.
 
     DATA: lv_xml  TYPE string,
-          ls_file TYPE ty_file.
+          ls_file TYPE lif_defs=>ty_file.
 
 
     lv_xml = io_xml->render( iv_normalize = iv_normalize
@@ -12170,7 +12173,7 @@ CLASS lcl_objects_files IMPLEMENTATION.
 
   METHOD add_raw.
 
-    DATA: ls_file TYPE ty_file.
+    DATA: ls_file TYPE lif_defs=>ty_file.
 
     ls_file-path     = '/'.
     ls_file-data     = iv_data.
@@ -12207,25 +12210,25 @@ CLASS lcl_objects_super DEFINITION ABSTRACT.
     METHODS:
       constructor
         IMPORTING
-          is_item     TYPE ty_item
+          is_item     TYPE lif_defs=>ty_item
           iv_language TYPE spras.
 
     CLASS-METHODS:
       jump_adt
-        IMPORTING i_obj_name TYPE ty_item-obj_name
-                  i_obj_type TYPE ty_item-obj_type
+        IMPORTING i_obj_name TYPE lif_defs=>ty_item-obj_name
+                  i_obj_type TYPE lif_defs=>ty_item-obj_type
         RAISING   lcx_exception.
 
     CONSTANTS: c_user_unknown TYPE xubname VALUE 'UNKNOWN'.
 
   PROTECTED SECTION.
 
-    DATA: ms_item     TYPE ty_item,
+    DATA: ms_item     TYPE lif_defs=>ty_item,
           mv_language TYPE spras.
 
     METHODS:
       get_metadata
-        RETURNING VALUE(rs_metadata) TYPE ty_metadata,
+        RETURNING VALUE(rs_metadata) TYPE lif_defs=>ty_metadata,
       corr_insert
         IMPORTING iv_package TYPE devclass
         RAISING   lcx_exception,
@@ -12258,7 +12261,7 @@ CLASS lcl_objects_bridge DEFINITION INHERITING FROM lcl_objects_super FINAL.
     CLASS-METHODS class_constructor.
 
     METHODS constructor
-      IMPORTING is_item TYPE ty_item
+      IMPORTING is_item TYPE lif_defs=>ty_item
       RAISING   cx_sy_create_object_error.
 
     INTERFACES lif_object.
@@ -12305,7 +12308,7 @@ CLASS lcl_objects_bridge IMPLEMENTATION.
     DATA ls_objtype_map LIKE LINE OF gt_objtype_map.
 
     super->constructor( is_item = is_item
-                        iv_language = gc_english ).
+                        iv_language = lif_defs=>gc_english ).
 
 *    determine the responsible plugin
     READ TABLE gt_objtype_map INTO ls_objtype_map
@@ -12483,7 +12486,7 @@ CLASS lcl_objects_program DEFINITION INHERITING FROM lcl_objects_super.
 
     METHODS serialize_program
       IMPORTING io_xml     TYPE REF TO lcl_xml_output OPTIONAL
-                is_item    TYPE ty_item
+                is_item    TYPE lif_defs=>ty_item
                 io_files   TYPE REF TO lcl_objects_files
                 iv_program TYPE programm OPTIONAL
                 iv_extra   TYPE clike OPTIONAL
@@ -12563,10 +12566,10 @@ CLASS lcl_objects_program DEFINITION INHERITING FROM lcl_objects_super.
     CLASS-METHODS:
       add_tpool
         IMPORTING it_tpool        TYPE textpool_table
-        RETURNING VALUE(rt_tpool) TYPE ty_tpool_tt,
+        RETURNING VALUE(rt_tpool) TYPE lif_defs=>ty_tpool_tt,
       read_tpool
-        IMPORTING it_tpool        TYPE ty_tpool_tt
-        RETURNING VALUE(rt_tpool) TYPE ty_tpool_tt.
+        IMPORTING it_tpool        TYPE lif_defs=>ty_tpool_tt
+        RETURNING VALUE(rt_tpool) TYPE lif_defs=>ty_tpool_tt.
 
   PRIVATE SECTION.
     METHODS:
@@ -13470,49 +13473,49 @@ CLASS lcl_objects DEFINITION FINAL.
              obj     TYPE REF TO lif_object,
              xml     TYPE REF TO lcl_xml_input,
              package TYPE devclass,
-             item    TYPE ty_item,
+             item    TYPE lif_defs=>ty_item,
            END OF ty_deserialization.
 
     TYPES: ty_deserialization_tt TYPE STANDARD TABLE OF ty_deserialization WITH DEFAULT KEY.
 
     CLASS-METHODS serialize
-      IMPORTING is_item         TYPE ty_item
+      IMPORTING is_item         TYPE lif_defs=>ty_item
                 iv_language     TYPE spras
                 io_log          TYPE REF TO lcl_log OPTIONAL
-      RETURNING VALUE(rt_files) TYPE ty_files_tt
+      RETURNING VALUE(rt_files) TYPE lif_defs=>ty_files_tt
       RAISING   lcx_exception.
 
     CLASS-METHODS deserialize
       IMPORTING io_repo                  TYPE REF TO lcl_repo
-      RETURNING VALUE(rt_accessed_files) TYPE ty_file_signatures_tt
+      RETURNING VALUE(rt_accessed_files) TYPE lif_defs=>ty_file_signatures_tt
       RAISING   lcx_exception.
 
     CLASS-METHODS delete
-      IMPORTING it_tadir TYPE ty_tadir_tt
+      IMPORTING it_tadir TYPE lif_defs=>ty_tadir_tt
       RAISING   lcx_exception.
 
     CLASS-METHODS jump
-      IMPORTING is_item TYPE ty_item
+      IMPORTING is_item TYPE lif_defs=>ty_item
       RAISING   lcx_exception.
 
     CLASS-METHODS changed_by
-      IMPORTING is_item        TYPE ty_item
+      IMPORTING is_item        TYPE lif_defs=>ty_item
       RETURNING VALUE(rv_user) TYPE xubname
       RAISING   lcx_exception.
 
     CLASS-METHODS has_changed_since
-      IMPORTING is_item           TYPE ty_item
+      IMPORTING is_item           TYPE lif_defs=>ty_item
                 iv_timestamp      TYPE timestamp
       RETURNING VALUE(rv_changed) TYPE abap_bool
       RAISING   lcx_exception.
 
     CLASS-METHODS is_supported
-      IMPORTING is_item        TYPE ty_item
+      IMPORTING is_item        TYPE lif_defs=>ty_item
                 iv_native_only TYPE abap_bool DEFAULT abap_false
       RETURNING VALUE(rv_bool) TYPE abap_bool.
 
     CLASS-METHODS exists
-      IMPORTING is_item        TYPE ty_item
+      IMPORTING is_item        TYPE lif_defs=>ty_item
       RETURNING VALUE(rv_bool) TYPE abap_bool.
 
     CLASS-METHODS supported_list
@@ -13521,36 +13524,36 @@ CLASS lcl_objects DEFINITION FINAL.
   PRIVATE SECTION.
 
     CLASS-METHODS check_duplicates
-      IMPORTING it_files TYPE ty_files_tt
+      IMPORTING it_files TYPE lif_defs=>ty_files_tt
       RAISING   lcx_exception.
 
     CLASS-METHODS create_object
-      IMPORTING is_item        TYPE ty_item
+      IMPORTING is_item        TYPE lif_defs=>ty_item
                 iv_language    TYPE spras
-                is_metadata    TYPE ty_metadata OPTIONAL
+                is_metadata    TYPE lif_defs=>ty_metadata OPTIONAL
                 iv_native_only TYPE abap_bool DEFAULT abap_false
       RETURNING VALUE(ri_obj)  TYPE REF TO lif_object
       RAISING   lcx_exception.
 
     CLASS-METHODS
       prioritize_deser
-        IMPORTING it_results        TYPE ty_results_tt
-        RETURNING VALUE(rt_results) TYPE ty_results_tt.
+        IMPORTING it_results        TYPE lif_defs=>ty_results_tt
+        RETURNING VALUE(rt_results) TYPE lif_defs=>ty_results_tt.
 
     CLASS-METHODS class_name
-      IMPORTING is_item              TYPE ty_item
+      IMPORTING is_item              TYPE lif_defs=>ty_item
       RETURNING VALUE(rv_class_name) TYPE string.
 
     CLASS-METHODS resolve_ddic
-      CHANGING ct_tadir TYPE ty_tadir_tt
+      CHANGING ct_tadir TYPE lif_defs=>ty_tadir_tt
       RAISING  lcx_exception.
 
     CLASS-METHODS warning_overwrite
-      CHANGING ct_results TYPE ty_results_tt
+      CHANGING ct_results TYPE lif_defs=>ty_results_tt
       RAISING  lcx_exception.
 
     CLASS-METHODS warning_package
-      IMPORTING is_item          TYPE ty_item
+      IMPORTING is_item          TYPE lif_defs=>ty_item
                 iv_package       TYPE devclass
       RETURNING VALUE(rv_cancel) TYPE abap_bool
       RAISING   lcx_exception.
@@ -13559,14 +13562,14 @@ CLASS lcl_objects DEFINITION FINAL.
       IMPORTING iv_package TYPE devclass.
 
     CLASS-METHODS delete_obj
-      IMPORTING is_item TYPE ty_item
+      IMPORTING is_item TYPE lif_defs=>ty_item
       RAISING   lcx_exception.
 
     CLASS-METHODS compare_remote_to_local
       IMPORTING
         io_object TYPE REF TO lif_object
-        it_remote TYPE ty_files_tt
-        is_result TYPE ty_result
+        it_remote TYPE lif_defs=>ty_files_tt
+        is_result TYPE lif_defs=>ty_result
       RAISING
         lcx_exception.
 
@@ -13574,7 +13577,7 @@ CLASS lcl_objects DEFINITION FINAL.
       IMPORTING it_objects TYPE ty_deserialization_tt
                 iv_ddic    TYPE abap_bool DEFAULT abap_false
                 iv_descr   TYPE string
-      CHANGING  ct_files   TYPE ty_file_signatures_tt
+      CHANGING  ct_files   TYPE lif_defs=>ty_file_signatures_tt
       RAISING   lcx_exception.
 
 ENDCLASS.                    "lcl_object DEFINITION
@@ -13600,7 +13603,7 @@ CLASS lcl_tadir DEFINITION FINAL.
         IMPORTING iv_package            TYPE tadir-devclass
                   iv_ignore_subpackages TYPE abap_bool DEFAULT abap_false
                   io_dot                TYPE REF TO lcl_dot_abapgit OPTIONAL
-        RETURNING VALUE(rt_tadir)       TYPE ty_tadir_tt
+        RETURNING VALUE(rt_tadir)       TYPE lif_defs=>ty_tadir_tt
         RAISING   lcx_exception,
       read_single
         IMPORTING iv_pgmid        TYPE tadir-pgmid DEFAULT 'R3TR'
@@ -13616,15 +13619,15 @@ CLASS lcl_tadir DEFINITION FINAL.
   PRIVATE SECTION.
     CLASS-METHODS:
       check_exists
-        IMPORTING it_tadir        TYPE ty_tadir_tt
-        RETURNING VALUE(rt_tadir) TYPE ty_tadir_tt
+        IMPORTING it_tadir        TYPE lif_defs=>ty_tadir_tt
+        RETURNING VALUE(rt_tadir) TYPE lif_defs=>ty_tadir_tt
         RAISING   lcx_exception,
       build
         IMPORTING iv_package            TYPE tadir-devclass
                   iv_top                TYPE tadir-devclass
                   io_dot                TYPE REF TO lcl_dot_abapgit
                   iv_ignore_subpackages TYPE abap_bool DEFAULT abap_false
-        RETURNING VALUE(rt_tadir)       TYPE ty_tadir_tt
+        RETURNING VALUE(rt_tadir)       TYPE lif_defs=>ty_tadir_tt
         RAISING   lcx_exception.
 
 ENDCLASS.                    "lcl_tadir DEFINITION
@@ -13673,7 +13676,7 @@ CLASS lcl_tadir IMPLEMENTATION.
   METHOD check_exists.
 
     DATA: lv_exists TYPE abap_bool,
-          ls_item   TYPE ty_item.
+          ls_item   TYPE lif_defs=>ty_item.
 
     FIELD-SYMBOLS: <ls_tadir> LIKE LINE OF it_tadir.
 
@@ -13711,7 +13714,7 @@ CLASS lcl_tadir IMPLEMENTATION.
 
   METHOD build.
 
-    DATA: lt_tadir    TYPE ty_tadir_tt,
+    DATA: lt_tadir    TYPE lif_defs=>ty_tadir_tt,
           lt_tdevc    TYPE STANDARD TABLE OF tdevc,
           lv_path     TYPE string.
 
@@ -13786,7 +13789,7 @@ CLASS lcl_file_status DEFINITION FINAL
     CLASS-METHODS status
       IMPORTING io_repo           TYPE REF TO lcl_repo
                 io_log            TYPE REF TO lcl_log OPTIONAL
-      RETURNING VALUE(rt_results) TYPE ty_results_tt
+      RETURNING VALUE(rt_results) TYPE lif_defs=>ty_results_tt
       RAISING   lcx_exception.
 
   PRIVATE SECTION.
@@ -13794,33 +13797,33 @@ CLASS lcl_file_status DEFINITION FINAL
     CLASS-METHODS:
       calculate_status
         IMPORTING iv_devclass       TYPE devclass
-                  it_local          TYPE ty_files_item_tt
-                  it_remote         TYPE ty_files_tt
-                  it_cur_state      TYPE ty_file_signatures_tt
-        RETURNING VALUE(rt_results) TYPE ty_results_tt,
+                  it_local          TYPE lif_defs=>ty_files_item_tt
+                  it_remote         TYPE lif_defs=>ty_files_tt
+                  it_cur_state      TYPE lif_defs=>ty_file_signatures_tt
+        RETURNING VALUE(rt_results) TYPE lif_defs=>ty_results_tt,
       run_checks
         IMPORTING io_log     TYPE REF TO lcl_log
-                  it_results TYPE ty_results_tt
+                  it_results TYPE lif_defs=>ty_results_tt
                   io_dot     TYPE REF TO lcl_dot_abapgit
                   iv_top     TYPE devclass
         RAISING   lcx_exception,
       build_existing
-        IMPORTING is_local         TYPE ty_file_item
-                  is_remote        TYPE ty_file
-                  it_state         TYPE ty_file_signatures_ts
-        RETURNING VALUE(rs_result) TYPE ty_result,
+        IMPORTING is_local         TYPE lif_defs=>ty_file_item
+                  is_remote        TYPE lif_defs=>ty_file
+                  it_state         TYPE lif_defs=>ty_file_signatures_ts
+        RETURNING VALUE(rs_result) TYPE lif_defs=>ty_result,
       build_new_local
-        IMPORTING is_local         TYPE ty_file_item
-        RETURNING VALUE(rs_result) TYPE ty_result,
+        IMPORTING is_local         TYPE lif_defs=>ty_file_item
+        RETURNING VALUE(rs_result) TYPE lif_defs=>ty_result,
       build_new_remote
         IMPORTING iv_devclass      TYPE devclass
-                  is_remote        TYPE ty_file
-                  it_items         TYPE ty_items_ts
-                  it_state         TYPE ty_file_signatures_ts
-        RETURNING VALUE(rs_result) TYPE ty_result,
+                  is_remote        TYPE lif_defs=>ty_file
+                  it_items         TYPE lif_defs=>ty_items_ts
+                  it_state         TYPE lif_defs=>ty_file_signatures_ts
+        RETURNING VALUE(rs_result) TYPE lif_defs=>ty_result,
       identify_object
         IMPORTING iv_filename TYPE string
-        EXPORTING es_item     TYPE ty_item
+        EXPORTING es_item     TYPE lif_defs=>ty_item
                   ev_is_xml   TYPE abap_bool.
 
 ENDCLASS.                    "lcl_file_status DEFINITION
@@ -13833,8 +13836,8 @@ CLASS lcl_file_status IMPLEMENTATION.
   METHOD run_checks.
 
     DATA: lv_path     TYPE string,
-          ls_item     TYPE ty_item,
-          ls_file     TYPE ty_file_signature,
+          ls_item     TYPE lif_defs=>ty_item,
+          ls_file     TYPE lif_defs=>ty_file_signature,
           lt_res_sort LIKE it_results,
           lt_item_idx LIKE it_results.
 
@@ -13949,11 +13952,11 @@ CLASS lcl_file_status IMPLEMENTATION.
   METHOD calculate_status.
 
     DATA: lt_remote    LIKE it_remote,
-          lt_items     TYPE ty_items_tt,
+          lt_items     TYPE lif_defs=>ty_items_tt,
           ls_item      LIKE LINE OF lt_items,
           lv_is_xml    TYPE abap_bool,
-          lt_items_idx TYPE ty_items_ts,
-          lt_state_idx TYPE ty_file_signatures_ts. " Sorted by path+filename
+          lt_items_idx TYPE lif_defs=>ty_items_ts,
+          lt_state_idx TYPE lif_defs=>ty_file_signatures_ts. " Sorted by path+filename
 
     FIELD-SYMBOLS: <ls_remote> LIKE LINE OF it_remote,
                    <ls_result> LIKE LINE OF rt_results,
@@ -14062,10 +14065,10 @@ CLASS lcl_file_status IMPLEMENTATION.
 
     IF sy-subrc = 0.
       IF ls_file_sig-sha1 <> is_local-file-sha1.
-        rs_result-lstate = gc_state-modified.
+        rs_result-lstate = lif_defs=>gc_state-modified.
       ENDIF.
       IF ls_file_sig-sha1 <> is_remote-sha1.
-        rs_result-rstate = gc_state-modified.
+        rs_result-rstate = lif_defs=>gc_state-modified.
       ENDIF.
       rs_result-match = boolc( rs_result-lstate IS INITIAL
         AND rs_result-rstate IS INITIAL ).
@@ -14076,8 +14079,8 @@ CLASS lcl_file_status IMPLEMENTATION.
       " the user will presumably decide what to do after checking the actual diff
       rs_result-match = boolc( is_local-file-sha1 = is_remote-sha1 ).
       IF rs_result-match = abap_false.
-        rs_result-lstate = gc_state-modified.
-        rs_result-rstate = gc_state-modified.
+        rs_result-lstate = lif_defs=>gc_state-modified.
+        rs_result-rstate = lif_defs=>gc_state-modified.
       ENDIF.
     ENDIF.
 
@@ -14096,7 +14099,7 @@ CLASS lcl_file_status IMPLEMENTATION.
 
     " Match
     rs_result-match    = abap_false.
-    rs_result-lstate   = gc_state-added.
+    rs_result-lstate   = lif_defs=>gc_state-added.
 
   ENDMETHOD.  "build_new_local
 
@@ -14109,7 +14112,7 @@ CLASS lcl_file_status IMPLEMENTATION.
     rs_result-path     = is_remote-path.
     rs_result-filename = is_remote-filename.
     rs_result-match    = abap_false.
-    rs_result-rstate   = gc_state-added.
+    rs_result-rstate   = lif_defs=>gc_state-added.
 
     identify_object( EXPORTING iv_filename = is_remote-filename
                      IMPORTING es_item     = ls_item ).
@@ -14137,14 +14140,14 @@ CLASS lcl_file_status IMPLEMENTATION.
           rs_result-match = abap_true.
           CLEAR rs_result-rstate.
         ELSE.
-          rs_result-rstate = gc_state-modified.
+          rs_result-rstate = lif_defs=>gc_state-modified.
         ENDIF.
 
         " Item is in state and in cache but with no package - it was deleted
         " OR devclass is the same as repo package (see #532)
         IF ls_item-devclass IS INITIAL OR ls_item-devclass = iv_devclass.
           rs_result-match  = abap_false.
-          rs_result-lstate = gc_state-deleted.
+          rs_result-lstate = lif_defs=>gc_state-deleted.
         ENDIF.
       ENDIF.
 
@@ -14234,7 +14237,7 @@ CLASS lcl_popups DEFINITION FINAL.
         RAISING   lcx_exception,
       popup_to_create_transp_branch
         IMPORTING it_transport_headers       TYPE trwbo_request_headers
-        RETURNING VALUE(rs_transport_branch) TYPE ty_transport_to_branch
+        RETURNING VALUE(rs_transport_branch) TYPE lif_defs=>ty_transport_to_branch
         RAISING   lcx_exception
                   lcx_cancel,
       popup_to_select_transports
@@ -14841,11 +14844,11 @@ CLASS lcl_zip DEFINITION FINAL.
 
     CLASS-METHODS unzip_file
       IMPORTING iv_xstr         TYPE xstring
-      RETURNING VALUE(rt_files) TYPE ty_files_tt
+      RETURNING VALUE(rt_files) TYPE lif_defs=>ty_files_tt
       RAISING   lcx_exception.
 
     CLASS-METHODS normalize_path
-      CHANGING ct_files TYPE ty_files_tt
+      CHANGING ct_files TYPE lif_defs=>ty_files_tt
       RAISING  lcx_exception.
 
     CLASS-METHODS filename
@@ -14860,7 +14863,7 @@ CLASS lcl_zip DEFINITION FINAL.
       RAISING   lcx_exception.
 
     CLASS-METHODS encode_files
-      IMPORTING it_files       TYPE ty_files_item_tt
+      IMPORTING it_files       TYPE lif_defs=>ty_files_item_tt
       RETURNING VALUE(rv_xstr) TYPE xstring
       RAISING   lcx_exception.
 
@@ -15151,7 +15154,7 @@ CLASS lcl_zip IMPLEMENTATION.
 
       <ls_file>-data = lv_data.
 
-      <ls_file>-sha1 = lcl_hash=>sha1( iv_type = gc_type-blob
+      <ls_file>-sha1 = lcl_hash=>sha1( iv_type = lif_defs=>gc_type-blob
                                        iv_data = <ls_file>-data ).
 
     ENDLOOP.
@@ -15163,7 +15166,7 @@ CLASS lcl_zip IMPLEMENTATION.
   METHOD export.
 
     DATA: lo_log TYPE REF TO lcl_log,
-          lt_zip TYPE ty_files_item_tt.
+          lt_zip TYPE lif_defs=>ty_files_item_tt.
 
 
     CREATE OBJECT lo_log.
@@ -15219,12 +15222,12 @@ CLASS lcl_zip IMPLEMENTATION.
   METHOD export_object.
 
     DATA: ls_tadir    TYPE tadir,
-          ls_item     TYPE ty_item,
+          ls_item     TYPE lif_defs=>ty_item,
           lv_folder   TYPE string,
           lv_fullpath TYPE string,
           lt_rawdata  TYPE solix_tab,
           lv_sep      TYPE c LENGTH 1,
-          lt_files    TYPE ty_files_tt.
+          lt_files    TYPE lif_defs=>ty_files_tt.
 
     STATICS: lv_prev TYPE string.
 
@@ -15339,8 +15342,8 @@ CLASS lcl_objects IMPLEMENTATION.
       lv_index = sy-tabix.
 
       IF <ls_result>-lstate IS NOT INITIAL
-          AND <ls_result>-lstate <> gc_state-deleted
-          AND NOT ( <ls_result>-lstate = gc_state-added
+          AND <ls_result>-lstate <> lif_defs=>gc_state-deleted
+          AND NOT ( <ls_result>-lstate = lif_defs=>gc_state-added
           AND <ls_result>-rstate IS INITIAL ).
         lv_question = |It looks like object {
           <ls_result>-obj_type } { <ls_result>-obj_name
@@ -15479,7 +15482,7 @@ CLASS lcl_objects IMPLEMENTATION.
 
     rv_changed = create_object(
       is_item     = is_item
-      iv_language = gc_english )->has_changed_since( iv_timestamp ).
+      iv_language = lif_defs=>gc_english )->has_changed_since( iv_timestamp ).
 
   ENDMETHOD.  "has_changed_since
 
@@ -15487,7 +15490,7 @@ CLASS lcl_objects IMPLEMENTATION.
 
     TRY.
         create_object( is_item        = is_item
-                       iv_language    = gc_english
+                       iv_language    = lif_defs=>gc_english
                        iv_native_only = iv_native_only ).
         rv_bool = abap_true.
       CATCH lcx_exception.
@@ -15529,7 +15532,7 @@ CLASS lcl_objects IMPLEMENTATION.
 
     TRY.
         li_obj = create_object( is_item = is_item
-                                iv_language = gc_english ).
+                                iv_language = lif_defs=>gc_english ).
         rv_bool = li_obj->exists( ).
       CATCH lcx_exception.
 * ignore all errors and assume the object exists
@@ -15550,7 +15553,7 @@ CLASS lcl_objects IMPLEMENTATION.
           adt_jump_enabled TYPE abap_bool.
 
     li_obj = create_object( is_item     = is_item
-                            iv_language = gc_english ).
+                            iv_language = lif_defs=>gc_english ).
 
     adt_jump_enabled = lcl_app=>settings( )->read( )->get_adt_jump_enabled( ).
 
@@ -15584,7 +15587,7 @@ CLASS lcl_objects IMPLEMENTATION.
       rv_user = lcl_objects_super=>c_user_unknown.
     ELSE.
       li_obj = create_object( is_item     = is_item
-                              iv_language = gc_english ).
+                              iv_language = lif_defs=>gc_english ).
       rv_user = li_obj->changed_by( ).
     ENDIF.
 
@@ -15596,7 +15599,7 @@ CLASS lcl_objects IMPLEMENTATION.
 
   METHOD delete.
 
-    DATA: ls_item     TYPE ty_item,
+    DATA: ls_item     TYPE lif_defs=>ty_item,
           lv_tabclass TYPE dd02l-tabclass,
           lt_tadir    LIKE it_tadir.
 
@@ -15672,11 +15675,11 @@ CLASS lcl_objects IMPLEMENTATION.
 * in case they have dependencies with .INCLUDE
 
     TYPES: BEGIN OF ty_edge,
-             from TYPE ty_item,
-             to   TYPE ty_item,
+             from TYPE lif_defs=>ty_item,
+             to   TYPE lif_defs=>ty_item,
            END OF ty_edge.
 
-    DATA: lt_nodes        TYPE TABLE OF ty_item,
+    DATA: lt_nodes        TYPE TABLE OF lif_defs=>ty_item,
           lt_edges        TYPE TABLE OF ty_edge,
           lt_findstrings  TYPE TABLE OF rsfind,
           lv_plus         TYPE i VALUE 1,
@@ -15788,7 +15791,7 @@ CLASS lcl_objects IMPLEMENTATION.
 
     IF is_supported( is_item ) = abap_true.
       li_obj = create_object( is_item     = is_item
-                              iv_language = gc_english ).
+                              iv_language = lif_defs=>gc_english ).
 
       li_obj->delete( ).
 
@@ -15841,7 +15844,7 @@ CLASS lcl_objects IMPLEMENTATION.
 
   METHOD check_duplicates.
 
-    DATA: lt_files TYPE ty_files_tt.
+    DATA: lt_files TYPE lif_defs=>ty_files_tt.
 
 
     lt_files[] = it_files[].
@@ -15883,19 +15886,19 @@ CLASS lcl_objects IMPLEMENTATION.
 
   METHOD deserialize.
 
-    DATA: ls_item    TYPE ty_item,
+    DATA: ls_item    TYPE lif_defs=>ty_item,
           lv_cancel  TYPE abap_bool,
           li_obj     TYPE REF TO lif_object,
-          lt_remote  TYPE ty_files_tt,
+          lt_remote  TYPE lif_defs=>ty_files_tt,
           lv_package TYPE devclass,
           lo_files   TYPE REF TO lcl_objects_files,
           lo_xml     TYPE REF TO lcl_xml_input,
-          lt_results TYPE ty_results_tt,
+          lt_results TYPE lif_defs=>ty_results_tt,
           lt_ddic    TYPE TABLE OF ty_deserialization,
           lt_rest    TYPE TABLE OF ty_deserialization,
           lt_late    TYPE TABLE OF ty_deserialization.
 
-    FIELD-SYMBOLS: <ls_result> TYPE ty_result,
+    FIELD-SYMBOLS: <ls_result> TYPE lif_defs=>ty_result,
                    <ls_deser>  LIKE LINE OF lt_late.
 
 
@@ -15915,7 +15918,7 @@ CLASS lcl_objects IMPLEMENTATION.
     warning_overwrite( CHANGING ct_results = lt_results ).
 
     LOOP AT lt_results ASSIGNING <ls_result> WHERE obj_type IS NOT INITIAL
-        AND NOT ( lstate = gc_state-added AND rstate IS INITIAL ).
+        AND NOT ( lstate = lif_defs=>gc_state-added AND rstate IS INITIAL ).
       lcl_progress=>show( iv_key     = 'Deserialize'
                           iv_current = sy-tabix
                           iv_total   = lines( lt_results )
@@ -16015,7 +16018,7 @@ CLASS lcl_objects IMPLEMENTATION.
 
   METHOD compare_remote_to_local.
 
-    DATA: ls_remote_file       TYPE ty_file,
+    DATA: ls_remote_file       TYPE lif_defs=>ty_file,
           lo_remote_version    TYPE REF TO lcl_xml_input,
           lo_comparison_result TYPE REF TO lif_object_comparison_result.
 
@@ -16390,7 +16393,7 @@ INTERFACE lif_object_oriented_object_fnc.
     deserialize_source
       IMPORTING
         is_key    TYPE seoclskey
-        it_source TYPE ty_string_tt
+        it_source TYPE lif_defs=>ty_string_tt
       RAISING
         lcx_exception
         cx_sy_dyn_call_error,
@@ -16404,16 +16407,16 @@ INTERFACE lif_object_oriented_object_fnc.
     update_descriptions
       IMPORTING
         is_key          TYPE seoclskey
-        it_descriptions TYPE ty_seocompotx_tt,
+        it_descriptions TYPE lif_defs=>ty_seocompotx_tt,
     add_to_activation_list
       IMPORTING
-        is_item TYPE ty_item
+        is_item TYPE lif_defs=>ty_item
       RAISING
         lcx_exception,
     create_sotr
       IMPORTING
         iv_package TYPE devclass
-        it_sotr    TYPE ty_sotr_tt
+        it_sotr    TYPE lif_defs=>ty_sotr_tt
       RAISING
         lcx_exception,
     create_documentation
@@ -16438,7 +16441,7 @@ INTERFACE lif_object_oriented_object_fnc.
         is_class_key     TYPE seoclskey
         iv_type          TYPE seop_include_ext_app OPTIONAL
       RETURNING
-        VALUE(rt_source) TYPE ty_string_tt
+        VALUE(rt_source) TYPE lif_defs=>ty_string_tt
       RAISING
         lcx_exception
         cx_sy_dyn_call_error,
@@ -16475,14 +16478,14 @@ INTERFACE lif_object_oriented_object_fnc.
       IMPORTING
         iv_object_name TYPE sobj_name
       RETURNING
-        VALUE(rt_sotr) TYPE ty_sotr_tt
+        VALUE(rt_sotr) TYPE lif_defs=>ty_sotr_tt
       RAISING
         lcx_exception,
     read_descriptions
       IMPORTING
         iv_obejct_name         TYPE seoclsname
       RETURNING
-        VALUE(rt_descriptions) TYPE ty_seocompotx_tt,
+        VALUE(rt_descriptions) TYPE lif_defs=>ty_seocompotx_tt,
     delete
       IMPORTING
         is_deletion_key TYPE seoclskey
@@ -16498,7 +16501,7 @@ CLASS lcl_oo_object_serializer DEFINITION.
         IMPORTING
           is_class_key     TYPE seoclskey
         RETURNING
-          VALUE(rt_source) TYPE ty_string_tt
+          VALUE(rt_source) TYPE lif_defs=>ty_string_tt
         RAISING
           lcx_exception
           cx_sy_dyn_call_error,
@@ -16507,37 +16510,37 @@ CLASS lcl_oo_object_serializer DEFINITION.
           VALUE(rv_return) TYPE abap_bool.
     METHODS serialize_locals_imp
       IMPORTING is_clskey        TYPE seoclskey
-      RETURNING VALUE(rt_source) TYPE ty_string_tt
+      RETURNING VALUE(rt_source) TYPE lif_defs=>ty_string_tt
       RAISING   lcx_exception.
 
     METHODS serialize_locals_def
       IMPORTING is_clskey        TYPE seoclskey
-      RETURNING VALUE(rt_source) TYPE ty_string_tt
+      RETURNING VALUE(rt_source) TYPE lif_defs=>ty_string_tt
       RAISING   lcx_exception.
     METHODS serialize_testclasses
       IMPORTING
                 is_clskey        TYPE seoclskey
-      RETURNING VALUE(rt_source) TYPE ty_string_tt
+      RETURNING VALUE(rt_source) TYPE lif_defs=>ty_string_tt
       RAISING   lcx_exception.
 
     METHODS serialize_macros
       IMPORTING is_clskey        TYPE seoclskey
-      RETURNING VALUE(rt_source) TYPE ty_string_tt
+      RETURNING VALUE(rt_source) TYPE lif_defs=>ty_string_tt
       RAISING   lcx_exception.
   PRIVATE SECTION.
     DATA mv_skip_testclass TYPE abap_bool.
     METHODS serialize_abap_old
       IMPORTING is_clskey        TYPE seoclskey
-      RETURNING VALUE(rt_source) TYPE ty_string_tt
+      RETURNING VALUE(rt_source) TYPE lif_defs=>ty_string_tt
       RAISING   lcx_exception.
 
     METHODS serialize_abap_new
       IMPORTING is_clskey        TYPE seoclskey
-      RETURNING VALUE(rt_source) TYPE ty_string_tt
+      RETURNING VALUE(rt_source) TYPE lif_defs=>ty_string_tt
       RAISING   lcx_exception
                 cx_sy_dyn_call_error.
     METHODS remove_signatures
-      CHANGING ct_source TYPE ty_string_tt.
+      CHANGING ct_source TYPE lif_defs=>ty_string_tt.
 
     METHODS read_include
       IMPORTING is_clskey        TYPE seoclskey
@@ -16546,7 +16549,7 @@ CLASS lcl_oo_object_serializer DEFINITION.
 
 
     METHODS reduce
-      CHANGING ct_source TYPE ty_string_tt.
+      CHANGING ct_source TYPE lif_defs=>ty_string_tt.
 ENDCLASS.
 
 CLASS lcl_oo_object_serializer IMPLEMENTATION.
@@ -16752,12 +16755,12 @@ CLASS lcl_object_oriented_base DEFINITION ABSTRACT.
     DATA mv_skip_test_classes TYPE abap_bool.
     METHODS deserialize_abap_source_old
       IMPORTING is_clskey TYPE seoclskey
-                it_source TYPE ty_string_tt
+                it_source TYPE lif_defs=>ty_string_tt
       RAISING   lcx_exception.
 
     METHODS deserialize_abap_source_new
       IMPORTING is_clskey TYPE seoclskey
-                it_source TYPE ty_string_tt
+                it_source TYPE lif_defs=>ty_string_tt
       RAISING   lcx_exception
                 cx_sy_dyn_call_error.
 ENDCLASS.
@@ -16973,10 +16976,11 @@ CLASS lcl_object_oriented_base IMPLEMENTATION.
 ENDCLASS.
 
 "Backdoor injection for test purposes
-CLASS lth_oo_factory_injector DEFINITION DEFERRED.
+CLASS ltcl_oo_factory_injector DEFINITION DEFERRED.
 
 CLASS lcl_object_oriented_factory DEFINITION
-  FRIENDS lth_oo_factory_injector.
+  FRIENDS ltcl_oo_factory_injector.
+
   PUBLIC SECTION.
     CLASS-METHODS:
       make
@@ -17012,7 +17016,7 @@ CLASS lcl_object_clas DEFINITION INHERITING FROM lcl_objects_program.
     ALIASES mo_files FOR lif_object~mo_files.
     METHODS constructor
       IMPORTING
-        is_item     TYPE ty_item
+        is_item     TYPE lif_defs=>ty_item
         iv_language TYPE spras.
 
   PROTECTED SECTION.
@@ -17200,9 +17204,9 @@ CLASS lcl_object_clas IMPLEMENTATION.
 
     DATA: ls_vseoclass    TYPE vseoclass,
           lt_tpool        TYPE textpool_table,
-          lt_descriptions TYPE ty_seocompotx_tt,
+          lt_descriptions TYPE lif_defs=>ty_seocompotx_tt,
           ls_clskey       TYPE seoclskey,
-          lt_sotr         TYPE ty_sotr_tt,
+          lt_sotr         TYPE lif_defs=>ty_sotr_tt,
           lt_lines        TYPE tlinetab.
 
 
@@ -17270,7 +17274,7 @@ CLASS lcl_object_clas IMPLEMENTATION.
 
   METHOD deserialize_sotr.
     "OTR stands for Online Text Repository
-    DATA: lt_sotr    TYPE ty_sotr_tt.
+    DATA: lt_sotr    TYPE lif_defs=>ty_sotr_tt.
 
     io_xml->read( EXPORTING iv_name = 'SOTR'
                   CHANGING cg_data = lt_sotr ).
@@ -17307,7 +17311,7 @@ CLASS lcl_object_clas IMPLEMENTATION.
   METHOD deserialize_tpool.
 
     DATA: lv_clsname   TYPE seoclsname,
-          lt_tpool_ext TYPE ty_tpool_tt,
+          lt_tpool_ext TYPE lif_defs=>ty_tpool_tt,
           lt_tpool     TYPE textpool_table.
 
 
@@ -17336,7 +17340,7 @@ CLASS lcl_object_clas IMPLEMENTATION.
           lt_local_implementations TYPE seop_source_string,
           lt_local_macros          TYPE seop_source_string,
           lt_test_classes          TYPE seop_source_string,
-          lt_descriptions          TYPE ty_seocompotx_tt,
+          lt_descriptions          TYPE lif_defs=>ty_seocompotx_tt,
           ls_class_key             TYPE seoclskey.
 
 
@@ -17472,7 +17476,7 @@ CLASS lcl_object_oriented_class IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD lif_object_oriented_object_fnc~create_sotr.
-    DATA: lt_sotr    TYPE ty_sotr_tt,
+    DATA: lt_sotr    TYPE lif_defs=>ty_sotr_tt,
           lt_objects TYPE sotr_objects,
           ls_paket   TYPE sotr_pack,
           lv_object  LIKE LINE OF lt_objects.
@@ -19208,12 +19212,12 @@ CLASS lcl_object_enho_wdyconf DEFINITION.
   PUBLIC SECTION.
     METHODS: constructor
       IMPORTING
-        is_item  TYPE ty_item
+        is_item  TYPE lif_defs=>ty_item
         io_files TYPE REF TO lcl_objects_files.
     INTERFACES: lif_object_enho.
 
   PRIVATE SECTION.
-    DATA: ms_item  TYPE ty_item,
+    DATA: ms_item  TYPE lif_defs=>ty_item,
           mo_files TYPE REF TO lcl_objects_files.
 
 ENDCLASS.                    "lcl_object_enho_wdyconf DEFINITION
@@ -19488,12 +19492,12 @@ CLASS lcl_object_enho_badi DEFINITION.
   PUBLIC SECTION.
     METHODS: constructor
       IMPORTING
-        is_item  TYPE ty_item
+        is_item  TYPE lif_defs=>ty_item
         io_files TYPE REF TO lcl_objects_files.
     INTERFACES: lif_object_enho.
 
   PRIVATE SECTION.
-    DATA: ms_item  TYPE ty_item,
+    DATA: ms_item  TYPE lif_defs=>ty_item,
           mo_files TYPE REF TO lcl_objects_files.
 
 ENDCLASS.                    "lcl_object_enho_badi DEFINITION
@@ -19611,7 +19615,7 @@ CLASS lcl_object_enho_hook DEFINITION.
   PUBLIC SECTION.
     METHODS: constructor
       IMPORTING
-        is_item  TYPE ty_item
+        is_item  TYPE lif_defs=>ty_item
         io_files TYPE REF TO lcl_objects_files.
 
     INTERFACES: lif_object_enho.
@@ -19624,7 +19628,7 @@ CLASS lcl_object_enho_hook DEFINITION.
 
     TYPES: ty_spaces_tt TYPE STANDARD TABLE OF ty_spaces WITH DEFAULT KEY.
 
-    DATA: ms_item TYPE ty_item.
+    DATA: ms_item TYPE lif_defs=>ty_item.
     DATA: mo_files TYPE REF TO lcl_objects_files.
 
     METHODS hook_impl_deserialize
@@ -19819,12 +19823,12 @@ CLASS lcl_object_enho_interface DEFINITION.
     METHODS:
       constructor
         IMPORTING
-          is_item  TYPE ty_item
+          is_item  TYPE lif_defs=>ty_item
           io_files TYPE REF TO lcl_objects_files.
     INTERFACES: lif_object_enho.
 
   PRIVATE SECTION.
-    DATA: ms_item  TYPE ty_item,
+    DATA: ms_item  TYPE lif_defs=>ty_item,
           mo_files TYPE REF TO lcl_objects_files.
 
 ENDCLASS.                    "lcl_object_enho_interface DEFINITION
@@ -19924,12 +19928,12 @@ CLASS lcl_object_enho_class DEFINITION.
     METHODS:
       constructor
         IMPORTING
-          is_item  TYPE ty_item
+          is_item  TYPE lif_defs=>ty_item
           io_files TYPE REF TO lcl_objects_files.
     INTERFACES: lif_object_enho.
 
   PRIVATE SECTION.
-    DATA: ms_item TYPE ty_item.
+    DATA: ms_item TYPE lif_defs=>ty_item.
     DATA: mo_files TYPE REF TO lcl_objects_files.
 
 ENDCLASS.                    "lcl_object_enho_class DEFINITION
@@ -20897,7 +20901,7 @@ CLASS lcl_object_form DEFINITION INHERITING FROM lcl_objects_super FINAL.
 
     METHODS _get_last_changes
       IMPORTING
-        iv_form_name           TYPE ty_item-obj_name
+        iv_form_name           TYPE lif_defs=>ty_item-obj_name
       RETURNING
         VALUE(es_last_changed) TYPE tys_form_header.
 
@@ -20934,7 +20938,7 @@ CLASS lcl_object_form DEFINITION INHERITING FROM lcl_objects_super FINAL.
 
     METHODS _find_form
       IMPORTING
-        iv_object_name        TYPE ty_item-obj_name
+        iv_object_name        TYPE lif_defs=>ty_item-obj_name
       RETURNING
         VALUE(et_text_header) TYPE lcl_object_form=>tyt_text_header.
 
@@ -21579,7 +21583,7 @@ CLASS lcl_object_fugr IMPLEMENTATION.
           ls_progdir   TYPE ty_progdir,
           lt_includes  TYPE rso_t_objnm,
           lt_tpool     TYPE textpool_table,
-          lt_tpool_ext TYPE ty_tpool_tt,
+          lt_tpool_ext TYPE lif_defs=>ty_tpool_tt,
           lt_source    TYPE TABLE OF abaptxt255.
 
     FIELD-SYMBOLS: <lv_include> LIKE LINE OF lt_includes.
@@ -22696,7 +22700,7 @@ CLASS lcl_object_intf DEFINITION FINAL INHERITING FROM lcl_objects_program.
     ALIASES mo_files FOR lif_object~mo_files.
     METHODS constructor
       IMPORTING
-        is_item     TYPE ty_item
+        is_item     TYPE lif_defs=>ty_item
         iv_language TYPE spras.
   PROTECTED SECTION.
     METHODS deserialize_abap
@@ -22734,7 +22738,7 @@ CLASS lcl_object_intf IMPLEMENTATION.
   METHOD deserialize_abap.
     DATA: ls_vseointerf   TYPE vseointerf,
           lt_source       TYPE seop_source_string,
-          lt_descriptions TYPE ty_seocompotx_tt,
+          lt_descriptions TYPE lif_defs=>ty_seocompotx_tt,
           ls_clskey       TYPE seoclskey.
     ls_clskey-clsname = ms_item-obj_name.
 
@@ -22826,7 +22830,7 @@ CLASS lcl_object_intf IMPLEMENTATION.
 
   METHOD serialize_xml.
     DATA:
-      lt_descriptions TYPE ty_seocompotx_tt,
+      lt_descriptions TYPE lif_defs=>ty_seocompotx_tt,
       ls_vseointerf   TYPE vseointerf,
       ls_clskey       TYPE seoclskey,
       lt_lines        TYPE tlinetab.
@@ -24135,7 +24139,7 @@ CLASS lcl_object_prog DEFINITION INHERITING FROM lcl_objects_program FINAL.
   PRIVATE SECTION.
     TYPES: BEGIN OF ty_tpool_i18n,
              language TYPE langu,
-             textpool TYPE ty_tpool_tt,
+             textpool TYPE lif_defs=>ty_tpool_tt,
            END OF ty_tpool_i18n,
            tt_tpool_i18n TYPE STANDARD TABLE OF ty_tpool_i18n.
 
@@ -24239,7 +24243,7 @@ CLASS lcl_object_prog IMPLEMENTATION.
           ls_progdir      TYPE ty_progdir,
           lt_tpool        TYPE textpool_table,
           lt_dynpros      TYPE ty_dynpro_tt,
-          lt_tpool_ext    TYPE ty_tpool_tt,
+          lt_tpool_ext    TYPE lif_defs=>ty_tpool_tt,
           ls_cua          TYPE ty_cua,
           lt_source       TYPE abaptxt255_tab.
 
@@ -26216,7 +26220,7 @@ CLASS lcl_object_shi3 DEFINITION INHERITING FROM lcl_objects_super FINAL.
 
     METHODS constructor
       IMPORTING
-        is_item     TYPE ty_item
+        is_item     TYPE lif_defs=>ty_item
         iv_language TYPE spras.
 
 
@@ -27325,7 +27329,7 @@ CLASS lcl_object_smim IMPLEMENTATION.
   METHOD find_content.
 
     DATA: lv_filename TYPE string,
-          lt_files    TYPE ty_files_tt.
+          lt_files    TYPE lif_defs=>ty_files_tt.
 
     FIELD-SYMBOLS: <ls_file> LIKE LINE OF lt_files.
 
@@ -27365,7 +27369,7 @@ CLASS lcl_object_smim IMPLEMENTATION.
           lv_folder   TYPE abap_bool,
           lv_filename TYPE string,
           lv_class    TYPE smimloio-lo_class,
-          ls_file     TYPE ty_file,
+          ls_file     TYPE lif_defs=>ty_file,
           lv_content  TYPE xstring,
           li_api      TYPE REF TO if_mr_api,
           lv_loio     TYPE sdok_docid.
@@ -30914,7 +30918,7 @@ CLASS lcl_object_w3super DEFINITION INHERITING FROM lcl_objects_super ABSTRACT.
 
     METHODS constructor
       IMPORTING
-        is_item     TYPE ty_item
+        is_item     TYPE lif_defs=>ty_item
         iv_language TYPE spras.
 
   PROTECTED SECTION.
@@ -31753,7 +31757,7 @@ CLASS lcl_object_wapa IMPLEMENTATION.
 
     lv_string = lcl_convert=>xstring_to_string_utf8( iv_content ).
 
-    SPLIT lv_string AT gc_newline INTO TABLE rt_content.
+    SPLIT lv_string AT lif_defs=>gc_newline INTO TABLE rt_content.
 
   ENDMETHOD.
 
@@ -31766,7 +31770,7 @@ CLASS lcl_object_wapa IMPLEMENTATION.
       IMPORTING
         p_content = lt_content ).
 
-    CONCATENATE LINES OF lt_content INTO lv_string SEPARATED BY gc_newline RESPECTING BLANKS.
+    CONCATENATE LINES OF lt_content INTO lv_string SEPARATED BY lif_defs=>gc_newline RESPECTING BLANKS.
 
     rv_content = lcl_convert=>string_to_xstring_utf8( lv_string ).
 
@@ -33531,14 +33535,15 @@ CLASS lcl_object_oriented_factory IMPLEMENTATION.
   ENDMETHOD.
 ENDCLASS.
 
-CLASS lth_oo_factory_injector DEFINITION FOR TESTING.
+CLASS ltcl_oo_factory_injector DEFINITION FOR TESTING.
   PUBLIC SECTION.
     CLASS-METHODS:
       inject
         IMPORTING
           io_object_oriented_object TYPE REF TO lif_object_oriented_object_fnc.
 ENDCLASS.
-CLASS lth_oo_factory_injector IMPLEMENTATION.
+
+CLASS ltcl_oo_factory_injector IMPLEMENTATION.
   METHOD inject.
     lcl_object_oriented_factory=>go_object_oriented_object = io_object_oriented_object.
   ENDMETHOD.
@@ -33734,8 +33739,8 @@ CLASS lcl_repo_online IMPLEMENTATION.
 
   METHOD push.
 
-    DATA: lv_branch        TYPE ty_sha1,
-          lt_updated_files TYPE ty_file_signatures_tt.
+    DATA: lv_branch        TYPE lif_defs=>ty_sha1,
+          lt_updated_files TYPE lif_defs=>ty_file_signatures_tt.
 
 
     handle_stage_ignore( io_stage ).
@@ -33787,8 +33792,8 @@ CLASS lcl_repo_online IMPLEMENTATION.
 
     IF lv_add = abap_true.
       io_stage->add(
-        iv_path     = gc_root_dir
-        iv_filename = gc_dot_abapgit
+        iv_path     = lif_defs=>gc_root_dir
+        iv_filename = lif_defs=>gc_dot_abapgit
         iv_data     = lo_dot_abapgit->serialize( ) ).
 
       set_dot_abapgit( lo_dot_abapgit ).
@@ -33798,9 +33803,9 @@ CLASS lcl_repo_online IMPLEMENTATION.
 
   METHOD rebuild_local_checksums. "REMOTE
 
-    DATA: lt_remote       TYPE ty_files_tt,
-          lt_local        TYPE ty_files_item_tt,
-          ls_last_item    TYPE ty_item,
+    DATA: lt_remote       TYPE lif_defs=>ty_files_tt,
+          lt_local        TYPE lif_defs=>ty_files_item_tt,
+          ls_last_item    TYPE lif_defs=>ty_item,
           lv_branch_equal TYPE abap_bool,
           lt_checksums    TYPE lcl_persistence_repo=>ty_local_checksum_tt.
 
@@ -33815,7 +33820,7 @@ CLASS lcl_repo_online IMPLEMENTATION.
 
     DELETE lt_local " Remove non-code related files except .abapgit
       WHERE item IS INITIAL
-      AND NOT ( file-path = gc_root_dir AND file-filename = gc_dot_abapgit ).
+      AND NOT ( file-path = lif_defs=>gc_root_dir AND file-filename = lif_defs=>gc_dot_abapgit ).
 
     SORT lt_local BY item.
     SORT lt_remote BY path filename.
@@ -33871,8 +33876,8 @@ CLASS lcl_repo IMPLEMENTATION.
 
 
     READ TABLE mt_remote ASSIGNING <ls_remote>
-      WITH KEY path = gc_root_dir
-      filename = gc_dot_abapgit.
+      WITH KEY path = lif_defs=>gc_root_dir
+      filename = lif_defs=>gc_dot_abapgit.
     IF sy-subrc = 0.
       ro_dot = lcl_dot_abapgit=>deserialize( <ls_remote>-data ).
     ENDIF.
@@ -33956,8 +33961,8 @@ CLASS lcl_repo IMPLEMENTATION.
     " If this is not true that there is an error somewhere but not here
 
     DATA: lt_checksums TYPE lcl_persistence_repo=>ty_local_checksum_tt,
-          lt_files_idx TYPE ty_file_signatures_tt,
-          lt_local     TYPE ty_files_item_tt,
+          lt_files_idx TYPE lif_defs=>ty_file_signatures_tt,
+          lt_local     TYPE lif_defs=>ty_files_item_tt,
           lv_chks_row  TYPE i,
           lv_file_row  TYPE i.
 
@@ -34029,7 +34034,7 @@ CLASS lcl_repo IMPLEMENTATION.
 
   METHOD deserialize.
 
-    DATA: lt_updated_files TYPE ty_file_signatures_tt,
+    DATA: lt_updated_files TYPE lif_defs=>ty_file_signatures_tt,
           lo_dot_abapgit   TYPE REF TO lcl_dot_abapgit,
           lt_requirements  TYPE STANDARD TABLE OF lcl_dot_abapgit=>ty_requirement.
 
@@ -34075,10 +34080,10 @@ CLASS lcl_repo IMPLEMENTATION.
 
   METHOD get_files_local.
 
-    DATA: lt_tadir TYPE ty_tadir_tt,
-          ls_item  TYPE ty_item,
-          lt_files TYPE ty_files_tt,
-          lt_cache TYPE SORTED TABLE OF ty_file_item
+    DATA: lt_tadir TYPE lif_defs=>ty_tadir_tt,
+          ls_item  TYPE lif_defs=>ty_item,
+          lt_files TYPE lif_defs=>ty_files_tt,
+          lt_cache TYPE SORTED TABLE OF lif_defs=>ty_file_item
                    WITH NON-UNIQUE KEY item.
 
     DATA: lt_filter       TYPE SORTED TABLE OF tadir
@@ -34098,10 +34103,10 @@ CLASS lcl_repo IMPLEMENTATION.
     ENDIF.
 
     APPEND INITIAL LINE TO rt_files ASSIGNING <ls_return>.
-    <ls_return>-file-path     = gc_root_dir.
-    <ls_return>-file-filename = gc_dot_abapgit.
+    <ls_return>-file-path     = lif_defs=>gc_root_dir.
+    <ls_return>-file-filename = lif_defs=>gc_dot_abapgit.
     <ls_return>-file-data     = get_dot_abapgit( )->serialize( ).
-    <ls_return>-file-sha1     = lcl_hash=>sha1( iv_type = gc_type-blob
+    <ls_return>-file-sha1     = lcl_hash=>sha1( iv_type = lif_defs=>gc_type-blob
                                                 iv_data = <ls_return>-file-data ).
 
     lt_cache = mt_local.
@@ -34154,7 +34159,7 @@ CLASS lcl_repo IMPLEMENTATION.
         io_log      = io_log ).
       LOOP AT lt_files ASSIGNING <ls_file>.
         <ls_file>-path = <ls_tadir>-path.
-        <ls_file>-sha1 = lcl_hash=>sha1( iv_type = gc_type-blob iv_data = <ls_file>-data ).
+        <ls_file>-sha1 = lcl_hash=>sha1( iv_type = lif_defs=>gc_type-blob iv_data = <ls_file>-data ).
 
         APPEND INITIAL LINE TO rt_files ASSIGNING <ls_return>.
         <ls_return>-file = <ls_file>.
@@ -34240,8 +34245,8 @@ CLASS lcl_repo IMPLEMENTATION.
 
   METHOD rebuild_local_checksums. "LOCAL (BASE)
 
-    DATA: lt_local     TYPE ty_files_item_tt,
-          ls_last_item TYPE ty_item,
+    DATA: lt_local     TYPE lif_defs=>ty_files_item_tt,
+          ls_last_item TYPE lif_defs=>ty_item,
           lt_checksums TYPE lcl_persistence_repo=>ty_local_checksum_tt.
 
     FIELD-SYMBOLS: <ls_checksum> LIKE LINE OF lt_checksums,
@@ -34253,7 +34258,7 @@ CLASS lcl_repo IMPLEMENTATION.
 
     DELETE lt_local " Remove non-code related files except .abapgit
       WHERE item IS INITIAL
-      AND NOT ( file-path = gc_root_dir AND file-filename = gc_dot_abapgit ).
+      AND NOT ( file-path = lif_defs=>gc_root_dir AND file-filename = lif_defs=>gc_dot_abapgit ).
 
     SORT lt_local BY item.
 
@@ -34543,7 +34548,7 @@ CLASS lcl_background DEFINITION FINAL.
   PRIVATE SECTION.
     CLASS-METHODS:
       build_comment
-        IMPORTING is_files          TYPE ty_stage_files
+        IMPORTING is_files          TYPE lif_defs=>ty_stage_files
         RETURNING VALUE(rv_comment) TYPE string,
       push
         IMPORTING io_repo     TYPE REF TO lcl_repo_online
@@ -34582,8 +34587,8 @@ CLASS lcl_background IMPLEMENTATION.
 
   METHOD push_fixed.
 
-    DATA: ls_comment TYPE ty_comment,
-          ls_files   TYPE ty_stage_files,
+    DATA: ls_comment TYPE lif_defs=>ty_comment,
+          ls_files   TYPE lif_defs=>ty_stage_files,
           lo_stage   TYPE REF TO lcl_stage.
 
     FIELD-SYMBOLS: <ls_local> LIKE LINE OF ls_files-local.
@@ -34636,7 +34641,7 @@ CLASS lcl_background IMPLEMENTATION.
     ELSE.
       rv_comment = 'BG: Multiple objects'.
       LOOP AT lt_objects INTO lv_str.
-        CONCATENATE rv_comment gc_newline lv_str INTO rv_comment.
+        CONCATENATE rv_comment lif_defs=>gc_newline lv_str INTO rv_comment.
       ENDLOOP.
     ENDIF.
 
@@ -34644,8 +34649,8 @@ CLASS lcl_background IMPLEMENTATION.
 
   METHOD push_auto.
 
-    DATA: ls_comment    TYPE ty_comment,
-          ls_files      TYPE ty_stage_files,
+    DATA: ls_comment    TYPE lif_defs=>ty_comment,
+          ls_files      TYPE lif_defs=>ty_stage_files,
           ls_user_files LIKE ls_files,
           lo_stage      TYPE REF TO lcl_stage.
 
@@ -34953,8 +34958,8 @@ CLASS lcl_transport_objects DEFINITION.
     METHODS to_stage
       IMPORTING
         io_stage           TYPE REF TO lcl_stage
-        is_stage_objects   TYPE ty_stage_files
-        it_object_statuses TYPE ty_results_tt
+        is_stage_objects   TYPE lif_defs=>ty_stage_files
+        it_object_statuses TYPE lif_defs=>ty_results_tt
       RAISING
         lcx_exception.
   PRIVATE SECTION.
@@ -34968,8 +34973,8 @@ CLASS lcl_transport_objects IMPLEMENTATION.
 
   METHOD to_stage.
     DATA: ls_transport_object TYPE tadir,
-          ls_local_file       TYPE ty_file_item,
-          ls_object_status    TYPE ty_result.
+          ls_local_file       TYPE lif_defs=>ty_file_item,
+          ls_object_status    TYPE lif_defs=>ty_result.
 
     LOOP AT mt_transport_objects INTO ls_transport_object.
       LOOP AT it_object_statuses INTO ls_object_status
@@ -34978,7 +34983,7 @@ CLASS lcl_transport_objects IMPLEMENTATION.
           AND NOT lstate IS INITIAL.
 
         CASE ls_object_status-lstate.
-          WHEN gc_state-added OR gc_state-modified.
+          WHEN lif_defs=>gc_state-added OR lif_defs=>gc_state-modified.
             IF ls_transport_object-delflag = abap_true.
               lcx_exception=>raise( |Object { ls_transport_object-obj_name
               } should be added/modified, but has deletion flag in transport| ).
@@ -34998,7 +35003,7 @@ CLASS lcl_transport_objects IMPLEMENTATION.
               iv_path     = ls_local_file-file-path
               iv_filename = ls_local_file-file-filename
               iv_data     = ls_local_file-file-data ).
-          WHEN gc_state-deleted.
+          WHEN lif_defs=>gc_state-deleted.
             IF ls_transport_object-delflag = abap_false.
               lcx_exception=>raise( |Object { ls_transport_object-obj_name
               } should be removed, but has NO deletion flag in transport| ).
@@ -35024,7 +35029,7 @@ CLASS lcl_transport_to_branch DEFINITION.
     METHODS:
       create
         IMPORTING io_repository          TYPE REF TO lcl_repo_online
-                  is_transport_to_branch TYPE ty_transport_to_branch
+                  is_transport_to_branch TYPE lif_defs=>ty_transport_to_branch
                   it_transport_objects   TYPE scts_tadir
         RAISING   lcx_exception.
   PRIVATE SECTION.
@@ -35037,15 +35042,15 @@ CLASS lcl_transport_to_branch DEFINITION.
         lcx_exception.
     METHODS generate_commit_message
       IMPORTING
-        is_transport_to_branch TYPE ty_transport_to_branch
+        is_transport_to_branch TYPE lif_defs=>ty_transport_to_branch
       RETURNING
-        VALUE(rs_comment)      TYPE ty_comment.
+        VALUE(rs_comment)      TYPE lif_defs=>ty_comment.
     METHODS stage_transport_objects
       IMPORTING
         it_transport_objects TYPE scts_tadir
         io_stage             TYPE REF TO lcl_stage
-        is_stage_objects     TYPE ty_stage_files
-        it_object_statuses   TYPE ty_results_tt
+        is_stage_objects     TYPE lif_defs=>ty_stage_files
+        it_object_statuses   TYPE lif_defs=>ty_results_tt
       RAISING
         lcx_exception.
 ENDCLASS.
@@ -35055,10 +35060,10 @@ CLASS lcl_transport_to_branch IMPLEMENTATION.
   METHOD create.
     DATA:
       lv_branch_name     TYPE string,
-      ls_comment         TYPE ty_comment,
+      ls_comment         TYPE lif_defs=>ty_comment,
       lo_stage           TYPE REF TO lcl_stage,
-      ls_stage_objects   TYPE ty_stage_files,
-      lt_object_statuses TYPE ty_results_tt.
+      ls_stage_objects   TYPE lif_defs=>ty_stage_files,
+      lt_object_statuses TYPE lif_defs=>ty_results_tt.
 
     lv_branch_name = lcl_git_branch_list=>complete_heads_branch_name(
         lcl_git_branch_list=>normalize_branch_name( is_transport_to_branch-branch_name ) ).
@@ -35316,7 +35321,7 @@ CLASS lcl_services_git IMPLEMENTATION.
 
   METHOD commit.
 
-    DATA: ls_comment TYPE ty_comment,
+    DATA: ls_comment TYPE lif_defs=>ty_comment,
           lo_user    TYPE REF TO lcl_persistence_user.
 
     lo_user = lcl_app=>user( ).
@@ -35343,7 +35348,7 @@ CLASS lcl_services_git IMPLEMENTATION.
 
     IF NOT is_commit-body IS INITIAL.
       CONCATENATE ls_comment-comment '' is_commit-body
-        INTO ls_comment-comment SEPARATED BY gc_newline.
+        INTO ls_comment-comment SEPARATED BY lif_defs=>gc_newline.
     ENDIF.
 
     io_repo->push( is_comment = ls_comment
@@ -35484,7 +35489,7 @@ CLASS lcl_services_repo IMPLEMENTATION.
 
   METHOD purge.
 
-    DATA: lt_tadir    TYPE ty_tadir_tt,
+    DATA: lt_tadir    TYPE lif_defs=>ty_tadir_tt,
           lv_answer   TYPE c LENGTH 1,
           lo_repo     TYPE REF TO lcl_repo,
           lv_package  TYPE devclass,
@@ -35686,7 +35691,7 @@ CLASS lcl_services_repo IMPLEMENTATION.
       lo_transport_to_branch TYPE REF TO lcl_transport_to_branch,
       lt_transport_headers   TYPE trwbo_request_headers,
       lt_transport_objects               TYPE scts_tadir,
-      ls_transport_to_branch TYPE ty_transport_to_branch.
+      ls_transport_to_branch TYPE lif_defs=>ty_transport_to_branch.
 
     lo_repository ?= lcl_app=>repo_srv( )->get( iv_repository_key ).
 
@@ -36020,7 +36025,7 @@ CLASS lcl_gui_asset_manager DEFINITION FINAL CREATE PRIVATE FRIENDS lcl_gui.
       RAISING   lcx_exception.
 
     METHODS get_images
-      RETURNING VALUE(rt_images) TYPE tt_web_assets.
+      RETURNING VALUE(rt_images) TYPE lif_defs=>tt_web_assets.
 
     CLASS-METHODS get_webfont_link
       RETURNING VALUE(rv_link) TYPE string.
@@ -36038,7 +36043,7 @@ CLASS lcl_gui_asset_manager DEFINITION FINAL CREATE PRIVATE FRIENDS lcl_gui.
       RAISING   lcx_exception.
 
     METHODS get_inline_images
-      RETURNING VALUE(rt_images) TYPE tt_web_assets.
+      RETURNING VALUE(rt_images) TYPE lif_defs=>tt_web_assets.
 
 ENDCLASS. "lcl_gui_asset_manager
 
@@ -36152,7 +36157,7 @@ CLASS lcl_gui_asset_manager IMPLEMENTATION.
       APPEND &1 TO lt_data.
     END-OF-DEFINITION.
 
-    DATA: lt_data TYPE ty_string_tt,
+    DATA: lt_data TYPE lif_defs=>ty_string_tt,
           lv_str  TYPE string.
 
     CASE iv_asset_name.
@@ -37495,7 +37500,7 @@ CLASS lcl_gui_asset_manager IMPLEMENTATION.
         lcx_exception=>raise( |No inline resource: { iv_asset_name }| ).
     ENDCASE.
 
-    CONCATENATE LINES OF lt_data INTO lv_str SEPARATED BY gc_newline.
+    CONCATENATE LINES OF lt_data INTO lv_str SEPARATED BY lif_defs=>gc_newline.
 
     CALL FUNCTION 'SCMS_STRING_TO_XSTRING'
       EXPORTING
@@ -37510,7 +37515,7 @@ CLASS lcl_gui_asset_manager IMPLEMENTATION.
 
   METHOD get_inline_images.
 
-    DATA ls_image TYPE ty_web_asset.
+    DATA ls_image TYPE lif_defs=>ty_web_asset.
 
 * see https://github.com/larshp/abapGit/issues/201 for source SVG
     ls_image-url     = 'img/logo' ##NO_TEXT.
@@ -37711,7 +37716,7 @@ CLASS lcl_gui_chunk_lib IMPLEMENTATION.
         lv_icon = 'arrow-up/grey80'.
       ENDIF.
       ro_html->add_a( iv_act = 'displayNews()'
-                      iv_typ = gc_action_type-onclick
+                      iv_typ = lif_defs=>gc_action_type-onclick
                       iv_txt = lcl_html=>icon( iv_name  = lv_icon
                                                iv_class = 'pad-sides'
                                                iv_hint  = 'Display changelog' ) ).
@@ -37726,7 +37731,7 @@ CLASS lcl_gui_chunk_lib IMPLEMENTATION.
     ELSE.
       lv_icon = 'star/grey' ##NO_TEXT.
     ENDIF.
-    ro_html->add_a( iv_act = |{ gc_action-repo_toggle_fav }?{ io_repo->get_key( ) }|
+    ro_html->add_a( iv_act = |{ lif_defs=>gc_action-repo_toggle_fav }?{ io_repo->get_key( ) }|
                     iv_txt = lcl_html=>icon( iv_name  = lv_icon
                                              iv_class = 'pad-sides'
                                              iv_hint  = 'Click to toggle favorite' ) ).
@@ -37762,7 +37767,7 @@ CLASS lcl_gui_chunk_lib IMPLEMENTATION.
       ro_html->add_icon( iv_name = 'package/darkgrey' iv_hint = 'SAP package' ).
       ro_html->add( '<span>' ).
       ro_html->add_a( iv_txt = io_repo->get_package( )
-                      iv_act = |{ gc_action-jump_pkg }?{ io_repo->get_package( ) }| ).
+                      iv_act = |{ lif_defs=>gc_action-jump_pkg }?{ io_repo->get_package( ) }| ).
       ro_html->add( '</span>' ).
     ENDIF.
 
@@ -37791,19 +37796,19 @@ CLASS lcl_gui_chunk_lib IMPLEMENTATION.
       ENDCASE.
 
       CASE <state>.
-        WHEN gc_state-unchanged.  "None or unchanged
-          IF iv1 = gc_state-added OR iv2 = gc_state-added.
+        WHEN lif_defs=>gc_state-unchanged.  "None or unchanged
+          IF iv1 = lif_defs=>gc_state-added OR iv2 = lif_defs=>gc_state-added.
             rv_html = rv_html && |<span class="none" title="{ lv_system } Not exists">X</span>|.
           ELSE.
             rv_html = rv_html && |<span class="none" title="{ lv_system } No changes">&nbsp;</span>|.
           ENDIF.
-        WHEN gc_state-modified.   "Changed
+        WHEN lif_defs=>gc_state-modified.   "Changed
           rv_html = rv_html && |<span class="changed" title="{ lv_system } Modified">M</span>|.
-        WHEN gc_state-added.      "Added new
+        WHEN lif_defs=>gc_state-added.      "Added new
           rv_html = rv_html && |<span class="added" title="{ lv_system } Added new">A</span>|.
-        WHEN gc_state-mixed.      "Multiple changes (multifile)
+        WHEN lif_defs=>gc_state-mixed.      "Multiple changes (multifile)
           rv_html = rv_html && |<span class="mixed" title="{ lv_system } Multiple changes">&#x25A0;</span>|.
-        WHEN gc_state-deleted.    "Deleted
+        WHEN lif_defs=>gc_state-deleted.    "Deleted
           rv_html = rv_html && |<span class="deleted" title="{ lv_system } Deleted">D</span>|.
       ENDCASE.
     ENDDO.
@@ -37832,7 +37837,7 @@ CLASS lcl_gui_chunk_lib IMPLEMENTATION.
     ro_html->add( |<span class="{ lv_class }">| ).
     ro_html->add_icon( iv_name = 'git-branch/darkgrey' iv_hint = 'Current branch' ).
     IF iv_interactive = abap_true.
-      ro_html->add_a( iv_act = |{ gc_action-git_branch_switch }?{ io_repo->get_key( ) }|
+      ro_html->add_a( iv_act = |{ lif_defs=>gc_action-git_branch_switch }?{ io_repo->get_key( ) }|
                       iv_txt = lv_text ).
     ELSE.
       ro_html->add( lv_text ).
@@ -37894,7 +37899,7 @@ CLASS lcl_gui_chunk_lib IMPLEMENTATION.
                && '<div class="float-right">'
                && lcl_html=>a(
                     iv_txt   = '&#x274c;'
-                    iv_typ   = gc_action_type-onclick
+                    iv_typ   = lif_defs=>gc_action_type-onclick
                     iv_act   = 'displayNews()'
                     iv_class = 'close-btn' )
                && '</div></div>' ).
@@ -38027,7 +38032,7 @@ CLASS lcl_gui_page IMPLEMENTATION.
 
     ro_html->add( |<td class="logo">{
                   lcl_html=>a( iv_txt = '<img src="img/logo" alt="logo">'
-                               iv_act = gc_action-abapgit_home )
+                               iv_act = lif_defs=>gc_action-abapgit_home )
                   }</td>| ).                                "#EC NOTEXT
 
     ro_html->add( |<td><span class="page_title"> &#x25BA; {
@@ -38082,7 +38087,7 @@ CLASS lcl_gui_page IMPLEMENTATION.
   ENDMETHOD. "scripts
 
   METHOD lif_gui_page~on_event.
-    ev_state = gc_event_state-not_handled.
+    ev_state = lif_defs=>gc_event_state-not_handled.
   ENDMETHOD. "lif_gui_page~on_event
 
   METHOD lif_gui_page~render.
@@ -38432,8 +38437,8 @@ CLASS lcl_html_action_utils IMPLEMENTATION.
     CLEAR es_fields.
 
     CONCATENATE LINES OF it_postdata INTO lv_string.
-    REPLACE ALL OCCURRENCES OF gc_crlf    IN lv_string WITH lc_replace.
-    REPLACE ALL OCCURRENCES OF gc_newline IN lv_string WITH lc_replace.
+    REPLACE ALL OCCURRENCES OF lif_defs=>gc_crlf    IN lv_string WITH lc_replace.
+    REPLACE ALL OCCURRENCES OF lif_defs=>gc_newline IN lv_string WITH lc_replace.
     lt_fields = parse_fields( lv_string ).
 
     get_field( EXPORTING name = 'COMMITTER_NAME'  it = lt_fields CHANGING cv = es_fields ).
@@ -38445,7 +38450,7 @@ CLASS lcl_html_action_utils IMPLEMENTATION.
 
     ASSIGN COMPONENT 'BODY' OF STRUCTURE es_fields TO <body>.
     ASSERT <body> IS ASSIGNED.
-    REPLACE ALL OCCURRENCES OF lc_replace IN <body> WITH gc_newline.
+    REPLACE ALL OCCURRENCES OF lc_replace IN <body> WITH lif_defs=>gc_newline.
 
     ASSERT es_fields IS NOT INITIAL.
 
@@ -38512,7 +38517,7 @@ CLASS lcl_repo_content_browser DEFINITION FINAL.
              changes  TYPE i,
              lstate   TYPE char1,
              rstate   TYPE char1,
-             files    TYPE tt_repo_files,
+             files    TYPE lif_defs=>tt_repo_files,
            END OF ty_repo_item.
     TYPES tt_repo_items TYPE STANDARD TABLE OF ty_repo_item WITH DEFAULT KEY.
 
@@ -38558,7 +38563,7 @@ DEFINE _reduce_state.
   ELSEIF &1 IS INITIAL.
     &1 = &2.
   ELSE.
-    &1 = gc_state-mixed.
+    &1 = lif_defs=>gc_state-mixed.
   ENDIF.
 END-OF-DEFINITION.
 
@@ -38664,7 +38669,7 @@ CLASS lcl_repo_content_browser IMPLEMENTATION.
 
   METHOD build_repo_items_offline.
 
-    DATA: lt_tadir TYPE ty_tadir_tt.
+    DATA: lt_tadir TYPE lif_defs=>ty_tadir_tt.
 
     FIELD-SYMBOLS: <ls_repo_item> LIKE LINE OF rt_repo_items,
                    <ls_tadir>     LIKE LINE OF lt_tadir.
@@ -38687,8 +38692,8 @@ CLASS lcl_repo_content_browser IMPLEMENTATION.
   METHOD build_repo_items_online.
 
     DATA: lo_repo_online TYPE REF TO lcl_repo_online,
-          ls_file        TYPE ty_repo_file,
-          lt_status      TYPE ty_results_tt.
+          ls_file        TYPE lif_defs=>ty_repo_file,
+          lt_status      TYPE lif_defs=>ty_results_tt.
 
     FIELD-SYMBOLS: <status>       LIKE LINE OF lt_status,
                    <ls_repo_item> LIKE LINE OF rt_repo_items.
@@ -40086,21 +40091,21 @@ CLASS lcl_gui_view_repo_content IMPLEMENTATION.
     CASE iv_action.
       WHEN c_actions-toggle_hide_files. " Toggle file diplay
         mv_hide_files   = lcl_app=>user( )->toggle_hide_files( ).
-        ev_state        = gc_event_state-re_render.
+        ev_state        = lif_defs=>gc_event_state-re_render.
       WHEN c_actions-change_dir.        " Change dir
         lv_path         = lcl_html_action_utils=>dir_decode( iv_getdata ).
         mv_cur_dir      = lcl_path=>change_dir( iv_cur_dir = mv_cur_dir iv_cd = lv_path ).
-        ev_state        = gc_event_state-re_render.
+        ev_state        = lif_defs=>gc_event_state-re_render.
       WHEN c_actions-toggle_folders.    " Toggle folder view
         mv_show_folders = boolc( mv_show_folders <> abap_true ).
         mv_cur_dir      = '/'. " Root
-        ev_state        = gc_event_state-re_render.
+        ev_state        = lif_defs=>gc_event_state-re_render.
       WHEN c_actions-toggle_changes.    " Toggle changes only view
         mv_changes_only = lcl_app=>user( )->toggle_changes_only( ).
-        ev_state        = gc_event_state-re_render.
+        ev_state        = lif_defs=>gc_event_state-re_render.
       WHEN c_actions-display_more.      " Increase MAX lines limit
         mv_max_lines    = mv_max_lines + mv_max_setting.
-        ev_state        = gc_event_state-re_render.
+        ev_state        = lif_defs=>gc_event_state-re_render.
     ENDCASE.
 
   ENDMETHOD. "lif_gui_page~on_event
@@ -40183,7 +40188,7 @@ CLASS lcl_gui_view_repo_content IMPLEMENTATION.
           ro_html->add( |Only { lv_max_str } shown in list. Display {
             lcl_html=>a( iv_txt = lv_add_str iv_act = c_actions-display_more )
             } more. (Set in Advanced > {
-            lcl_html=>a( iv_txt = 'Settings' iv_act = gc_action-go_settings )
+            lcl_html=>a( iv_txt = 'Settings' iv_act = lif_defs=>gc_action-go_settings )
             } )| ).
           ro_html->add( '</div>' ).
         ENDIF.
@@ -40247,9 +40252,9 @@ CLASS lcl_gui_view_repo_content IMPLEMENTATION.
     DATA: lo_tb_advanced TYPE REF TO lcl_html_toolbar,
           lo_tb_branch   TYPE REF TO lcl_html_toolbar,
           lv_key         TYPE lcl_persistence_db=>ty_value,
-          lv_wp_opt      LIKE gc_html_opt-crossout,
-          lv_crossout    LIKE gc_html_opt-crossout,
-          lv_pull_opt    LIKE gc_html_opt-crossout.
+          lv_wp_opt      LIKE lif_defs=>gc_html_opt-crossout,
+          lv_crossout    LIKE lif_defs=>gc_html_opt-crossout,
+          lv_pull_opt    LIKE lif_defs=>gc_html_opt-crossout.
 
     CREATE OBJECT ro_toolbar.
     CREATE OBJECT lo_tb_branch.
@@ -40258,58 +40263,58 @@ CLASS lcl_gui_view_repo_content IMPLEMENTATION.
     lv_key = mo_repo->get_key( ).
 
     IF mo_repo->is_write_protected( ) = abap_true.
-      lv_wp_opt   = gc_html_opt-crossout.
-      lv_pull_opt = gc_html_opt-crossout.
+      lv_wp_opt   = lif_defs=>gc_html_opt-crossout.
+      lv_pull_opt = lif_defs=>gc_html_opt-crossout.
     ELSE.
-      lv_pull_opt = gc_html_opt-strong.
+      lv_pull_opt = lif_defs=>gc_html_opt-strong.
     ENDIF.
 
     " Build branch drop-down ========================
     IF mo_repo->is_offline( ) = abap_false. " Online ?
       lo_tb_branch->add( iv_txt = 'Overview'
-                         iv_act = |{ gc_action-go_branch_overview }?{ lv_key }| ).
+                         iv_act = |{ lif_defs=>gc_action-go_branch_overview }?{ lv_key }| ).
       lo_tb_branch->add( iv_txt = 'Switch'
-                         iv_act = |{ gc_action-git_branch_switch }?{ lv_key }|
+                         iv_act = |{ lif_defs=>gc_action-git_branch_switch }?{ lv_key }|
                          iv_opt = lv_wp_opt ).
       lo_tb_branch->add( iv_txt = 'Create'
-                         iv_act = |{ gc_action-git_branch_create }?{ lv_key }| ).
+                         iv_act = |{ lif_defs=>gc_action-git_branch_create }?{ lv_key }| ).
       lo_tb_branch->add( iv_txt = 'Delete'
-                         iv_act = |{ gc_action-git_branch_delete }?{ lv_key }| ).
+                         iv_act = |{ lif_defs=>gc_action-git_branch_delete }?{ lv_key }| ).
     ENDIF.
 
     " Build advanced drop-down ========================
     IF mo_repo->is_offline( ) = abap_false. " Online ?
       lo_tb_advanced->add( iv_txt = 'Reset local'
-                           iv_act = |{ gc_action-git_reset }?{ lv_key }|
+                           iv_act = |{ lif_defs=>gc_action-git_reset }?{ lv_key }|
                            iv_opt = lv_wp_opt ).
       lo_tb_advanced->add( iv_txt = 'Background mode'
-                           iv_act = |{ gc_action-go_background }?{ lv_key }| ).
+                           iv_act = |{ lif_defs=>gc_action-go_background }?{ lv_key }| ).
       lo_tb_advanced->add( iv_txt = 'Change remote'
-                           iv_act = |{ gc_action-repo_remote_change }?{ lv_key }| ).
+                           iv_act = |{ lif_defs=>gc_action-repo_remote_change }?{ lv_key }| ).
       lo_tb_advanced->add( iv_txt = 'Make off-line'
-                           iv_act = |{ gc_action-repo_remote_detach }?{ lv_key }| ).
+                           iv_act = |{ lif_defs=>gc_action-repo_remote_detach }?{ lv_key }| ).
       lo_tb_advanced->add( iv_txt = 'Force stage'
-                           iv_act = |{ gc_action-go_stage }?{ lv_key }| ).
+                           iv_act = |{ lif_defs=>gc_action-go_stage }?{ lv_key }| ).
       lo_tb_advanced->add( iv_txt = 'Transport to Branch'
-                           iv_act = |{ gc_action-repo_transport_to_branch }?{ lv_key }| ).
+                           iv_act = |{ lif_defs=>gc_action-repo_transport_to_branch }?{ lv_key }| ).
     ELSE.
       lo_tb_advanced->add( iv_txt = 'Make on-line'
-                           iv_act = |{ gc_action-repo_remote_attach }?{ lv_key }| ).
+                           iv_act = |{ lif_defs=>gc_action-repo_remote_attach }?{ lv_key }| ).
     ENDIF.
     lo_tb_advanced->add( iv_txt = 'Repo settings'
-                         iv_act = |{ gc_action-repo_settings }?{ lv_key }| ).
+                         iv_act = |{ lif_defs=>gc_action-repo_settings }?{ lv_key }| ).
     lo_tb_advanced->add( iv_txt = 'Update local checksums'
-                         iv_act = |{ gc_action-repo_refresh_checksums }?{ lv_key }| ).
+                         iv_act = |{ lif_defs=>gc_action-repo_refresh_checksums }?{ lv_key }| ).
     lo_tb_advanced->add( iv_txt = 'Remove'
-                         iv_act = |{ gc_action-repo_remove }?{ lv_key }| ).
+                         iv_act = |{ lif_defs=>gc_action-repo_remove }?{ lv_key }| ).
 
     CLEAR lv_crossout.
     IF mo_repo->is_write_protected( ) = abap_true
-        OR lcl_auth=>is_allowed( gc_authorization-uninstall ) = abap_false.
-      lv_crossout = gc_html_opt-crossout.
+        OR lcl_auth=>is_allowed( lif_auth=>gc_authorization-uninstall ) = abap_false.
+      lv_crossout = lif_defs=>gc_html_opt-crossout.
     ENDIF.
     lo_tb_advanced->add( iv_txt = 'Uninstall'
-                         iv_act = |{ gc_action-repo_purge }?{ lv_key }|
+                         iv_act = |{ lif_defs=>gc_action-repo_purge }?{ lv_key }|
                          iv_opt = lv_crossout ).
 
     " Build main toolbar ==============================
@@ -40317,18 +40322,18 @@ CLASS lcl_gui_view_repo_content IMPLEMENTATION.
       TRY.
           IF iv_rstate IS NOT INITIAL. " Something new at remote
             ro_toolbar->add( iv_txt = 'Pull'
-                             iv_act = |{ gc_action-git_pull }?{ lv_key }|
+                             iv_act = |{ lif_defs=>gc_action-git_pull }?{ lv_key }|
                              iv_opt = lv_pull_opt ).
           ENDIF.
           IF iv_lstate IS NOT INITIAL. " Something new at local
             ro_toolbar->add( iv_txt = 'Stage'
-                             iv_act = |{ gc_action-go_stage }?{ lv_key }|
-                             iv_opt = gc_html_opt-strong ).
+                             iv_act = |{ lif_defs=>gc_action-go_stage }?{ lv_key }|
+                             iv_opt = lif_defs=>gc_html_opt-strong ).
           ENDIF.
           IF iv_rstate IS NOT INITIAL OR iv_lstate IS NOT INITIAL. " Any changes
             ro_toolbar->add( iv_txt = 'Show diff'
-                             iv_act = |{ gc_action-go_diff }?key={ lv_key }|
-                             iv_opt = gc_html_opt-strong ).
+                             iv_act = |{ lif_defs=>gc_action-go_diff }?key={ lv_key }|
+                             iv_opt = lif_defs=>gc_html_opt-strong ).
           ENDIF.
         CATCH lcx_exception ##NO_HANDLER.
           " authorization error or repository does not exist
@@ -40338,17 +40343,17 @@ CLASS lcl_gui_view_repo_content IMPLEMENTATION.
                        io_sub = lo_tb_branch ) ##NO_TEXT.
     ELSE.
       ro_toolbar->add( iv_txt = 'Import ZIP'
-                       iv_act = |{ gc_action-zip_import }?{ lv_key }|
-                       iv_opt = gc_html_opt-strong ).
+                       iv_act = |{ lif_defs=>gc_action-zip_import }?{ lv_key }|
+                       iv_opt = lif_defs=>gc_html_opt-strong ).
       ro_toolbar->add( iv_txt = 'Export ZIP'
-                       iv_act = |{ gc_action-zip_export }?{ lv_key }|
-                       iv_opt = gc_html_opt-strong ).
+                       iv_act = |{ lif_defs=>gc_action-zip_export }?{ lv_key }|
+                       iv_opt = lif_defs=>gc_html_opt-strong ).
     ENDIF.
 
     ro_toolbar->add( iv_txt = 'Advanced'
                      io_sub = lo_tb_advanced ) ##NO_TEXT.
     ro_toolbar->add( iv_txt = 'Refresh'
-                     iv_act = |{ gc_action-repo_refresh }?{ lv_key }| ).
+                     iv_act = |{ lif_defs=>gc_action-repo_refresh }?{ lv_key }| ).
     ro_toolbar->add( iv_txt = lcl_html=>icon( iv_name = 'settings/grey70' )
                      io_sub = build_grid_menu( ) ).
 
@@ -40477,7 +40482,7 @@ CLASS lcl_gui_view_repo_content IMPLEMENTATION.
 
         ro_html->add( '<div>' ).
         ro_html->add_a( iv_txt = |view diff ({ is_item-changes })|
-                        iv_act = |{ gc_action-go_diff }?{ lv_difflink }| ).
+                        iv_act = |{ lif_defs=>gc_action-go_diff }?{ lv_difflink }| ).
         ro_html->add( lcl_gui_chunk_lib=>render_item_state( iv1 = is_item-lstate
                                                             iv2 = is_item-rstate ) ).
         ro_html->add( '</div>' ).
@@ -40491,7 +40496,7 @@ CLASS lcl_gui_view_repo_content IMPLEMENTATION.
               iv_key  = mo_repo->get_key( )
               ig_file = ls_file ).
             ro_html->add_a( iv_txt = 'view diff'
-                            iv_act = |{ gc_action-go_diff }?{ lv_difflink }| ).
+                            iv_act = |{ lif_defs=>gc_action-go_diff }?{ lv_difflink }| ).
             ro_html->add( lcl_gui_chunk_lib=>render_item_state( iv1 = ls_file-lstate
                                                                 iv2 = ls_file-rstate ) ).
           ELSE.
@@ -40550,7 +40555,7 @@ CLASS lcl_gui_view_repo_content IMPLEMENTATION.
                                                     iv_obj_name = is_item-obj_name ).
 
     rv_html = lcl_html=>a( iv_txt = |{ is_item-obj_name }|
-                           iv_act = |{ gc_action-jump }?{ lv_encode }| ).
+                           iv_act = |{ lif_defs=>gc_action-jump }?{ lv_encode }| ).
 
   ENDMETHOD.  "build_obj_jump_link
 
@@ -40578,7 +40583,7 @@ ENDCLASS.                       "lcl_gui_view_tutorial
 CLASS lcl_gui_view_tutorial IMPLEMENTATION.
 
   METHOD lif_gui_page~on_event.
-    ev_state = gc_event_state-not_handled.
+    ev_state = lif_defs=>gc_event_state-not_handled.
   ENDMETHOD.  " lif_gui_page~on_event.
 
   METHOD lif_gui_page~render.
@@ -40602,17 +40607,17 @@ CLASS lcl_gui_view_tutorial IMPLEMENTATION.
     ro_html->add( '<p><ul>' ).
 
     ro_html->add( `<li>To clone a remote repo (e.g. from github) click ` ).
-    ro_html->add_a( iv_txt = '+ Clone' iv_act = gc_action-repo_clone ).
+    ro_html->add_a( iv_txt = '+ Clone' iv_act = lif_defs=>gc_action-repo_clone ).
     ro_html->add( ' from the top menu. This will copy a remote repo to your system.</li>' ).
 
     ro_html->add( `<li>To add a local package as a repo click ` ).
-    ro_html->add_a( iv_txt = '+ Offline' iv_act = gc_action-repo_newoffline ).
+    ro_html->add_a( iv_txt = '+ Offline' iv_act = lif_defs=>gc_action-repo_newoffline ).
     ro_html->add( ' from the top menu. This will track a repo which already exist in' ).
     ro_html->add( ' the system with abapGit. You''ll be able to attach it to remote origin' ).
     ro_html->add( ' or just serialize as a zip file</li>' ).
 
     ro_html->add( `<li>Go ` ).
-    ro_html->add_a( iv_txt = 'Explore' iv_act = gc_action-go_explore ).
+    ro_html->add_a( iv_txt = 'Explore' iv_act = lif_defs=>gc_action-go_explore ).
     ro_html->add( ' to find projects using abapGit</li>' ).
 
     ro_html->add( '</ul></p>' ).
@@ -40632,7 +40637,7 @@ CLASS lcl_gui_view_tutorial IMPLEMENTATION.
       ro_html->add( 'abapGit installed in package&nbsp;' ).
       ro_html->add( lcl_services_abapgit=>c_package_abapgit ).
     ELSE.
-      ro_html->add_a( iv_txt = 'install abapGit repo' iv_act = gc_action-abapgit_install ).
+      ro_html->add_a( iv_txt = 'install abapGit repo' iv_act = lif_defs=>gc_action-abapgit_install ).
       ro_html->add( ' - To keep abapGit up-to-date (or also to contribute) you need to' ).
       ro_html->add( 'install it as a repository.' ).
     ENDIF.
@@ -40642,7 +40647,7 @@ CLASS lcl_gui_view_tutorial IMPLEMENTATION.
       ro_html->add( 'abapGit plugins installed in package&nbsp;' ).
       ro_html->add( lcl_services_abapgit=>c_package_plugins ).
     ELSE.
-      ro_html->add_a( iv_txt = 'install abapGit plugins' iv_act = gc_action-abapgit_install_pi ).
+      ro_html->add_a( iv_txt = 'install abapGit plugins' iv_act = lif_defs=>gc_action-abapgit_install_pi ).
       ro_html->add( ' - you can also install plugins to extend supported object types' ).
     ENDIF.
     ro_html->add( '</li>' ).
@@ -40732,10 +40737,10 @@ CLASS lcl_gui_page_commit IMPLEMENTATION.
                                   io_repo     = mo_repo
                                   io_stage    = mo_stage ).
 
-        ev_state = gc_event_state-go_back_to_bookmark.
+        ev_state = lif_defs=>gc_event_state-go_back_to_bookmark.
 
       WHEN c_action-commit_cancel.
-        ev_state = gc_event_state-go_back.
+        ev_state = lif_defs=>gc_event_state-go_back.
     ENDCASE.
 
   ENDMETHOD.
@@ -40901,12 +40906,12 @@ CLASS lcl_gui_page_commit IMPLEMENTATION.
 
     lo_toolbar->add( iv_act = 'submitFormById(''commit_form'');'
                      iv_txt = 'Commit'
-                     iv_typ = gc_action_type-onclick
-                     iv_opt = gc_html_opt-strong ) ##NO_TEXT.
+                     iv_typ = lif_defs=>gc_action_type-onclick
+                     iv_opt = lif_defs=>gc_html_opt-strong ) ##NO_TEXT.
 
     lo_toolbar->add( iv_act = c_action-commit_cancel
                      iv_txt = 'Cancel'
-                     iv_opt = gc_html_opt-cancel ) ##NO_TEXT.
+                     iv_opt = lif_defs=>gc_html_opt-cancel ) ##NO_TEXT.
 
     ro_html->add( '<div class="paddings">' ).
     ro_html->add( lo_toolbar->render( ) ).
@@ -40935,8 +40940,8 @@ CLASS lcl_merge DEFINITION FINAL.
 
   PUBLIC SECTION.
     TYPES: BEGIN OF ty_ancestor,
-             commit TYPE ty_sha1,
-             tree   TYPE ty_sha1,
+             commit TYPE lif_defs=>ty_sha1,
+             tree   TYPE lif_defs=>ty_sha1,
              time   TYPE string,
              body   TYPE string,
            END OF ty_ancestor.
@@ -40964,7 +40969,7 @@ CLASS lcl_merge DEFINITION FINAL.
 
   PRIVATE SECTION.
     CLASS-DATA: gs_merge   TYPE ty_merge,
-                gt_objects TYPE ty_objects_tt.
+                gt_objects TYPE lif_defs=>ty_objects_tt.
 
     TYPES: ty_ancestor_tt TYPE STANDARD TABLE OF ty_ancestor WITH DEFAULT KEY.
 
@@ -40974,7 +40979,7 @@ CLASS lcl_merge DEFINITION FINAL.
       calculate_result
         RAISING lcx_exception,
       find_ancestors
-        IMPORTING iv_commit           TYPE ty_sha1
+        IMPORTING iv_commit           TYPE lif_defs=>ty_sha1
         RETURNING VALUE(rt_ancestors) TYPE ty_ancestor_tt
         RAISING   lcx_exception,
       find_first_common
@@ -41044,7 +41049,7 @@ CLASS lcl_merge IMPLEMENTATION.
 
     DEFINE _from_source.
       READ TABLE gt_objects ASSIGNING <ls_object>
-        WITH KEY type = gc_type-blob
+        WITH KEY type = lif_defs=>gc_type-blob
         sha1 = <ls_source>-sha1.
       ASSERT sy-subrc = 0.
 
@@ -41189,7 +41194,7 @@ CLASS lcl_merge IMPLEMENTATION.
     END-OF-DEFINITION.
 
     DATA: ls_commit TYPE lcl_git_pack=>ty_commit,
-          lt_visit  TYPE STANDARD TABLE OF ty_sha1,
+          lt_visit  TYPE STANDARD TABLE OF lif_defs=>ty_sha1,
           lv_commit LIKE LINE OF lt_visit.
 
     FIELD-SYMBOLS: <ls_ancestor> LIKE LINE OF rt_ancestors,
@@ -41200,7 +41205,7 @@ CLASS lcl_merge IMPLEMENTATION.
 
     LOOP AT lt_visit INTO lv_commit.
       READ TABLE gt_objects ASSIGNING <ls_object>
-        WITH KEY type = gc_type-commit sha1 = lv_commit.
+        WITH KEY type = lif_defs=>gc_type-commit sha1 = lv_commit.
       ASSERT sy-subrc = 0.
 
       ls_commit = lcl_git_pack=>decode_commit( <ls_object>-data ).
@@ -41212,7 +41217,7 @@ CLASS lcl_merge IMPLEMENTATION.
       <ls_ancestor>-commit = lv_commit.
       <ls_ancestor>-tree = ls_commit-tree.
       <ls_ancestor>-body = ls_commit-body.
-      FIND REGEX gc_author_regex IN ls_commit-author
+      FIND REGEX lif_defs=>gc_author_regex IN ls_commit-author
         SUBMATCHES <ls_ancestor>-time ##NO_TEXT.
       ASSERT sy-subrc = 0.
     ENDLOOP.
@@ -41301,7 +41306,7 @@ CLASS lcl_gui_page_merge IMPLEMENTATION.
           EXPORTING
             io_repo  = mo_repo
             io_stage = ms_merge-stage.
-        ev_state = gc_event_state-new_page.
+        ev_state = lif_defs=>gc_event_state-new_page.
     ENDCASE.
 
   ENDMETHOD.
@@ -41526,7 +41531,7 @@ CLASS lcl_gui_page_background IMPLEMENTATION.
   METHOD build_menu.
     CREATE OBJECT ro_menu.
     ro_menu->add( iv_txt = 'Run background logic'
-                  iv_act = gc_action-go_background_run ) ##NO_TEXT.
+                  iv_act = lif_defs=>gc_action-go_background_run ) ##NO_TEXT.
   ENDMETHOD. "build_menu
 
   METHOD lif_gui_page~on_event.
@@ -41534,11 +41539,11 @@ CLASS lcl_gui_page_background IMPLEMENTATION.
     DATA ls_bg_task     TYPE lcl_persistence_background=>ty_background.
 
     CASE iv_action.
-      WHEN gc_action-bg_update.
+      WHEN lif_defs=>gc_action-bg_update.
         ls_bg_task     = lcl_html_action_utils=>decode_bg_update( iv_getdata ).
         ls_bg_task-key = mv_key.
         lcl_services_background=>update_task( ls_bg_task ).
-        ev_state = gc_event_state-re_render.
+        ev_state = lif_defs=>gc_event_state-re_render.
     ENDCASE.
 
   ENDMETHOD.
@@ -41597,7 +41602,7 @@ CLASS lcl_gui_page_background IMPLEMENTATION.
     ro_html->add( '<br>' ).
 
     ro_html->add( '<u>Method</u><br>' )  ##NO_TEXT.
-    ro_html->add( |<form method="get" action="sapevent:{ gc_action-bg_update }">| ).
+    ro_html->add( |<form method="get" action="sapevent:{ lif_defs=>gc_action-bg_update }">| ).
     ro_html->add( '<input type="radio" name="method" value="nothing"' &&
       lv_nothing && '>Do nothing<br>' )  ##NO_TEXT.
     ro_html->add( '<input type="radio" name="method" value="push"' &&
@@ -41680,9 +41685,9 @@ CLASS lcl_branch_overview DEFINITION FINAL.
            END OF ty_create.
 
     TYPES: BEGIN OF ty_commit,
-             sha1       TYPE ty_sha1,
-             parent1    TYPE ty_sha1,
-             parent2    TYPE ty_sha1,
+             sha1       TYPE lif_defs=>ty_sha1,
+             parent1    TYPE lif_defs=>ty_sha1,
+             parent2    TYPE lif_defs=>ty_sha1,
              author     TYPE string,
              email      TYPE string,
              time       TYPE string,
@@ -41712,7 +41717,7 @@ CLASS lcl_branch_overview DEFINITION FINAL.
 
     CLASS-METHODS:
       parse_commits
-        IMPORTING it_objects TYPE ty_objects_tt
+        IMPORTING it_objects TYPE lif_defs=>ty_objects_tt
         RAISING   lcx_exception,
       determine_branch
         RAISING lcx_exception,
@@ -41722,7 +41727,7 @@ CLASS lcl_branch_overview DEFINITION FINAL.
         RAISING lcx_exception,
       get_git_objects
         IMPORTING io_repo           TYPE REF TO lcl_repo_online
-        RETURNING VALUE(rt_objects) TYPE ty_objects_tt
+        RETURNING VALUE(rt_objects) TYPE lif_defs=>ty_objects_tt
         RAISING   lcx_exception.
 
     CLASS-DATA:
@@ -41800,7 +41805,7 @@ CLASS lcl_branch_overview IMPLEMENTATION.
 
   METHOD run.
 
-    DATA: lt_objects TYPE ty_objects_tt.
+    DATA: lt_objects TYPE lif_defs=>ty_objects_tt.
 
 
     CLEAR gt_branches.
@@ -41838,7 +41843,7 @@ CLASS lcl_branch_overview IMPLEMENTATION.
                                               it_branches = gt_branches
                                     IMPORTING et_objects = rt_objects ).
 
-    DELETE rt_objects WHERE type = gc_type-blob.
+    DELETE rt_objects WHERE type = lif_defs=>gc_type-blob.
 
   ENDMETHOD.
 
@@ -41851,7 +41856,7 @@ CLASS lcl_branch_overview IMPLEMENTATION.
     FIELD-SYMBOLS: <ls_object> LIKE LINE OF it_objects.
 
 
-    LOOP AT it_objects ASSIGNING <ls_object> WHERE type = gc_type-commit.
+    LOOP AT it_objects ASSIGNING <ls_object> WHERE type = lif_defs=>gc_type-commit.
       ls_raw = lcl_git_pack=>decode_commit( <ls_object>-data ).
 
       CLEAR ls_commit.
@@ -41859,10 +41864,10 @@ CLASS lcl_branch_overview IMPLEMENTATION.
       ls_commit-parent1 = ls_raw-parent.
       ls_commit-parent2 = ls_raw-parent2.
 
-      SPLIT ls_raw-body AT gc_newline INTO ls_commit-message lv_trash.
+      SPLIT ls_raw-body AT lif_defs=>gc_newline INTO ls_commit-message lv_trash.
 
 * unix time stamps are in same time zone, so ignore the zone,
-      FIND REGEX gc_author_regex IN ls_raw-author
+      FIND REGEX lif_defs=>gc_author_regex IN ls_raw-author
         SUBMATCHES
         ls_commit-author
         ls_commit-email
@@ -42230,15 +42235,15 @@ CLASS lcl_gui_page_branch_overview IMPLEMENTATION.
     CASE iv_action.
       WHEN c_actions-refresh.
         refresh( ).
-        ev_state = gc_event_state-re_render.
+        ev_state = lif_defs=>gc_event_state-re_render.
       WHEN c_actions-uncompress.
         mv_compress = abap_false.
         refresh( ).
-        ev_state = gc_event_state-re_render.
+        ev_state = lif_defs=>gc_event_state-re_render.
       WHEN c_actions-compress.
         mv_compress = abap_true.
         refresh( ).
-        ev_state = gc_event_state-re_render.
+        ev_state = lif_defs=>gc_event_state-re_render.
       WHEN c_actions-merge.
         ls_merge = decode_merge( it_postdata ).
         CREATE OBJECT lo_merge
@@ -42247,7 +42252,7 @@ CLASS lcl_gui_page_branch_overview IMPLEMENTATION.
             iv_source = ls_merge-source
             iv_target = ls_merge-target.
         ei_page = lo_merge.
-        ev_state = gc_event_state-new_page.
+        ev_state = lif_defs=>gc_event_state-new_page.
     ENDCASE.
 
   ENDMETHOD.
@@ -42301,7 +42306,7 @@ CLASS lcl_gui_page_db_display IMPLEMENTATION.
   METHOD render_record_banner.
     rv_html = |<table class="tag"><tr><td class="label">Type:</td>|
            && | <td>{ is_key-type }</td></tr></table>|
-           && gc_newline
+           && lif_defs=>gc_newline
            && |<table class="tag"><tr><td class="label">Key:</td>|
            && |  <td>{ is_key-value }</td></tr></table>|.
   ENDMETHOD. "render_record_banner
@@ -42332,7 +42337,7 @@ CLASS lcl_gui_page_db_display IMPLEMENTATION.
 
     CREATE OBJECT ro_html.
     CREATE OBJECT lo_toolbar.
-    lo_toolbar->add( iv_act = |{ gc_action-db_edit }?{ lv_action }|
+    lo_toolbar->add( iv_act = |{ lif_defs=>gc_action-db_edit }?{ lv_action }|
                      iv_txt = 'Edit' ) ##NO_TEXT.
 
     ro_html->add( '<div class="db_entry">' ).
@@ -42394,8 +42399,8 @@ CLASS lcl_gui_page_db_edit IMPLEMENTATION.
     CREATE OBJECT lo_toolbar.
     lo_toolbar->add( iv_act = 'submitFormById(''db_form'');'
                      iv_txt = 'Save'
-                     iv_typ = gc_action_type-onclick
-                     iv_opt = gc_html_opt-strong ) ##NO_TEXT.
+                     iv_typ = lif_defs=>gc_action_type-onclick
+                     iv_opt = lif_defs=>gc_html_opt-strong ) ##NO_TEXT.
 
     ro_html->add( '<div class="db_entry">' ).
 
@@ -42407,7 +42412,7 @@ CLASS lcl_gui_page_db_edit IMPLEMENTATION.
     ro_html->add( '</td></tr></table>' ).
 
     " Form
-    ro_html->add( |<form id="db_form" method="post" action="sapevent:{ gc_action-db_update }">| ).
+    ro_html->add( |<form id="db_form" method="post" action="sapevent:{ lif_defs=>gc_action-db_update }">| ).
     ro_html->add( |<input type="hidden" name="type" value="{ ms_key-type }">| ).
     ro_html->add( |<input type="hidden" name="value" value="{ ms_key-value }">| ).
     ro_html->add( |<textarea rows="20" cols="100" name="xmldata">{ lv_data }</textarea>| ).
@@ -42480,9 +42485,9 @@ CLASS lcl_gui_page_db IMPLEMENTATION.
       lv_action  = lcl_html_action_utils=>dbkey_encode( <ls_data> ).
 
       CREATE OBJECT lo_toolbar.
-      lo_toolbar->add( iv_txt = 'Display' iv_act = |{ gc_action-db_display }?{ lv_action }| ).
-      lo_toolbar->add( iv_txt = 'Edit'    iv_act = |{ gc_action-db_edit }?{ lv_action }| ).
-      lo_toolbar->add( iv_txt = 'Delete'  iv_act = |{ gc_action-db_delete }?{ lv_action }| ).
+      lo_toolbar->add( iv_txt = 'Display' iv_act = |{ lif_defs=>gc_action-db_display }?{ lv_action }| ).
+      lo_toolbar->add( iv_txt = 'Edit'    iv_act = |{ lif_defs=>gc_action-db_edit }?{ lv_action }| ).
+      lo_toolbar->add( iv_txt = 'Delete'  iv_act = |{ lif_defs=>gc_action-db_delete }?{ lv_action }| ).
 
       ro_html->add( |<tr{ lv_trclass }>| ).
       ro_html->add( |<td>{ <ls_data>-type }</td>| ).
@@ -42583,8 +42588,8 @@ CLASS lcl_gui_page_diff DEFINITION FINAL INHERITING FROM lcl_gui_page.
     METHODS:
       constructor
         IMPORTING iv_key           TYPE lcl_persistence_repo=>ty_repo-key
-                  is_file          TYPE ty_file OPTIONAL
-                  is_object        TYPE ty_item OPTIONAL
+                  is_file          TYPE lif_defs=>ty_file OPTIONAL
+                  is_object        TYPE lif_defs=>ty_item OPTIONAL
                   iv_supress_stage TYPE abap_bool DEFAULT abap_false
         RAISING   lcx_exception,
       lif_gui_page~on_event REDEFINITION.
@@ -42628,9 +42633,9 @@ CLASS lcl_gui_page_diff DEFINITION FINAL INHERITING FROM lcl_gui_page.
       IMPORTING is_diff_line   TYPE lcl_diff=>ty_diff OPTIONAL
       RETURNING VALUE(ro_html) TYPE REF TO lcl_html.
     METHODS append_diff
-      IMPORTING it_remote TYPE ty_files_tt
-                it_local  TYPE ty_files_item_tt
-                is_status TYPE ty_result
+      IMPORTING it_remote TYPE lif_defs=>ty_files_tt
+                it_local  TYPE lif_defs=>ty_files_item_tt
+                is_status TYPE lif_defs=>ty_result
       RAISING   lcx_exception.
     METHODS build_menu
       IMPORTING iv_supress_stage TYPE abap_bool
@@ -42646,9 +42651,9 @@ CLASS lcl_gui_page_diff IMPLEMENTATION.
 
   METHOD constructor.
 
-    DATA: lt_remote TYPE ty_files_tt,
-          lt_local  TYPE ty_files_item_tt,
-          lt_status TYPE ty_results_tt,
+    DATA: lt_remote TYPE lif_defs=>ty_files_tt,
+          lt_local  TYPE lif_defs=>ty_files_item_tt,
+          lt_status TYPE lif_defs=>ty_results_tt,
           lo_repo   TYPE REF TO lcl_repo_online,
           lv_ts     TYPE timestamp.
 
@@ -42850,9 +42855,9 @@ CLASS lcl_gui_page_diff IMPLEMENTATION.
 
     IF iv_supress_stage = abap_false.
       ro_menu->add( iv_txt = 'Stage'
-                    iv_act = |{ gc_action-go_stage }?{ mv_repo_key }|
+                    iv_act = |{ lif_defs=>gc_action-go_stage }?{ mv_repo_key }|
                     iv_id  = 'stage-button'
-                    iv_opt = gc_html_opt-strong ).
+                    iv_opt = lif_defs=>gc_html_opt-strong ).
     ENDIF.
 
     IF lines( lt_types ) > 1 OR lines( lt_users ) > 1.
@@ -42860,10 +42865,10 @@ CLASS lcl_gui_page_diff IMPLEMENTATION.
 
       " File types
       IF lines( lt_types ) > 1.
-        lo_sub->add( iv_txt = 'TYPE' iv_typ = gc_action_type-separator ).
+        lo_sub->add( iv_txt = 'TYPE' iv_typ = lif_defs=>gc_action_type-separator ).
         LOOP AT lt_types ASSIGNING <i>.
           lo_sub->add( iv_txt = <i>
-                       iv_typ = gc_action_type-onclick
+                       iv_typ = lif_defs=>gc_action_type-onclick
                        iv_aux = 'type'
                        iv_chk = abap_true ).
         ENDLOOP.
@@ -42871,10 +42876,10 @@ CLASS lcl_gui_page_diff IMPLEMENTATION.
 
       " Changed by
       IF lines( lt_users ) > 1.
-        lo_sub->add( iv_txt = 'CHANGED BY' iv_typ = gc_action_type-separator ).
+        lo_sub->add( iv_txt = 'CHANGED BY' iv_typ = lif_defs=>gc_action_type-separator ).
         LOOP AT lt_users ASSIGNING <i>.
           lo_sub->add( iv_txt = <i>
-                       iv_typ = gc_action_type-onclick
+                       iv_typ = lif_defs=>gc_action_type-onclick
                        iv_aux = 'changed-by'
                        iv_chk = abap_true ).
         ENDLOOP.
@@ -42898,7 +42903,7 @@ CLASS lcl_gui_page_diff IMPLEMENTATION.
     CASE iv_action.
       WHEN c_actions-toggle_unified. " Toggle file diplay
         mv_unified = lcl_app=>user( )->toggle_diff_unified( ).
-        ev_state   = gc_event_state-re_render.
+        ev_state   = lif_defs=>gc_event_state-re_render.
     ENDCASE.
 
   ENDMETHOD. "lif_gui_page~on_event
@@ -43200,7 +43205,7 @@ CLASS lcl_gui_page_diff IMPLEMENTATION.
 
     ro_html->add( 'var gHelper = new DiffHelper({' ).
     ro_html->add( |  seed:        "{ mv_seed }",| ).
-    ro_html->add( |  stageAction: "{ gc_action-go_stage }",| ).
+    ro_html->add( |  stageAction: "{ lif_defs=>gc_action-go_stage }",| ).
     ro_html->add( '  ids: {' ).
     ro_html->add( '    diffList:    "diff-list",' ).
     ro_html->add( '    filterMenu:  "diff-filter",' ).
@@ -43316,7 +43321,7 @@ CLASS lcl_gui_page_main IMPLEMENTATION.
           ei_page      = ei_page
           ev_state     = ev_state ).
 
-      IF ev_state <> gc_event_state-not_handled.
+      IF ev_state <> lif_defs=>gc_event_state-not_handled.
         RETURN.
       ENDIF.
     ENDIF.
@@ -43331,10 +43336,10 @@ CLASS lcl_gui_page_main IMPLEMENTATION.
           CATCH lcx_exception ##NO_HANDLER.
         ENDTRY.
 
-        ev_state = gc_event_state-re_render.
+        ev_state = lif_defs=>gc_event_state-re_render.
       WHEN c_actions-changed_by.
         test_changed_by( ).
-        ev_state = gc_event_state-no_more_act.
+        ev_state = lif_defs=>gc_event_state-no_more_act.
     ENDCASE.
 
   ENDMETHOD.  "on_event
@@ -43343,7 +43348,7 @@ CLASS lcl_gui_page_main IMPLEMENTATION.
 
     DATA: ls_tadir TYPE tadir,
           lv_user  TYPE xubname,
-          ls_item  TYPE ty_item.
+          ls_item  TYPE lif_defs=>ty_item.
 
 
     ls_tadir = lcl_popups=>popup_object( ).
@@ -43434,21 +43439,21 @@ CLASS lcl_gui_page_main IMPLEMENTATION.
     CREATE OBJECT lo_advsub.
     CREATE OBJECT lo_helpsub.
 
-    lo_advsub->add( iv_txt = 'Database util'    iv_act = gc_action-go_db ) ##NO_TEXT.
-    lo_advsub->add( iv_txt = 'Package to zip'   iv_act = gc_action-zip_package ) ##NO_TEXT.
-    lo_advsub->add( iv_txt = 'Transport to zip' iv_act = gc_action-zip_transport ) ##NO_TEXT.
-    lo_advsub->add( iv_txt = 'Object to files'  iv_act = gc_action-zip_object ) ##NO_TEXT.
+    lo_advsub->add( iv_txt = 'Database util'    iv_act = lif_defs=>gc_action-go_db ) ##NO_TEXT.
+    lo_advsub->add( iv_txt = 'Package to zip'   iv_act = lif_defs=>gc_action-zip_package ) ##NO_TEXT.
+    lo_advsub->add( iv_txt = 'Transport to zip' iv_act = lif_defs=>gc_action-zip_transport ) ##NO_TEXT.
+    lo_advsub->add( iv_txt = 'Object to files'  iv_act = lif_defs=>gc_action-zip_object ) ##NO_TEXT.
     lo_advsub->add( iv_txt = 'Test changed by'  iv_act = c_actions-changed_by ) ##NO_TEXT.
-    lo_advsub->add( iv_txt = 'Page playground'  iv_act = gc_action-go_playground ) ##NO_TEXT.
-    lo_advsub->add( iv_txt = 'Debug info'       iv_act = gc_action-go_debuginfo ) ##NO_TEXT.
-    lo_advsub->add( iv_txt = 'Settings'         iv_act = gc_action-go_settings ) ##NO_TEXT.
+    lo_advsub->add( iv_txt = 'Page playground'  iv_act = lif_defs=>gc_action-go_playground ) ##NO_TEXT.
+    lo_advsub->add( iv_txt = 'Debug info'       iv_act = lif_defs=>gc_action-go_debuginfo ) ##NO_TEXT.
+    lo_advsub->add( iv_txt = 'Settings'         iv_act = lif_defs=>gc_action-go_settings ) ##NO_TEXT.
 
-    lo_helpsub->add( iv_txt = 'Tutorial'        iv_act = gc_action-go_tutorial ) ##NO_TEXT.
-    lo_helpsub->add( iv_txt = 'abapGit wiki'    iv_act = gc_action-abapgit_wiki ) ##NO_TEXT.
+    lo_helpsub->add( iv_txt = 'Tutorial'        iv_act = lif_defs=>gc_action-go_tutorial ) ##NO_TEXT.
+    lo_helpsub->add( iv_txt = 'abapGit wiki'    iv_act = lif_defs=>gc_action-abapgit_wiki ) ##NO_TEXT.
 
-    ro_menu->add( iv_txt = '+ Clone'            iv_act = gc_action-repo_clone ) ##NO_TEXT.
-    ro_menu->add( iv_txt = '+ Offline'          iv_act = gc_action-repo_newoffline ) ##NO_TEXT.
-    ro_menu->add( iv_txt = 'Explore'            iv_act = gc_action-go_explore ) ##NO_TEXT.
+    ro_menu->add( iv_txt = '+ Clone'            iv_act = lif_defs=>gc_action-repo_clone ) ##NO_TEXT.
+    ro_menu->add( iv_txt = '+ Offline'          iv_act = lif_defs=>gc_action-repo_newoffline ) ##NO_TEXT.
+    ro_menu->add( iv_txt = 'Explore'            iv_act = lif_defs=>gc_action-go_explore ) ##NO_TEXT.
 
     ro_menu->add( iv_txt = 'Advanced'           io_sub = lo_advsub ) ##NO_TEXT.
     ro_menu->add( iv_txt = 'Help'               io_sub = lo_helpsub ) ##NO_TEXT.
@@ -43531,7 +43536,7 @@ CLASS lcl_gui_page_main IMPLEMENTATION.
       ro_html->add( lo_favbar->render( iv_sort = abap_true ) ).
     ELSE.
       ro_html->add( |<span class="grey">No favorites so far. For more info please check {
-                    lcl_html=>a( iv_txt = 'tutorial' iv_act = gc_action-go_tutorial )
+                    lcl_html=>a( iv_txt = 'tutorial' iv_act = lif_defs=>gc_action-go_tutorial )
                     }</span>| ).
     ENDIF.
     ro_html->add( '</td>' ).
@@ -43594,8 +43599,8 @@ CLASS lcl_gui_page_stage DEFINITION FINAL INHERITING FROM lcl_gui_page.
     METHODS:
       constructor
         IMPORTING
-          io_repo TYPE REF TO lcl_repo_online
-          iv_seed TYPE string OPTIONAL
+                  io_repo TYPE REF TO lcl_repo_online
+                  iv_seed TYPE string OPTIONAL
         RAISING   lcx_exception,
       lif_gui_page~on_event REDEFINITION.
 
@@ -43606,7 +43611,7 @@ CLASS lcl_gui_page_stage DEFINITION FINAL INHERITING FROM lcl_gui_page.
 
   PRIVATE SECTION.
     DATA: mo_repo  TYPE REF TO lcl_repo_online,
-          ms_files TYPE ty_stage_files,
+          ms_files TYPE lif_defs=>ty_stage_files,
           mv_seed  TYPE string. " Unique page id to bind JS sessionStorage
 
     METHODS:
@@ -43615,15 +43620,15 @@ CLASS lcl_gui_page_stage DEFINITION FINAL INHERITING FROM lcl_gui_page.
 
       render_file
         IMPORTING iv_context     TYPE string
-                  is_file        TYPE ty_file
-                  is_item        TYPE ty_item OPTIONAL
+                  is_file        TYPE lif_defs=>ty_file
+                  is_item        TYPE lif_defs=>ty_item OPTIONAL
         RETURNING VALUE(ro_html) TYPE REF TO lcl_html,
 
       render_actions
         RETURNING VALUE(ro_html) TYPE REF TO lcl_html,
 
       read_last_changed_by
-        IMPORTING is_file        TYPE ty_file
+        IMPORTING is_file        TYPE lif_defs=>ty_file
         RETURNING VALUE(rv_user) TYPE xubname,
 
       process_stage_list
@@ -43664,7 +43669,7 @@ CLASS lcl_gui_page_stage IMPLEMENTATION.
 
     IF lines( ms_files-local ) > 0.
       ro_menu->add( iv_txt = |All diffs|
-                    iv_act = |{ gc_action-go_diff }?key={ mo_repo->get_key( ) }| ).
+                    iv_act = |{ lif_defs=>gc_action-go_diff }?key={ mo_repo->get_key( ) }| ).
     ENDIF.
 
   ENDMETHOD. "build_menu
@@ -43698,7 +43703,7 @@ CLASS lcl_gui_page_stage IMPLEMENTATION.
         io_repo  = mo_repo
         io_stage = lo_stage.
 
-    ev_state = gc_event_state-new_page.
+    ev_state = lif_defs=>gc_event_state-new_page.
 
   ENDMETHOD.
 
@@ -43706,7 +43711,7 @@ CLASS lcl_gui_page_stage IMPLEMENTATION.
 
     DATA: lv_string TYPE string,
           lt_fields TYPE tihttpnvp,
-          ls_file   TYPE ty_file.
+          ls_file   TYPE lif_defs=>ty_file.
 
     FIELD-SYMBOLS: <ls_file> LIKE LINE OF ms_files-local,
                    <ls_item> LIKE LINE OF lt_fields.
@@ -43824,7 +43829,7 @@ CLASS lcl_gui_page_stage IMPLEMENTATION.
         lv_param    = lcl_html_action_utils=>file_encode( iv_key  = mo_repo->get_key( )
                                                           ig_file = is_file ).
         lv_filename = lcl_html=>a( iv_txt = lv_filename
-                                   iv_act = |{ gc_action-go_diff }?{ lv_param }| ).
+                                   iv_act = |{ lif_defs=>gc_action-go_diff }?{ lv_param }| ).
         ro_html->add( |<td class="type">{ is_item-obj_type }</td>| ).
         ro_html->add( |<td class="name">{ lv_filename }</td>| ).
         ro_html->add( |<td class="user">{ read_last_changed_by( is_file ) }</td>| ).
@@ -43874,11 +43879,11 @@ CLASS lcl_gui_page_stage IMPLEMENTATION.
     " Action buttons
     ro_html->add( '<td class="indent5em">' ).
     ro_html->add_a( iv_act   = 'errorStub(event)' " Will be reinit by JS
-                    iv_typ   = gc_action_type-onclick
+                    iv_typ   = lif_defs=>gc_action_type-onclick
                     iv_id    = 'commitButton'
                     iv_style = 'display: none'
                     iv_txt   = 'Commit (<span id="fileCounter"></span>)'
-                    iv_opt   = gc_html_opt-strong ) ##NO_TEXT.
+                    iv_opt   = lif_defs=>gc_html_opt-strong ) ##NO_TEXT.
     ro_html->add_a( iv_act = |{ c_action-stage_all }|
                     iv_id  = 'commitAllButton'
                     iv_txt = lv_add_all_txt ) ##NO_TEXT.
@@ -43916,8 +43921,8 @@ CLASS lcl_gui_page_stage IMPLEMENTATION.
   ENDMETHOD.  "scripts
 
   METHOD read_last_changed_by.
-    DATA: ls_local_file TYPE ty_file_item,
-          lt_files_local type ty_files_item_tt.
+    DATA: ls_local_file  TYPE lif_defs=>ty_file_item,
+          lt_files_local TYPE lif_defs=>ty_files_item_tt.
     TRY.
         lt_files_local = mo_repo->get_files_local( ).
         READ TABLE lt_files_local INTO ls_local_file WITH KEY file = is_file.
@@ -44006,7 +44011,7 @@ CLASS lcl_gui_page_debuginfo IMPLEMENTATION.
 
     DATA: lt_objects TYPE STANDARD TABLE OF ko100,
           lv_list    TYPE string,
-          ls_item    TYPE ty_item.
+          ls_item    TYPE lif_defs=>ty_item.
 
     FIELD-SYMBOLS <object> LIKE LINE OF lt_objects.
 
@@ -44173,7 +44178,7 @@ CLASS lcl_gui_page_settings IMPLEMENTATION.
           persist_settings( ).
         ENDIF.
 
-        ev_state = gc_event_state-go_back.
+        ev_state = lif_defs=>gc_event_state-go_back.
     ENDCASE.
 
   ENDMETHOD.
@@ -44470,7 +44475,7 @@ CLASS lcl_gui_page_repo_settings IMPLEMENTATION.
         mo_repo->set_dot_abapgit( lo_dot ).
         mo_repo->refresh( ).
 
-        ev_state = gc_event_state-go_back.
+        ev_state = lif_defs=>gc_event_state-go_back.
     ENDCASE.
 
   ENDMETHOD.
@@ -44553,167 +44558,167 @@ CLASS lcl_gui_router IMPLEMENTATION.
     DATA: lv_url  TYPE string,
           lv_key  TYPE lcl_persistence_repo=>ty_repo-key,
           ls_db   TYPE lcl_persistence_db=>ty_content,
-          ls_item TYPE ty_item.
+          ls_item TYPE lif_defs=>ty_item.
 
     lv_key = iv_getdata. " TODO refactor
     lv_url = iv_getdata. " TODO refactor
 
     CASE iv_action.
         " General PAGE routing
-      WHEN gc_action-go_main                          " Go Main page
-          OR gc_action-go_explore                     " Go Explore page
-          OR gc_action-go_db                          " Go DB util page
-          OR gc_action-go_background_run              " Go background run page
-          OR gc_action-go_debuginfo                   " Go debug info page
-          OR gc_action-go_settings.                   " Go settings page
+      WHEN lif_defs=>gc_action-go_main                          " Go Main page
+          OR lif_defs=>gc_action-go_explore                     " Go Explore page
+          OR lif_defs=>gc_action-go_db                          " Go DB util page
+          OR lif_defs=>gc_action-go_background_run              " Go background run page
+          OR lif_defs=>gc_action-go_debuginfo                   " Go debug info page
+          OR lif_defs=>gc_action-go_settings.                   " Go settings page
         ei_page  = get_page_by_name( iv_action ).
-        ev_state = gc_event_state-new_page.
-      WHEN gc_action-go_background.                   " Go Background page
+        ev_state = lif_defs=>gc_event_state-new_page.
+      WHEN lif_defs=>gc_action-go_background.                   " Go Background page
         ei_page  = get_page_background( lv_key ).
-        ev_state = gc_event_state-new_page.
-      WHEN gc_action-go_diff.                         " Go Diff page
+        ev_state = lif_defs=>gc_event_state-new_page.
+      WHEN lif_defs=>gc_action-go_diff.                         " Go Diff page
         ei_page  = get_page_diff(
           iv_getdata   = iv_getdata
           iv_prev_page = iv_prev_page ).
-        ev_state = gc_event_state-new_page_w_bookmark.
-      WHEN gc_action-go_stage.                        " Go Staging page
+        ev_state = lif_defs=>gc_event_state-new_page_w_bookmark.
+      WHEN lif_defs=>gc_action-go_stage.                        " Go Staging page
         ei_page  = get_page_stage( iv_getdata ).
         IF iv_prev_page = 'PAGE_DIFF'.
-          ev_state = gc_event_state-new_page.
+          ev_state = lif_defs=>gc_event_state-new_page.
         ELSE.
-          ev_state = gc_event_state-new_page_w_bookmark.
+          ev_state = lif_defs=>gc_event_state-new_page_w_bookmark.
         ENDIF.
-      WHEN gc_action-go_branch_overview.              " Go repo branch overview
+      WHEN lif_defs=>gc_action-go_branch_overview.              " Go repo branch overview
         ei_page  = get_page_branch_overview( iv_getdata ).
-        ev_state = gc_event_state-new_page.
-      WHEN gc_action-go_playground.                   " Create playground page
+        ev_state = lif_defs=>gc_event_state-new_page.
+      WHEN lif_defs=>gc_action-go_playground.                   " Create playground page
         ei_page  = get_page_playground( ).
-        ev_state = gc_event_state-new_page.
-      WHEN gc_action-go_tutorial.                     " Go to tutorial
+        ev_state = lif_defs=>gc_event_state-new_page.
+      WHEN lif_defs=>gc_action-go_tutorial.                     " Go to tutorial
         lcl_app=>user( )->set_repo_show( '' ).        " Clear show_id
-        ev_state = gc_event_state-re_render.          " Assume we are on main page
+        ev_state = lif_defs=>gc_event_state-re_render.          " Assume we are on main page
 
         " SAP GUI actions
-      WHEN gc_action-jump.                          " Open object editor
+      WHEN lif_defs=>gc_action-jump.                          " Open object editor
         lcl_html_action_utils=>jump_decode(
           EXPORTING iv_string   = iv_getdata
           IMPORTING ev_obj_type = ls_item-obj_type
                     ev_obj_name = ls_item-obj_name ).
         lcl_objects=>jump( ls_item ).
-        ev_state = gc_event_state-no_more_act.
-      WHEN gc_action-jump_pkg.                      " Open SE80
+        ev_state = lif_defs=>gc_event_state-no_more_act.
+      WHEN lif_defs=>gc_action-jump_pkg.                      " Open SE80
         lcl_services_repo=>open_se80( |{ iv_getdata }| ).
-        ev_state = gc_event_state-no_more_act.
+        ev_state = lif_defs=>gc_event_state-no_more_act.
 
         " DB actions
-      WHEN gc_action-db_display OR gc_action-db_edit. " DB Display/Edit
+      WHEN lif_defs=>gc_action-db_display OR lif_defs=>gc_action-db_edit. " DB Display/Edit
         ei_page  = get_page_db_by_name( iv_name = iv_action  iv_getdata = iv_getdata ).
-        ev_state = gc_event_state-new_page.
+        ev_state = lif_defs=>gc_event_state-new_page.
         IF iv_prev_page = 'PAGE_DB_DISPLAY'.
-          ev_state = gc_event_state-new_page_replacing.
+          ev_state = lif_defs=>gc_event_state-new_page_replacing.
         ENDIF.
-      WHEN gc_action-db_delete.                       " DB Delete
+      WHEN lif_defs=>gc_action-db_delete.                       " DB Delete
         ls_db = lcl_html_action_utils=>dbkey_decode( iv_getdata ).
         lcl_services_db=>delete( ls_db ).
-        ev_state = gc_event_state-re_render.
-      WHEN gc_action-db_update.                       " DB Update
+        ev_state = lif_defs=>gc_event_state-re_render.
+      WHEN lif_defs=>gc_action-db_update.                       " DB Update
         ls_db = lcl_html_action_utils=>dbcontent_decode( it_postdata ).
         lcl_services_db=>update( ls_db ).
-        ev_state = gc_event_state-go_back.
+        ev_state = lif_defs=>gc_event_state-go_back.
 
         " ABAPGIT services actions
-      WHEN gc_action-abapgit_home.                    " Go abapGit homepage
+      WHEN lif_defs=>gc_action-abapgit_home.                    " Go abapGit homepage
         lcl_services_abapgit=>open_abapgit_homepage( ).
-        ev_state = gc_event_state-no_more_act.
-      WHEN gc_action-abapgit_wiki.                    " Go abapGit wikipage
+        ev_state = lif_defs=>gc_event_state-no_more_act.
+      WHEN lif_defs=>gc_action-abapgit_wiki.                    " Go abapGit wikipage
         lcl_services_abapgit=>open_abapgit_wikipage( ).
-        ev_state = gc_event_state-no_more_act.
-      WHEN gc_action-abapgit_install.                 " Install abapGit
+        ev_state = lif_defs=>gc_event_state-no_more_act.
+      WHEN lif_defs=>gc_action-abapgit_install.                 " Install abapGit
         lcl_services_abapgit=>install_abapgit( ).
-        ev_state = gc_event_state-re_render.
-      WHEN gc_action-abapgit_install_pi.              " Install abapGit plugins
+        ev_state = lif_defs=>gc_event_state-re_render.
+      WHEN lif_defs=>gc_action-abapgit_install_pi.              " Install abapGit plugins
         lcl_services_abapgit=>install_abapgit_pi( ).
-        ev_state = gc_event_state-re_render.
+        ev_state = lif_defs=>gc_event_state-re_render.
 
         " REPOSITORY services actions
-      WHEN gc_action-repo_newoffline.                 " New offline repo
+      WHEN lif_defs=>gc_action-repo_newoffline.                 " New offline repo
         lcl_services_repo=>new_offline( ).
-        ev_state = gc_event_state-re_render.
-      WHEN gc_action-repo_refresh.                    " Repo refresh
+        ev_state = lif_defs=>gc_event_state-re_render.
+      WHEN lif_defs=>gc_action-repo_refresh.                    " Repo refresh
         lcl_services_repo=>refresh( lv_key ).
-        ev_state = gc_event_state-re_render.
-      WHEN gc_action-repo_purge.                      " Repo remove & purge all objects
+        ev_state = lif_defs=>gc_event_state-re_render.
+      WHEN lif_defs=>gc_action-repo_purge.                      " Repo remove & purge all objects
         lcl_services_repo=>purge( lv_key ).
-        ev_state = gc_event_state-re_render.
-      WHEN gc_action-repo_remove.                     " Repo remove
+        ev_state = lif_defs=>gc_event_state-re_render.
+      WHEN lif_defs=>gc_action-repo_remove.                     " Repo remove
         lcl_services_repo=>remove( lv_key ).
-        ev_state = gc_event_state-re_render.
-      WHEN gc_action-repo_clone OR 'install'.    " Repo clone, 'install' is for explore page
+        ev_state = lif_defs=>gc_event_state-re_render.
+      WHEN lif_defs=>gc_action-repo_clone OR 'install'.    " Repo clone, 'install' is for explore page
         lcl_services_repo=>clone( lv_url ).
-        ev_state = gc_event_state-re_render.
-      WHEN gc_action-repo_refresh_checksums.          " Rebuil local checksums
+        ev_state = lif_defs=>gc_event_state-re_render.
+      WHEN lif_defs=>gc_action-repo_refresh_checksums.          " Rebuil local checksums
         lcl_services_repo=>refresh_local_checksums( lv_key ).
-        ev_state = gc_event_state-re_render.
-      WHEN gc_action-repo_toggle_fav.                 " Toggle repo as favorite
+        ev_state = lif_defs=>gc_event_state-re_render.
+      WHEN lif_defs=>gc_action-repo_toggle_fav.                 " Toggle repo as favorite
         lcl_services_repo=>toggle_favorite( lv_key ).
-        ev_state = gc_event_state-re_render.
-      WHEN gc_action-repo_transport_to_branch.
+        ev_state = lif_defs=>gc_event_state-re_render.
+      WHEN lif_defs=>gc_action-repo_transport_to_branch.
         lcl_services_repo=>transport_to_branch( iv_repository_key = lv_key ).
-        ev_state = gc_event_state-re_render.
-      WHEN gc_action-repo_settings.
+        ev_state = lif_defs=>gc_event_state-re_render.
+      WHEN lif_defs=>gc_action-repo_settings.
         CREATE OBJECT ei_page TYPE lcl_gui_page_repo_settings
           EXPORTING
             io_repo = lcl_app=>repo_srv( )->get( lv_key ).
-        ev_state = gc_event_state-new_page.
+        ev_state = lif_defs=>gc_event_state-new_page.
 
         " ZIP services actions
-      WHEN gc_action-zip_import.                      " Import repo from ZIP
+      WHEN lif_defs=>gc_action-zip_import.                      " Import repo from ZIP
         lcl_zip=>import( lv_key ).
-        ev_state = gc_event_state-re_render.
-      WHEN gc_action-zip_export.                      " Export repo as ZIP
+        ev_state = lif_defs=>gc_event_state-re_render.
+      WHEN lif_defs=>gc_action-zip_export.                      " Export repo as ZIP
         lcl_zip=>export( lcl_app=>repo_srv( )->get( lv_key ) ).
-        ev_state = gc_event_state-no_more_act.
-      WHEN gc_action-zip_package.                     " Export package as ZIP
+        ev_state = lif_defs=>gc_event_state-no_more_act.
+      WHEN lif_defs=>gc_action-zip_package.                     " Export package as ZIP
         lcl_zip=>export_package( ).
-        ev_state = gc_event_state-no_more_act.
-      WHEN gc_action-zip_transport.                   " Export transport as ZIP
+        ev_state = lif_defs=>gc_event_state-no_more_act.
+      WHEN lif_defs=>gc_action-zip_transport.                   " Export transport as ZIP
         lcl_transport=>zip( ).
-        ev_state = gc_event_state-no_more_act.
-      WHEN gc_action-zip_object.                      " Export object as ZIP
+        ev_state = lif_defs=>gc_event_state-no_more_act.
+      WHEN lif_defs=>gc_action-zip_object.                      " Export object as ZIP
         lcl_zip=>export_object( ).
-        ev_state = gc_event_state-no_more_act.
+        ev_state = lif_defs=>gc_event_state-no_more_act.
 
         " Remote ORIGIN manipulations
-      WHEN gc_action-repo_remote_attach.            " Remote attach
+      WHEN lif_defs=>gc_action-repo_remote_attach.            " Remote attach
         lcl_services_repo=>remote_attach( lv_key ).
-        ev_state = gc_event_state-re_render.
-      WHEN gc_action-repo_remote_detach.            " Remote detach
+        ev_state = lif_defs=>gc_event_state-re_render.
+      WHEN lif_defs=>gc_action-repo_remote_detach.            " Remote detach
         lcl_services_repo=>remote_detach( lv_key ).
-        ev_state = gc_event_state-re_render.
-      WHEN gc_action-repo_remote_change.            " Remote change
+        ev_state = lif_defs=>gc_event_state-re_render.
+      WHEN lif_defs=>gc_action-repo_remote_change.            " Remote change
         lcl_services_repo=>remote_change( lv_key ).
-        ev_state = gc_event_state-re_render.
+        ev_state = lif_defs=>gc_event_state-re_render.
 
         " GIT actions
-      WHEN gc_action-git_pull.                      " GIT Pull
+      WHEN lif_defs=>gc_action-git_pull.                      " GIT Pull
         lcl_services_git=>pull( lv_key ).
-        ev_state = gc_event_state-re_render.
-      WHEN gc_action-git_reset.                     " GIT Reset
+        ev_state = lif_defs=>gc_event_state-re_render.
+      WHEN lif_defs=>gc_action-git_reset.                     " GIT Reset
         lcl_services_git=>reset( lv_key ).
-        ev_state = gc_event_state-re_render.
-      WHEN gc_action-git_branch_create.             " GIT Create new branch
+        ev_state = lif_defs=>gc_event_state-re_render.
+      WHEN lif_defs=>gc_action-git_branch_create.             " GIT Create new branch
         lcl_services_git=>create_branch( lv_key ).
-        ev_state = gc_event_state-re_render.
-      WHEN gc_action-git_branch_delete.             " GIT Delete remote branch
+        ev_state = lif_defs=>gc_event_state-re_render.
+      WHEN lif_defs=>gc_action-git_branch_delete.             " GIT Delete remote branch
         lcl_services_git=>delete_branch( lv_key ).
-        ev_state = gc_event_state-re_render.
-      WHEN gc_action-git_branch_switch.             " GIT Switch branch
+        ev_state = lif_defs=>gc_event_state-re_render.
+      WHEN lif_defs=>gc_action-git_branch_switch.             " GIT Switch branch
         lcl_services_git=>switch_branch( lv_key ).
-        ev_state = gc_event_state-re_render.
+        ev_state = lif_defs=>gc_event_state-re_render.
 
         "Others
       WHEN OTHERS.
-        ev_state = gc_event_state-not_handled.
+        ev_state = lif_defs=>gc_event_state-not_handled.
     ENDCASE.
 
   ENDMETHOD.        " on_event
@@ -44777,8 +44782,8 @@ CLASS lcl_gui_router IMPLEMENTATION.
 
   METHOD get_page_diff.
 
-    DATA: ls_file   TYPE ty_file,
-          ls_object TYPE ty_item,
+    DATA: ls_file   TYPE lif_defs=>ty_file,
+          ls_object TYPE lif_defs=>ty_item,
           lo_page   TYPE REF TO lcl_gui_page_diff,
           lv_key    TYPE lcl_persistence_repo=>ty_repo-key.
 
@@ -44979,19 +44984,19 @@ CLASS lcl_gui IMPLEMENTATION.
         ENDIF.
 
         CASE lv_state.
-          WHEN gc_event_state-re_render.
+          WHEN lif_defs=>gc_event_state-re_render.
             render( ).
-          WHEN gc_event_state-new_page.
+          WHEN lif_defs=>gc_event_state-new_page.
             call_page( li_page ).
-          WHEN gc_event_state-new_page_w_bookmark.
+          WHEN lif_defs=>gc_event_state-new_page_w_bookmark.
             call_page( ii_page = li_page iv_with_bookmark = abap_true ).
-          WHEN gc_event_state-new_page_replacing.
+          WHEN lif_defs=>gc_event_state-new_page_replacing.
             call_page( ii_page = li_page iv_replacing = abap_true ).
-          WHEN gc_event_state-go_back.
+          WHEN lif_defs=>gc_event_state-go_back.
             back( ).
-          WHEN gc_event_state-go_back_to_bookmark.
+          WHEN lif_defs=>gc_event_state-go_back_to_bookmark.
             back( iv_to_bookmark = abap_true ).
-          WHEN gc_event_state-no_more_act.
+          WHEN lif_defs=>gc_event_state-no_more_act.
             " Do nothing, handling completed
           WHEN OTHERS.
             lcx_exception=>raise( |Unknown action: { action }| ).
@@ -45065,7 +45070,7 @@ CLASS lcl_gui IMPLEMENTATION.
 
   METHOD go_home.
 
-    on_event( action = |{ gc_action-go_main }| ). " doesn't accept strings directly
+    on_event( action = |{ lif_defs=>gc_action-go_main }| ). " doesn't accept strings directly
 
   ENDMETHOD.                "go_home
 
@@ -45073,7 +45078,7 @@ CLASS lcl_gui IMPLEMENTATION.
 
     DATA: lt_events TYPE cntl_simple_events,
           ls_event  LIKE LINE OF lt_events,
-          lt_assets TYPE tt_web_assets.
+          lt_assets TYPE lif_defs=>tt_web_assets.
 
     FIELD-SYMBOLS <ls_asset> LIKE LINE OF lt_assets.
 
@@ -45383,13 +45388,13 @@ CLASS ltcl_convert IMPLEMENTATION.
 
 ENDCLASS.                    "ltcl_convert IMPLEMENTATION
 
-CLASS lth_critical_tests DEFINITION FINAL.
+CLASS ltcl_critical_tests DEFINITION FINAL FOR TESTING.
   PUBLIC SECTION.
     CLASS-METHODS:
       check_run_permission.
 ENDCLASS.
 
-CLASS lth_critical_tests IMPLEMENTATION.
+CLASS ltcl_critical_tests IMPLEMENTATION.
 
   METHOD check_run_permission.
     DATA: lo_settings TYPE REF TO lcl_settings.
@@ -45437,15 +45442,15 @@ ENDCLASS.                    "ltcl_dangerous DEFINITION
 CLASS ltcl_dangerous IMPLEMENTATION.
 
   METHOD class_setup.
-    lth_critical_tests=>check_run_permission( ).
+    ltcl_critical_tests=>check_run_permission( ).
   ENDMETHOD.                    "class_setup
 
   METHOD run.
 
     DATA: lo_repo    TYPE REF TO lcl_repo_online,
-          lt_tadir   TYPE ty_tadir_tt,
+          lt_tadir   TYPE lif_defs=>ty_tadir_tt,
           lv_msg     TYPE string,
-          lt_results TYPE ty_results_tt,
+          lt_results TYPE lif_defs=>ty_results_tt,
           lt_types   TYPE lcl_objects=>ty_types_tt.
 
     FIELD-SYMBOLS: <ls_result> LIKE LINE OF lt_results,
@@ -45570,8 +45575,8 @@ CLASS ltcl_diff IMPLEMENTATION.
     FIELD-SYMBOLS: <ls_diff> LIKE LINE OF lt_diff.
 
 
-    CONCATENATE LINES OF mt_new INTO lv_new SEPARATED BY gc_newline.
-    CONCATENATE LINES OF mt_old INTO lv_old SEPARATED BY gc_newline.
+    CONCATENATE LINES OF mt_new INTO lv_new SEPARATED BY lif_defs=>gc_newline.
+    CONCATENATE LINES OF mt_old INTO lv_old SEPARATED BY lif_defs=>gc_newline.
 
     lv_xnew = lcl_convert=>string_to_xstring_utf8( lv_new ).
     lv_xold = lcl_convert=>string_to_xstring_utf8( lv_old ).
@@ -45787,7 +45792,7 @@ CLASS ltcl_git_porcelain IMPLEMENTATION.
     <ls_expanded>-path  = iv_path.
     <ls_expanded>-name  = iv_name.
     <ls_expanded>-sha1  = 'a'.
-    <ls_expanded>-chmod = gc_chmod-file.
+    <ls_expanded>-chmod = lif_defs=>gc_chmod-file.
 
   ENDMETHOD.
 
@@ -46123,7 +46128,7 @@ CLASS ltcl_object_types IMPLEMENTATION.
 
   METHOD is_supported.
 
-    DATA: ls_item      TYPE ty_item,
+    DATA: ls_item      TYPE lif_defs=>ty_item,
           lv_supported TYPE abap_bool,
           lt_types     TYPE lcl_objects=>ty_types_tt.
 
@@ -46149,7 +46154,7 @@ CLASS ltcl_object_types IMPLEMENTATION.
 
   METHOD not_exist.
 
-    DATA: ls_item   TYPE ty_item,
+    DATA: ls_item   TYPE lif_defs=>ty_item,
           lv_exists TYPE abap_bool,
           lt_types  TYPE lcl_objects=>ty_types_tt.
 
@@ -46209,7 +46214,7 @@ CLASS ltcl_git_pack_decode_commit IMPLEMENTATION.
 
   METHOD add.
 
-    CONCATENATE mv_str iv_string gc_newline INTO mv_str.
+    CONCATENATE mv_str iv_string lif_defs=>gc_newline INTO mv_str.
 
   ENDMETHOD.
 
@@ -46342,7 +46347,7 @@ CLASS ltcl_git_pack DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FI
     METHODS:
       object_blob
         IMPORTING iv_data          TYPE xstring
-        RETURNING VALUE(rs_object) TYPE ty_object
+        RETURNING VALUE(rs_object) TYPE lif_defs=>ty_object
         RAISING   lcx_exception.
 
 ENDCLASS.                    "test DEFINITION
@@ -46362,12 +46367,12 @@ CLASS ltcl_git_pack IMPLEMENTATION.
 
 
     APPEND INITIAL LINE TO lt_tree ASSIGNING <ls_tree>.
-    <ls_tree>-chmod = gc_chmod-file.
+    <ls_tree>-chmod = lif_defs=>gc_chmod-file.
     <ls_tree>-name  = 'b.txt'.
     <ls_tree>-sha1  = '0123'.
 
     APPEND INITIAL LINE TO lt_tree ASSIGNING <ls_tree>.
-    <ls_tree>-chmod = gc_chmod-file.
+    <ls_tree>-chmod = lif_defs=>gc_chmod-file.
     <ls_tree>-name  = 'a.txt'.
     <ls_tree>-sha1  = '0123'.
 
@@ -46390,12 +46395,12 @@ CLASS ltcl_git_pack IMPLEMENTATION.
 
 
     APPEND INITIAL LINE TO lt_tree ASSIGNING <ls_tree>.
-    <ls_tree>-chmod = gc_chmod-file.
+    <ls_tree>-chmod = lif_defs=>gc_chmod-file.
     <ls_tree>-name  = 'foo.txt'.
     <ls_tree>-sha1  = '0123'.
 
     APPEND INITIAL LINE TO lt_tree ASSIGNING <ls_tree>.
-    <ls_tree>-chmod = gc_chmod-dir.
+    <ls_tree>-chmod = lif_defs=>gc_chmod-dir.
     <ls_tree>-name  = 'foo'.
     <ls_tree>-sha1  = '0123'.
 
@@ -46413,22 +46418,22 @@ CLASS ltcl_git_pack IMPLEMENTATION.
   METHOD pack_multiple.
 
     CONSTANTS: lc_data TYPE x LENGTH 15 VALUE '123456789ABCDEF545794254754554',
-               lc_sha  TYPE ty_sha1 VALUE '5f46cb3c4b7f0b3600b64f744cde614a283a88dc'.
+               lc_sha  TYPE lif_defs=>ty_sha1 VALUE '5f46cb3c4b7f0b3600b64f744cde614a283a88dc'.
 
-    DATA: lt_objects TYPE ty_objects_tt,
+    DATA: lt_objects TYPE lif_defs=>ty_objects_tt,
           ls_object  LIKE LINE OF lt_objects,
           lt_nodes   TYPE lcl_git_pack=>ty_nodes_tt,
           ls_node    LIKE LINE OF lt_nodes,
           ls_commit  TYPE lcl_git_pack=>ty_commit,
-          lt_result  TYPE ty_objects_tt,
+          lt_result  TYPE lif_defs=>ty_objects_tt,
           lv_data    TYPE xstring.
 
 
 * blob
     lv_data = lc_data.
     CLEAR ls_object.
-    ls_object-sha1 = lcl_hash=>sha1( iv_type = gc_type-blob iv_data = lv_data ).
-    ls_object-type = gc_type-blob.
+    ls_object-sha1 = lcl_hash=>sha1( iv_type = lif_defs=>gc_type-blob iv_data = lv_data ).
+    ls_object-type = lif_defs=>gc_type-blob.
     ls_object-data = lv_data.
     APPEND ls_object TO lt_objects.
 
@@ -46441,8 +46446,8 @@ CLASS ltcl_git_pack IMPLEMENTATION.
     ls_commit-body      = 'body'.
     lv_data = lcl_git_pack=>encode_commit( ls_commit ).
     CLEAR ls_object.
-    ls_object-sha1 = lcl_hash=>sha1( iv_type = gc_type-commit iv_data = lv_data ).
-    ls_object-type = gc_type-commit.
+    ls_object-sha1 = lcl_hash=>sha1( iv_type = lif_defs=>gc_type-commit iv_data = lv_data ).
+    ls_object-type = lif_defs=>gc_type-commit.
     ls_object-data = lv_data.
     APPEND ls_object TO lt_objects.
 
@@ -46454,8 +46459,8 @@ CLASS ltcl_git_pack IMPLEMENTATION.
     APPEND ls_node TO lt_nodes.
     lv_data = lcl_git_pack=>encode_tree( lt_nodes ).
     CLEAR ls_object.
-    ls_object-sha1 = lcl_hash=>sha1( iv_type = gc_type-tree iv_data = lv_data ).
-    ls_object-type = gc_type-tree.
+    ls_object-sha1 = lcl_hash=>sha1( iv_type = lif_defs=>gc_type-tree iv_data = lv_data ).
+    ls_object-type = lif_defs=>gc_type-tree.
     ls_object-data = lv_data.
     APPEND ls_object TO lt_objects.
 
@@ -46472,9 +46477,9 @@ CLASS ltcl_git_pack IMPLEMENTATION.
 
   METHOD object_blob.
 
-    rs_object-sha1 = lcl_hash=>sha1( iv_type = gc_type-blob
+    rs_object-sha1 = lcl_hash=>sha1( iv_type = lif_defs=>gc_type-blob
                                      iv_data = iv_data ).
-    rs_object-type = gc_type-blob.
+    rs_object-type = lif_defs=>gc_type-blob.
     rs_object-data = iv_data.
 
   ENDMETHOD.                    "object_blob
@@ -46483,9 +46488,9 @@ CLASS ltcl_git_pack IMPLEMENTATION.
 
     CONSTANTS: lc_data TYPE x LENGTH 8 VALUE '0123456789ABCDEF'.
 
-    DATA: lt_objects TYPE ty_objects_tt,
+    DATA: lt_objects TYPE lif_defs=>ty_objects_tt,
           ls_object  LIKE LINE OF lt_objects,
-          lt_result  TYPE ty_objects_tt,
+          lt_result  TYPE lif_defs=>ty_objects_tt,
           lv_data    TYPE xstring.
 
 
@@ -46508,10 +46513,10 @@ CLASS ltcl_git_pack IMPLEMENTATION.
 
     CONSTANTS: lc_data TYPE x LENGTH 8 VALUE '0123456789ABCDEF'.
 
-    DATA: lt_objects TYPE ty_objects_tt,
+    DATA: lt_objects TYPE lif_defs=>ty_objects_tt,
           ls_object  LIKE LINE OF lt_objects,
           lv_xstring TYPE xstring,
-          lt_result  TYPE ty_objects_tt,
+          lt_result  TYPE lif_defs=>ty_objects_tt,
           lv_data    TYPE xstring.
 
 
@@ -46535,7 +46540,7 @@ CLASS ltcl_git_pack IMPLEMENTATION.
 
   METHOD tree.
 
-    CONSTANTS: lc_sha TYPE ty_sha1 VALUE '5f46cb3c4b7f0b3600b64f744cde614a283a88dc'.
+    CONSTANTS: lc_sha TYPE lif_defs=>ty_sha1 VALUE '5f46cb3c4b7f0b3600b64f744cde614a283a88dc'.
 
     DATA: lt_nodes  TYPE lcl_git_pack=>ty_nodes_tt,
           ls_node   LIKE LINE OF lt_nodes,
@@ -46543,7 +46548,7 @@ CLASS ltcl_git_pack IMPLEMENTATION.
           lt_result TYPE lcl_git_pack=>ty_nodes_tt.
 
     CLEAR ls_node.
-    ls_node-chmod = gc_chmod-file.
+    ls_node-chmod = lif_defs=>gc_chmod-file.
     ls_node-name = 'foobar.txt'.
     ls_node-sha1 = lc_sha.
     APPEND ls_node TO lt_nodes.
@@ -46559,8 +46564,8 @@ CLASS ltcl_git_pack IMPLEMENTATION.
 
   METHOD commit.
 
-    CONSTANTS: lc_tree   TYPE ty_sha1 VALUE '5f46cb3c4b7f0b3600b64f744cde614a283a88dc',
-               lc_parent TYPE ty_sha1 VALUE '1236cb3c4b7f0b3600b64f744cde614a283a88dc'.
+    CONSTANTS: lc_tree   TYPE lif_defs=>ty_sha1 VALUE '5f46cb3c4b7f0b3600b64f744cde614a283a88dc',
+               lc_parent TYPE lif_defs=>ty_sha1 VALUE '1236cb3c4b7f0b3600b64f744cde614a283a88dc'.
 
     DATA: ls_commit TYPE lcl_git_pack=>ty_commit,
           ls_result TYPE lcl_git_pack=>ty_commit,
@@ -46615,8 +46620,8 @@ CLASS ltcl_html IMPLEMENTATION.
     mo_html->add( 'hello world' ).
     mo_html->add( '</td>' ).
 
-    lv_exp = '<td>' && gc_newline &&
-             '  hello world' && gc_newline &&
+    lv_exp = '<td>' && lif_defs=>gc_newline &&
+             '  hello world' && lif_defs=>gc_newline &&
              '</td>'.
 
     cl_abap_unit_assert=>assert_equals(
@@ -46633,8 +46638,8 @@ CLASS ltcl_html IMPLEMENTATION.
     mo_html->add( '<input name="comment" type="text">' ).
     mo_html->add( '</td>' ).
 
-    lv_exp = '<td>' && gc_newline &&
-             '  <input name="comment" type="text">' && gc_newline &&
+    lv_exp = '<td>' && lif_defs=>gc_newline &&
+             '  <input name="comment" type="text">' && lif_defs=>gc_newline &&
              '</td>'.
 
     cl_abap_unit_assert=>assert_equals(
@@ -46651,8 +46656,8 @@ CLASS ltcl_html IMPLEMENTATION.
     mo_html->add( '<textarea name="body" rows="10" cols="72"></textarea>' ).
     mo_html->add( '</td>' ).
 
-    lv_exp = '<td>' && gc_newline &&
-             '  <textarea name="body" rows="10" cols="72"></textarea>' && gc_newline &&
+    lv_exp = '<td>' && lif_defs=>gc_newline &&
+             '  <textarea name="body" rows="10" cols="72"></textarea>' && lif_defs=>gc_newline &&
              '</td>'.
 
     cl_abap_unit_assert=>assert_equals(
@@ -46669,8 +46674,8 @@ CLASS ltcl_html IMPLEMENTATION.
     mo_html->add( 'foo<br>bar' ).
     mo_html->add( '</td>' ).
 
-    lv_exp = '<td>' && gc_newline &&
-             '  foo<br>bar' && gc_newline &&
+    lv_exp = '<td>' && lif_defs=>gc_newline &&
+             '  foo<br>bar' && lif_defs=>gc_newline &&
              '</td>'.
 
     cl_abap_unit_assert=>assert_equals(
@@ -46690,11 +46695,11 @@ CLASS ltcl_html IMPLEMENTATION.
     mo_html->add( '}' ).
     mo_html->add( '</style>' ).
 
-    lv_exp = '<style type="text/css">' && gc_newline &&
-             '  .class1 { color: red }' && gc_newline &&
-             '  .class2 {' && gc_newline &&
-             '    color: red' && gc_newline &&
-             '  }' && gc_newline &&
+    lv_exp = '<style type="text/css">' && lif_defs=>gc_newline &&
+             '  .class1 { color: red }' && lif_defs=>gc_newline &&
+             '  .class2 {' && lif_defs=>gc_newline &&
+             '    color: red' && lif_defs=>gc_newline &&
+             '  }' && lif_defs=>gc_newline &&
              '</style>'.
 
     cl_abap_unit_assert=>assert_equals(
@@ -46717,7 +46722,7 @@ CLASS ltcl_serialize DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT F
 
     METHODS:
       check
-        IMPORTING is_item TYPE ty_item
+        IMPORTING is_item TYPE lif_defs=>ty_item
         RAISING   lcx_exception,
       serialize_tabl FOR TESTING RAISING lcx_exception,
       serialize_enqu FOR TESTING RAISING lcx_exception,
@@ -46744,7 +46749,7 @@ CLASS ltcl_serialize IMPLEMENTATION.
 
   METHOD serialize_enqu.
 
-    DATA: ls_item  TYPE ty_item.
+    DATA: ls_item  TYPE lif_defs=>ty_item.
 
 
     ls_item-obj_type = 'ENQU'.
@@ -46756,7 +46761,7 @@ CLASS ltcl_serialize IMPLEMENTATION.
 
   METHOD serialize_shlp.
 
-    DATA: ls_item  TYPE ty_item.
+    DATA: ls_item  TYPE lif_defs=>ty_item.
 
 
     ls_item-obj_type = 'SHLP'.
@@ -46768,7 +46773,7 @@ CLASS ltcl_serialize IMPLEMENTATION.
 
   METHOD serialize_view.
 
-    DATA: ls_item  TYPE ty_item.
+    DATA: ls_item  TYPE lif_defs=>ty_item.
 
 
     ls_item-obj_type = 'VIEW'.
@@ -46780,7 +46785,7 @@ CLASS ltcl_serialize IMPLEMENTATION.
 
   METHOD serialize_tabl.
 
-    DATA: ls_item  TYPE ty_item.
+    DATA: ls_item  TYPE lif_defs=>ty_item.
 
 
     ls_item-obj_type = 'TABL'.
@@ -46792,7 +46797,7 @@ CLASS ltcl_serialize IMPLEMENTATION.
 
   METHOD serialize_auth.
 
-    DATA: ls_item  TYPE ty_item.
+    DATA: ls_item  TYPE lif_defs=>ty_item.
 
 
     ls_item-obj_type = 'AUTH'.
@@ -46804,7 +46809,7 @@ CLASS ltcl_serialize IMPLEMENTATION.
 
   METHOD serialize_clas.
 
-    DATA: ls_item  TYPE ty_item.
+    DATA: ls_item  TYPE lif_defs=>ty_item.
 
 
     ls_item-obj_type = 'CLAS'.
@@ -46816,7 +46821,7 @@ CLASS ltcl_serialize IMPLEMENTATION.
 
   METHOD serialize_doma.
 
-    DATA: ls_item  TYPE ty_item.
+    DATA: ls_item  TYPE lif_defs=>ty_item.
 
 
     ls_item-obj_type = 'DOMA'.
@@ -46828,7 +46833,7 @@ CLASS ltcl_serialize IMPLEMENTATION.
 
   METHOD serialize_dtel.
 
-    DATA: ls_item  TYPE ty_item.
+    DATA: ls_item  TYPE lif_defs=>ty_item.
 
 
     ls_item-obj_type = 'DTEL'.
@@ -46840,7 +46845,7 @@ CLASS ltcl_serialize IMPLEMENTATION.
 
   METHOD serialize_fugr.
 
-    DATA: ls_item  TYPE ty_item.
+    DATA: ls_item  TYPE lif_defs=>ty_item.
 
 
     ls_item-obj_type = 'FUGR'.
@@ -46852,7 +46857,7 @@ CLASS ltcl_serialize IMPLEMENTATION.
 
   METHOD serialize_msag.
 
-    DATA: ls_item  TYPE ty_item.
+    DATA: ls_item  TYPE lif_defs=>ty_item.
 
 
     ls_item-obj_type = 'MSAG'.
@@ -46864,7 +46869,7 @@ CLASS ltcl_serialize IMPLEMENTATION.
 
   METHOD serialize_prog.
 
-    DATA: ls_item  TYPE ty_item.
+    DATA: ls_item  TYPE lif_defs=>ty_item.
 
 
     ls_item-obj_type = 'PROG'.
@@ -46876,7 +46881,7 @@ CLASS ltcl_serialize IMPLEMENTATION.
 
   METHOD serialize_tran.
 
-    DATA: ls_item  TYPE ty_item.
+    DATA: ls_item  TYPE lif_defs=>ty_item.
 
 
     ls_item-obj_type = 'TRAN'.
@@ -46888,7 +46893,7 @@ CLASS ltcl_serialize IMPLEMENTATION.
 
   METHOD serialize_ttyp.
 
-    DATA: ls_item  TYPE ty_item.
+    DATA: ls_item  TYPE lif_defs=>ty_item.
 
 
     ls_item-obj_type = 'TTYP'.
@@ -46900,10 +46905,10 @@ CLASS ltcl_serialize IMPLEMENTATION.
 
   METHOD check.
 
-    DATA: lt_files TYPE ty_files_tt.
+    DATA: lt_files TYPE lif_defs=>ty_files_tt.
 
     lt_files = lcl_objects=>serialize( is_item     = is_item
-                                       iv_language = gc_english ).
+                                       iv_language = lif_defs=>gc_english ).
 
     cl_abap_unit_assert=>assert_not_initial( lt_files ).
 
@@ -47206,11 +47211,11 @@ CLASS ltcl_file_status IMPLEMENTATION.
 
   METHOD calculate_status.
 
-    DATA: lt_local       TYPE ty_files_item_tt,
-          lt_remote      TYPE ty_files_tt,
-          lt_state       TYPE ty_file_signatures_tt,
-          lt_results     TYPE ty_results_tt,
-          lt_results_exp TYPE ty_results_tt.
+    DATA: lt_local       TYPE lif_defs=>ty_files_item_tt,
+          lt_remote      TYPE lif_defs=>ty_files_tt,
+          lt_state       TYPE lif_defs=>ty_file_signatures_tt,
+          lt_results     TYPE lif_defs=>ty_results_tt,
+          lt_results_exp TYPE lif_defs=>ty_results_tt.
 
     FIELD-SYMBOLS: <local>  LIKE LINE OF lt_local,
                    <remote> LIKE LINE OF lt_remote,
@@ -47307,7 +47312,7 @@ CLASS ltcl_file_status2 IMPLEMENTATION.
 
   METHOD check.
 
-    DATA: lt_results TYPE ty_results_tt,
+    DATA: lt_results TYPE lif_defs=>ty_results_tt,
           lo_log     TYPE REF TO lcl_log.
 
     FIELD-SYMBOLS: <result> LIKE LINE OF lt_results.
@@ -47439,9 +47444,11 @@ CLASS ltcl_persistence_settings DEFINITION FINAL FOR TESTING
 ENDCLASS.
 
 CLASS ltcl_persistence_settings IMPLEMENTATION.
+
   METHOD class_setup.
-    lth_critical_tests=>check_run_permission( ).
+    ltcl_critical_tests=>check_run_permission( ).
   ENDMETHOD.
+
   METHOD setup.
     CREATE OBJECT mo_persistence_settings.
     CREATE OBJECT mo_settings.
@@ -47599,14 +47606,14 @@ CLASS ltd_spy_oo_object DEFINITION FOR TESTING.
       mt_local_test_classes    TYPE rswsourcet,
       mv_force                 TYPE seoflag,
       ms_deserialize_key       TYPE seoclskey,
-      mt_source                TYPE ty_string_tt,
-      ms_item_to_activate      TYPE ty_item,
-      mt_descriptions          TYPE ty_seocompotx_tt,
+      mt_source                TYPE lif_defs=>ty_string_tt,
+      ms_item_to_activate      TYPE lif_defs=>ty_item,
+      mt_descriptions          TYPE lif_defs=>ty_seocompotx_tt,
       ms_description_key       TYPE seoclskey,
       mv_text_pool_class_name  TYPE seoclsname,
       mt_text_pool             TYPE textpool_table,
       mv_text_pool_inserted    TYPE abap_bool,
-      mt_sotr                  TYPE ty_sotr_tt,
+      mt_sotr                  TYPE lif_defs=>ty_sotr_tt,
       mt_sotr_package          TYPE devclass,
       mv_docu_object_name      TYPE dokhl-object,
       mv_docu_language         TYPE spras,
@@ -47769,7 +47776,7 @@ CLASS ltd_fake_object_files IMPLEMENTATION.
                                         exp = abap_false ).
   ENDMETHOD.
   METHOD constructor.
-    DATA ls_empty_item TYPE ty_item.
+    DATA ls_empty_item TYPE lif_defs=>ty_item.
     super->constructor( ls_empty_item ).
     APPEND 'source'         TO me->mt_sources.
     APPEND 'definition'     TO me->mt_local_definitions.
@@ -47802,19 +47809,19 @@ CLASS ltc_oo_test DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
       mo_xml_input               TYPE REF TO lcl_xml_input,
       mo_xml_out                 TYPE REF TO lcl_xml_output,
       mo_oo_object               TYPE REF TO lif_object,
-      ms_item                    TYPE ty_item.
+      ms_item                    TYPE lif_defs=>ty_item.
     METHODS: when_deserializing
       RAISING
         lcx_exception,
       then_should_deserialize_source,
       given_the_descriptions
         IMPORTING
-          it_descriptions TYPE ty_seocompotx_tt
+          it_descriptions TYPE lif_defs=>ty_seocompotx_tt
         RAISING
           lcx_exception,
       then_shuld_update_descriptions
         IMPORTING
-          it_descriptions TYPE ty_seocompotx_tt,
+          it_descriptions TYPE lif_defs=>ty_seocompotx_tt,
       then_it_should_add_activation,
       given_documentation_in_xml_as
         IMPORTING
@@ -47927,7 +47934,7 @@ CLASS ltcl_class_deserialization IMPLEMENTATION.
     CREATE OBJECT mo_fake_object_files.
     CREATE OBJECT mo_spy_oo_object_functions.
     CREATE OBJECT mo_xml_out.
-    lth_oo_factory_injector=>inject( mo_spy_oo_object_functions ).
+    ltcl_oo_factory_injector=>inject( mo_spy_oo_object_functions ).
 
     ms_item-devclass = 'package_name'.
     ms_item-obj_name = 'zcl_class'.
@@ -47969,7 +47976,7 @@ CLASS ltcl_class_deserialization IMPLEMENTATION.
   METHOD should_update_descriptions.
     DATA:
       ls_description  TYPE seocompotx,
-      lt_descriptions TYPE ty_seocompotx_tt.
+      lt_descriptions TYPE lif_defs=>ty_seocompotx_tt.
 
     given_a_class_properties( ).
 
@@ -48046,7 +48053,7 @@ CLASS ltcl_class_deserialization IMPLEMENTATION.
 
   METHOD insert_text_pool.
     DATA: lt_pool_external TYPE textpool_table,
-          ls_pool_external TYPE ty_tpool.
+          ls_pool_external TYPE lif_defs=>ty_tpool.
     ls_pool_external-id = 'ID'.
     ls_pool_external-key = 'KEY'.
     APPEND ls_pool_external TO lt_pool_external.
@@ -48070,7 +48077,7 @@ CLASS ltcl_class_deserialization IMPLEMENTATION.
 
   METHOD create_stor_from_xml.
     DATA:
-      lt_sotr TYPE ty_sotr_tt,
+      lt_sotr TYPE lif_defs=>ty_sotr_tt,
       ls_sotr LIKE LINE OF lt_sotr.
 
     given_a_class_properties( ).
@@ -48129,7 +48136,7 @@ CLASS ltcl_interface_deserialization IMPLEMENTATION.
     CREATE OBJECT mo_fake_object_files.
     CREATE OBJECT mo_spy_oo_object_functions.
     CREATE OBJECT mo_xml_out.
-    lth_oo_factory_injector=>inject( mo_spy_oo_object_functions ).
+    ltcl_oo_factory_injector=>inject( mo_spy_oo_object_functions ).
 
     ms_item-devclass = 'package_name'.
     ms_item-obj_name = 'zif_interface'.
@@ -48154,7 +48161,7 @@ CLASS ltcl_interface_deserialization IMPLEMENTATION.
   METHOD update_descriptions.
     DATA:
       ls_description  TYPE seocompotx,
-      lt_descriptions TYPE ty_seocompotx_tt.
+      lt_descriptions TYPE lif_defs=>ty_seocompotx_tt.
 
     given_an_interface_properties( ).
 
@@ -48233,7 +48240,7 @@ CLASS ltcl_class_changed IMPLEMENTATION.
     CREATE OBJECT mo_fake_object_files.
     CREATE OBJECT mo_spy_oo_object_functions.
     CREATE OBJECT mo_xml_out.
-    lth_oo_factory_injector=>inject( mo_spy_oo_object_functions ).
+    ltcl_oo_factory_injector=>inject( mo_spy_oo_object_functions ).
 
     ms_item-devclass = 'package_name'.
     ms_item-obj_name = 'zcl_class'.
@@ -48280,7 +48287,7 @@ CLASS ltcl_interface_changed IMPLEMENTATION.
     CREATE OBJECT mo_fake_object_files.
     CREATE OBJECT mo_spy_oo_object_functions.
     CREATE OBJECT mo_xml_out.
-    lth_oo_factory_injector=>inject( mo_spy_oo_object_functions ).
+    ltcl_oo_factory_injector=>inject( mo_spy_oo_object_functions ).
 
     ms_item-devclass = 'package_name'.
     ms_item-obj_name = 'zif_interface'.
@@ -48328,7 +48335,7 @@ CLASS ltcl_exists_test IMPLEMENTATION.
   METHOD setup.
     CREATE OBJECT mo_spy_oo_object_functions.
     me->mo_spy_oo_object_functions->mv_exists = abap_true.
-    lth_oo_factory_injector=>inject( mo_spy_oo_object_functions ).
+    ltcl_oo_factory_injector=>inject( mo_spy_oo_object_functions ).
   ENDMETHOD.
 
   METHOD class_exists.
@@ -48394,7 +48401,7 @@ CLASS ltcl_serialize_class IMPLEMENTATION.
     CREATE OBJECT mo_fake_object_files.
     CREATE OBJECT mo_spy_oo_object_functions.
     me->mo_spy_oo_object_functions->mv_exists = abap_true.
-    lth_oo_factory_injector=>inject( mo_spy_oo_object_functions ).
+    ltcl_oo_factory_injector=>inject( mo_spy_oo_object_functions ).
 
     ms_item-devclass = 'package_name'.
     ms_item-obj_name = 'zcl_class'.
@@ -48409,7 +48416,7 @@ CLASS ltcl_serialize_class IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD serialize_abap.
-    DATA lt_abap_source TYPE ty_string_tt.
+    DATA lt_abap_source TYPE lif_defs=>ty_string_tt.
 
     APPEND 'a_source_line' TO  me->mo_spy_oo_object_functions->mt_source.
 
@@ -48424,7 +48431,7 @@ CLASS ltcl_serialize_class IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD serialize_local_definitions.
-    DATA lt_abap_source TYPE ty_string_tt.
+    DATA lt_abap_source TYPE lif_defs=>ty_string_tt.
 
     APPEND 'a_local_definition' TO  me->mo_spy_oo_object_functions->mt_local_definitions.
 
@@ -48440,7 +48447,7 @@ CLASS ltcl_serialize_class IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD serialize_local_implementation.
-    DATA lt_abap_source TYPE ty_string_tt.
+    DATA lt_abap_source TYPE lif_defs=>ty_string_tt.
 
     APPEND 'a_local_implementation' TO  me->mo_spy_oo_object_functions->mt_local_implementations.
 
@@ -48456,7 +48463,7 @@ CLASS ltcl_serialize_class IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD serialize_local_macros.
-    DATA lt_abap_source TYPE ty_string_tt.
+    DATA lt_abap_source TYPE lif_defs=>ty_string_tt.
     APPEND 'a_local_macro' TO  me->mo_spy_oo_object_functions->mt_local_macros.
 
     mo_oo_object->serialize( mo_xml_out ).
@@ -48471,7 +48478,7 @@ CLASS ltcl_serialize_class IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD serialize_test_classes.
-    DATA lt_abap_source TYPE ty_string_tt.
+    DATA lt_abap_source TYPE lif_defs=>ty_string_tt.
     APPEND 'a_local_test' TO  me->mo_spy_oo_object_functions->mt_local_test_classes.
 
     mo_oo_object->serialize( mo_xml_out ).
@@ -48584,8 +48591,8 @@ CLASS ltcl_serialize_class IMPLEMENTATION.
 
   METHOD read_sotr_if_exception_class.
     DATA:
-      lt_sotr        TYPE ty_sotr_tt,
-      lt_actual_sotr TYPE ty_sotr_tt,
+      lt_sotr        TYPE lif_defs=>ty_sotr_tt,
+      lt_actual_sotr TYPE lif_defs=>ty_sotr_tt,
       ls_sotr        LIKE LINE OF lt_sotr.
 
     me->mo_spy_oo_object_functions->ms_class_properties-category = seoc_category_exception.
@@ -48613,7 +48620,7 @@ CLASS ltcl_serialize_class IMPLEMENTATION.
 
   METHOD do_not_read_sotr_regular_class.
     DATA:
-      lt_actual_sotr TYPE ty_sotr_tt.
+      lt_actual_sotr TYPE lif_defs=>ty_sotr_tt.
 
     CLEAR: me->mo_spy_oo_object_functions->ms_class_properties-category.
 
@@ -48660,9 +48667,9 @@ CLASS ltcl_serialize_class IMPLEMENTATION.
 
   METHOD should_serialize_descriptions.
     DATA:
-      lt_descriptions        TYPE ty_seocompotx_tt,
-      lt_actual_descriptions TYPE ty_seocompotx_tt,
-      ls_description         TYPE LINE OF ty_seocompotx_tt.
+      lt_descriptions        TYPE lif_defs=>ty_seocompotx_tt,
+      lt_actual_descriptions TYPE lif_defs=>ty_seocompotx_tt,
+      ls_description         TYPE LINE OF lif_defs=>ty_seocompotx_tt.
 
     ls_description-clsname = 'class'.
     APPEND ls_description TO lt_descriptions.
@@ -48711,7 +48718,7 @@ CLASS ltcl_serialize_interface IMPLEMENTATION.
     CREATE OBJECT mo_fake_object_files.
     CREATE OBJECT mo_spy_oo_object_functions.
     me->mo_spy_oo_object_functions->mv_exists = abap_true.
-    lth_oo_factory_injector=>inject( mo_spy_oo_object_functions ).
+    ltcl_oo_factory_injector=>inject( mo_spy_oo_object_functions ).
 
     ms_item-devclass = 'package_name'.
     ms_item-obj_name = 'zif_interface'.
@@ -48726,7 +48733,7 @@ CLASS ltcl_serialize_interface IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD serialize_abap.
-    DATA lt_abap_source TYPE ty_string_tt.
+    DATA lt_abap_source TYPE lif_defs=>ty_string_tt.
 
     APPEND 'a_source_line' TO  me->mo_spy_oo_object_functions->mt_source.
 
@@ -48812,9 +48819,9 @@ CLASS ltcl_serialize_interface IMPLEMENTATION.
 
   METHOD should_serialize_descriptions.
     DATA:
-      lt_descriptions        TYPE ty_seocompotx_tt,
-      lt_actual_descriptions TYPE ty_seocompotx_tt,
-      ls_description         TYPE LINE OF ty_seocompotx_tt.
+      lt_descriptions        TYPE lif_defs=>ty_seocompotx_tt,
+      lt_actual_descriptions TYPE lif_defs=>ty_seocompotx_tt,
+      ls_description         TYPE LINE OF lif_defs=>ty_seocompotx_tt.
 
     ls_description-clsname = 'class'.
     APPEND ls_description TO lt_descriptions.
@@ -48857,7 +48864,7 @@ CLASS ltcl_delete_oo_test IMPLEMENTATION.
   METHOD setup.
     CREATE OBJECT mo_spy_oo_object_functions.
     me->mo_spy_oo_object_functions->mv_exists = abap_true.
-    lth_oo_factory_injector=>inject( mo_spy_oo_object_functions ).
+    ltcl_oo_factory_injector=>inject( mo_spy_oo_object_functions ).
   ENDMETHOD.
 
   METHOD class_delete.
@@ -48942,12 +48949,12 @@ CLASS ltcl_transport_objects DEFINITION FOR TESTING.
                   iv_filename          TYPE string
                   iv_path              TYPE string
                   iv_data              TYPE string
-        RETURNING VALUE(rs_local_file) TYPE ty_file_item,
+        RETURNING VALUE(rs_local_file) TYPE lif_defs=>ty_file_item,
       when_staging
         RAISING lcx_exception,
       then_file_should_be_added
         IMPORTING
-          is_local_file TYPE ty_file_item,
+          is_local_file TYPE lif_defs=>ty_file_item,
       then_it_should_raise_exception
         IMPORTING
           with_text TYPE string,
@@ -48958,8 +48965,8 @@ CLASS ltcl_transport_objects DEFINITION FOR TESTING.
 
     DATA: mo_transport_objects TYPE REF TO lcl_transport_objects,
           mt_transport_objects TYPE scts_tadir,
-          mt_object_statuses   TYPE ty_results_tt,
-          ms_stage_objects     TYPE ty_stage_files,
+          mt_object_statuses   TYPE lif_defs=>ty_results_tt,
+          ms_stage_objects     TYPE lif_defs=>ty_stage_files,
           mo_stage             TYPE REF TO lcl_stage.
 ENDCLASS.
 
@@ -48971,7 +48978,7 @@ CLASS ltcl_transport_objects IMPLEMENTATION.
         iv_branch_sha1 = 'Branch_SH1'.
   ENDMETHOD.
   METHOD add_new_to_local_files.
-    DATA ls_local_file TYPE ty_file_item.
+    DATA ls_local_file TYPE lif_defs=>ty_file_item.
 
     given_the_transport_object(
       iv_obj_name   = 'CL_FOO'
@@ -48981,7 +48988,7 @@ CLASS ltcl_transport_objects IMPLEMENTATION.
       iv_obj_name   = 'CL_FOO'
       iv_obj_type   = 'CLAS'
       iv_filename   = 'CL_FOO.abap'
-      iv_lstate     = gc_state-added ).
+      iv_lstate     = lif_defs=>gc_state-added ).
 
     ls_local_file = given_the_local_file(
       iv_obj_name = 'CL_FOO'
@@ -48995,7 +49002,7 @@ CLASS ltcl_transport_objects IMPLEMENTATION.
     then_file_should_be_added( ls_local_file ).
   ENDMETHOD.
   METHOD modified_to_new_local_files.
-    DATA ls_local_file TYPE ty_file_item.
+    DATA ls_local_file TYPE lif_defs=>ty_file_item.
     given_the_transport_object(
       iv_obj_name   = 'CL_FOO'
       iv_obj_type   = 'CLAS' ).
@@ -49004,7 +49011,7 @@ CLASS ltcl_transport_objects IMPLEMENTATION.
       iv_obj_name   = 'CL_FOO'
       iv_obj_type   = 'CLAS'
       iv_filename   = 'CL_FOO.abap'
-      iv_lstate     = gc_state-modified ).
+      iv_lstate     = lif_defs=>gc_state-modified ).
 
     ls_local_file = given_the_local_file(
       iv_obj_name = 'CL_FOO'
@@ -49019,8 +49026,8 @@ CLASS ltcl_transport_objects IMPLEMENTATION.
   ENDMETHOD.
   METHOD should_add_all_local_files.
     "Not only .abap, but also .xml and other includes
-    DATA ls_abap_local_file TYPE ty_file_item.
-    DATA ls_xml_local_file  TYPE ty_file_item.
+    DATA ls_abap_local_file TYPE lif_defs=>ty_file_item.
+    DATA ls_xml_local_file  TYPE lif_defs=>ty_file_item.
 
     given_the_transport_object(
       iv_obj_name   = 'CL_FOO'
@@ -49030,13 +49037,13 @@ CLASS ltcl_transport_objects IMPLEMENTATION.
       iv_obj_name   = 'CL_FOO'
       iv_obj_type   = 'CLAS'
       iv_filename   = 'CL_FOO.abap'
-      iv_lstate     = gc_state-modified ).
+      iv_lstate     = lif_defs=>gc_state-modified ).
 
     given_the_object_status(
       iv_obj_name   = 'CL_FOO'
       iv_obj_type   = 'CLAS'
       iv_filename   = 'CL_FOO.xml'
-      iv_lstate     = gc_state-modified ).
+      iv_lstate     = lif_defs=>gc_state-modified ).
 
     ls_abap_local_file = given_the_local_file(
       iv_obj_name = 'CL_FOO'
@@ -49065,7 +49072,7 @@ CLASS ltcl_transport_objects IMPLEMENTATION.
     given_the_object_status(
       iv_obj_name   = 'CL_FOO'
       iv_obj_type   = 'CLAS'
-      iv_lstate     = gc_state-added ).
+      iv_lstate     = lif_defs=>gc_state-added ).
 
     then_it_should_raise_exception(
       with_text = 'Object CL_A_CLASS_NOT_IN_REPO not found in the local repository files' ).
@@ -49080,7 +49087,7 @@ CLASS ltcl_transport_objects IMPLEMENTATION.
     given_the_object_status(
       iv_obj_name   = 'CL_FOO'
       iv_obj_type   = 'CLAS'
-      iv_lstate     = gc_state-added ).
+      iv_lstate     = lif_defs=>gc_state-added ).
 
     given_the_local_file(
       iv_obj_name = 'CL_ANOTHER_LOCAL_FILE'
@@ -49102,7 +49109,7 @@ CLASS ltcl_transport_objects IMPLEMENTATION.
     given_the_object_status(
       iv_obj_name   = 'CL_FOO'
       iv_obj_type   = 'CLAS'
-      iv_lstate     = gc_state-added ).
+      iv_lstate     = lif_defs=>gc_state-added ).
 
     then_it_should_raise_exception(
       with_text = 'Object CL_FOO should be added/modified, but has deletion flag in transport' ).
@@ -49117,7 +49124,7 @@ CLASS ltcl_transport_objects IMPLEMENTATION.
     given_the_object_status(
       iv_obj_name   = 'CL_FOO'
       iv_obj_type   = 'CLAS'
-      iv_lstate     = gc_state-modified ).
+      iv_lstate     = lif_defs=>gc_state-modified ).
 
     then_it_should_raise_exception(
       with_text = 'Object CL_FOO should be added/modified, but has deletion flag in transport' ).
@@ -49133,7 +49140,7 @@ CLASS ltcl_transport_objects IMPLEMENTATION.
       iv_obj_type   = 'CLAS'
       iv_filename   = 'CL_FOO.abap'
       iv_path       = '/a_path'
-      iv_lstate     = gc_state-deleted ).
+      iv_lstate     = lif_defs=>gc_state-deleted ).
 
     when_staging( ).
 
@@ -49154,14 +49161,14 @@ CLASS ltcl_transport_objects IMPLEMENTATION.
       iv_obj_type   = 'CLAS'
       iv_filename   = 'CL_FOO.abap'
       iv_path       = '/a_path'
-      iv_lstate     = gc_state-deleted ).
+      iv_lstate     = lif_defs=>gc_state-deleted ).
 
     given_the_object_status(
       iv_obj_name   = 'CL_FOO'
       iv_obj_type   = 'CLAS'
       iv_filename   = 'CL_FOO.xml'
       iv_path       = '/a_path'
-      iv_lstate     = gc_state-deleted ).
+      iv_lstate     = lif_defs=>gc_state-deleted ).
 
     when_staging( ).
 
@@ -49185,7 +49192,7 @@ CLASS ltcl_transport_objects IMPLEMENTATION.
       iv_obj_type   = 'CLAS'
       iv_filename   = 'CL_FOO.abap'
       iv_path       = '/a_path'
-      iv_lstate     = gc_state-deleted ).
+      iv_lstate     = lif_defs=>gc_state-deleted ).
 
     then_it_should_raise_exception(
          with_text = 'Object CL_FOO should be removed, but has NO deletion flag in transport' ).
@@ -49200,7 +49207,7 @@ CLASS ltcl_transport_objects IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD given_the_object_status.
-    DATA ls_object_status TYPE ty_result.
+    DATA ls_object_status TYPE lif_defs=>ty_result.
     ls_object_status-obj_name = iv_obj_name.
     ls_object_status-obj_type = iv_obj_type.
     ls_object_status-filename = iv_filename.
@@ -49482,7 +49489,7 @@ ENDFORM.                    "run
 *      -->##CALLED       text
 *      -->##NEEDED       text
 *----------------------------------------------------------------------*
-FORM branch_popup TABLES   tt_fields TYPE ty_sval_tt
+FORM branch_popup TABLES   tt_fields TYPE lif_defs=>ty_sval_tt
                   USING    pv_code TYPE clike
                   CHANGING cs_error TYPE svale
                            cv_show_popup TYPE c
@@ -49544,7 +49551,7 @@ FORM branch_popup TABLES   tt_fields TYPE ty_sval_tt
 
 ENDFORM.                    "branch_popup
 
-FORM package_popup TABLES   tt_fields TYPE ty_sval_tt
+FORM package_popup TABLES   tt_fields TYPE lif_defs=>ty_sval_tt
                    USING    pv_code TYPE clike
                    CHANGING cs_error TYPE svale
                             cv_show_popup TYPE c
@@ -49625,5 +49632,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-06-07T16:22:51.530Z
+* abapmerge - 2017-06-07T18:41:59.600Z
 ****************************************************
