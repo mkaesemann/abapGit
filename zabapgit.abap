@@ -3221,6 +3221,8 @@ CLASS lcl_xml_output DEFINITION FINAL INHERITING FROM lcl_xml CREATE PUBLIC.
       add_xml
         IMPORTING iv_name TYPE clike
                   ii_xml  TYPE REF TO if_ixml_element,
+      build_asx_node
+        RETURNING VALUE(ri_element) TYPE REF TO if_ixml_element,
       render
         IMPORTING iv_normalize  TYPE sap_bool DEFAULT abap_true
                   is_metadata   TYPE lif_defs=>ty_metadata OPTIONAL
@@ -3298,17 +3300,20 @@ CLASS lcl_xml_output IMPLEMENTATION.
     IF mi_raw IS INITIAL.
       li_abap ?= mi_xml_doc->get_root( )->get_first_child( ).
       mi_xml_doc->get_root( )->remove_child( li_abap ).
+      IF li_abap IS INITIAL.
+        li_abap = build_asx_node( ).
+      ENDIF.
     ELSE.
       li_abap = mi_raw.
     ENDIF.
 
     li_git = mi_xml_doc->create_element( c_abapgit_tag ).
-    li_git->set_attribute( name = c_attr_version value = gc_xml_version ). "#EC NOTEXT
+    li_git->set_attribute( name = c_attr_version value = gc_xml_version ).
     IF NOT is_metadata IS INITIAL.
       li_git->set_attribute( name  = c_attr_serializer
-                             value = is_metadata-class ).   "#EC NOTEXT
+                             value = is_metadata-class ).
       li_git->set_attribute( name  = c_attr_serializer_version
-                             value = is_metadata-version ). "#EC NOTEXT
+                             value = is_metadata-version ).
     ENDIF.
     li_git->append_child( li_abap ).
     mi_xml_doc->get_root( )->append_child( li_git ).
@@ -3316,6 +3321,28 @@ CLASS lcl_xml_output IMPLEMENTATION.
     rv_xml = to_xml( iv_normalize ).
 
   ENDMETHOD.                    "render
+
+  METHOD build_asx_node.
+
+    DATA: li_attr TYPE REF TO if_ixml_attribute.
+
+
+    ri_element = mi_xml_doc->create_element_ns(
+      name   = 'abap'
+      prefix = 'asx' ).
+
+    li_attr = mi_xml_doc->create_attribute_ns(
+      name = 'version' ).
+    li_attr->if_ixml_node~set_value( '1.0' ).
+    ri_element->set_attribute_node_ns( li_attr ).
+
+    li_attr = mi_xml_doc->create_attribute_ns(
+      name   = 'asx'
+      prefix = 'xmlns' ).
+    li_attr->if_ixml_node~set_value( 'http://www.sap.com/abapxml' ).
+    ri_element->set_attribute_node_ns( li_attr ).
+
+  ENDMETHOD.
 
 ENDCLASS.                    "lcl_xml_output IMPLEMENTATION
 
@@ -45846,6 +45873,8 @@ CLASS ltcl_xml DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINAL.
     METHODS:
       up FOR TESTING
         RAISING lcx_exception,
+      empty FOR TESTING
+        RAISING lcx_exception,
       down FOR TESTING
         RAISING lcx_exception.
 
@@ -45863,6 +45892,38 @@ CLASS ltcl_xml DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINAL.
 ENDCLASS.
 
 CLASS ltcl_xml IMPLEMENTATION.
+
+  METHOD empty.
+
+    DATA: ls_old    TYPE st_old,
+          ls_new    TYPE st_new,
+          lv_xml    TYPE string,
+          lo_input  TYPE REF TO lcl_xml_input,
+          lo_output TYPE REF TO lcl_xml_output.
+
+
+    CLEAR ls_old.
+
+    CREATE OBJECT lo_output.
+    lo_output->add( iv_name = 'DATA'
+                    ig_data = ls_old ).
+    lv_xml = lo_output->render( ).
+
+    CREATE OBJECT lo_input
+      EXPORTING
+        iv_xml = lv_xml.
+    lo_input->read( EXPORTING iv_name = 'DATA'
+                    CHANGING cg_data = ls_new ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_new-foo
+      exp = ls_old-foo ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_new-bar
+      exp = ls_old-bar ).
+
+  ENDMETHOD.
 
   METHOD up.
 
@@ -49544,5 +49605,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-06-10T10:56:38.973Z
+* abapmerge - 2017-06-10T11:32:11.252Z
 ****************************************************
