@@ -437,26 +437,6 @@ ENDINTERFACE.
 *&  Include           ZABAPGIT_MACROS
 *&---------------------------------------------------------------------*
 
-* Macros
-
-DEFINE _object_check_timestamp.
-  IF sy-subrc = 0 AND &1 IS NOT INITIAL AND &2 IS NOT INITIAL.
-    cl_abap_tstmp=>systemtstmp_syst2utc(
-      EXPORTING syst_date = &1
-                syst_time = &2
-      IMPORTING utc_tstmp = lv_ts ).
-    IF lv_ts < iv_timestamp.
-      rv_changed = abap_false. " Unchanged
-    ELSE.
-      rv_changed = abap_true.
-      RETURN.
-    ENDIF.
-  ELSE. " Not found? => changed
-    rv_changed = abap_true.
-    RETURN.
-  ENDIF.
-END-OF-DEFINITION.
-
 
 ****************************************************
 * abapmerge - ZABAPGIT_EXCEPTIONS
@@ -1965,8 +1945,8 @@ CLASS lcl_convert DEFINITION FINAL.
       RETURNING VALUE(rv_xstring) TYPE xstring.
 
     CLASS-METHODS split_string
-        IMPORTING iv_string         TYPE string
-        RETURNING value(rt_lines)   TYPE string_table.
+      IMPORTING iv_string       TYPE string
+      RETURNING VALUE(rt_lines) TYPE string_table.
 
 ENDCLASS.                    "lcl_convert DEFINITION
 
@@ -2278,8 +2258,8 @@ CLASS lcl_path IMPLEMENTATION.
 
   METHOD change_dir.
 
-    DATA lv_last TYPE i.
-    DATA lv_temp TYPE string.
+    DATA: lv_last TYPE i,
+          lv_temp TYPE string.
 
     lv_last = strlen( iv_cur_dir ) - 1.
 
@@ -3331,8 +3311,7 @@ CLASS lcl_xml_output IMPLEMENTATION.
       name   = 'abap'
       prefix = 'asx' ).
 
-    li_attr = mi_xml_doc->create_attribute_ns(
-      name = 'version' ).
+    li_attr = mi_xml_doc->create_attribute_ns( 'version' ).
     li_attr->if_ixml_node~set_value( '1.0' ).
     ri_element->set_attribute_node_ns( li_attr ).
 
@@ -8398,17 +8377,17 @@ CLASS ltcl_news IMPLEMENTATION.
     ls_log = lcl_news=>parse_line(
       iv_line            = '======'
       iv_current_version = '1.26.01' ).
-    cl_abap_unit_assert=>assert_initial( act = ls_log ).
+    cl_abap_unit_assert=>assert_initial( ls_log ).
 
     ls_log = lcl_news=>parse_line(
       iv_line            = ''
       iv_current_version = '1.26.01' ).
-    cl_abap_unit_assert=>assert_initial( act = ls_log ).
+    cl_abap_unit_assert=>assert_initial( ls_log ).
 
     ls_log = lcl_news=>parse_line(
       iv_line            = '------'
       iv_current_version = '1.26.01' ).
-    cl_abap_unit_assert=>assert_initial( act = ls_log ).
+    cl_abap_unit_assert=>assert_initial( ls_log ).
 
     CLEAR ls_log.
     ls_log = lcl_news=>parse_line(
@@ -12246,6 +12225,13 @@ CLASS lcl_objects_super DEFINITION ABSTRACT.
           mv_language TYPE spras.
 
     METHODS:
+      check_timestamp
+        IMPORTING
+          iv_timestamp      TYPE timestamp
+          iv_date           TYPE datum
+          iv_time           TYPE uzeit
+        RETURNING
+          VALUE(rv_changed) TYPE abap_bool,
       get_metadata
         RETURNING VALUE(rs_metadata) TYPE lif_defs=>ty_metadata,
       corr_insert
@@ -13202,7 +13188,6 @@ CLASS lcl_objects_program IMPLEMENTATION.
 
     DATA: lv_date    TYPE dats,
           lv_time    TYPE tims,
-          lv_ts      TYPE timestamp,
           lt_screens TYPE STANDARD TABLE OF d020s,
           lt_eudb    TYPE STANDARD TABLE OF eudb.
 
@@ -13214,7 +13199,13 @@ CLASS lcl_objects_program IMPLEMENTATION.
       WHERE progname = iv_program
       AND   r3state = 'A'.
 
-    _object_check_timestamp lv_date lv_time.
+    rv_changed = check_timestamp(
+      iv_timestamp = iv_timestamp
+      iv_date      = lv_date
+      iv_time      = lv_time ).
+    IF rv_changed = abap_true.
+      RETURN.
+    ENDIF.
 
     SELECT SINGLE udat utime FROM repotext " Program text pool
       INTO (lv_date, lv_time)
@@ -13222,7 +13213,13 @@ CLASS lcl_objects_program IMPLEMENTATION.
       AND   r3state = 'A'.
 
     IF sy-subrc = 0. " Text not found ? Assuming no changes, see #404
-      _object_check_timestamp lv_date lv_time.
+      rv_changed = check_timestamp(
+        iv_timestamp = iv_timestamp
+        iv_date      = lv_date
+        iv_time      = lv_time ).
+      IF rv_changed = abap_true.
+        RETURN.
+      ENDIF.
     ENDIF.
 
     IF iv_skip_gui = abap_true.
@@ -13234,7 +13231,13 @@ CLASS lcl_objects_program IMPLEMENTATION.
       WHERE prog = iv_program ##TOO_MANY_ITAB_FIELDS.     "#EC CI_SUBRC
 
     LOOP AT lt_screens ASSIGNING <ls_screen>.
-      _object_check_timestamp <ls_screen>-dgen <ls_screen>-tgen.
+      rv_changed = check_timestamp(
+        iv_timestamp = iv_timestamp
+        iv_date      = <ls_screen>-dgen
+        iv_time      = <ls_screen>-tgen ).
+      IF rv_changed = abap_true.
+        RETURN.
+      ENDIF.
     ENDLOOP.
 
     SELECT vdatum vzeit FROM eudb         " GUI
@@ -13244,7 +13247,13 @@ CLASS lcl_objects_program IMPLEMENTATION.
       AND   srtf2 = 0 ##TOO_MANY_ITAB_FIELDS.             "#EC CI_SUBRC
 
     LOOP AT lt_eudb ASSIGNING <ls_eudb>.
-      _object_check_timestamp <ls_eudb>-vdatum <ls_eudb>-vzeit.
+      rv_changed = check_timestamp(
+        iv_timestamp = iv_timestamp
+        iv_date      = <ls_eudb>-vdatum
+        iv_time      = <ls_eudb>-vzeit ).
+      IF rv_changed = abap_true.
+        RETURN.
+      ENDIF.
     ENDLOOP.
 
   ENDMETHOD.  "check_prog_changed_since
@@ -13365,6 +13374,25 @@ CLASS lcl_objects_super IMPLEMENTATION.
 
   ENDMETHOD.
 
+  METHOD check_timestamp.
+
+    DATA: lv_ts TYPE timestamp.
+
+    IF sy-subrc = 0 AND iv_date IS NOT INITIAL AND iv_time IS NOT INITIAL.
+      cl_abap_tstmp=>systemtstmp_syst2utc(
+        EXPORTING syst_date = iv_date
+                  syst_time = iv_time
+        IMPORTING utc_tstmp = lv_ts ).
+      IF lv_ts < iv_timestamp.
+        rv_changed = abap_false. " Unchanged
+      ELSE.
+        rv_changed = abap_true.
+      ENDIF.
+    ELSE. " Not found? => changed
+      rv_changed = abap_true.
+    ENDIF.
+
+  ENDMETHOD.
 
   METHOD get_metadata.
     rs_metadata-class =
@@ -14261,32 +14289,52 @@ CLASS lcl_popups DEFINITION FINAL.
                   lcx_cancel,
       popup_to_select_transports
         RETURNING VALUE(rt_trkorr) TYPE trwbo_request_headers.
-  PRIVATE SECTION.
 
+  PRIVATE SECTION.
+    TYPES: ty_sval_tt TYPE STANDARD TABLE OF sval WITH DEFAULT KEY.
+
+    CLASS-METHODS: add_field
+      IMPORTING iv_tabname    TYPE sval-tabname
+                iv_fieldname  TYPE sval-fieldname
+                iv_fieldtext  TYPE sval-fieldtext
+                iv_value      TYPE clike DEFAULT ''
+                iv_field_attr TYPE sval-field_attr DEFAULT ''
+      CHANGING  ct_fields     TYPE ty_sval_tt.
 
 ENDCLASS.
 
 CLASS lcl_popups IMPLEMENTATION.
 
-  METHOD popup_object.
+  METHOD add_field.
 
-    DEFINE _add_dialog_fld.
-      APPEND INITIAL LINE TO lt_fields ASSIGNING <ls_field>.
-      <ls_field>-tabname    = &1.                           "#EC NOTEXT
-      <ls_field>-fieldname  = &2.                           "#EC NOTEXT
-      <ls_field>-fieldtext  = &3.                           "#EC NOTEXT
-      <ls_field>-value      = &4.                           "#EC NOTEXT
-      <ls_field>-field_attr = &5.                           "#EC NOTEXT
-    END-OF-DEFINITION.
+    FIELD-SYMBOLS: <ls_field> LIKE LINE OF ct_fields.
+
+    APPEND INITIAL LINE TO ct_fields ASSIGNING <ls_field>.
+    <ls_field>-tabname    = iv_tabname.
+    <ls_field>-fieldname  = iv_fieldname.
+    <ls_field>-fieldtext  = iv_fieldtext.
+    <ls_field>-value      = iv_value.
+    <ls_field>-field_attr = iv_field_attr.
+
+  ENDMETHOD.
+
+  METHOD popup_object.
 
     DATA: lv_returncode TYPE c,
           lt_fields     TYPE TABLE OF sval.
 
     FIELD-SYMBOLS: <ls_field> LIKE LINE OF lt_fields.
 
-    "               TAB           FLD       LABEL     DEF                 ATTR
-    _add_dialog_fld 'TADIR'      'OBJECT'   'Type'    ''                  ''.
-    _add_dialog_fld 'TADIR'      'OBJ_NAME' 'Name'    ''                  ''.
+
+    add_field( EXPORTING iv_tabname   = 'TADIR'
+                         iv_fieldname = 'OBJECT'
+                         iv_fieldtext = 'Type'
+               CHANGING ct_fields     = lt_fields ).
+
+    add_field( EXPORTING iv_tabname   = 'TADIR'
+                         iv_fieldname = 'OBJ_NAME'
+                         iv_fieldtext = 'Name'
+               CHANGING ct_fields     = lt_fields ).
 
     CALL FUNCTION 'POPUP_GET_VALUES'
       EXPORTING
@@ -14329,9 +14377,17 @@ CLASS lcl_popups IMPLEMENTATION.
 
     FIELD-SYMBOLS: <ls_field> LIKE LINE OF lt_fields.
 
-    "               TAB     FLD        LABEL          DEF      ATTR
-    _add_dialog_fld 'TDEVC' 'DEVCLASS' 'Package'      ''       ''.
-    _add_dialog_fld 'TDEVC' 'INTSYS'   'Folder logic' 'PREFIX' ''.
+
+    add_field( EXPORTING iv_tabname   = 'TDEVC'
+                         iv_fieldname = 'DEVCLASS'
+                         iv_fieldtext = 'Package'
+               CHANGING ct_fields     = lt_fields ).
+
+    add_field( EXPORTING iv_tabname   = 'TDEVC'
+                         iv_fieldname = 'INTSYS'
+                         iv_fieldtext = 'Folder logic'
+                         iv_value     = 'PREFIX'
+               CHANGING ct_fields     = lt_fields ).
 
     CALL FUNCTION 'POPUP_GET_VALUES'
       EXPORTING
@@ -14374,8 +14430,11 @@ CLASS lcl_popups IMPLEMENTATION.
 
     CLEAR: ev_name, ev_cancel.
 
-*                   TAB     FLD   LABEL   DEF                       ATTR
-    _add_dialog_fld 'TEXTL' 'LINE' 'Name' 'new-branch-name'         ''.
+    add_field( EXPORTING iv_tabname   = 'TEXTL'
+                         iv_fieldname = 'LINE'
+                         iv_fieldtext = 'Name'
+                         iv_value     = 'new-branch-name'
+               CHANGING ct_fields     = lt_fields ).
 
     CALL FUNCTION 'POPUP_GET_VALUES'
       EXPORTING
@@ -14412,8 +14471,11 @@ CLASS lcl_popups IMPLEMENTATION.
 
     CLEAR: ev_name, ev_cancel.
 
-*                   TAB     FLD   LABEL   DEF                       ATTR
-    _add_dialog_fld 'TEXTL' 'LINE' 'Name' 'lcl_gui_page_'          ''.
+    add_field( EXPORTING iv_tabname   = 'TEXTL'
+                         iv_fieldname = 'LINE'
+                         iv_fieldtext = 'Name'
+                         iv_value     = 'lcl_gui_page_'
+               CHANGING ct_fields     = lt_fields ).
 
     CALL FUNCTION 'POPUP_GET_VALUES'
       EXPORTING
@@ -14450,9 +14512,15 @@ CLASS lcl_popups IMPLEMENTATION.
     FIELD-SYMBOLS: <ls_field> LIKE LINE OF lt_fields.
 
 
-    "               TAB           FLD       LABEL     DEF                 ATTR
-    _add_dialog_fld 'ABAPTXT255' 'LINE'     'Name'    ''                  ''.
-    _add_dialog_fld 'TDEVC'      'DEVCLASS' 'Package' ''                  ''.
+    add_field( EXPORTING iv_tabname   = 'ABAPTXT255'
+                         iv_fieldname = 'LINE'
+                         iv_fieldtext = 'Name'
+               CHANGING ct_fields     = lt_fields ).
+
+    add_field( EXPORTING iv_tabname   = 'TDEVC'
+                         iv_fieldname = 'DEVCLASS'
+                         iv_fieldtext = 'Package'
+               CHANGING ct_fields     = lt_fields ).
 
     lv_icon_ok  = icon_okay.
     lv_button1 = 'Create package' ##NO_TEXT.
@@ -14627,10 +14695,26 @@ CLASS lcl_popups IMPLEMENTATION.
       lv_icon2   = icon_folder.
     ENDIF.
 
-*                   TAB           FLD       LABEL            DEF        ATTR
-    _add_dialog_fld 'ABAPTXT255' 'LINE'     'Git clone URL'  iv_url     lv_uattr.
-    _add_dialog_fld 'TDEVC'      'DEVCLASS' 'Target package' iv_package lv_pattr.
-    _add_dialog_fld 'TEXTL'      'LINE'     'Branch'         iv_branch  '05'.
+    add_field( EXPORTING iv_tabname    = 'ABAPTXT255'
+                         iv_fieldname  = 'LINE'
+                         iv_fieldtext  = 'Git clone URL'
+                         iv_value      = iv_url
+                         iv_field_attr = lv_uattr
+               CHANGING ct_fields      = lt_fields ).
+
+    add_field( EXPORTING iv_tabname    = 'TDEVC'
+                         iv_fieldname  = 'DEVCLASS'
+                         iv_fieldtext  = 'Target package'
+                         iv_value      = iv_package
+                         iv_field_attr = lv_pattr
+               CHANGING ct_fields      = lt_fields ).
+
+    add_field( EXPORTING iv_tabname    = 'TEXTL'
+                         iv_fieldname  = 'LINE'
+                         iv_fieldtext  = 'Branch'
+                         iv_value      = iv_branch
+                         iv_field_attr = '05'
+               CHANGING ct_fields      = lt_fields ).
 
     lv_icon_ok  = icon_okay.
     lv_icon_br  = icon_workflow_fork.
@@ -14788,20 +14872,25 @@ CLASS lcl_popups IMPLEMENTATION.
       CONCATENATE lv_transports_as_text '_' ls_transport_header-trkorr INTO lv_transports_as_text.
     ENDLOOP.
 
-    "               TAB           FLD     LABEL          DEF  ATTR
-    _add_dialog_fld 'TEXTL'      'LINE'  'Branch name'   lv_transports_as_text  ''.
-    _add_dialog_fld 'ABAPTXT255' 'LINE'  'Commit text'   lv_transports_as_text  ''.
+    add_field( EXPORTING iv_tabname   = 'TEXTL'
+                         iv_fieldname = 'LINE'
+                         iv_fieldtext = 'Branch name'
+                         iv_value     = lv_transports_as_text
+               CHANGING ct_fields     = lt_fields ).
+
+    add_field( EXPORTING iv_tabname   = 'ABAPTXT255'
+                         iv_fieldname = 'LINE'
+                         iv_fieldtext = 'Commit text'
+                         iv_value     = lv_transports_as_text
+               CHANGING ct_fields     = lt_fields ).
 
     CALL FUNCTION 'POPUP_GET_VALUES'
       EXPORTING
-*       no_value_check  = SPACE    " Deactivates data type check
         popup_title     = 'Transport to new Branch'
-*       start_column    = '5'    " Start column of the dialog box
-*       start_row       = '5'    " Start line of the dialog box
       IMPORTING
         returncode      = lv_returncode
       TABLES
-        fields          = lt_fields  " Table fields, values and attributes
+        fields          = lt_fields
       EXCEPTIONS
         error_in_fields = 1
         OTHERS          = 2.
@@ -16360,7 +16449,7 @@ CLASS lcl_object_auth IMPLEMENTATION.
 
   METHOD lif_object~jump.
 
-    DATA: field TYPE fieldname .
+    DATA: field TYPE fieldname.
 
     field = ms_item-obj_name.
 
@@ -18549,8 +18638,7 @@ CLASS lcl_object_doma IMPLEMENTATION.
   METHOD lif_object~has_changed_since.
 
     DATA: lv_date TYPE dats,
-          lv_time TYPE tims,
-          lv_ts   TYPE timestamp.
+          lv_time TYPE tims.
 
     SELECT SINGLE as4date as4time FROM dd01l
       INTO (lv_date, lv_time)
@@ -18558,7 +18646,10 @@ CLASS lcl_object_doma IMPLEMENTATION.
       AND as4local = 'A'
       AND as4vers  = '0000'.
 
-    _object_check_timestamp lv_date lv_time.
+    rv_changed = check_timestamp(
+      iv_timestamp = iv_timestamp
+      iv_date      = lv_date
+      iv_time      = lv_time ).
 
   ENDMETHOD.  "lif_object~has_changed_since
 
@@ -18913,8 +19004,7 @@ CLASS lcl_object_dtel IMPLEMENTATION.
   METHOD lif_object~has_changed_since.
 
     DATA: lv_date TYPE dats,
-          lv_time TYPE tims,
-          lv_ts   TYPE timestamp.
+          lv_time TYPE tims.
 
     SELECT SINGLE as4date as4time FROM dd04l
       INTO (lv_date, lv_time)
@@ -18922,7 +19012,10 @@ CLASS lcl_object_dtel IMPLEMENTATION.
       AND as4local = 'A'
       AND as4vers = '0000'.
 
-    _object_check_timestamp lv_date lv_time.
+    rv_changed = check_timestamp(
+      iv_timestamp = iv_timestamp
+      iv_date      = lv_date
+      iv_time      = lv_time ).
 
   ENDMETHOD.  "lif_object~has_changed_since
 
@@ -19468,7 +19561,7 @@ CLASS lcl_object_enho_clif IMPLEMENTATION.
     io_xml->read( EXPORTING iv_name = 'TAB_METHODS'
                   CHANGING cg_data = lt_tab_methods ).
 
-    io_clif->set_enhattributes( tab_attributes = lt_tab_attributes ).
+    io_clif->set_enhattributes( lt_tab_attributes ).
 
 * todo: deserialize includes
 
@@ -20516,8 +20609,7 @@ CLASS lcl_object_enqu IMPLEMENTATION.
   METHOD lif_object~has_changed_since.
 
     DATA: lv_date TYPE dats,
-          lv_time TYPE tims,
-          lv_ts   TYPE timestamp.
+          lv_time TYPE tims.
 
     SELECT SINGLE as4date as4time FROM dd25l
       INTO (lv_date, lv_time)
@@ -20525,7 +20617,10 @@ CLASS lcl_object_enqu IMPLEMENTATION.
       AND as4local = 'A'
       AND as4vers  = '0000'.
 
-    _object_check_timestamp lv_date lv_time.
+    rv_changed = check_timestamp(
+      iv_timestamp = iv_timestamp
+      iv_date      = lv_date
+      iv_time      = lv_time ).
 
   ENDMETHOD.  "lif_object~has_changed_since
 
@@ -21731,7 +21826,6 @@ CLASS lcl_object_fugr IMPLEMENTATION.
     DATA: lt_reposrc TYPE STANDARD TABLE OF ty_reposrc WITH DEFAULT KEY,
           ls_reposrc LIKE LINE OF lt_reposrc,
           lv_program TYPE program,
-          lv_cnam    TYPE reposrc-cnam,
           lv_tabix   LIKE sy-tabix,
           lt_functab TYPE ty_rs38l_incl_tt.
 
@@ -26246,16 +26340,7 @@ CLASS lcl_object_shi3 DEFINITION INHERITING FROM lcl_objects_super FINAL.
 
 
   PRIVATE SECTION.
-
-    TYPES: BEGIN OF ty_id_map,
-             old TYPE ttree-id,
-             new TYPE ttree-id,
-           END OF ty_id_map.
-    TYPES  tt_id_map TYPE STANDARD TABLE OF ty_id_map.
-    TYPES  ts_id_map TYPE SORTED TABLE OF ty_id_map WITH UNIQUE KEY old.
-
-    DATA: mv_tree_id TYPE ttree-id,
-          mt_map     TYPE ts_id_map. " SORTED !
+    DATA: mv_tree_id TYPE ttree-id.
 
     METHODS jump_se43
       RAISING lcx_exception.
@@ -26524,15 +26609,17 @@ CLASS lcl_object_shlp IMPLEMENTATION.
   METHOD lif_object~has_changed_since.
 
     DATA: lv_date TYPE dats,
-          lv_time TYPE tims,
-          lv_ts   TYPE timestamp.
+          lv_time TYPE tims.
 
     SELECT SINGLE as4date as4time FROM dd30l
-      INTO (lv_date, lv_time)
-      WHERE shlpname = ms_item-obj_name
-      AND as4local = 'A'.
+       INTO (lv_date, lv_time)
+       WHERE shlpname = ms_item-obj_name
+       AND as4local = 'A'.
 
-    _object_check_timestamp lv_date lv_time.
+    rv_changed = check_timestamp(
+     iv_timestamp = iv_timestamp
+     iv_date      = lv_date
+     iv_time      = lv_time ).
 
   ENDMETHOD.  "lif_object~has_changed_since
 
@@ -28826,7 +28913,6 @@ CLASS lcl_object_tabl IMPLEMENTATION.
 
     DATA: lv_date    TYPE dats,
           lv_time    TYPE tims,
-          lv_ts      TYPE timestamp,
           lt_indexes TYPE STANDARD TABLE OF dd09l.
 
     FIELD-SYMBOLS <ls_index> LIKE LINE OF lt_indexes.
@@ -28837,7 +28923,13 @@ CLASS lcl_object_tabl IMPLEMENTATION.
       AND as4local = 'A'
       AND as4vers  = '0000'.
 
-    _object_check_timestamp lv_date lv_time.
+    rv_changed = check_timestamp(
+      iv_timestamp = iv_timestamp
+      iv_date      = lv_date
+      iv_time      = lv_time ).
+    IF rv_changed = abap_true.
+      RETURN.
+    ENDIF.
 
     SELECT SINGLE as4date as4time FROM dd09l " Table tech settings
       INTO (lv_date, lv_time)
@@ -28845,7 +28937,13 @@ CLASS lcl_object_tabl IMPLEMENTATION.
       AND as4local = 'A'
       AND as4vers  = '0000'.
 
-    _object_check_timestamp lv_date lv_time.
+    rv_changed = check_timestamp(
+      iv_timestamp = iv_timestamp
+      iv_date      = lv_date
+      iv_time      = lv_time ).
+    IF rv_changed = abap_true.
+      RETURN.
+    ENDIF.
 
     SELECT as4date as4time FROM dd12l " Table tech settings
       INTO CORRESPONDING FIELDS OF TABLE lt_indexes
@@ -28854,7 +28952,13 @@ CLASS lcl_object_tabl IMPLEMENTATION.
       AND as4vers  = '0000' ##TOO_MANY_ITAB_FIELDS.
 
     LOOP AT lt_indexes ASSIGNING <ls_index>.
-      _object_check_timestamp <ls_index>-as4date <ls_index>-as4time.
+      rv_changed = check_timestamp(
+        iv_timestamp = iv_timestamp
+        iv_date      = <ls_index>-as4date
+        iv_time      = <ls_index>-as4time ).
+      IF rv_changed = abap_true.
+        RETURN.
+      ENDIF.
     ENDLOOP.
 
   ENDMETHOD.  "lif_object~has_changed_since
@@ -29975,15 +30079,17 @@ CLASS lcl_object_ttyp IMPLEMENTATION.
   METHOD lif_object~has_changed_since.
 
     DATA: lv_date TYPE dats,
-          lv_time TYPE tims,
-          lv_ts   TYPE timestamp.
+          lv_time TYPE tims.
 
     SELECT SINGLE as4date as4time FROM dd40l
       INTO (lv_date, lv_time)
       WHERE typename = ms_item-obj_name
       AND as4local = 'A'.
 
-    _object_check_timestamp lv_date lv_time.
+    rv_changed = check_timestamp(
+      iv_timestamp = iv_timestamp
+      iv_date      = lv_date
+      iv_time      = lv_time ).
 
   ENDMETHOD.  "lif_object~has_changed_since
 
@@ -30592,24 +30698,35 @@ CLASS lcl_object_view IMPLEMENTATION.
   METHOD lif_object~has_changed_since.
 
     DATA: lv_date TYPE dats,
-          lv_time TYPE tims,
-          lv_ts   TYPE timestamp.
+          lv_time TYPE tims.
 
-    SELECT SINGLE as4date as4time FROM dd25l " View
+    SELECT SINGLE as4date as4time FROM dd25l
       INTO (lv_date, lv_time)
       WHERE viewname = ms_item-obj_name
       AND as4local = 'A'
       AND as4vers  = '0000'.
 
-    _object_check_timestamp lv_date lv_time.
+    rv_changed = check_timestamp(
+      iv_timestamp = iv_timestamp
+      iv_date      = lv_date
+      iv_time      = lv_time ).
+    IF rv_changed = abap_true.
+      RETURN.
+    ENDIF.
 
-    SELECT SINGLE as4date as4time FROM dd09l " Table tech settings
+    SELECT SINGLE as4date as4time FROM dd09l
       INTO (lv_date, lv_time)
       WHERE tabname = ms_item-obj_name
       AND as4local = 'A'
       AND as4vers  = '0000'.
 
-    _object_check_timestamp lv_date lv_time.
+    rv_changed = check_timestamp(
+      iv_timestamp = iv_timestamp
+      iv_date      = lv_date
+      iv_time      = lv_time ).
+    IF rv_changed = abap_true.
+      RETURN.
+    ENDIF.
 
   ENDMETHOD.  "lif_object~has_changed_since
 
@@ -34067,7 +34184,7 @@ CLASS lcl_repo IMPLEMENTATION.
       io_dot                = get_dot_abapgit( ) ).
 
     lt_filter = it_filter.
-    lv_filter_exist = boolc( lines( lt_filter ) > 0 ) .
+    lv_filter_exist = boolc( lines( lt_filter ) > 0 ).
 
     LOOP AT lt_tadir ASSIGNING <ls_tadir>.
       IF lv_filter_exist = abap_true.
@@ -38713,12 +38830,12 @@ CLASS lcl_syntax_highlighter DEFINITION ABSTRACT
   PUBLIC SECTION.
 
     CLASS-METHODS create
-      IMPORTING iv_filename TYPE string
+      IMPORTING iv_filename        TYPE string
       RETURNING VALUE(ro_instance) TYPE REF TO lcl_syntax_highlighter.
 
     METHODS process_line
-        IMPORTING iv_line        TYPE string
-        RETURNING VALUE(rv_line) TYPE string.
+      IMPORTING iv_line        TYPE string
+      RETURNING VALUE(rv_line) TYPE string.
 
   PROTECTED SECTION.
 
@@ -38735,14 +38852,20 @@ CLASS lcl_syntax_highlighter DEFINITION ABSTRACT
 
     TYPES:
       BEGIN OF ty_rule,
-        regex     TYPE REF TO cl_abap_regex,
-        token     TYPE char1,
-        style     TYPE string,
+        regex TYPE REF TO cl_abap_regex,
+        token TYPE char1,
+        style TYPE string,
       END OF ty_rule.
 
     CONSTANTS c_token_none TYPE c VALUE '.'.
 
     DATA mt_rules TYPE STANDARD TABLE OF ty_rule.
+
+    METHODS add_rule
+      IMPORTING
+        iv_regex TYPE string
+        iv_token TYPE c
+        iv_style TYPE string.
 
     METHODS parse_line
       IMPORTING iv_line    TYPE string
@@ -38780,21 +38903,21 @@ CLASS lcl_syntax_abap DEFINITION INHERITING FROM lcl_syntax_highlighter FINAL.
 
     CONSTANTS:
       BEGIN OF c_css,
-        keyword  TYPE string VALUE 'keyword',                "#EC NOTEXT
-        text     TYPE string VALUE 'text',                   "#EC NOTEXT
-        comment  TYPE string VALUE 'comment',                "#EC NOTEXT
+        keyword TYPE string VALUE 'keyword',                "#EC NOTEXT
+        text    TYPE string VALUE 'text',                   "#EC NOTEXT
+        comment TYPE string VALUE 'comment',                "#EC NOTEXT
       END OF c_css,
 
       BEGIN OF c_token,
-        keyword  TYPE c VALUE 'K',                           "#EC NOTEXT
-        text     TYPE c VALUE 'T',                           "#EC NOTEXT
-        comment  TYPE c VALUE 'C',                           "#EC NOTEXT
+        keyword TYPE c VALUE 'K',                           "#EC NOTEXT
+        text    TYPE c VALUE 'T',                           "#EC NOTEXT
+        comment TYPE c VALUE 'C',                           "#EC NOTEXT
       END OF c_token,
 
       BEGIN OF c_regex,
-        comment  TYPE string VALUE '##|"|^\*',
-        text     TYPE string VALUE '`|''|\||\{|\}',
-        keyword  TYPE string VALUE '&&|\b[-_a-z0-9]+\b',
+        comment TYPE string VALUE '##|"|^\*',
+        text    TYPE string VALUE '`|''|\||\{|\}',
+        keyword TYPE string VALUE '&&|\b[-_a-z0-9]+\b',
       END OF c_regex.
 
   PROTECTED SECTION.
@@ -38822,21 +38945,21 @@ CLASS lcl_syntax_xml DEFINITION INHERITING FROM lcl_syntax_highlighter FINAL.
 
     CONSTANTS:
       BEGIN OF c_css,
-        xml_tag  TYPE string VALUE 'xml_tag',                "#EC NOTEXT
-        attr     TYPE string VALUE 'attr',                   "#EC NOTEXT
-        attr_val TYPE string VALUE 'attr_val',               "#EC NOTEXT
+        xml_tag  TYPE string VALUE 'xml_tag',               "#EC NOTEXT
+        attr     TYPE string VALUE 'attr',                  "#EC NOTEXT
+        attr_val TYPE string VALUE 'attr_val',              "#EC NOTEXT
       END OF c_css,
 
       BEGIN OF c_token,
-        xml_tag  TYPE c VALUE 'X',                           "#EC NOTEXT
-        attr     TYPE c VALUE 'A',                           "#EC NOTEXT
-        attr_val TYPE c VALUE 'V',                           "#EC NOTEXT
+        xml_tag  TYPE c VALUE 'X',                          "#EC NOTEXT
+        attr     TYPE c VALUE 'A',                          "#EC NOTEXT
+        attr_val TYPE c VALUE 'V',                          "#EC NOTEXT
       END OF c_token,
 
       BEGIN OF c_regex,
-        xml_tag  TYPE string VALUE '[<>]',                   "#EC NOTEXT
+        xml_tag  TYPE string VALUE '[<>]',                  "#EC NOTEXT
         attr     TYPE string VALUE '\s[-a-z:_0-9]+\s*(?==)', "#EC NOTEXT
-        attr_val TYPE string VALUE '["''][^''"]+[''"]',      "#EC NOTEXT
+        attr_val TYPE string VALUE '["''][^''"]+[''"]',     "#EC NOTEXT
       END OF c_regex.
 
   PROTECTED SECTION.
@@ -38844,23 +38967,6 @@ CLASS lcl_syntax_xml DEFINITION INHERITING FROM lcl_syntax_highlighter FINAL.
     METHODS order_matches REDEFINITION.
 
 ENDCLASS.                       " lcl_syntax_xml DEFINITION
-
-*----------------------------------------------------------------------*
-* Macros to fill table with a regular expressions to be parsed
-*----------------------------------------------------------------------*
-
-DEFINE _add_rule.
-
-  CREATE OBJECT ls_rule-regex
-    EXPORTING
-      pattern     = c_regex-&1
-      ignore_case = abap_true.
-
-  ls_rule-token = c_token-&1.
-  ls_rule-style = c_css-&1.
-  APPEND ls_rule TO mt_rules.
-
-END-OF-DEFINITION.           " _add_rule
 
 *----------------------------------------------------------------------*
 *       CLASS lcl_syntax_highlighter IMPLEMENTATION
@@ -38882,6 +38988,21 @@ CLASS lcl_syntax_highlighter IMPLEMENTATION.
     ENDIF.
 
   ENDMETHOD.                    " create.
+
+  METHOD add_rule.
+
+    DATA ls_rule LIKE LINE OF mt_rules.
+
+    CREATE OBJECT ls_rule-regex
+      EXPORTING
+        pattern     = iv_regex
+        ignore_case = abap_true.
+
+    ls_rule-token = iv_token.
+    ls_rule-style = iv_style.
+    APPEND ls_rule TO mt_rules.
+
+  ENDMETHOD.
 
   METHOD parse_line.
 
@@ -38918,10 +39039,10 @@ CLASS lcl_syntax_highlighter IMPLEMENTATION.
   METHOD extend_matches.
 
     DATA:
-      lv_line_len   TYPE i,
-      lv_last_pos   TYPE i VALUE 0,
-      lv_length     TYPE i,
-      ls_match      TYPE ty_match.
+      lv_line_len TYPE i,
+      lv_last_pos TYPE i VALUE 0,
+      lv_length   TYPE i,
+      ls_match    TYPE ty_match.
 
     FIELD-SYMBOLS <match> TYPE ty_match.
 
@@ -38955,8 +39076,8 @@ CLASS lcl_syntax_highlighter IMPLEMENTATION.
   METHOD format_line.
 
     DATA:
-      lv_chunk  TYPE string,
-      ls_rule   LIKE LINE OF mt_rules.
+      lv_chunk TYPE string,
+      ls_rule  LIKE LINE OF mt_rules.
 
     FIELD-SYMBOLS <match> TYPE ty_match.
 
@@ -39037,14 +39158,21 @@ CLASS lcl_syntax_abap IMPLEMENTATION.
 
   METHOD constructor.
 
-    DATA ls_rule LIKE LINE OF mt_rules.
-
     super->constructor( ).
 
     " Initialize instances of regular expression
-    _add_rule keyword.
-    _add_rule comment.
-    _add_rule text.
+
+    add_rule( iv_regex = c_regex-keyword
+              iv_token = c_token-keyword
+              iv_style = c_css-keyword ).
+
+    add_rule( iv_regex = c_regex-comment
+              iv_token = c_token-comment
+              iv_style = c_css-comment ).
+
+    add_rule( iv_regex = c_regex-text
+              iv_token = c_token-text
+              iv_style = c_css-text ).
 
   ENDMETHOD.                    " constructor
 
@@ -39258,14 +39386,21 @@ CLASS lcl_syntax_xml IMPLEMENTATION.
 
   METHOD constructor.
 
-    DATA ls_rule LIKE LINE OF mt_rules.
-
     super->constructor( ).
 
     " Initialize instances of regular expressions
-    _add_rule xml_tag.
-    _add_rule attr.
-    _add_rule attr_val.
+
+    add_rule( iv_regex = c_regex-xml_tag
+              iv_token = c_token-xml_tag
+              iv_style = c_css-xml_tag ).
+
+    add_rule( iv_regex = c_regex-attr
+              iv_token = c_token-attr
+              iv_style = c_css-attr ).
+
+    add_rule( iv_regex = c_regex-attr_val
+              iv_token = c_token-attr_val
+              iv_style = c_css-attr_val ).
 
   ENDMETHOD.
 
@@ -39299,7 +39434,7 @@ CLASS lcl_syntax_xml IMPLEMENTATION.
             DELETE ct_matches INDEX lv_index.
             CONTINUE.
 
-          " Adjust length and offset of closing tag
+            " Adjust length and offset of closing tag
           ELSEIF <match>-text_tag = '>' AND lv_prev_token <> c_token-xml_tag.
             lv_state = 'C'.
             <match>-length = <match>-offset - <prev>-offset - <prev>-length + <match>-length.
@@ -39369,7 +39504,7 @@ CLASS ltcl_syntax_cases IMPLEMENTATION.
     ms_match-token    = &1.
     ms_match-offset   = &2.
     ms_match-length   = &3.
-    append ms_match to mt_after_parse.
+    APPEND ms_match TO mt_after_parse.
   END-OF-DEFINITION.           " _generate_parse
 
   DEFINE _generate_order.
@@ -39377,7 +39512,7 @@ CLASS ltcl_syntax_cases IMPLEMENTATION.
     ms_match-offset   = &2.
     ms_match-length   = &3.
     ms_match-text_tag = &4.
-    append ms_match to mt_after_order.
+    APPEND ms_match TO mt_after_order.
   END-OF-DEFINITION.           " _generate_order
 
   DEFINE _generate_extend.
@@ -39385,7 +39520,7 @@ CLASS ltcl_syntax_cases IMPLEMENTATION.
     ms_match-offset   = &2.
     ms_match-length   = &3.
     ms_match-text_tag = &4.
-    append ms_match to mt_after_extend.
+    APPEND ms_match TO mt_after_extend.
   END-OF-DEFINITION.           " _generate_extend
 
   METHOD do_test.
@@ -39698,7 +39833,7 @@ CLASS ltcl_syntax_cases IMPLEMENTATION.
 
     DATA lv_line TYPE string.
 
-    lv_line = '<tag>Text</tag>'.    "#EC NOTEXT
+    lv_line = '<tag>Text</tag>'.                            "#EC NOTEXT
 
     " Generate table with expected values after parsing
     _generate_parse 'X' 0  1.
@@ -39723,7 +39858,7 @@ CLASS ltcl_syntax_cases IMPLEMENTATION.
 
     DATA lv_line TYPE string.
 
-    lv_line = '<tag/>'.    "#EC NOTEXT
+    lv_line = '<tag/>'.                                     "#EC NOTEXT
 
     " Generate table with expected values after parsing
     _generate_parse 'X' 0  1.
@@ -39743,7 +39878,7 @@ CLASS ltcl_syntax_cases IMPLEMENTATION.
 
     DATA lv_line TYPE string.
 
-    lv_line = '<tag attribute="value"/>'.    "#EC NOTEXT
+    lv_line = '<tag attribute="value"/>'.                   "#EC NOTEXT
 
     " Generate table with expected values after parsing
     _generate_parse 'X' 0  1.
@@ -39772,7 +39907,7 @@ CLASS ltcl_syntax_cases IMPLEMENTATION.
 
     DATA lv_line TYPE string.
 
-    lv_line = '<?xml version="1.0"?>'.    "#EC NOTEXT
+    lv_line = '<?xml version="1.0"?>'.                      "#EC NOTEXT
 
     " Generate table with expected values after parsing
     _generate_parse 'X' 0  1.
@@ -39801,7 +39936,7 @@ CLASS ltcl_syntax_cases IMPLEMENTATION.
 
     DATA lv_line TYPE string.
 
-    lv_line = '<ns:tag ns:a1="v1" ns:a2=''v2''>"text"</ns:tag>'.    "#EC NOTEXT
+    lv_line = '<ns:tag ns:a1="v1" ns:a2=''v2''>"text"</ns:tag>'. "#EC NOTEXT
 
     " Generate table with expected values after parsing
     _generate_parse 'X' 0  1.
@@ -39903,8 +40038,8 @@ CLASS ltcl_syntax_basic_logic IMPLEMENTATION.
 
     cl_abap_unit_assert=>assert_equals(
       act = lv_line_act
-      exp = '<span class="keyword">CALL FUNCTION</span>' "#EC NOTEXT
-      msg = 'Failure during applying of style.' ). "#EC NOTEXT
+      exp = '<span class="keyword">CALL FUNCTION</span>'    "#EC NOTEXT
+      msg = 'Failure during applying of style.' ).          "#EC NOTEXT
 
   ENDMETHOD.                    " apply_style
 
@@ -39918,15 +40053,15 @@ CLASS ltcl_syntax_basic_logic IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals(
       act = lv_line_act
       exp = ''
-      msg = 'Failure in method process_line.' ). "#EC NOTEXT
+      msg = 'Failure in method process_line.' ).            "#EC NOTEXT
 
     " Call the method with non-empty line and compare results
     lv_line_act = mo->process_line( iv_line  = '* CALL FUNCTION' ). "#EC NOTEXT
 
     cl_abap_unit_assert=>assert_equals(
       act = lv_line_act
-      exp = '<span class="comment">* CALL FUNCTION</span>' "#EC NOTEXT
-      msg = 'Failure in method process_line.' ). "#EC NOTEXT
+      exp = '<span class="comment">* CALL FUNCTION</span>'  "#EC NOTEXT
+      msg = 'Failure in method process_line.' ).            "#EC NOTEXT
 
   ENDMETHOD.                    " process_line
 
@@ -49605,5 +49740,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-06-10T11:46:36.727Z
+* abapmerge - 2017-06-10T13:45:35.402Z
 ****************************************************
