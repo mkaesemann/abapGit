@@ -3483,16 +3483,13 @@ CLASS lcl_gui DEFINITION DEFERRED.
 CLASS lcl_persistence_user DEFINITION DEFERRED.
 CLASS lcl_repo_srv DEFINITION DEFERRED.
 CLASS lcl_persistence_db DEFINITION DEFERRED.
-CLASS lcl_persistence_settings DEFINITION DEFERRED.
+CLASS lcl_persist_settings DEFINITION DEFERRED.
 
 *----------------------------------------------------------------------*
 *       CLASS lcl_app DEFINITION
 *----------------------------------------------------------------------*
 CLASS lcl_app DEFINITION FINAL.
   PUBLIC SECTION.
-
-    CLASS-METHODS run
-      RAISING lcx_exception.
 
     CLASS-METHODS gui
       RETURNING VALUE(ro_gui) TYPE REF TO lcl_gui
@@ -3510,14 +3507,14 @@ CLASS lcl_app DEFINITION FINAL.
       RETURNING VALUE(ro_db) TYPE REF TO lcl_persistence_db.
 
     CLASS-METHODS settings
-      RETURNING VALUE(ro_settings) TYPE REF TO lcl_persistence_settings.
+      RETURNING VALUE(ro_settings) TYPE REF TO lcl_persist_settings.
 
   PRIVATE SECTION.
     CLASS-DATA: go_gui          TYPE REF TO lcl_gui,
                 go_current_user TYPE REF TO lcl_persistence_user,
                 go_db           TYPE REF TO lcl_persistence_db,
                 go_repo_srv     TYPE REF TO lcl_repo_srv,
-                go_settings     TYPE REF TO lcl_persistence_settings.
+                go_settings     TYPE REF TO lcl_persist_settings.
 
 ENDCLASS.   "lcl_app
 
@@ -3529,14 +3526,14 @@ ENDCLASS.   "lcl_app
 *&  Include           ZABAPGIT_PERSISTENCE_OLD
 *&---------------------------------------------------------------------*
 
-CLASS lcl_persistence_migrate DEFINITION DEFERRED.
+CLASS lcl_persist_migrate DEFINITION DEFERRED.
 
 *----------------------------------------------------------------------*
 *       CLASS lcl_persistence DEFINITION
 *----------------------------------------------------------------------*
 *
 *----------------------------------------------------------------------*
-CLASS lcl_persistence DEFINITION FINAL FRIENDS lcl_persistence_migrate.
+CLASS lcl_persistence DEFINITION FINAL FRIENDS lcl_persist_migrate.
 
 * this class is obsolete, use LCL_PERSISTENCE_REPO instead
 
@@ -3897,7 +3894,7 @@ ENDCLASS.                    "lcl_persistence IMPLEMENTATION
 *----------------------------------------------------------------------*
 *
 *----------------------------------------------------------------------*
-CLASS lcl_user DEFINITION FINAL FRIENDS lcl_persistence_migrate.
+CLASS lcl_user DEFINITION FINAL FRIENDS lcl_persist_migrate.
 
 * this class is obsolete, use LCL_PERSISTENCE_USER instead
 
@@ -3953,9 +3950,9 @@ ENDCLASS.                    "lcl_user DEFINITION
 *----------------------------------------------------------------------*
 CLASS lcl_user IMPLEMENTATION.
 
-* this class is obsolete, use LCL_PERSISTENCE_USER instead
-
   METHOD read.
+
+* this class is obsolete, use LCL_PERSISTENCE_USER instead
 
     DATA: lt_lines TYPE TABLE OF tline,
           ls_line  LIKE LINE OF lt_lines.
@@ -4358,10 +4355,6 @@ CLASS lcl_dot_abapgit IMPLEMENTATION.
     rv_language = ms_data-master_language.
   ENDMETHOD.
 
-*  METHOD set_master_language.
-*    ms_data-master_language = iv_language.
-*  ENDMETHOD.
-
   METHOD get_signature.
 
     rs_signature-path     = lif_defs=>gc_root_dir.
@@ -4381,7 +4374,7 @@ ENDCLASS.
 *&  Include           ZABAPGIT_PERSISTENCE
 *&---------------------------------------------------------------------*
 
-CLASS lcl_persistence_migrate DEFINITION FINAL.
+CLASS lcl_persist_migrate DEFINITION FINAL.
 
   PUBLIC SECTION.
     CLASS-METHODS: run RAISING lcx_exception.
@@ -4583,7 +4576,7 @@ CLASS lcl_persistence_repo DEFINITION FINAL.
 
 ENDCLASS.
 
-CLASS lcl_persistence_background DEFINITION FINAL.
+CLASS lcl_persist_background DEFINITION FINAL.
 
   PUBLIC SECTION.
 
@@ -4649,7 +4642,7 @@ CLASS lcl_persistence_background DEFINITION FINAL.
 
 ENDCLASS.     "lcl_persistence_background DEFINITION
 
-CLASS lcl_persistence_background IMPLEMENTATION.
+CLASS lcl_persist_background IMPLEMENTATION.
 
   METHOD constructor.
     mo_db = lcl_app=>db( ).
@@ -5389,7 +5382,7 @@ CLASS lcl_persistence_repo IMPLEMENTATION.
 
   METHOD delete.
 
-    DATA: lo_background TYPE REF TO lcl_persistence_background.
+    DATA: lo_background TYPE REF TO lcl_persist_background.
 
     CREATE OBJECT lo_background.
     lo_background->delete( iv_key ).
@@ -5650,7 +5643,7 @@ CLASS lcl_persistence_repo IMPLEMENTATION.
 
 ENDCLASS.
 
-CLASS lcl_persistence_migrate IMPLEMENTATION.
+CLASS lcl_persist_migrate IMPLEMENTATION.
 
   METHOD run.
 
@@ -6041,7 +6034,7 @@ CLASS lcl_settings IMPLEMENTATION.
 
 ENDCLASS.
 
-CLASS lcl_persistence_settings DEFINITION FINAL.
+CLASS lcl_persist_settings DEFINITION FINAL.
 
   PUBLIC SECTION.
     METHODS modify
@@ -6055,10 +6048,11 @@ CLASS lcl_persistence_settings DEFINITION FINAL.
 
 ENDCLASS.
 
-CLASS lcl_persistence_settings IMPLEMENTATION.
-* todo, refactor this to use XML and only 1 row in the database?
+CLASS lcl_persist_settings IMPLEMENTATION.
 
   METHOD modify.
+
+* todo, refactor this class to use XML and only 1 row in the database?
 
     lcl_app=>db( )->modify(
       iv_type       = 'SETTINGS'
@@ -8672,13 +8666,13 @@ CLASS lcx_2fa_auth_failed IMPLEMENTATION.
   ENDMETHOD.
 ENDCLASS.
 
-CLASS lcx_2fa_token_gen_failed DEFINITION INHERITING FROM lcx_2fa_error FINAL.
+CLASS lcx_2fa_gen_failed DEFINITION INHERITING FROM lcx_2fa_error FINAL.
   PROTECTED SECTION.
     METHODS:
       get_default_text REDEFINITION.
 ENDCLASS.
 
-CLASS lcx_2fa_token_gen_failed IMPLEMENTATION.
+CLASS lcx_2fa_gen_failed IMPLEMENTATION.
   METHOD get_default_text.
     rv_text = 'Two factor access token generation failed.' ##NO_TEXT.
   ENDMETHOD.
@@ -8696,25 +8690,25 @@ CLASS lcx_2fa_unsupported IMPLEMENTATION.
   ENDMETHOD.
 ENDCLASS.
 
-CLASS lcx_2fa_token_del_failed DEFINITION INHERITING FROM lcx_2fa_error FINAL.
+CLASS lcx_2fa_del_failed DEFINITION INHERITING FROM lcx_2fa_error FINAL.
   PROTECTED SECTION.
     METHODS:
       get_default_text REDEFINITION.
 ENDCLASS.
 
-CLASS lcx_2fa_token_del_failed IMPLEMENTATION.
+CLASS lcx_2fa_del_failed IMPLEMENTATION.
   METHOD get_default_text.
     rv_text = 'Deleting previous access tokens failed.' ##NO_TEXT.
   ENDMETHOD.
 ENDCLASS.
 
-CLASS lcx_2fa_communication_error DEFINITION INHERITING FROM lcx_2fa_error FINAL.
+CLASS lcx_2fa_comm_error DEFINITION INHERITING FROM lcx_2fa_error FINAL.
   PROTECTED SECTION.
     METHODS:
       get_default_text REDEFINITION.
 ENDCLASS.
 
-CLASS lcx_2fa_communication_error IMPLEMENTATION.
+CLASS lcx_2fa_comm_error IMPLEMENTATION.
   METHOD get_default_text.
     rv_text = 'Communication error.' ##NO_TEXT.
   ENDMETHOD.
@@ -8765,8 +8759,8 @@ INTERFACE lif_2fa_authenticator.
                            iv_2fa_token           TYPE string
                  RETURNING VALUE(rv_access_token) TYPE string
                  RAISING   lcx_2fa_auth_failed
-                           lcx_2fa_token_gen_failed
-                           lcx_2fa_communication_error,
+                           lcx_2fa_gen_failed
+                           lcx_2fa_comm_error,
     "! Check if this authenticator instance supports the give repository url
     "! @parameter iv_url | Repository url
     "! @parameter rv_supported | Is supported
@@ -8788,7 +8782,7 @@ INTERFACE lif_2fa_authenticator.
                               iv_username        TYPE string
                               iv_password        TYPE string
                     RETURNING VALUE(rv_required) TYPE abap_bool
-                    RAISING   lcx_2fa_communication_error,
+                    RAISING   lcx_2fa_comm_error,
     "! Delete all previously created access tokens for abapGit
     "! @parameter iv_url | Repository url
     "! @parameter iv_username | Username
@@ -8800,8 +8794,8 @@ INTERFACE lif_2fa_authenticator.
                                    iv_username  TYPE string
                                    iv_password  TYPE string
                                    iv_2fa_token TYPE string
-                         RAISING   lcx_2fa_token_del_failed
-                                   lcx_2fa_communication_error
+                         RAISING   lcx_2fa_del_failed
+                                   lcx_2fa_comm_error
                                    lcx_2fa_auth_failed,
     "! Begin an authenticator session that uses internal caching for authorizations
     "! @raising lcx_2fa_illegal_state | Session already started
@@ -8812,7 +8806,7 @@ INTERFACE lif_2fa_authenticator.
 ENDINTERFACE.
 
 "! Default <em>LIF_2FA-AUTHENTICATOR</em> implememtation
-CLASS lcl_2fa_authenticator_base DEFINITION
+CLASS lcl_2fa_auth_base DEFINITION
   ABSTRACT
   CREATE PUBLIC.
 
@@ -8838,7 +8832,7 @@ CLASS lcl_2fa_authenticator_base DEFINITION
       "! <p>
       "! <em>sy-msg...</em> must be set right before calling!
       "! </p>
-      raise_comm_error_from_sy RAISING lcx_2fa_communication_error.
+      raise_comm_error_from_sy RAISING lcx_2fa_comm_error.
     METHODS:
       "! @parameter rv_running | Internal session is currently active
       is_session_running RETURNING VALUE(rv_running) TYPE abap_bool.
@@ -8848,7 +8842,7 @@ CLASS lcl_2fa_authenticator_base DEFINITION
       mv_session_running TYPE abap_bool.
 ENDCLASS.
 
-CLASS lcl_2fa_authenticator_base IMPLEMENTATION.
+CLASS lcl_2fa_auth_base IMPLEMENTATION.
   METHOD constructor.
     CREATE OBJECT mo_url_regex
       EXPORTING
@@ -8873,7 +8867,7 @@ CLASS lcl_2fa_authenticator_base IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD delete_access_tokens.
-    RAISE EXCEPTION TYPE lcx_2fa_token_del_failed. " Needs to be overwritten in subclasses
+    RAISE EXCEPTION TYPE lcx_2fa_del_failed. " Needs to be overwritten in subclasses
   ENDMETHOD.
 
   METHOD raise_comm_error_from_sy.
@@ -8882,7 +8876,7 @@ CLASS lcl_2fa_authenticator_base IMPLEMENTATION.
     MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
             WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4
             INTO lv_error_msg.
-    RAISE EXCEPTION TYPE lcx_2fa_communication_error
+    RAISE EXCEPTION TYPE lcx_2fa_comm_error
       EXPORTING
         iv_error_text = |Communication error: { lv_error_msg }| ##NO_TEXT.
   ENDMETHOD.
@@ -8908,10 +8902,8 @@ CLASS lcl_2fa_authenticator_base IMPLEMENTATION.
   ENDMETHOD.
 ENDCLASS.
 
-CLASS lcl_2fa_github_authenticator DEFINITION
-  INHERITING FROM lcl_2fa_authenticator_base
-  FINAL
-  CREATE PUBLIC.
+CLASS lcl_2fa_github_auth DEFINITION INHERITING FROM lcl_2fa_auth_base
+    FINAL CREATE PUBLIC.
 
   PUBLIC SECTION.
     METHODS:
@@ -8942,12 +8934,12 @@ CLASS lcl_2fa_github_authenticator DEFINITION
                                          iv_2fa_token     TYPE string
                                RETURNING VALUE(ri_client) TYPE REF TO if_http_client
                                RAISING   lcx_2fa_auth_failed
-                                         lcx_2fa_communication_error.
+                                         lcx_2fa_comm_error.
     DATA:
       mi_authenticated_session TYPE REF TO if_http_client.
 ENDCLASS.
 
-CLASS lcl_2fa_github_authenticator IMPLEMENTATION.
+CLASS lcl_2fa_github_auth IMPLEMENTATION.
   METHOD constructor.
     super->constructor( '^https?://(www\.)?github.com.*$' ).
   ENDMETHOD.
@@ -8982,14 +8974,14 @@ CLASS lcl_2fa_github_authenticator IMPLEMENTATION.
         code   = lv_http_code
         reason = lv_http_code_description ).
     IF lv_http_code <> 201.
-      RAISE EXCEPTION TYPE lcx_2fa_token_gen_failed
+      RAISE EXCEPTION TYPE lcx_2fa_gen_failed
         EXPORTING
           iv_error_text = |Token generation failed: { lv_http_code } { lv_http_code_description }|.
     ENDIF.
 
     rv_access_token = get_token_from_response( li_http_client->response ).
     IF rv_access_token IS INITIAL.
-      RAISE EXCEPTION TYPE lcx_2fa_token_gen_failed
+      RAISE EXCEPTION TYPE lcx_2fa_gen_failed
         EXPORTING
           iv_error_text = 'Token generation failed: parser error' ##NO_TEXT.
     ENDIF.
@@ -9147,7 +9139,7 @@ CLASS lcl_2fa_github_authenticator IMPLEMENTATION.
         code   = lv_http_code
         reason = lv_http_code_description ).
     IF lv_http_code <> 200.
-      RAISE EXCEPTION TYPE lcx_2fa_token_del_failed
+      RAISE EXCEPTION TYPE lcx_2fa_del_failed
         EXPORTING
           iv_error_text = |Could not fetch current 2FA authorizations: | &&
                           |{ lv_http_code } { lv_http_code_description }|.
@@ -9172,7 +9164,7 @@ CLASS lcl_2fa_github_authenticator IMPLEMENTATION.
           code   = lv_http_code
           reason = lv_http_code_description ).
       IF lv_http_code <> 204.
-        RAISE EXCEPTION TYPE lcx_2fa_token_del_failed
+        RAISE EXCEPTION TYPE lcx_2fa_del_failed
           EXPORTING
             iv_error_text = |Could not delete token '{ <lv_id> }': | &&
                             |{ lv_http_code } { lv_http_code_description }|.
@@ -9252,7 +9244,7 @@ CLASS lcl_2fa_github_authenticator IMPLEMENTATION.
 ENDCLASS.
 
 "! Static registry class to find <em>LIF_2FA_AUTHENTICATOR</em> instances
-CLASS lcl_2fa_authenticator_registry DEFINITION
+CLASS lcl_2fa_auth_registry DEFINITION
   FINAL
   CREATE PRIVATE.
 
@@ -9297,9 +9289,9 @@ CLASS lcl_2fa_authenticator_registry DEFINITION
         RAISING   lcx_exception.
 ENDCLASS.
 
-CLASS lcl_2fa_authenticator_registry IMPLEMENTATION.
+CLASS lcl_2fa_auth_registry IMPLEMENTATION.
   METHOD class_constructor.
-    DEFINE register.
+    DEFINE _register.
       CREATE OBJECT li_authenticator TYPE &1.
       INSERT li_authenticator INTO TABLE gt_registered_authenticators.
     END-OF-DEFINITION.
@@ -9309,7 +9301,7 @@ CLASS lcl_2fa_authenticator_registry IMPLEMENTATION.
     " If there are new authenticators these need to be added here manually.
     " I do not think there is an equivalent to SEO_INTERFACE_IMPLEM_GET_ALL for local classes
     " without invoking the compiler directly.
-    register: lcl_2fa_github_authenticator.
+    _register: lcl_2fa_github_auth.
   ENDMETHOD.
 
   METHOD get_authenticator_for_url.
@@ -9433,7 +9425,7 @@ ENDCLASS.
 *&  Include           ZABAPGIT_HTTP
 *&---------------------------------------------------------------------*
 
-CLASS lcl_proxy_authentication DEFINITION FINAL.
+CLASS lcl_proxy_auth DEFINITION FINAL.
 
   PUBLIC SECTION.
     CLASS-METHODS:
@@ -9449,7 +9441,7 @@ CLASS lcl_proxy_authentication DEFINITION FINAL.
 
 ENDCLASS.
 
-CLASS lcl_proxy_authentication IMPLEMENTATION.
+CLASS lcl_proxy_auth IMPLEMENTATION.
 
   METHOD run.
 
@@ -9881,7 +9873,7 @@ CLASS lcl_http IMPLEMENTATION.
     ENDIF.
 
     IF lo_settings->get_proxy_authentication( ) = abap_true.
-      lcl_proxy_authentication=>run( li_client ).
+      lcl_proxy_auth=>run( li_client ).
     ENDIF.
 
     CREATE OBJECT ro_client
@@ -9996,7 +9988,7 @@ CLASS lcl_http IMPLEMENTATION.
     ENDIF.
 
     " Offer two factor authentication if it is available and required
-    lcl_2fa_authenticator_registry=>use_2fa_if_required(
+    lcl_2fa_auth_registry=>use_2fa_if_required(
       EXPORTING
         iv_url      = iv_url
       CHANGING
@@ -11890,26 +11882,26 @@ CLASS lcl_objects_files DEFINITION.
 
 ENDCLASS.                    "lcl_objects_files DEFINITION
 
-INTERFACE lif_object_comparison_result.
+INTERFACE lif_comparison_result.
   METHODS:
     show_confirmation_dialog,
     is_result_complete_halt
       RETURNING VALUE(rv_response) TYPE abap_bool.
-
 ENDINTERFACE.
 
 "Null Object Pattern
-CLASS lcl_null_comparison_result DEFINITION FINAL.
+CLASS lcl_comparison_null DEFINITION FINAL.
   PUBLIC SECTION.
-    INTERFACES lif_object_comparison_result.
+    INTERFACES lif_comparison_result.
 ENDCLASS.
-CLASS lcl_null_comparison_result IMPLEMENTATION.
 
-  METHOD lif_object_comparison_result~is_result_complete_halt.
+CLASS lcl_comparison_null IMPLEMENTATION.
+
+  METHOD lif_comparison_result~is_result_complete_halt.
     rv_response = abap_false.
   ENDMETHOD.
 
-  METHOD lif_object_comparison_result~show_confirmation_dialog.
+  METHOD lif_comparison_result~show_confirmation_dialog.
     RETURN.
   ENDMETHOD.
 
@@ -11949,7 +11941,7 @@ INTERFACE lif_object.
   METHODS:
     compare_to_remote_version
       IMPORTING io_remote_version_xml       TYPE REF TO lcl_xml_input
-      RETURNING VALUE(ro_comparison_result) TYPE REF TO lif_object_comparison_result
+      RETURNING VALUE(ro_comparison_result) TYPE REF TO lif_comparison_result
       RAISING   lcx_exception.
 
   DATA: mo_files TYPE REF TO lcl_objects_files.
@@ -12441,7 +12433,7 @@ CLASS lcl_objects_bridge IMPLEMENTATION.
   ENDMETHOD.                    "class_constructor
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_objects_bridge IMPLEMENTATION
@@ -14249,17 +14241,16 @@ ENDCLASS.
 
 CLASS lcl_popups IMPLEMENTATION.
 
-  DEFINE _add_dialog_fld.
-    APPEND INITIAL LINE TO lt_fields ASSIGNING <ls_field>.
-    <ls_field>-tabname    = &1.                             "#EC NOTEXT
-    <ls_field>-fieldname  = &2.                             "#EC NOTEXT
-    <ls_field>-fieldtext  = &3.                             "#EC NOTEXT
-    <ls_field>-value      = &4.                             "#EC NOTEXT
-    <ls_field>-field_attr = &5.                             "#EC NOTEXT
-  END-OF-DEFINITION.
-
-
   METHOD popup_object.
+
+    DEFINE _add_dialog_fld.
+      APPEND INITIAL LINE TO lt_fields ASSIGNING <ls_field>.
+      <ls_field>-tabname    = &1.                           "#EC NOTEXT
+      <ls_field>-fieldname  = &2.                           "#EC NOTEXT
+      <ls_field>-fieldtext  = &3.                           "#EC NOTEXT
+      <ls_field>-value      = &4.                           "#EC NOTEXT
+      <ls_field>-field_attr = &5.                           "#EC NOTEXT
+    END-OF-DEFINITION.
 
     DATA: lv_returncode TYPE c,
           lt_fields     TYPE TABLE OF sval.
@@ -16020,7 +16011,7 @@ CLASS lcl_objects IMPLEMENTATION.
 
     DATA: ls_remote_file       TYPE lif_defs=>ty_file,
           lo_remote_version    TYPE REF TO lcl_xml_input,
-          lo_comparison_result TYPE REF TO lif_object_comparison_result.
+          lo_comparison_result TYPE REF TO lif_comparison_result.
 
 
     IF is_result-filename CS '.XML'.
@@ -16216,7 +16207,7 @@ CLASS lcl_object_acid IMPLEMENTATION.
   ENDMETHOD.                    "lif_object~jump
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_acid IMPLEMENTATION
@@ -16354,7 +16345,7 @@ CLASS lcl_object_auth IMPLEMENTATION.
   ENDMETHOD.                    "lif_object~jump
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_auth IMPLEMENTATION
@@ -16365,7 +16356,7 @@ ENDCLASS.                    "lcl_object_auth IMPLEMENTATION
 ****************************************************
 "This interface contains SAP object oriented functions that can't be put under test
 "(i.e. creating a Class in the system)
-INTERFACE lif_object_oriented_object_fnc.
+INTERFACE lif_oo_object_fnc.
   TYPES: BEGIN OF ty_includes,
            programm TYPE programm,
          END OF ty_includes,
@@ -16493,7 +16484,7 @@ INTERFACE lif_object_oriented_object_fnc.
         lcx_exception.
 ENDINTERFACE.
 
-CLASS lcl_oo_object_serializer DEFINITION.
+CLASS lcl_oo_serializer DEFINITION.
   PUBLIC SECTION.
 
     METHODS:
@@ -16552,7 +16543,7 @@ CLASS lcl_oo_object_serializer DEFINITION.
       CHANGING ct_source TYPE lif_defs=>ty_string_tt.
 ENDCLASS.
 
-CLASS lcl_oo_object_serializer IMPLEMENTATION.
+CLASS lcl_oo_serializer IMPLEMENTATION.
   METHOD serialize_abap_clif_source.
     TRY.
         rt_source = serialize_abap_new( is_class_key ).
@@ -16560,6 +16551,7 @@ CLASS lcl_oo_object_serializer IMPLEMENTATION.
         rt_source = serialize_abap_old( is_class_key ).
     ENDTRY.
   ENDMETHOD.
+
   METHOD serialize_abap_old.
 * for old ABAP AS versions
     DATA: lo_source TYPE REF TO cl_oo_source.
@@ -16748,11 +16740,13 @@ CLASS lcl_oo_object_serializer IMPLEMENTATION.
 
 ENDCLASS.
 
-CLASS lcl_object_oriented_base DEFINITION ABSTRACT.
+CLASS lcl_oo_base DEFINITION ABSTRACT.
   PUBLIC SECTION.
-    INTERFACES: lif_object_oriented_object_fnc.
+    INTERFACES: lif_oo_object_fnc.
+
   PRIVATE SECTION.
     DATA mv_skip_test_classes TYPE abap_bool.
+
     METHODS deserialize_abap_source_old
       IMPORTING is_clskey TYPE seoclskey
                 it_source TYPE lif_defs=>ty_string_tt
@@ -16765,13 +16759,13 @@ CLASS lcl_object_oriented_base DEFINITION ABSTRACT.
                 cx_sy_dyn_call_error.
 ENDCLASS.
 
-CLASS lcl_object_oriented_base IMPLEMENTATION.
+CLASS lcl_oo_base IMPLEMENTATION.
 
-  METHOD lif_object_oriented_object_fnc~create.
+  METHOD lif_oo_object_fnc~create.
     ASSERT 0 = 1. "Subclass responsibility
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~deserialize_source.
+  METHOD lif_oo_object_fnc~deserialize_source.
     TRY.
         deserialize_abap_source_new(
           is_clskey = is_key
@@ -16783,7 +16777,7 @@ CLASS lcl_object_oriented_base IMPLEMENTATION.
     ENDTRY.
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~generate_locals.
+  METHOD lif_oo_object_fnc~generate_locals.
     ASSERT 0 = 1. "Subclass responsibility
   ENDMETHOD.
 
@@ -16844,24 +16838,25 @@ CLASS lcl_object_oriented_base IMPLEMENTATION.
     CALL METHOD lo_source->('IF_OO_CLIF_SOURCE~UNLOCK').
 
   ENDMETHOD.
-  METHOD lif_object_oriented_object_fnc~add_to_activation_list.
+
+  METHOD lif_oo_object_fnc~add_to_activation_list.
     lcl_objects_activation=>add_item( is_item ).
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~update_descriptions.
+  METHOD lif_oo_object_fnc~update_descriptions.
     DELETE FROM seocompotx WHERE clsname = is_key-clsname. "#EC CI_SUBRC
     INSERT seocompotx FROM TABLE it_descriptions.         "#EC CI_SUBRC
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~insert_text_pool.
+  METHOD lif_oo_object_fnc~insert_text_pool.
     ASSERT 0 = 1. "Subclass responsibility
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~create_sotr.
+  METHOD lif_oo_object_fnc~create_sotr.
     ASSERT 0 = 1. "Subclass responsibility
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~create_documentation.
+  METHOD lif_oo_object_fnc~create_documentation.
     CALL FUNCTION 'DOCU_UPD'
       EXPORTING
         id       = 'CL'
@@ -16877,11 +16872,11 @@ CLASS lcl_object_oriented_base IMPLEMENTATION.
     ENDIF.
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~get_includes.
+  METHOD lif_oo_object_fnc~get_includes.
     ASSERT 0 = 1. "Subclass responsibility
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~exists.
+  METHOD lif_oo_object_fnc~exists.
     CALL FUNCTION 'SEO_CLASS_EXISTENCE_CHECK'
       EXPORTING
         clskey        = iv_object_name
@@ -16895,8 +16890,8 @@ CLASS lcl_object_oriented_base IMPLEMENTATION.
     rv_exists = boolc( sy-subrc <> 2 ).
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~serialize_abap.
-    DATA lo_oo_serializer TYPE REF TO lcl_oo_object_serializer.
+  METHOD lif_oo_object_fnc~serialize_abap.
+    DATA lo_oo_serializer TYPE REF TO lcl_oo_serializer.
     CREATE OBJECT lo_oo_serializer.
     CASE iv_type.
       WHEN seop_ext_class_locals_def.
@@ -16913,31 +16908,30 @@ CLASS lcl_object_oriented_base IMPLEMENTATION.
     ENDCASE.
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~get_skip_test_classes.
+  METHOD lif_oo_object_fnc~get_skip_test_classes.
     rv_skip = mv_skip_test_classes.
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~get_class_properties.
+  METHOD lif_oo_object_fnc~get_class_properties.
     ASSERT 0 = 1. "Subclass responsibility
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~get_interface_properties.
+  METHOD lif_oo_object_fnc~get_interface_properties.
     ASSERT 0 = 1. "Subclass responsibility
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~read_text_pool.
+  METHOD lif_oo_object_fnc~read_text_pool.
     ASSERT 0 = 1. "Subclass responsibility
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~read_sotr.
+  METHOD lif_oo_object_fnc~read_sotr.
     ASSERT 0 = 1. "Subclass responsibility
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~read_documentation.
-    DATA:
-      lv_state  TYPE dokstate,
-      lv_object TYPE dokhl-object,
-      lt_lines  TYPE tlinetab.
+  METHOD lif_oo_object_fnc~read_documentation.
+    DATA: lv_state  TYPE dokstate,
+          lv_object TYPE dokhl-object,
+          lt_lines  TYPE tlinetab.
 
     lv_object = iv_class_name.
 
@@ -16963,13 +16957,13 @@ CLASS lcl_object_oriented_base IMPLEMENTATION.
     ENDIF.
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~read_descriptions.
+  METHOD lif_oo_object_fnc~read_descriptions.
     SELECT * FROM seocompotx INTO TABLE rt_descriptions
       WHERE clsname = iv_obejct_name.                     "#EC CI_SUBRC
     DELETE rt_descriptions WHERE descript IS INITIAL.
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~delete.
+  METHOD lif_oo_object_fnc~delete.
     ASSERT 0 = 1. "Subclass responsibility
   ENDMETHOD.
 
@@ -16978,7 +16972,7 @@ ENDCLASS.
 "Backdoor injection for test purposes
 CLASS ltcl_oo_factory_injector DEFINITION DEFERRED.
 
-CLASS lcl_object_oriented_factory DEFINITION
+CLASS lcl_oo_factory DEFINITION
   FRIENDS ltcl_oo_factory_injector.
 
   PUBLIC SECTION.
@@ -16987,10 +16981,10 @@ CLASS lcl_object_oriented_factory DEFINITION
         IMPORTING
           iv_object_type                   TYPE tadir-object
         RETURNING
-          VALUE(ro_object_oriented_object) TYPE REF TO lif_object_oriented_object_fnc.
+          VALUE(ro_object_oriented_object) TYPE REF TO lif_oo_object_fnc.
   PRIVATE SECTION.
     CLASS-DATA:
-        go_object_oriented_object TYPE REF TO lif_object_oriented_object_fnc.
+        go_object_oriented_object TYPE REF TO lif_oo_object_fnc.
 ENDCLASS.
 "lcl_object_oriented_factory implementation is in include ZABAPGIT_OBJECT_OO_FACTORY.
 "Reason: In this way, clas and intf specific OO functions implementations can be done
@@ -17028,7 +17022,7 @@ CLASS lcl_object_clas DEFINITION INHERITING FROM lcl_objects_program.
     METHODS deserialize_docu
       IMPORTING io_xml TYPE REF TO lcl_xml_input
       RAISING   lcx_exception.
-    DATA mo_object_oriented_object_fct TYPE REF TO lif_object_oriented_object_fnc.
+    DATA mo_object_oriented_object_fct TYPE REF TO lif_oo_object_fnc.
   PRIVATE SECTION.
     DATA mv_skip_testclass TYPE abap_bool.
 
@@ -17391,36 +17385,36 @@ CLASS lcl_object_clas IMPLEMENTATION.
   ENDMETHOD.                    "deserialize
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
   METHOD constructor.
     super->constructor(
       is_item     = is_item
       iv_language = iv_language ).
-    mo_object_oriented_object_fct = lcl_object_oriented_factory=>make( iv_object_type = ms_item-obj_type ).
+    mo_object_oriented_object_fct = lcl_oo_factory=>make( iv_object_type = ms_item-obj_type ).
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_CLAS IMPLEMENTATION
 
+CLASS lcl_oo_class DEFINITION INHERITING FROM lcl_oo_base.
 
-CLASS lcl_object_oriented_class DEFINITION
-  INHERITING FROM lcl_object_oriented_base.
   PUBLIC SECTION.
     METHODS:
-      lif_object_oriented_object_fnc~create REDEFINITION,
-      lif_object_oriented_object_fnc~generate_locals REDEFINITION,
-      lif_object_oriented_object_fnc~insert_text_pool REDEFINITION,
-      lif_object_oriented_object_fnc~create_sotr REDEFINITION,
-      lif_object_oriented_object_fnc~get_includes REDEFINITION,
-      lif_object_oriented_object_fnc~get_class_properties REDEFINITION,
-      lif_object_oriented_object_fnc~read_text_pool REDEFINITION,
-      lif_object_oriented_object_fnc~read_sotr REDEFINITION,
-      lif_object_oriented_object_fnc~delete REDEFINITION.
+      lif_oo_object_fnc~create REDEFINITION,
+      lif_oo_object_fnc~generate_locals REDEFINITION,
+      lif_oo_object_fnc~insert_text_pool REDEFINITION,
+      lif_oo_object_fnc~create_sotr REDEFINITION,
+      lif_oo_object_fnc~get_includes REDEFINITION,
+      lif_oo_object_fnc~get_class_properties REDEFINITION,
+      lif_oo_object_fnc~read_text_pool REDEFINITION,
+      lif_oo_object_fnc~read_sotr REDEFINITION,
+      lif_oo_object_fnc~delete REDEFINITION.
 
 ENDCLASS.
-CLASS lcl_object_oriented_class IMPLEMENTATION.
-  METHOD lif_object_oriented_object_fnc~create.
+
+CLASS lcl_oo_class IMPLEMENTATION.
+  METHOD lif_oo_object_fnc~create.
     CALL FUNCTION 'SEO_CLASS_CREATE_COMPLETE'
       EXPORTING
         devclass        = iv_package
@@ -17439,7 +17433,8 @@ CLASS lcl_object_oriented_class IMPLEMENTATION.
       lcx_exception=>raise( 'error from SEO_CLASS_CREATE_COMPLETE' ).
     ENDIF.
   ENDMETHOD.
-  METHOD lif_object_oriented_object_fnc~generate_locals.
+
+  METHOD lif_oo_object_fnc~generate_locals.
     CALL FUNCTION 'SEO_CLASS_GENERATE_LOCALS'
       EXPORTING
         clskey                 = is_key
@@ -17458,7 +17453,7 @@ CLASS lcl_object_oriented_class IMPLEMENTATION.
       lcx_exception=>raise( 'error from generate_locals' ).
     ENDIF.
   ENDMETHOD.
-  METHOD lif_object_oriented_object_fnc~insert_text_pool.
+  METHOD lif_oo_object_fnc~insert_text_pool.
     DATA: lv_cp        TYPE program.
 
     lv_cp = cl_oo_classname_service=>get_classpool_name( iv_class_name ).
@@ -17475,7 +17470,7 @@ CLASS lcl_object_oriented_class IMPLEMENTATION.
                                  iv_name = lv_cp ).
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~create_sotr.
+  METHOD lif_oo_object_fnc~create_sotr.
     DATA: lt_sotr    TYPE lif_defs=>ty_sotr_tt,
           lt_objects TYPE sotr_objects,
           ls_paket   TYPE sotr_pack,
@@ -17535,7 +17530,7 @@ CLASS lcl_object_oriented_class IMPLEMENTATION.
     ENDLOOP.
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~get_includes.
+  METHOD lif_oo_object_fnc~get_includes.
 * note: includes returned might not exist
 * method cl_oo_classname_service=>GET_ALL_CLASS_INCLUDES does not exist in 702
 
@@ -17568,7 +17563,7 @@ CLASS lcl_object_oriented_class IMPLEMENTATION.
 
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~get_class_properties.
+  METHOD lif_oo_object_fnc~get_class_properties.
     CALL FUNCTION 'SEO_CLIF_GET'
       EXPORTING
         cifkey       = is_class_key
@@ -17587,7 +17582,7 @@ CLASS lcl_object_oriented_class IMPLEMENTATION.
     ENDIF.
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~read_text_pool.
+  METHOD lif_oo_object_fnc~read_text_pool.
     DATA:
      lv_cp TYPE program.
 
@@ -17595,7 +17590,7 @@ CLASS lcl_object_oriented_class IMPLEMENTATION.
     READ TEXTPOOL lv_cp INTO rt_text_pool LANGUAGE iv_language. "#EC CI_READ_REP
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~read_sotr.
+  METHOD lif_oo_object_fnc~read_sotr.
     DATA: lv_concept    TYPE sotr_head-concept,
           lt_seocompodf TYPE STANDARD TABLE OF seocompodf WITH DEFAULT KEY,
           ls_header     TYPE sotr_head,
@@ -17654,7 +17649,7 @@ CLASS lcl_object_oriented_class IMPLEMENTATION.
     ENDLOOP.
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~delete.
+  METHOD lif_oo_object_fnc~delete.
     CALL FUNCTION 'SEO_CLASS_DELETE_COMPLETE'
       EXPORTING
         clskey       = is_deletion_key
@@ -17861,7 +17856,7 @@ CLASS lcl_object_dcls IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.
@@ -18079,7 +18074,7 @@ CLASS lcl_object_ddls IMPLEMENTATION.
   ENDMETHOD.                    "deserialize
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.                    "lif_object~compare_to_remote_version
 
   METHOD open_adt_stob.
@@ -18296,7 +18291,7 @@ CLASS lcl_object_doct IMPLEMENTATION.
   ENDMETHOD.                    "serialize
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_msag IMPLEMENTATION
@@ -18463,7 +18458,7 @@ CLASS lcl_object_docv IMPLEMENTATION.
   ENDMETHOD.                    "serialize
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_msag IMPLEMENTATION
@@ -18834,7 +18829,7 @@ CLASS lcl_object_doma IMPLEMENTATION.
   ENDMETHOD.  "deserialize_texts
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_doma IMPLEMENTATION
@@ -19173,7 +19168,7 @@ CLASS lcl_object_dtel IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_dtel IMPLEMENTATION
@@ -19207,7 +19202,7 @@ ENDINTERFACE.                    "lif_object_enho
 *----------------------------------------------------------------------*
 *
 *----------------------------------------------------------------------*
-CLASS lcl_object_enho_wdyconf DEFINITION.
+CLASS lcl_object_enho_wdyc DEFINITION.
 
   PUBLIC SECTION.
     METHODS: constructor
@@ -19227,7 +19222,7 @@ ENDCLASS.                    "lcl_object_enho_wdyconf DEFINITION
 *----------------------------------------------------------------------*
 *
 *----------------------------------------------------------------------*
-CLASS lcl_object_enho_wdyconf IMPLEMENTATION.
+CLASS lcl_object_enho_wdyc IMPLEMENTATION.
 
   METHOD constructor.
     ms_item = is_item.
@@ -19817,7 +19812,7 @@ ENDCLASS.                    "lcl_object_enho_hook IMPLEMENTATION
 *----------------------------------------------------------------------*
 *
 *----------------------------------------------------------------------*
-CLASS lcl_object_enho_interface DEFINITION.
+CLASS lcl_object_enho_intf DEFINITION.
 
   PUBLIC SECTION.
     METHODS:
@@ -19838,7 +19833,7 @@ ENDCLASS.                    "lcl_object_enho_interface DEFINITION
 *----------------------------------------------------------------------*
 *
 *----------------------------------------------------------------------*
-CLASS lcl_object_enho_interface IMPLEMENTATION.
+CLASS lcl_object_enho_intf IMPLEMENTATION.
 
   METHOD constructor.
     ms_item  = is_item.
@@ -20163,12 +20158,12 @@ CLASS lcl_object_enho IMPLEMENTATION.
             is_item  = ms_item
             io_files = mo_files.
       WHEN cl_enh_tool_intf=>tooltype.
-        CREATE OBJECT ri_enho TYPE lcl_object_enho_interface
+        CREATE OBJECT ri_enho TYPE lcl_object_enho_intf
           EXPORTING
             is_item  = ms_item
             io_files = mo_files.
       WHEN cl_wdr_cfg_enhancement=>tooltype.
-        CREATE OBJECT ri_enho TYPE lcl_object_enho_wdyconf
+        CREATE OBJECT ri_enho TYPE lcl_object_enho_wdyc
           EXPORTING
             is_item  = ms_item
             io_files = mo_files.
@@ -20235,7 +20230,7 @@ CLASS lcl_object_enho IMPLEMENTATION.
   ENDMETHOD.                    "jump
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.                    "lif_object~compare_to_remote_version
 
 ENDCLASS.                    "lcl_object_enho IMPLEMENTATION
@@ -20458,7 +20453,7 @@ CLASS lcl_object_enhs IMPLEMENTATION.
   ENDMETHOD.  "jump
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS. "lcl_object_enhs
@@ -20653,7 +20648,7 @@ CLASS lcl_object_enqu IMPLEMENTATION.
   ENDMETHOD.                    "deserialize
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_enqu IMPLEMENTATION
@@ -20855,7 +20850,7 @@ CLASS lcl_object_ensc IMPLEMENTATION.
   ENDMETHOD.  "jump
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS. "lcl_object_ensc
@@ -21126,7 +21121,7 @@ CLASS lcl_object_form IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
   METHOD _build_extra_from_header.
@@ -21375,10 +21370,6 @@ ENDCLASS.                    "lcl_object_fugr DEFINITION
 *
 *----------------------------------------------------------------------*
 CLASS lcl_object_fugr IMPLEMENTATION.
-
-* function group SEUF
-* function group SIFP
-* function group SUNI
 
   METHOD lif_object~has_changed_since.
 
@@ -21952,6 +21943,10 @@ CLASS lcl_object_fugr IMPLEMENTATION.
 
   METHOD lif_object~serialize.
 
+* function group SEUF
+* function group SIFP
+* function group SUNI
+
     DATA: lt_functions    TYPE ty_function_tt,
           ls_progdir      TYPE ty_progdir,
           lv_program_name TYPE programm,
@@ -22059,7 +22054,7 @@ CLASS lcl_object_fugr IMPLEMENTATION.
   ENDMETHOD.                    "jump
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_fugr IMPLEMENTATION
@@ -22259,7 +22254,7 @@ CLASS lcl_object_iarp IMPLEMENTATION.
   ENDMETHOD.                    "lif_object~jump
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_iarp IMPLEMENTATION
@@ -22459,7 +22454,7 @@ CLASS lcl_object_iasp IMPLEMENTATION.
   ENDMETHOD.                    "lif_object~jump
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_iasp IMPLEMENTATION
@@ -22676,7 +22671,7 @@ CLASS lcl_object_iatu IMPLEMENTATION.
   ENDMETHOD.                    "lif_object~jump
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_iatu IMPLEMENTATION
@@ -22713,7 +22708,7 @@ CLASS lcl_object_intf DEFINITION FINAL INHERITING FROM lcl_objects_program.
       RAISING   lcx_exception.
 
   PRIVATE SECTION.
-    DATA mo_object_oriented_object_fct TYPE REF TO lif_object_oriented_object_fnc.
+    DATA mo_object_oriented_object_fct TYPE REF TO lif_oo_object_fnc.
 
     METHODS serialize_xml
       IMPORTING io_xml TYPE REF TO lcl_xml_output
@@ -22727,23 +22722,25 @@ CLASS lcl_object_intf IMPLEMENTATION.
     super->constructor(
       is_item     = is_item
       iv_language = iv_language ).
-    mo_object_oriented_object_fct = lcl_object_oriented_factory=>make( iv_object_type = ms_item-obj_type ).
+    mo_object_oriented_object_fct = lcl_oo_factory=>make( iv_object_type = ms_item-obj_type ).
   ENDMETHOD.
+
   METHOD lif_object~deserialize.
     deserialize_abap( io_xml     = io_xml
                       iv_package = iv_package ).
 
     deserialize_docu( io_xml ).
   ENDMETHOD.
+
   METHOD deserialize_abap.
     DATA: ls_vseointerf   TYPE vseointerf,
           lt_source       TYPE seop_source_string,
           lt_descriptions TYPE lif_defs=>ty_seocompotx_tt,
           ls_clskey       TYPE seoclskey.
+
+
     ls_clskey-clsname = ms_item-obj_name.
-
     lt_source = mo_files->read_abap( ).
-
     io_xml->read( EXPORTING iv_name = 'VSEOINTERF'
                   CHANGING cg_data = ls_vseointerf ).
 
@@ -22899,7 +22896,7 @@ CLASS lcl_object_intf IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
   METHOD lif_object~delete.
@@ -22946,18 +22943,18 @@ CLASS lcl_object_intf IMPLEMENTATION.
 ENDCLASS.
 
 
-CLASS lcl_object_oriented_interface DEFINITION
-  INHERITING FROM lcl_object_oriented_base.
+CLASS lcl_oo_interface DEFINITION
+  INHERITING FROM lcl_oo_base.
   PUBLIC SECTION.
     METHODS:
-      lif_object_oriented_object_fnc~create REDEFINITION,
-      lif_object_oriented_object_fnc~get_includes REDEFINITION,
-      lif_object_oriented_object_fnc~get_interface_properties REDEFINITION,
-      lif_object_oriented_object_fnc~delete REDEFINITION.
+      lif_oo_object_fnc~create REDEFINITION,
+      lif_oo_object_fnc~get_includes REDEFINITION,
+      lif_oo_object_fnc~get_interface_properties REDEFINITION,
+      lif_oo_object_fnc~delete REDEFINITION.
 ENDCLASS.
 
-CLASS lcl_object_oriented_interface IMPLEMENTATION.
-  METHOD lif_object_oriented_object_fnc~create.
+CLASS lcl_oo_interface IMPLEMENTATION.
+  METHOD lif_oo_object_fnc~create.
     CALL FUNCTION 'SEO_INTERFACE_CREATE_COMPLETE'
       EXPORTING
         devclass        = iv_package
@@ -22976,13 +22973,14 @@ CLASS lcl_object_oriented_interface IMPLEMENTATION.
       lcx_exception=>raise( 'Error from SEO_INTERFACE_CREATE_COMPLETE' ).
     ENDIF.
   ENDMETHOD.
-  METHOD lif_object_oriented_object_fnc~get_includes.
+
+  METHOD lif_oo_object_fnc~get_includes.
     DATA lv_interface_name TYPE seoclsname.
     lv_interface_name = iv_object_name.
     APPEND cl_oo_classname_service=>get_interfacepool_name( lv_interface_name ) TO rt_includes.
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~get_interface_properties.
+  METHOD lif_oo_object_fnc~get_interface_properties.
     CALL FUNCTION 'SEO_CLIF_GET'
       EXPORTING
         cifkey       = is_interface_key
@@ -23001,7 +22999,7 @@ CLASS lcl_object_oriented_interface IMPLEMENTATION.
     ENDIF.
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~delete.
+  METHOD lif_oo_object_fnc~delete.
     CALL FUNCTION 'SEO_INTERFACE_DELETE_COMPLETE'
       EXPORTING
         intkey       = is_deletion_key
@@ -23323,7 +23321,7 @@ CLASS lcl_object_msag IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_msag IMPLEMENTATION
@@ -23589,7 +23587,7 @@ CLASS lcl_object_nrob IMPLEMENTATION.
   ENDMETHOD.                    "jump
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_nrob IMPLEMENTATION
@@ -23745,7 +23743,7 @@ CLASS lcl_object_para IMPLEMENTATION.
   ENDMETHOD.                    "jump
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_para IMPLEMENTATION
@@ -24112,7 +24110,7 @@ CLASS lcl_object_pinf IMPLEMENTATION.
   ENDMETHOD.                    "jump
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_PINF IMPLEMENTATION
@@ -24281,7 +24279,7 @@ CLASS lcl_object_prog IMPLEMENTATION.
   ENDMETHOD.                    "lif_serialize~deserialize
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.                    "lif_object~compare_to_remote_version
 
   METHOD serialize_texts.
@@ -24599,9 +24597,7 @@ CLASS lcl_object_samc IMPLEMENTATION.
   ENDMETHOD.                    "jump
 
   METHOD lif_object~compare_to_remote_version.
-
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
-
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
   METHOD get_data_object.
@@ -24971,9 +24967,7 @@ CLASS lcl_object_sapc IMPLEMENTATION.
   ENDMETHOD.                    "jump
 
   METHOD lif_object~compare_to_remote_version.
-
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
-
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
   METHOD get_data_object.
@@ -25336,7 +25330,7 @@ CLASS lcl_object_sfbf IMPLEMENTATION.
   ENDMETHOD.                    "jump
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_SFBF IMPLEMENTATION
@@ -25570,7 +25564,7 @@ CLASS lcl_object_sfbs IMPLEMENTATION.
   ENDMETHOD.                    "jump
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_SFBS IMPLEMENTATION
@@ -25797,7 +25791,7 @@ CLASS lcl_object_sfpf IMPLEMENTATION.
   ENDMETHOD.                    "deserialize
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_doma IMPLEMENTATION
@@ -25970,7 +25964,7 @@ CLASS lcl_object_sfpi IMPLEMENTATION.
   ENDMETHOD.                    "deserialize
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_doma IMPLEMENTATION
@@ -26196,7 +26190,7 @@ CLASS lcl_object_sfsw IMPLEMENTATION.
   ENDMETHOD.                    "jump
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_sfsw IMPLEMENTATION
@@ -26242,17 +26236,6 @@ CLASS lcl_object_shi3 DEFINITION INHERITING FROM lcl_objects_super FINAL.
     METHODS clear_fields
       CHANGING cs_head  TYPE ttree
                ct_nodes TYPE hier_iface_t.
-
-*    METHODS regenerate_ids
-*      CHANGING ct_nodes TYPE hier_iface_t
-*               ct_refs  TYPE hier_ref_t
-*               ct_texts TYPE hier_texts_t
-*      RAISING  lcx_exception.
-*
-*    METHODS replace_id
-*      IMPORTING iv_id            TYPE clike
-*      RETURNING VALUE(rv_new_id) TYPE ttree-id
-*      RAISING   lcx_exception.
 
 ENDCLASS.                    "lcl_object_shi3 DEFINITION
 
@@ -26429,67 +26412,6 @@ CLASS lcl_object_shi3 IMPLEMENTATION.
 
   ENDMETHOD.                    "strip_stamps
 
-*  METHOD regenerate_ids.
-*
-*    DATA: ls_uid TYPE sys_uid,
-*          lt_map TYPE tt_id_map.
-*
-*    FIELD-SYMBOLS: <ls_node> LIKE LINE OF ct_nodes,
-*                   <ls_ref>  LIKE LINE OF ct_refs,
-*                   <ls_text> LIKE LINE OF ct_texts,
-*                   <ls_map>  LIKE LINE OF mt_map.
-*
-*    "Build map
-*    LOOP AT ct_nodes ASSIGNING <ls_node>.
-*      APPEND INITIAL LINE TO lt_map ASSIGNING <ls_map>.
-*      IF <ls_node>-parent_id IS INITIAL.
-*        <ls_map>-old = <ls_node>-node_id.
-*        <ls_map>-new = <ls_node>-node_id. "Root node
-*      ELSE.
-*        CALL FUNCTION 'STREE_GET_UNIQUE_ID'
-*          IMPORTING
-*            unique_id = ls_uid.
-*
-*        <ls_map>-old = <ls_node>-node_id.
-*        <ls_map>-new = ls_uid-id.
-*      ENDIF.
-*      <ls_node>-node_id = <ls_map>-new. "Replace id
-*    ENDLOOP.
-*
-*    mt_map = lt_map. "Sort
-*
-*    LOOP AT ct_nodes ASSIGNING <ls_node>.
-*      <ls_node>-parent_id  = replace_id( <ls_node>-parent_id ).
-*      <ls_node>-brother_id = replace_id( <ls_node>-brother_id ).
-*    ENDLOOP.
-*
-*    LOOP AT ct_refs ASSIGNING <ls_ref>.
-*      <ls_ref>-node_id = replace_id( <ls_ref>-node_id ).
-*    ENDLOOP.
-*
-*    LOOP AT ct_texts ASSIGNING <ls_text>.
-*      <ls_text>-node_id = replace_id( <ls_text>-node_id ).
-*    ENDLOOP.
-*
-*  ENDMETHOD.                    "regenerate_ids
-*
-*  METHOD replace_id.
-*
-*    DATA ls_map LIKE LINE OF mt_map.
-*
-*    IF iv_id IS INITIAL.
-*      RETURN. "No substitution for empty values
-*    ENDIF.
-*
-*    READ TABLE mt_map WITH TABLE KEY old = iv_id INTO ls_map.
-*    IF sy-subrc <> 0.
-*      lcx_exception=>raise( 'Cannot replace id, SHI3' ).
-*    ENDIF.
-*
-*    rv_new_id = ls_map-new.
-*
-*  ENDMETHOD.                    "replace_id
-
   METHOD lif_object~deserialize.
 
     DATA: ls_msg    TYPE hier_mess,
@@ -26509,10 +26431,6 @@ CLASS lcl_object_shi3 IMPLEMENTATION.
                   CHANGING  cg_data = lt_refs ).
     io_xml->read( EXPORTING iv_name = 'TREE_TEXTS'
                   CHANGING  cg_data = lt_texts ).
-
-*    regenerate_ids( CHANGING ct_nodes = lt_nodes
-*                             ct_refs  = lt_refs
-*                             ct_texts = lt_texts ).
 
     IF lif_object~exists( ) = abap_true.
       lif_object~delete( ).
@@ -26543,7 +26461,7 @@ CLASS lcl_object_shi3 IMPLEMENTATION.
   ENDMETHOD.                    "deserialize
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_shi3 IMPLEMENTATION
@@ -26759,7 +26677,7 @@ CLASS lcl_object_shlp IMPLEMENTATION.
   ENDMETHOD.                    "deserialize
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_shlp IMPLEMENTATION
@@ -27193,7 +27111,7 @@ CLASS lcl_object_sicf IMPLEMENTATION.
   ENDMETHOD.                    "jump
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_sicf IMPLEMENTATION
@@ -27536,7 +27454,7 @@ CLASS lcl_object_smim IMPLEMENTATION.
   ENDMETHOD.                    "jump
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_smim IMPLEMENTATION
@@ -27667,7 +27585,7 @@ CLASS lcl_object_splo IMPLEMENTATION.
   ENDMETHOD.                    "lif_object~jump
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_splo IMPLEMENTATION
@@ -27918,7 +27836,7 @@ CLASS lcl_object_ssfo IMPLEMENTATION.
   ENDMETHOD.                    "deserialize
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_ssfo IMPLEMENTATION
@@ -28133,7 +28051,7 @@ CLASS lcl_object_ssst IMPLEMENTATION.
   ENDMETHOD.                    "jump
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_ssst IMPLEMENTATION
@@ -28301,7 +28219,7 @@ CLASS lcl_object_styl IMPLEMENTATION.
   ENDMETHOD.                    "serialize
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_styl IMPLEMENTATION
@@ -28434,7 +28352,7 @@ CLASS lcl_object_susc IMPLEMENTATION.
   ENDMETHOD.                    "jump
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_susc IMPLEMENTATION
@@ -28617,7 +28535,7 @@ CLASS lcl_object_suso IMPLEMENTATION.
   ENDMETHOD.                    "jump
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_suso IMPLEMENTATION
@@ -28630,7 +28548,7 @@ ENDCLASS.                    "lcl_object_suso IMPLEMENTATION
 *&  Include  zabapgit_object_tabl_valid
 *&---------------------------------------------------------------------*
 
-CLASS lcl_object_tabl_validation DEFINITION FINAL.
+CLASS lcl_object_tabl_valid DEFINITION FINAL.
   PUBLIC SECTION.
     METHODS validate
       IMPORTING
@@ -28642,20 +28560,20 @@ CLASS lcl_object_tabl_validation DEFINITION FINAL.
         lcx_exception.
 ENDCLASS.
 
-CLASS lcl_tabl_validation_dialog DEFINITION FINAL.
+CLASS lcl_tabl_valid_dialog DEFINITION FINAL.
   PUBLIC SECTION.
     METHODS:
       constructor
         IMPORTING
           iv_message TYPE string.
-    INTERFACES: lif_object_comparison_result.
+    INTERFACES: lif_comparison_result.
+
   PRIVATE SECTION.
     DATA mv_message TYPE string.
     DATA mv_halt TYPE string.
-
 ENDCLASS.
 
-CLASS lcl_object_tabl_validation IMPLEMENTATION.
+CLASS lcl_object_tabl_valid IMPLEMENTATION.
 
   METHOD validate.
     DATA: lt_previous_table_fields TYPE TABLE OF dd03p,
@@ -28688,15 +28606,16 @@ CLASS lcl_object_tabl_validation IMPLEMENTATION.
 
 ENDCLASS.
 
-CLASS lcl_tabl_validation_dialog IMPLEMENTATION.
+CLASS lcl_tabl_valid_dialog IMPLEMENTATION.
   METHOD constructor.
     mv_message = iv_message.
   ENDMETHOD.
-  METHOD lif_object_comparison_result~is_result_complete_halt.
+
+  METHOD lif_comparison_result~is_result_complete_halt.
     rv_response = mv_halt.
   ENDMETHOD.
 
-  METHOD lif_object_comparison_result~show_confirmation_dialog.
+  METHOD lif_comparison_result~show_confirmation_dialog.
     DATA lv_answer TYPE string.
     TRY.
         lv_answer = lcl_popups=>popup_to_confirm(
@@ -28730,7 +28649,8 @@ CLASS lct_table_validation DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION S
       create_xmls
         RAISING
           lcx_exception.
-    DATA: mo_table_validator            TYPE REF TO lcl_object_tabl_validation,
+
+    DATA: mo_table_validator            TYPE REF TO lcl_object_tabl_valid,
           mo_previous_version_out_xml   TYPE REF TO lcl_xml_output,
           mo_previous_version_input_xml TYPE REF TO lcl_xml_input,
           mo_current_version_out_xml    TYPE REF TO lcl_xml_output,
@@ -29278,7 +29198,7 @@ CLASS lcl_object_tabl IMPLEMENTATION.
   ENDMETHOD.                    "deserialize
 
   METHOD lif_object~compare_to_remote_version.
-    DATA: lo_table_validation     TYPE REF TO lcl_object_tabl_validation,
+    DATA: lo_table_validation     TYPE REF TO lcl_object_tabl_valid,
           lo_local_version_output TYPE REF TO lcl_xml_output,
           lo_local_version_input  TYPE REF TO lcl_xml_input,
           lv_validation_text      TYPE string.
@@ -29297,11 +29217,11 @@ CLASS lcl_object_tabl IMPLEMENTATION.
       io_local_version  = lo_local_version_input ).
     IF lv_validation_text IS NOT INITIAL.
       lv_validation_text = |Database Table { ms_item-obj_name }: { lv_validation_text }|.
-      CREATE OBJECT ro_comparison_result TYPE lcl_tabl_validation_dialog
+      CREATE OBJECT ro_comparison_result TYPE lcl_tabl_valid_dialog
         EXPORTING
           iv_message = lv_validation_text.
     ELSE.
-      CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+      CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
     ENDIF.
   ENDMETHOD.
 
@@ -29508,7 +29428,7 @@ CLASS lcl_object_tobj IMPLEMENTATION.
   ENDMETHOD.                    "jump
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_tobj IMPLEMENTATION
@@ -29949,7 +29869,7 @@ CLASS lcl_object_tran IMPLEMENTATION.
   ENDMETHOD.                    "serialize
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
   METHOD serialize_texts.
@@ -30187,7 +30107,7 @@ CLASS lcl_object_ttyp IMPLEMENTATION.
   ENDMETHOD.                    "deserialize
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_ttyp IMPLEMENTATION
@@ -30397,14 +30317,12 @@ CLASS lcl_object_type IMPLEMENTATION.
   ENDMETHOD.                    "delete
 
   METHOD lif_object~jump.
-
     jump_se11( iv_radio = 'RSRD1-TYMA'
                iv_field = 'RSRD1-TYMA_VAL' ).
-
   ENDMETHOD.                    "jump
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_type IMPLEMENTATION
@@ -30611,7 +30529,7 @@ CLASS lcl_object_vcls IMPLEMENTATION.
   ENDMETHOD.                    "jump
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_vcls IMPLEMENTATION
@@ -30883,7 +30801,7 @@ CLASS lcl_object_view IMPLEMENTATION.
   ENDMETHOD.                    "deserialize
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.                    "lif_object~compare_to_remote_version
 
 ENDCLASS.                    "lcl_object_view IMPLEMENTATION
@@ -30930,7 +30848,7 @@ CLASS lcl_object_w3super DEFINITION INHERITING FROM lcl_objects_super ABSTRACT.
     DATA ms_key TYPE wwwdatatab.
 
     METHODS get_ext
-      IMPORTING it_params TYPE ty_wwwparams_tt
+      IMPORTING it_params     TYPE ty_wwwparams_tt
       RETURNING VALUE(rv_ext) TYPE string
       RAISING   lcx_exception.
 
@@ -30940,12 +30858,12 @@ CLASS lcl_object_w3super DEFINITION INHERITING FROM lcl_objects_super ABSTRACT.
       RAISING   lcx_exception.
 
     METHODS strip_params
-      CHANGING  ct_params TYPE ty_wwwparams_tt
-      RAISING   lcx_exception.
+      CHANGING ct_params TYPE ty_wwwparams_tt
+      RAISING  lcx_exception.
 
     METHODS find_param
-      IMPORTING it_params TYPE ty_wwwparams_tt
-                iv_name   TYPE w3_name
+      IMPORTING it_params       TYPE ty_wwwparams_tt
+                iv_name         TYPE w3_name
       RETURNING VALUE(rv_value) TYPE string
       RAISING   lcx_exception.
 
@@ -31328,7 +31246,7 @@ CLASS lcl_object_w3super IMPLEMENTATION.
   ENDMETHOD.  " find_param.
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS. "lcl_object_W3SUPER IMPLEMENTATION
@@ -31341,6 +31259,9 @@ ENDCLASS. "lcl_object_W3SUPER IMPLEMENTATION
 CLASS lcl_object_w3mi DEFINITION INHERITING FROM lcl_object_w3super FINAL.
 ENDCLASS.                    "lcl_object_W3MI DEFINITION
 
+CLASS lcl_object_w3mi IMPLEMENTATION.
+ENDCLASS.
+
 *----------------------------------------------------------------------*
 *       CLASS lcl_object_W3HT DEFINITION
 *----------------------------------------------------------------------*
@@ -31348,6 +31269,9 @@ ENDCLASS.                    "lcl_object_W3MI DEFINITION
 *----------------------------------------------------------------------*
 CLASS lcl_object_w3ht DEFINITION INHERITING FROM lcl_object_w3super FINAL.
 ENDCLASS.                    "lcl_object_W3HT DEFINITION
+
+CLASS lcl_object_w3ht IMPLEMENTATION.
+ENDCLASS.
 
 
 ****************************************************
@@ -31777,7 +31701,7 @@ CLASS lcl_object_wapa IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_tran IMPLEMENTATION
@@ -32024,7 +31948,7 @@ CLASS lcl_object_wdya IMPLEMENTATION.
   ENDMETHOD.                    "jump
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_wdya IMPLEMENTATION
@@ -32844,7 +32768,7 @@ CLASS lcl_object_wdyn IMPLEMENTATION.
   ENDMETHOD.                    "jump
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.                    "lif_object~compare_to_remote_version
 
 ENDCLASS.                    "lcl_object_wdyn IMPLEMENTATION
@@ -33299,7 +33223,7 @@ CLASS lcl_object_webi IMPLEMENTATION.
   ENDMETHOD.                    "lif_object~get_metadata
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_webi IMPLEMENTATION
@@ -33509,7 +33433,7 @@ CLASS lcl_object_xslt IMPLEMENTATION.
   ENDMETHOD.                    "lif_object~get_metadata
 
   METHOD lif_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE lcl_null_comparison_result.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
   ENDMETHOD.
 
 ENDCLASS.                    "lcl_object_xslt IMPLEMENTATION
@@ -33521,16 +33445,16 @@ ENDCLASS.                    "lcl_object_xslt IMPLEMENTATION
 *&---------------------------------------------------------------------*
 *&  Include  zabapgit_object_oo_factory
 *&---------------------------------------------------------------------*
-CLASS lcl_object_oriented_factory IMPLEMENTATION.
+CLASS lcl_oo_factory IMPLEMENTATION.
   METHOD make.
     IF go_object_oriented_object IS BOUND.
       ro_object_oriented_object = go_object_oriented_object.
       RETURN.
     ENDIF.
     IF iv_object_type = 'CLAS'.
-      CREATE OBJECT ro_object_oriented_object TYPE lcl_object_oriented_class.
+      CREATE OBJECT ro_object_oriented_object TYPE lcl_oo_class.
     ELSEIF iv_object_type = 'INTF'.
-      CREATE OBJECT ro_object_oriented_object TYPE lcl_object_oriented_interface.
+      CREATE OBJECT ro_object_oriented_object TYPE lcl_oo_interface.
     ENDIF.
   ENDMETHOD.
 ENDCLASS.
@@ -33540,12 +33464,12 @@ CLASS ltcl_oo_factory_injector DEFINITION FOR TESTING.
     CLASS-METHODS:
       inject
         IMPORTING
-          io_object_oriented_object TYPE REF TO lif_object_oriented_object_fnc.
+          io_object_oriented_object TYPE REF TO lif_oo_object_fnc.
 ENDCLASS.
 
 CLASS ltcl_oo_factory_injector IMPLEMENTATION.
   METHOD inject.
-    lcl_object_oriented_factory=>go_object_oriented_object = io_object_oriented_object.
+    lcl_oo_factory=>go_object_oriented_object = io_object_oriented_object.
   ENDMETHOD.
 ENDCLASS.
 
@@ -34552,11 +34476,11 @@ CLASS lcl_background DEFINITION FINAL.
         RETURNING VALUE(rv_comment) TYPE string,
       push
         IMPORTING io_repo     TYPE REF TO lcl_repo_online
-                  is_settings TYPE lcl_persistence_background=>ty_background
+                  is_settings TYPE lcl_persist_background=>ty_background
         RAISING   lcx_exception,
       push_fixed
         IMPORTING io_repo     TYPE REF TO lcl_repo_online
-                  is_settings TYPE lcl_persistence_background=>ty_background
+                  is_settings TYPE lcl_persist_background=>ty_background
         RAISING   lcx_exception,
       push_auto
         IMPORTING io_repo TYPE REF TO lcl_repo_online
@@ -34574,10 +34498,10 @@ CLASS lcl_background IMPLEMENTATION.
     ENDIF.
 
     CASE is_settings-amethod.
-      WHEN lcl_persistence_background=>c_amethod-fixed.
+      WHEN lcl_persist_background=>c_amethod-fixed.
         push_fixed( io_repo     = io_repo
                     is_settings = is_settings ).
-      WHEN lcl_persistence_background=>c_amethod-auto.
+      WHEN lcl_persist_background=>c_amethod-auto.
         push_auto( io_repo ).
       WHEN OTHERS.
         lcx_exception=>raise( 'unknown push method' ).
@@ -34707,9 +34631,9 @@ CLASS lcl_background IMPLEMENTATION.
 
     CONSTANTS: c_enq_type TYPE c LENGTH 12 VALUE 'BACKGROUND'.
 
-    DATA: lo_per       TYPE REF TO lcl_persistence_background,
+    DATA: lo_per       TYPE REF TO lcl_persist_background,
           lo_repo      TYPE REF TO lcl_repo_online,
-          lt_list      TYPE lcl_persistence_background=>tt_background,
+          lt_list      TYPE lcl_persist_background=>tt_background,
           lv_repo_name TYPE string.
 
     FIELD-SYMBOLS: <ls_list> LIKE LINE OF lt_list.
@@ -34745,9 +34669,9 @@ CLASS lcl_background IMPLEMENTATION.
         iv_password = <ls_list>-password ).
 
       CASE <ls_list>-method.
-        WHEN lcl_persistence_background=>c_method-pull.
+        WHEN lcl_persist_background=>c_method-pull.
           lo_repo->deserialize( ).
-        WHEN lcl_persistence_background=>c_method-push.
+        WHEN lcl_persist_background=>c_method-push.
           push( io_repo     = lo_repo
                 is_settings = <ls_list> ).
         WHEN OTHERS.
@@ -35024,7 +34948,7 @@ CLASS lcl_transport_objects IMPLEMENTATION.
 
 ENDCLASS.
 
-CLASS lcl_transport_to_branch DEFINITION.
+CLASS lcl_transport_2_branch DEFINITION.
   PUBLIC SECTION.
     METHODS:
       create
@@ -35055,7 +34979,7 @@ CLASS lcl_transport_to_branch DEFINITION.
         lcx_exception.
 ENDCLASS.
 
-CLASS lcl_transport_to_branch IMPLEMENTATION.
+CLASS lcl_transport_2_branch IMPLEMENTATION.
 
   METHOD create.
     DATA:
@@ -35677,20 +35601,19 @@ CLASS lcl_services_repo IMPLEMENTATION.
     CALL FUNCTION 'RS_TOOL_ACCESS'
       EXPORTING
         operation       = 'SHOW'
-        in_new_window   = 'X'
+        in_new_window   = abap_true
         object_name     = iv_package
         object_type     = 'DEVC'
-        with_objectlist = 'X'.
+        with_objectlist = abap_true.
 
   ENDMETHOD.  " open_se80.
-
 
   METHOD transport_to_branch.
     DATA:
       lo_repository          TYPE REF TO lcl_repo_online,
-      lo_transport_to_branch TYPE REF TO lcl_transport_to_branch,
+      lo_transport_to_branch TYPE REF TO lcl_transport_2_branch,
       lt_transport_headers   TYPE trwbo_request_headers,
-      lt_transport_objects               TYPE scts_tadir,
+      lt_transport_objects   TYPE scts_tadir,
       ls_transport_to_branch TYPE lif_defs=>ty_transport_to_branch.
 
     lo_repository ?= lcl_app=>repo_srv( )->get( iv_repository_key ).
@@ -35700,6 +35623,7 @@ CLASS lcl_services_repo IMPLEMENTATION.
     IF lt_transport_objects IS INITIAL.
       lcx_exception=>raise( 'Canceled or List of objects is empty ' ).
     ENDIF.
+
     ls_transport_to_branch = lcl_popups=>popup_to_create_transp_branch(
       lt_transport_headers ).
 
@@ -35974,25 +35898,25 @@ ENDCLASS. "lcl_services_db
 *&  Include           ZABAPGIT_SERVICES_BACKGROUND
 *&---------------------------------------------------------------------*
 
-CLASS lcl_services_background DEFINITION FINAL.
+CLASS lcl_services_bkg DEFINITION FINAL.
 
   PUBLIC SECTION.
 
     CLASS-METHODS update_task
-      IMPORTING is_bg_task TYPE lcl_persistence_background=>ty_background
+      IMPORTING is_bg_task TYPE lcl_persist_background=>ty_background
       RAISING   lcx_exception.
 
 ENDCLASS. "lcl_services_background
 
-CLASS lcl_services_background IMPLEMENTATION.
+CLASS lcl_services_bkg IMPLEMENTATION.
 
   METHOD update_task.
 
-    DATA lo_persistence TYPE REF TO lcl_persistence_background.
+    DATA lo_persistence TYPE REF TO lcl_persist_background.
 
     CREATE OBJECT lo_persistence.
 
-    IF is_bg_task-method = lcl_persistence_background=>c_method-nothing.
+    IF is_bg_task-method = lcl_persist_background=>c_method-nothing.
       lo_persistence->delete( is_bg_task-key ).
     ELSE.
       lo_persistence->modify( is_bg_task ).
@@ -37680,7 +37604,7 @@ CLASS lcl_gui_chunk_lib IMPLEMENTATION.
   METHOD render_repo_top.
 
     DATA: lo_repo_online TYPE REF TO lcl_repo_online,
-          lo_pback       TYPE REF TO lcl_persistence_background,
+          lo_pback       TYPE REF TO lcl_persist_background,
           lv_hint        TYPE string,
           lv_icon        TYPE string.
 
@@ -38215,7 +38139,7 @@ CLASS lcl_html_action_utils DEFINITION FINAL.
 
     CLASS-METHODS decode_bg_update
       IMPORTING iv_getdata       TYPE clike
-      RETURNING VALUE(rs_fields) TYPE lcl_persistence_background=>ty_background.
+      RETURNING VALUE(rs_fields) TYPE lcl_persist_background=>ty_background.
 
     CLASS-METHODS stage_decode
       IMPORTING iv_getdata TYPE clike
@@ -38496,7 +38420,7 @@ ENDCLASS.       "lcl_html_action_utils IMPLEMENTATION
 *&  Include           ZABAPGIT_REPO_BROWSER_UTIL
 *&---------------------------------------------------------------------*
 
-CLASS lcl_repo_content_browser DEFINITION FINAL.
+CLASS lcl_repo_content_list DEFINITION FINAL.
 
   PUBLIC SECTION.
 
@@ -38567,7 +38491,7 @@ DEFINE _reduce_state.
   ENDIF.
 END-OF-DEFINITION.
 
-CLASS lcl_repo_content_browser IMPLEMENTATION.
+CLASS lcl_repo_content_list IMPLEMENTATION.
 
   METHOD constructor.
     mo_repo = io_repo.
@@ -39991,7 +39915,7 @@ ENDCLASS.                       " ltcl_syntax_highlighter
 *&  Include           ZABAPGIT_VIEW_REPO
 *&---------------------------------------------------------------------*
 
-CLASS lcl_gui_view_repo_content DEFINITION FINAL.
+CLASS lcl_gui_view_repo DEFINITION FINAL.
   PUBLIC SECTION.
     INTERFACES lif_gui_page.
     ALIASES render FOR lif_gui_page~render.
@@ -40033,20 +39957,20 @@ CLASS lcl_gui_view_repo_content DEFINITION FINAL.
         RETURNING VALUE(ro_toolbar) TYPE REF TO lcl_html_toolbar
         RAISING   lcx_exception,
       render_item
-        IMPORTING is_item        TYPE lcl_repo_content_browser=>ty_repo_item
+        IMPORTING is_item        TYPE lcl_repo_content_list=>ty_repo_item
         RETURNING VALUE(ro_html) TYPE REF TO lcl_html
         RAISING   lcx_exception,
       render_item_files
-        IMPORTING is_item        TYPE lcl_repo_content_browser=>ty_repo_item
+        IMPORTING is_item        TYPE lcl_repo_content_list=>ty_repo_item
         RETURNING VALUE(ro_html) TYPE REF TO lcl_html,
       render_item_command
-        IMPORTING is_item        TYPE lcl_repo_content_browser=>ty_repo_item
+        IMPORTING is_item        TYPE lcl_repo_content_list=>ty_repo_item
         RETURNING VALUE(ro_html) TYPE REF TO lcl_html,
       get_item_class
-        IMPORTING is_item        TYPE lcl_repo_content_browser=>ty_repo_item
+        IMPORTING is_item        TYPE lcl_repo_content_list=>ty_repo_item
         RETURNING VALUE(rv_html) TYPE string,
       get_item_icon
-        IMPORTING is_item        TYPE lcl_repo_content_browser=>ty_repo_item
+        IMPORTING is_item        TYPE lcl_repo_content_list=>ty_repo_item
         RETURNING VALUE(rv_html) TYPE string,
       render_empty_package
         RETURNING VALUE(rv_html) TYPE string,
@@ -40056,7 +39980,7 @@ CLASS lcl_gui_view_repo_content DEFINITION FINAL.
 
     METHODS:
       build_obj_jump_link
-        IMPORTING is_item        TYPE lcl_repo_content_browser=>ty_repo_item
+        IMPORTING is_item        TYPE lcl_repo_content_list=>ty_repo_item
         RETURNING VALUE(rv_html) TYPE string,
       build_dir_jump_link
         IMPORTING iv_path        TYPE string
@@ -40064,7 +39988,7 @@ CLASS lcl_gui_view_repo_content DEFINITION FINAL.
 
 ENDCLASS. "lcl_gui_view_repo_content
 
-CLASS lcl_gui_view_repo_content IMPLEMENTATION.
+CLASS lcl_gui_view_repo IMPLEMENTATION.
 
   METHOD constructor.
 
@@ -40112,8 +40036,8 @@ CLASS lcl_gui_view_repo_content IMPLEMENTATION.
 
   METHOD lif_gui_page~render.
 
-    DATA: lt_repo_items TYPE lcl_repo_content_browser=>tt_repo_items,
-          lo_browser    TYPE REF TO lcl_repo_content_browser,
+    DATA: lt_repo_items TYPE lcl_repo_content_list=>tt_repo_items,
+          lo_browser    TYPE REF TO lcl_repo_content_list,
           lx_error      TYPE REF TO lcx_exception,
           lv_lstate     TYPE char1,
           lv_rstate     TYPE char1,
@@ -41422,7 +41346,7 @@ ENDCLASS.
 *&  Include           ZABAPGIT_PAGE_BACKGROUND
 *&---------------------------------------------------------------------*
 
-CLASS lcl_gui_page_background_run DEFINITION FINAL
+CLASS lcl_gui_page_bkg_run DEFINITION FINAL
     INHERITING FROM lcl_gui_page.
 
   PUBLIC SECTION.
@@ -41439,7 +41363,7 @@ CLASS lcl_gui_page_background_run DEFINITION FINAL
 
 ENDCLASS.
 
-CLASS lcl_gui_page_background_run IMPLEMENTATION.
+CLASS lcl_gui_page_bkg_run IMPLEMENTATION.
 
   METHOD constructor.
     super->constructor( ).
@@ -41492,16 +41416,16 @@ CLASS lcl_gui_page_background_run IMPLEMENTATION.
 
 ENDCLASS.
 
-CLASS lcl_gui_page_background DEFINITION FINAL
+CLASS lcl_gui_page_bkg DEFINITION FINAL
     INHERITING FROM lcl_gui_page.
 
   PUBLIC SECTION.
     METHODS:
-      constructor IMPORTING  iv_key TYPE lcl_persistence_repo=>ty_repo-key,
+      constructor IMPORTING iv_key TYPE lcl_persistence_repo=>ty_repo-key,
       lif_gui_page~on_event REDEFINITION.
 
   PROTECTED SECTION.
-    METHODS render_content        REDEFINITION.
+    METHODS render_content REDEFINITION.
 
   PRIVATE SECTION.
     DATA:
@@ -41516,7 +41440,7 @@ CLASS lcl_gui_page_background DEFINITION FINAL
 
 ENDCLASS.
 
-CLASS lcl_gui_page_background IMPLEMENTATION.
+CLASS lcl_gui_page_bkg IMPLEMENTATION.
 
   METHOD constructor.
 
@@ -41536,13 +41460,13 @@ CLASS lcl_gui_page_background IMPLEMENTATION.
 
   METHOD lif_gui_page~on_event.
 
-    DATA ls_bg_task     TYPE lcl_persistence_background=>ty_background.
+    DATA ls_bg_task TYPE lcl_persist_background=>ty_background.
 
     CASE iv_action.
       WHEN lif_defs=>gc_action-bg_update.
         ls_bg_task     = lcl_html_action_utils=>decode_bg_update( iv_getdata ).
         ls_bg_task-key = mv_key.
-        lcl_services_background=>update_task( ls_bg_task ).
+        lcl_services_bkg=>update_task( ls_bg_task ).
         ev_state = lif_defs=>gc_event_state-re_render.
     ENDCASE.
 
@@ -41551,8 +41475,8 @@ CLASS lcl_gui_page_background IMPLEMENTATION.
   METHOD render_data.
 
     DATA: lo_repo    TYPE REF TO lcl_repo_online,
-          lo_per     TYPE REF TO lcl_persistence_background,
-          lt_per     TYPE lcl_persistence_background=>tt_background,
+          lo_per     TYPE REF TO lcl_persist_background,
+          lt_per     TYPE lcl_persist_background=>tt_background,
           ls_per     LIKE LINE OF lt_per,
           lv_nothing TYPE string,
           lv_push    TYPE string,
@@ -41583,16 +41507,16 @@ CLASS lcl_gui_page_background IMPLEMENTATION.
     ENDIF.
 
     CASE ls_per-method.
-      WHEN lcl_persistence_background=>c_method-push.
+      WHEN lcl_persist_background=>c_method-push.
         lv_push = ' checked' ##NO_TEXT.
-      WHEN lcl_persistence_background=>c_method-pull.
+      WHEN lcl_persist_background=>c_method-pull.
         lv_pull = ' checked' ##NO_TEXT.
       WHEN OTHERS.
         lv_nothing = ' checked' ##NO_TEXT.
     ENDCASE.
 
     CASE ls_per-amethod.
-      WHEN lcl_persistence_background=>c_amethod-auto.
+      WHEN lcl_persist_background=>c_amethod-auto.
         lv_aauto = ' checked' ##NO_TEXT.
       WHEN OTHERS.
         lv_afixed = ' checked' ##NO_TEXT.
@@ -41976,7 +41900,7 @@ ENDCLASS.
 
 ***********************
 
-CLASS lcl_gui_page_branch_overview DEFINITION FINAL INHERITING FROM lcl_gui_page.
+CLASS lcl_gui_page_boverview DEFINITION FINAL INHERITING FROM lcl_gui_page.
 
   PUBLIC SECTION.
     METHODS:
@@ -42032,7 +41956,7 @@ CLASS lcl_gui_page_branch_overview DEFINITION FINAL INHERITING FROM lcl_gui_page
 
 ENDCLASS.                       "lcl_gui_page_explore DEFINITION
 
-CLASS lcl_gui_page_branch_overview IMPLEMENTATION.
+CLASS lcl_gui_page_boverview IMPLEMENTATION.
 
   METHOD constructor.
     super->constructor( ).
@@ -42277,7 +42201,7 @@ ENDCLASS.
 *&  Include           ZABAPGIT_PAGE_DB
 *&---------------------------------------------------------------------*
 
-CLASS lcl_gui_page_db_display DEFINITION FINAL INHERITING FROM lcl_gui_page.
+CLASS lcl_gui_page_db_dis DEFINITION FINAL INHERITING FROM lcl_gui_page.
 
   PUBLIC SECTION.
     METHODS: constructor
@@ -42295,7 +42219,7 @@ CLASS lcl_gui_page_db_display DEFINITION FINAL INHERITING FROM lcl_gui_page.
 
 ENDCLASS.
 
-CLASS lcl_gui_page_db_display IMPLEMENTATION.
+CLASS lcl_gui_page_db_dis IMPLEMENTATION.
 
   METHOD constructor.
     super->constructor( ).
@@ -42406,7 +42330,7 @@ CLASS lcl_gui_page_db_edit IMPLEMENTATION.
 
     " Banners & Toolbar
     ro_html->add( '<table class="toolbar"><tr><td>' ).
-    ro_html->add( lcl_gui_page_db_display=>render_record_banner( ms_key ) ).
+    ro_html->add( lcl_gui_page_db_dis=>render_record_banner( ms_key ) ).
     ro_html->add( '</td><td>' ).
     ro_html->add( lo_toolbar->render( iv_right = abap_true ) ).
     ro_html->add( '</td></tr></table>' ).
@@ -42894,10 +42818,6 @@ CLASS lcl_gui_page_diff IMPLEMENTATION.
 
   ENDMETHOD.  " build_menu.
 
-**********************************************************************
-* EVENT HANDLING
-**********************************************************************
-
   METHOD lif_gui_page~on_event.
 
     CASE iv_action.
@@ -42907,10 +42827,6 @@ CLASS lcl_gui_page_diff IMPLEMENTATION.
     ENDCASE.
 
   ENDMETHOD. "lif_gui_page~on_event
-
-**********************************************************************
-* RENDER LOGIC
-**********************************************************************
 
   METHOD render_content.
 
@@ -42959,10 +42875,6 @@ CLASS lcl_gui_page_diff IMPLEMENTATION.
     ro_html->add( '</div>' ).                               "#EC NOTEXT
 
   ENDMETHOD.  " render_diff
-
-**********************************************************************
-* CHUNKS
-**********************************************************************
 
   METHOD render_diff_head.
 
@@ -43276,7 +43188,7 @@ CLASS lcl_gui_page_main DEFINITION FINAL INHERITING FROM lcl_gui_page.
                END OF c_actions.
 
     DATA: mv_show         TYPE lcl_persistence_db=>ty_value,
-          mo_repo_content TYPE REF TO lcl_gui_view_repo_content.
+          mo_repo_content TYPE REF TO lcl_gui_view_repo.
 
     METHODS:
       test_changed_by
@@ -43364,10 +43276,6 @@ CLASS lcl_gui_page_main IMPLEMENTATION.
     MESSAGE lv_user TYPE 'S'.
 
   ENDMETHOD.
-
-**********************************************************************
-* RENDERING
-**********************************************************************
 
   METHOD render_content.
 
@@ -43462,7 +43370,7 @@ CLASS lcl_gui_page_main IMPLEMENTATION.
 
   METHOD render_toc.
 
-    DATA: lo_pback      TYPE REF TO lcl_persistence_background,
+    DATA: lo_pback      TYPE REF TO lcl_persist_background,
           lv_current    TYPE abap_bool,
           lv_key        TYPE lcl_persistence_repo=>ty_repo-key,
           lv_icon       TYPE string,
@@ -44279,7 +44187,7 @@ CLASS lcl_gui_page_settings IMPLEMENTATION.
 
   METHOD persist_settings.
 
-    DATA lo_settings_persistence TYPE REF TO lcl_persistence_settings.
+    DATA lo_settings_persistence TYPE REF TO lcl_persist_settings.
 
     lo_settings_persistence = lcl_app=>settings( ).
     lo_settings_persistence->modify( mo_settings ).
@@ -44307,7 +44215,7 @@ CLASS lcl_gui_page_settings IMPLEMENTATION.
 
   METHOD read_settings.
 
-    DATA lo_settings_persistence TYPE REF TO lcl_persistence_settings.
+    DATA lo_settings_persistence TYPE REF TO lcl_persist_settings.
 
     lo_settings_persistence = lcl_app=>settings( ).
     mo_settings = lo_settings_persistence->read( ).
@@ -44385,7 +44293,7 @@ ENDCLASS.
 *&  Include           ZABAPGIT_PAGE_REPO_SETTINGS
 *&---------------------------------------------------------------------*
 
-CLASS lcl_gui_page_repo_settings DEFINITION FINAL INHERITING FROM lcl_gui_page.
+CLASS lcl_gui_page_repo_sett DEFINITION FINAL INHERITING FROM lcl_gui_page.
   PUBLIC SECTION.
     METHODS:
       constructor
@@ -44408,9 +44316,9 @@ CLASS lcl_gui_page_repo_settings DEFINITION FINAL INHERITING FROM lcl_gui_page.
         RETURNING
           VALUE(rt_post_fields) TYPE tihttpnvp.
 
-ENDCLASS.                       "lcl_gui_page_debuginfo
+ENDCLASS.
 
-CLASS lcl_gui_page_repo_settings IMPLEMENTATION.
+CLASS lcl_gui_page_repo_sett IMPLEMENTATION.
 
   METHOD constructor.
     super->constructor( ).
@@ -44568,10 +44476,12 @@ CLASS lcl_gui_router IMPLEMENTATION.
       WHEN lif_defs=>gc_action-go_main                          " Go Main page
           OR lif_defs=>gc_action-go_explore                     " Go Explore page
           OR lif_defs=>gc_action-go_db                          " Go DB util page
-          OR lif_defs=>gc_action-go_background_run              " Go background run page
           OR lif_defs=>gc_action-go_debuginfo                   " Go debug info page
           OR lif_defs=>gc_action-go_settings.                   " Go settings page
         ei_page  = get_page_by_name( iv_action ).
+        ev_state = lif_defs=>gc_event_state-new_page.
+      WHEN lif_defs=>gc_action-go_background_run.              " Go background run page
+        CREATE OBJECT ei_page TYPE lcl_gui_page_bkg_run.
         ev_state = lif_defs=>gc_event_state-new_page.
       WHEN lif_defs=>gc_action-go_background.                   " Go Background page
         ei_page  = get_page_background( lv_key ).
@@ -44612,9 +44522,10 @@ CLASS lcl_gui_router IMPLEMENTATION.
 
         " DB actions
       WHEN lif_defs=>gc_action-db_display OR lif_defs=>gc_action-db_edit. " DB Display/Edit
-        ei_page  = get_page_db_by_name( iv_name = iv_action  iv_getdata = iv_getdata ).
+        ei_page = get_page_db_by_name( iv_name    = 'DB_DIS'
+                                       iv_getdata = iv_getdata ).
         ev_state = lif_defs=>gc_event_state-new_page.
-        IF iv_prev_page = 'PAGE_DB_DISPLAY'.
+        IF iv_prev_page = 'PAGE_DB_DIS'.
           ev_state = lif_defs=>gc_event_state-new_page_replacing.
         ENDIF.
       WHEN lif_defs=>gc_action-db_delete.                       " DB Delete
@@ -44666,7 +44577,7 @@ CLASS lcl_gui_router IMPLEMENTATION.
         lcl_services_repo=>transport_to_branch( iv_repository_key = lv_key ).
         ev_state = lif_defs=>gc_event_state-re_render.
       WHEN lif_defs=>gc_action-repo_settings.
-        CREATE OBJECT ei_page TYPE lcl_gui_page_repo_settings
+        CREATE OBJECT ei_page TYPE lcl_gui_page_repo_sett
           EXPORTING
             io_repo = lcl_app=>repo_srv( )->get( lv_key ).
         ev_state = lif_defs=>gc_event_state-new_page.
@@ -44764,7 +44675,7 @@ CLASS lcl_gui_router IMPLEMENTATION.
   METHOD get_page_branch_overview.
 
     DATA: lo_repo TYPE REF TO lcl_repo_online,
-          lo_page TYPE REF TO lcl_gui_page_branch_overview,
+          lo_page TYPE REF TO lcl_gui_page_boverview,
           lv_key  TYPE lcl_persistence_repo=>ty_repo-key.
 
 
@@ -44837,7 +44748,7 @@ CLASS lcl_gui_router IMPLEMENTATION.
 
   METHOD get_page_background.
 
-    CREATE OBJECT ri_page TYPE lcl_gui_page_background
+    CREATE OBJECT ri_page TYPE lcl_gui_page_bkg
       EXPORTING
         iv_key = iv_key.
 
@@ -45211,17 +45122,6 @@ ENDCLASS.                     "lcl_gui IMPLEMENTATION
 *       CLASS lcl_app IMPLEMENTATION
 *----------------------------------------------------------------------*
 CLASS lcl_app IMPLEMENTATION.
-
-  METHOD run.
-
-    IF sy-batch = abap_true.
-      lcl_background=>run( ).
-    ELSE.
-      gui( )->go_home( ).
-      CALL SELECTION-SCREEN 1001. " trigger screen
-    ENDIF.
-
-  ENDMETHOD.      "run
 
   METHOD gui.
 
@@ -47439,7 +47339,7 @@ CLASS ltcl_persistence_settings DEFINITION FINAL FOR TESTING
       read_run_critical_tests       FOR TESTING RAISING cx_static_check,
       read_not_found_critical_tests FOR TESTING RAISING cx_static_check.
     DATA:
-      mo_persistence_settings TYPE REF TO lcl_persistence_settings,
+      mo_persistence_settings TYPE REF TO lcl_persist_settings,
       mo_settings             TYPE REF TO lcl_settings.
 ENDCLASS.
 
@@ -47593,7 +47493,7 @@ ENDCLASS.
 
 CLASS ltd_spy_oo_object DEFINITION FOR TESTING.
   PUBLIC SECTION.
-    INTERFACES: lif_object_oriented_object_fnc.
+    INTERFACES: lif_oo_object_fnc.
     DATA:
       mv_package               TYPE devclass,
       mv_overwrite             TYPE seox_boolean,
@@ -47629,7 +47529,7 @@ CLASS ltd_spy_oo_object DEFINITION FOR TESTING.
 
 ENDCLASS.
 CLASS ltd_spy_oo_object IMPLEMENTATION.
-  METHOD lif_object_oriented_object_fnc~create.
+  METHOD lif_oo_object_fnc~create.
     DATA lv_properties_structure_name TYPE string.
     lv_properties_structure_name = cl_abap_typedescr=>describe_by_data( is_properties )->absolute_name.
     IF lv_properties_structure_name = cl_abap_typedescr=>describe_by_data( ms_interface_properties )->absolute_name.
@@ -47640,7 +47540,8 @@ CLASS ltd_spy_oo_object IMPLEMENTATION.
     mv_package                = iv_package.
     mv_overwrite              = iv_overwrite.
   ENDMETHOD.
-  METHOD lif_object_oriented_object_fnc~generate_locals.
+
+  METHOD lif_oo_object_fnc~generate_locals.
     ms_locals_key            = is_key.
     mt_local_definitions     = it_local_definitions.
     mt_local_implementations = it_local_implementations.
@@ -47649,21 +47550,21 @@ CLASS ltd_spy_oo_object IMPLEMENTATION.
     mv_force                 = iv_force.
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~deserialize_source.
+  METHOD lif_oo_object_fnc~deserialize_source.
     ms_deserialize_key = is_key.
     mt_source          = it_source.
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~add_to_activation_list.
+  METHOD lif_oo_object_fnc~add_to_activation_list.
     ms_item_to_activate = is_item.
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~update_descriptions.
+  METHOD lif_oo_object_fnc~update_descriptions.
     ms_description_key = is_key.
     mt_descriptions    = it_descriptions.
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~insert_text_pool.
+  METHOD lif_oo_object_fnc~insert_text_pool.
     mv_text_pool_inserted   = abap_true.
     mv_text_pool_class_name = iv_class_name.
     mt_text_pool            = it_text_pool.
@@ -47672,28 +47573,28 @@ CLASS ltd_spy_oo_object IMPLEMENTATION.
       exp = sy-langu ).
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~create_sotr.
+  METHOD lif_oo_object_fnc~create_sotr.
     mt_sotr = it_sotr.
     mt_sotr_package = iv_package.
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~create_documentation.
+  METHOD lif_oo_object_fnc~create_documentation.
     mv_docu_object_name = iv_object_name.
     mv_docu_language    = iv_language.
     mt_docu_lines       = it_lines.
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~get_includes.
+  METHOD lif_oo_object_fnc~get_includes.
     APPEND 'dummy' TO rt_includes.
     mv_get_includes_called = abap_true.
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~exists.
+  METHOD lif_oo_object_fnc~exists.
     mv_exists_called = abap_true.
     rv_exists = mv_exists.
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~serialize_abap.
+  METHOD lif_oo_object_fnc~serialize_abap.
     ms_serialize_key = is_class_key.
     CASE iv_type.
       WHEN seop_ext_class_locals_def.
@@ -47709,35 +47610,35 @@ CLASS ltd_spy_oo_object IMPLEMENTATION.
     ENDCASE.
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~get_class_properties.
+  METHOD lif_oo_object_fnc~get_class_properties.
     rs_class_properties = ms_class_properties.
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~get_interface_properties.
+  METHOD lif_oo_object_fnc~get_interface_properties.
     rs_interface_properties = ms_interface_properties.
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~read_text_pool.
+  METHOD lif_oo_object_fnc~read_text_pool.
     rt_text_pool = mt_text_pool.
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~read_sotr.
+  METHOD lif_oo_object_fnc~read_sotr.
     rt_sotr = mt_sotr.
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~read_documentation.
+  METHOD lif_oo_object_fnc~read_documentation.
     rt_lines = mt_docu_lines.
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~read_descriptions.
+  METHOD lif_oo_object_fnc~read_descriptions.
     rt_descriptions = mt_descriptions.
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~get_skip_test_classes.
+  METHOD lif_oo_object_fnc~get_skip_test_classes.
     rv_skip = mv_skip_test_classes.
   ENDMETHOD.
 
-  METHOD lif_object_oriented_object_fnc~delete.
+  METHOD lif_oo_object_fnc~delete.
     ms_delete_key = is_deletion_key.
   ENDMETHOD.
 
@@ -49304,7 +49205,7 @@ CLASS lcl_migrations IMPLEMENTATION.
   METHOD run.
 
     " Migrate STDTEXT to TABLE
-    lcl_persistence_migrate=>run( ).
+    lcl_persist_migrate=>run( ).
 
     " Rebuild local file checksums
     rebuild_local_checksums_161112( ).
@@ -49468,12 +49369,23 @@ FORM run.
 
   TRY.
       lcl_migrations=>run( ).
-      lcl_app=>run( ).
+      PERFORM open_gui.
     CATCH lcx_exception INTO lx_exception.
       MESSAGE lx_exception->mv_text TYPE 'E'.
   ENDTRY.
 
 ENDFORM.                    "run
+
+FORM open_gui RAISING lcx_exception.
+
+  IF sy-batch = abap_true.
+    lcl_background=>run( ).
+  ELSE.
+    lcl_app=>gui( )->go_home( ).
+    CALL SELECTION-SCREEN 1001. " trigger screen
+  ENDIF.
+
+ENDFORM.
 
 *&---------------------------------------------------------------------*
 *&      Form  branch_popup
@@ -49632,5 +49544,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-06-07T18:41:59.600Z
+* abapmerge - 2017-06-10T10:56:38.973Z
 ****************************************************
