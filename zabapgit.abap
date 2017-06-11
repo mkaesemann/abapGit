@@ -2,9 +2,6 @@ REPORT zabapgit LINE-SIZE 100.
 
 * See http://www.abapgit.org
 
-CONSTANTS: gc_xml_version  TYPE string VALUE 'v1.0.0',      "#EC NOTEXT
-           gc_abap_version TYPE string VALUE 'v1.37.2'.     "#EC NOTEXT
-
 ********************************************************************************
 * The MIT License (MIT)
 *
@@ -180,6 +177,9 @@ ENDCLASS. " lcl_password_dialog IMPLEMENTATION
 TYPE-POOLS seop.
 
 INTERFACE lif_defs.
+
+  CONSTANTS: gc_xml_version  TYPE string VALUE 'v1.0.0',    "#EC NOTEXT
+             gc_abap_version TYPE string VALUE 'v1.37.2'.   "#EC NOTEXT
 
   TYPES: ty_type    TYPE c LENGTH 6,
          ty_bitbyte TYPE c LENGTH 8,
@@ -1837,6 +1837,35 @@ ENDCLASS. "lcl_html_toolbar IMPLEMENTATION
 *&  Include           ZABAPGIT_UTIL
 *&---------------------------------------------------------------------*
 
+CLASS lcl_state DEFINITION.
+
+  PUBLIC SECTION.
+
+    CLASS-METHODS:
+      reduce
+        IMPORTING
+          iv_cur  TYPE char1
+        CHANGING
+          cv_prev TYPE char1.
+
+ENDCLASS.
+
+CLASS lcl_state IMPLEMENTATION.
+
+  METHOD reduce.
+
+    IF cv_prev = iv_cur OR iv_cur IS INITIAL.
+      RETURN. " No change
+    ELSEIF cv_prev IS INITIAL.
+      cv_prev = iv_cur.
+    ELSE.
+      cv_prev = lif_defs=>gc_state-mixed.
+    ENDIF.
+
+  ENDMETHOD.
+
+ENDCLASS.
+
 *----------------------------------------------------------------------*
 *       CLASS lcl_time DEFINITION
 *----------------------------------------------------------------------*
@@ -3099,7 +3128,7 @@ CLASS lcl_xml IMPLEMENTATION.
     li_element = mi_xml_doc->find_from_name_ns( depth = 0 name = c_abapgit_tag ).
     li_version = li_element->if_ixml_node~get_attributes(
       )->get_named_item_ns( c_attr_version ) ##no_text.
-    IF li_version->get_value( ) <> gc_xml_version.
+    IF li_version->get_value( ) <> lif_defs=>gc_xml_version.
       display_xml_error( ).
     ENDIF.
 
@@ -3114,7 +3143,7 @@ CLASS lcl_xml IMPLEMENTATION.
     DATA: lv_version TYPE string.
 
 
-    lv_version = |abapGit version: { gc_abap_version }|.
+    lv_version = |abapGit version: { lif_defs=>gc_abap_version }|.
 
     CALL FUNCTION 'POPUP_TO_INFORM'
       EXPORTING
@@ -3288,7 +3317,7 @@ CLASS lcl_xml_output IMPLEMENTATION.
     ENDIF.
 
     li_git = mi_xml_doc->create_element( c_abapgit_tag ).
-    li_git->set_attribute( name = c_attr_version value = gc_xml_version ).
+    li_git->set_attribute( name = c_attr_version value = lif_defs=>gc_xml_version ).
     IF NOT is_metadata IS INITIAL.
       li_git->set_attribute( name  = c_attr_serializer
                              value = is_metadata-class ).
@@ -8104,7 +8133,7 @@ CLASS lcl_news IMPLEMENTATION.
       CREATE OBJECT ro_instance
         EXPORTING
           iv_rawdata          = <file>-data
-          iv_current_version  = gc_abap_version " TODO refactor
+          iv_current_version  = lif_defs=>gc_abap_version " TODO refactor
           iv_lastseen_version = normalize_version( lv_last_seen ).
     ENDIF.
 
@@ -9837,7 +9866,7 @@ CLASS lcl_http IMPLEMENTATION.
   METHOD get_agent.
 
 * bitbucket require agent prefix = "git/"
-    rv_agent = 'git/abapGit-' && gc_abap_version.
+    rv_agent = 'git/abapGit-' && lif_defs=>gc_abap_version.
 
   ENDMETHOD.
 
@@ -38056,14 +38085,14 @@ CLASS lcl_gui_page DEFINITION ABSTRACT.
   PRIVATE SECTION.
 
     METHODS html_head
-      RETURNING VALUE(ro_html)   TYPE REF TO lcl_html.
+      RETURNING VALUE(ro_html) TYPE REF TO lcl_html.
 
     METHODS title
       RETURNING VALUE(ro_html) TYPE REF TO lcl_html.
 
 
     METHODS footer
-      RETURNING VALUE(ro_html)    TYPE REF TO lcl_html.
+      RETURNING VALUE(ro_html) TYPE REF TO lcl_html.
 
     METHODS redirect
       RETURNING VALUE(ro_html) TYPE REF TO lcl_html.
@@ -38128,7 +38157,7 @@ CLASS lcl_gui_page IMPLEMENTATION.
     ro_html->add( '<table class="w100"><tr>' ).             "#EC NOTEXT
 
     ro_html->add( '<td class="w40"></td>' ).                "#EC NOTEXT
-    ro_html->add( |<td><span class="version">{ gc_abap_version }</span></td>| ). "#EC NOTEXT
+    ro_html->add( |<td><span class="version">{ lif_defs=>gc_abap_version }</span></td>| ). "#EC NOTEXT
     ro_html->add( '<td id="debug-output" class="w40"></td>' ). "#EC NOTEXT
 
     ro_html->add( '</tr></table>' ).                        "#EC NOTEXT
@@ -38140,13 +38169,13 @@ CLASS lcl_gui_page IMPLEMENTATION.
 
     CREATE OBJECT ro_html.
 
-    ro_html->add( '<!DOCTYPE html>' ).                "#EC NOTEXT
-    ro_html->add( '<html>' ).                         "#EC NOTEXT
-    ro_html->add( '<head>' ).                         "#EC NOTEXT
+    ro_html->add( '<!DOCTYPE html>' ).                      "#EC NOTEXT
+    ro_html->add( '<html>' ).                               "#EC NOTEXT
+    ro_html->add( '<head>' ).                               "#EC NOTEXT
     ro_html->add( |<meta http-equiv="refresh" content="0; url={
-                  ms_control-redirect_url }">| ). "#EC NOTEXT
-    ro_html->add( '</head>').                         "#EC NOTEXT
-    ro_html->add( '</html>').                         "#EC NOTEXT
+                  ms_control-redirect_url }">| ).           "#EC NOTEXT
+    ro_html->add( '</head>' ).                              "#EC NOTEXT
+    ro_html->add( '</html>' ).                              "#EC NOTEXT
 
   ENDMETHOD.
 
@@ -38189,7 +38218,7 @@ CLASS lcl_gui_page IMPLEMENTATION.
       ro_html->add( '</script>' ).
     ENDIF.
 
-    ro_html->add( '</html>').                               "#EC NOTEXT
+    ro_html->add( '</html>' ).                              "#EC NOTEXT
 
   ENDMETHOD.  " lif_gui_page~render.
 
@@ -38624,17 +38653,6 @@ CLASS lcl_repo_content_list DEFINITION FINAL.
 
 ENDCLASS. "lcl_repo_content_browser
 
-DEFINE _reduce_state.
-  " &1 - prev, &2 - cur
-  IF &1 = &2 OR &2 IS INITIAL.
-    ASSERT 1 = 1. " No change
-  ELSEIF &1 IS INITIAL.
-    &1 = &2.
-  ELSE.
-    &1 = lif_defs=>gc_state-mixed.
-  ENDIF.
-END-OF-DEFINITION.
-
 CLASS lcl_repo_content_list IMPLEMENTATION.
 
   METHOD constructor.
@@ -38708,8 +38726,11 @@ CLASS lcl_repo_content_list IMPLEMENTATION.
       ENDAT.
 
       ls_folder-changes = ls_folder-changes + <item>-changes.
-      _reduce_state ls_folder-lstate <item>-lstate.
-      _reduce_state ls_folder-rstate <item>-rstate.
+
+      lcl_state=>reduce( EXPORTING iv_cur = <item>-lstate
+                         CHANGING cv_prev = ls_folder-lstate ).
+      lcl_state=>reduce( EXPORTING iv_cur = <item>-rstate
+                         CHANGING cv_prev = ls_folder-rstate ).
 
       AT END OF path.
         APPEND ls_folder TO ct_repo_items.
@@ -38791,8 +38812,11 @@ CLASS lcl_repo_content_list IMPLEMENTATION.
         IF ls_file-is_changed = abap_true.
           <ls_repo_item>-sortkey = c_sortkey-changed. " Changed files
           <ls_repo_item>-changes = <ls_repo_item>-changes + 1.
-          _reduce_state <ls_repo_item>-lstate ls_file-lstate.
-          _reduce_state <ls_repo_item>-rstate ls_file-rstate.
+
+          lcl_state=>reduce( EXPORTING iv_cur = ls_file-lstate
+                             CHANGING cv_prev = <ls_repo_item>-lstate ).
+          lcl_state=>reduce( EXPORTING iv_cur = <ls_repo_item>-rstate
+                             CHANGING cv_prev = ls_file-rstate ).
         ENDIF.
       ENDIF.
 
@@ -40226,8 +40250,10 @@ CLASS lcl_gui_view_repo IMPLEMENTATION.
                                           iv_changes_only = mv_changes_only ).
 
         LOOP AT lt_repo_items ASSIGNING <ls_item>.
-          _reduce_state lv_lstate <ls_item>-lstate.
-          _reduce_state lv_rstate <ls_item>-rstate.
+          lcl_state=>reduce( EXPORTING iv_cur = <ls_item>-lstate
+                             CHANGING cv_prev = lv_lstate ).
+          lcl_state=>reduce( EXPORTING iv_cur = <ls_item>-rstate
+                             CHANGING cv_prev = lv_rstate ).
         ENDLOOP.
 
         ro_html->add( render_head_line( iv_lstate = lv_lstate
@@ -41687,18 +41713,18 @@ CLASS lcl_gui_page_bkg IMPLEMENTATION.
     ro_html->add( lcl_gui_chunk_lib=>render_repo_top( lo_repo ) ).
     ro_html->add( '<br>' ).
 
-    ro_html->add( '<u>Method</u><br>' )  ##NO_TEXT.
+    ro_html->add( '<u>Method</u><br>' ) ##NO_TEXT.
     ro_html->add( |<form method="get" action="sapevent:{ lif_defs=>gc_action-bg_update }">| ).
     ro_html->add( '<input type="radio" name="method" value="nothing"' &&
-      lv_nothing && '>Do nothing<br>' )  ##NO_TEXT.
+      lv_nothing && '>Do nothing<br>' ) ##NO_TEXT.
     ro_html->add( '<input type="radio" name="method" value="push"' &&
-      lv_push && '>Automatic push<br>' )  ##NO_TEXT.
+      lv_push && '>Automatic push<br>' ) ##NO_TEXT.
     ro_html->add( '<input type="radio" name="method" value="pull"' &&
-      lv_pull && '>Automatic pull<br>' )  ##NO_TEXT.
+      lv_pull && '>Automatic pull<br>' ) ##NO_TEXT.
     ro_html->add( '<br>' ).
 
-    ro_html->add( '<u>HTTP Authentication, optional</u><br>' )  ##NO_TEXT.
-    ro_html->add( '(password will be saved in clear text)<br>' )  ##NO_TEXT.
+    ro_html->add( '<u>HTTP Authentication, optional</u><br>' ) ##NO_TEXT.
+    ro_html->add( '(password will be saved in clear text)<br>' ) ##NO_TEXT.
     ro_html->add( '<table>' ).
     ro_html->add( '<tr>' ).
     ro_html->add( '<td>Username:</td>' ).
@@ -41716,9 +41742,9 @@ CLASS lcl_gui_page_bkg IMPLEMENTATION.
 
     ro_html->add( '<u>Commit author</u><br>' ).
     ro_html->add( '<input type="radio" name="amethod" value="fixed"' &&
-      lv_afixed && '>Fixed<br>' )  ##NO_TEXT.
+      lv_afixed && '>Fixed<br>' ) ##NO_TEXT.
     ro_html->add( '<input type="radio" name="amethod" value="auto"' &&
-      lv_aauto && '>Automatic<br>' )  ##NO_TEXT.
+      lv_aauto && '>Automatic<br>' ) ##NO_TEXT.
     ro_html->add( '<br>' ).
 
     ro_html->add( '<table>' ).
@@ -44069,8 +44095,8 @@ CLASS lcl_gui_page_debuginfo IMPLEMENTATION.
 
     CREATE OBJECT ro_html.
 
-    ro_html->add( |<p>abapGit version: { gc_abap_version }</p>| ).
-    ro_html->add( |<p>XML version:     { gc_xml_version }</p>| ).
+    ro_html->add( |<p>abapGit version: { lif_defs=>gc_abap_version }</p>| ).
+    ro_html->add( |<p>XML version:     { lif_defs=>gc_xml_version }</p>| ).
     ro_html->add( |<p>GUI version:     { lv_gui_version }</p>| ).
     ro_html->add( |<p>LCL_TIME:        { lcl_time=>get( ) }</p>| ).
     ro_html->add( |<p>SY time:         { sy-datum } { sy-uzeit } { sy-tzone }</p>| ).
@@ -45128,7 +45154,7 @@ CLASS lcl_gui IMPLEMENTATION.
 
   METHOD call_page.
 
-    DATA: ls_stack  TYPE ty_page_stack.
+    DATA: ls_stack TYPE ty_page_stack.
 
     IF iv_replacing = abap_false AND NOT mi_cur_page IS INITIAL.
       ls_stack-page     = mi_cur_page.
@@ -45223,11 +45249,11 @@ CLASS lcl_gui IMPLEMENTATION.
 
       CALL FUNCTION 'SCMS_STRING_TO_XSTRING'
         EXPORTING
-          text      = iv_text
+          text   = iv_text
         IMPORTING
-          buffer    = lv_xstr
+          buffer = lv_xstr
         EXCEPTIONS
-          OTHERS    = 1.
+          OTHERS = 1.
       ASSERT sy-subrc = 0.
 
     ELSE. " Raw input
@@ -49740,5 +49766,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-06-10T13:45:35.402Z
+* abapmerge - 2017-06-11T09:52:56.944Z
 ****************************************************
