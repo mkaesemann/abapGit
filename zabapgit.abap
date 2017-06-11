@@ -38802,11 +38802,11 @@ CLASS lcl_repo_content_list IMPLEMENTATION.
       ENDAT.
 
       IF <status>-filename IS NOT INITIAL.
-        ls_file-path        = <status>-path.
-        ls_file-filename    = <status>-filename.
-        ls_file-is_changed  = boolc( <status>-match = abap_false ). " TODO refactor
-        ls_file-rstate      = <status>-rstate.
-        ls_file-lstate      = <status>-lstate.
+        ls_file-path       = <status>-path.
+        ls_file-filename   = <status>-filename.
+        ls_file-is_changed = boolc( <status>-match = abap_false ). " TODO refactor
+        ls_file-rstate     = <status>-rstate.
+        ls_file-lstate     = <status>-lstate.
         APPEND ls_file TO <ls_repo_item>-files.
 
         IF ls_file-is_changed = abap_true.
@@ -38815,8 +38815,8 @@ CLASS lcl_repo_content_list IMPLEMENTATION.
 
           lcl_state=>reduce( EXPORTING iv_cur = ls_file-lstate
                              CHANGING cv_prev = <ls_repo_item>-lstate ).
-          lcl_state=>reduce( EXPORTING iv_cur = <ls_repo_item>-rstate
-                             CHANGING cv_prev = ls_file-rstate ).
+          lcl_state=>reduce( EXPORTING iv_cur = ls_file-rstate
+                             CHANGING cv_prev = <ls_repo_item>-rstate ).
         ENDIF.
       ENDIF.
 
@@ -49770,5 +49770,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-06-11T10:18:27.233Z
+* abapmerge - 2017-06-11T10:33:38.087Z
 ****************************************************
