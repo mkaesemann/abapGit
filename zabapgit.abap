@@ -179,7 +179,7 @@ TYPE-POOLS seop.
 INTERFACE lif_defs.
 
   CONSTANTS: gc_xml_version  TYPE string VALUE 'v1.0.0',    "#EC NOTEXT
-             gc_abap_version TYPE string VALUE 'v1.37.2'.   "#EC NOTEXT
+             gc_abap_version TYPE string VALUE 'v1.37.3'.   "#EC NOTEXT
 
   TYPES: ty_type    TYPE c LENGTH 6,
          ty_bitbyte TYPE c LENGTH 8,
@@ -369,7 +369,7 @@ INTERFACE lif_defs.
 
   CONSTANTS: gc_root_dir     TYPE string VALUE '/',
              gc_dot_abapgit  TYPE string VALUE '.abapgit.xml' ##NO_TEXT,
-             gc_author_regex TYPE string VALUE '^([\w\s\.@\-_1-9]+) <(.*)> (\d{10})\s?.\d{4}$' ##NO_TEXT.
+             gc_author_regex TYPE string VALUE '^([\\\w\s\.@\-_1-9]+) <(.*)> (\d{10})\s?.\d{4}$' ##NO_TEXT.
 
   CONSTANTS: BEGIN OF gc_action,
                repo_clone               TYPE string VALUE 'repo_clone',
@@ -49809,5 +49809,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-06-27T17:13:53.669Z
+* abapmerge - 2017-06-29T06:04:24.154Z
 ****************************************************
