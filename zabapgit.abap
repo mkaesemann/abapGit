@@ -13910,9 +13910,9 @@ CLASS lcl_tadir IMPLEMENTATION.
 
   METHOD build.
 
-    DATA: lt_tadir    TYPE lif_defs=>ty_tadir_tt,
-          lt_tdevc    TYPE STANDARD TABLE OF tdevc,
-          lv_path     TYPE string.
+    DATA: lt_tadir TYPE lif_defs=>ty_tadir_tt,
+          lt_tdevc TYPE STANDARD TABLE OF tdevc,
+          lv_path  TYPE string.
 
     FIELD-SYMBOLS: <ls_tdevc> LIKE LINE OF lt_tdevc,
                    <ls_tadir> LIKE LINE OF rt_tadir.
@@ -13921,6 +13921,7 @@ CLASS lcl_tadir IMPLEMENTATION.
     SELECT * FROM tadir
       INTO CORRESPONDING FIELDS OF TABLE rt_tadir
       WHERE devclass = iv_package
+      AND pgmid = 'R3TR'
       AND object <> 'DEVC'
       AND object <> 'SOTR'
       AND object <> 'SFB1'
@@ -49951,5 +49952,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-07-05T18:00:42.725Z
+* abapmerge - 2017-07-05T18:02:42.090Z
 ****************************************************
