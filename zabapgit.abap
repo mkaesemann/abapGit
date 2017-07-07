@@ -10432,7 +10432,7 @@ CLASS lcl_git_transport IMPLEMENTATION.
               lcl_git_utils=>get_null( ) &&
               ` ` &&
               lv_cap_list &&
-              lif_defs=>gc_newline.                                   "#EC NOTEXT
+              lif_defs=>gc_newline.                         "#EC NOTEXT
     lv_cmd_pkt = lcl_git_utils=>pkt_string( lv_line ).
 
     lv_buffer = lv_cmd_pkt && '0000'.
@@ -10528,17 +10528,17 @@ CLASS lcl_git_transport IMPLEMENTATION.
         lv_capa = 'side-band-64k no-progress multi_ack agent='
           && lcl_http=>get_agent( ) ##NO_TEXT.
         lv_line = 'want' && ` ` && <ls_branch>-sha1
-          && ` ` && lv_capa && lif_defs=>gc_newline.                  "#EC NOTEXT
+          && ` ` && lv_capa && lif_defs=>gc_newline.        "#EC NOTEXT
       ELSE.
         lv_line = 'want' && ` ` && <ls_branch>-sha1
-          && lif_defs=>gc_newline.                                    "#EC NOTEXT
+          && lif_defs=>gc_newline.                          "#EC NOTEXT
       ENDIF.
       lv_buffer = lv_buffer && lcl_git_utils=>pkt_string( lv_line ).
     ENDLOOP.
 
     IF iv_deepen = abap_true.
       lv_buffer = lv_buffer && lcl_git_utils=>pkt_string( 'deepen 1'
-        && lif_defs=>gc_newline ).                                    "#EC NOTEXT
+        && lif_defs=>gc_newline ).                          "#EC NOTEXT
     ENDIF.
 
     lv_buffer = lv_buffer
@@ -10863,17 +10863,17 @@ CLASS lcl_git_pack IMPLEMENTATION.
 
   METHOD delta.
 
-    DATA: lv_delta   TYPE xstring,
-          lv_base    TYPE xstring,
-          lv_result  TYPE xstring,
+    DATA: lv_delta  TYPE xstring,
+          lv_base   TYPE xstring,
+          lv_result TYPE xstring,
 *          lv_bitbyte TYPE ty_bitbyte,
-          lv_offset  TYPE i,
-          lv_sha1    TYPE lif_defs=>ty_sha1,
-          ls_object  LIKE LINE OF ct_objects,
-          lv_len     TYPE i,
-          lv_org     TYPE x,
+          lv_offset TYPE i,
+          lv_sha1   TYPE lif_defs=>ty_sha1,
+          ls_object LIKE LINE OF ct_objects,
+          lv_len    TYPE i,
+          lv_org    TYPE x,
 *          lv_i       TYPE i,
-          lv_x       TYPE x.
+          lv_x      TYPE x.
 
     FIELD-SYMBOLS: <ls_object> LIKE LINE OF ct_objects.
 
@@ -11211,9 +11211,9 @@ CLASS lcl_git_pack IMPLEMENTATION.
           lv_len        TYPE i,
           lv_compressed TYPE xstring,
           lv_xstring    TYPE xstring.
-
+    DATA: lv_objects_total     TYPE i.
+    DATA: lv_objects_processed TYPE i.
     FIELD-SYMBOLS: <ls_object> LIKE LINE OF it_objects.
-
 
     rv_data = c_pack_start.
 
@@ -11224,7 +11224,16 @@ CLASS lcl_git_pack IMPLEMENTATION.
                                               iv_length = 4 ).
     CONCATENATE rv_data lv_xstring INTO rv_data IN BYTE MODE.
 
+    lv_objects_total = lines( it_objects ).
+
     LOOP AT it_objects ASSIGNING <ls_object>.
+
+      lv_objects_processed = sy-tabix.
+
+      cl_progress_indicator=>progress_indicate( i_text      = |encoding objects &1% ( &2 of &3 )|
+                                                i_processed = lv_objects_processed
+                                                i_total     = lv_objects_total ).
+
       lv_xstring = type_and_length( <ls_object> ).
       CONCATENATE rv_data lv_xstring INTO rv_data IN BYTE MODE.
 
@@ -49955,5 +49964,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-07-05T18:33:39.976Z
+* abapmerge - 2017-07-07T07:04:13.427Z
 ****************************************************
