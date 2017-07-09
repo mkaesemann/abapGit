@@ -2137,7 +2137,8 @@ CLASS lcl_hash IMPLEMENTATION.
 
   METHOD adler32.
 
-    CONSTANTS: lc_adler TYPE i VALUE 65521.
+    CONSTANTS: lc_adler TYPE i VALUE 65521,
+               lc_max_b TYPE i VALUE 1800000000.
 
     DATA: lv_index TYPE i,
           lv_a     TYPE i VALUE 1,
@@ -2151,9 +2152,21 @@ CLASS lcl_hash IMPLEMENTATION.
     DO xstrlen( iv_xstring ) TIMES.
       lv_index = sy-index - 1.
 
-      lv_a = ( lv_a + iv_xstring+lv_index(1) ) MOD lc_adler.
-      lv_b = ( lv_b + lv_a ) MOD lc_adler.
+      lv_a = lv_a + iv_xstring+lv_index(1).
+      lv_b = lv_b + lv_a.
+
+* delay the MOD operation until the integer might overflow
+* articles describe 5552 additions are allowed, but this assumes unsigned integers
+* instead of allowing a fixed number of additions before running MOD, then
+* just compare value of lv_b, this is 1 operation less than comparing and adding
+      IF lv_b > lc_max_b.
+        lv_a = lv_a MOD lc_adler.
+        lv_b = lv_b MOD lc_adler.
+      ENDIF.
     ENDDO.
+
+    lv_a = lv_a MOD lc_adler.
+    lv_b = lv_b MOD lc_adler.
 
     lv_x = lv_a.
     lv_ca = lv_x.
@@ -50010,5 +50023,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-07-09T07:42:20.931Z
+* abapmerge - 2017-07-09T07:44:13.368Z
 ****************************************************
