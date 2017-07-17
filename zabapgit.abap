@@ -38512,6 +38512,10 @@ CLASS lcl_html_action_utils DEFINITION FINAL.
       IMPORTING iv_string        TYPE clike
       RETURNING VALUE(rt_fields) TYPE tihttpnvp.
 
+    CLASS-METHODS parse_fields_upper_case_name
+      IMPORTING iv_string        TYPE clike
+      RETURNING VALUE(rt_fields) TYPE tihttpnvp.
+
     CLASS-METHODS add_field
       IMPORTING name TYPE string
                 iv   TYPE any
@@ -38572,8 +38576,8 @@ CLASS lcl_html_action_utils DEFINITION FINAL.
       RETURNING VALUE(rs_content) TYPE lcl_persistence_db=>ty_content.
 
     CLASS-METHODS parse_commit_request
-      IMPORTING it_postdata      TYPE cnht_post_data_tab
-      EXPORTING es_fields        TYPE any.
+      IMPORTING it_postdata TYPE cnht_post_data_tab
+      EXPORTING es_fields   TYPE any.
 
     CLASS-METHODS decode_bg_update
       IMPORTING iv_getdata       TYPE clike
@@ -38604,7 +38608,32 @@ CLASS lcl_html_action_utils IMPLEMENTATION.
 
   METHOD parse_fields.
 
-    rt_fields = cl_http_utility=>if_http_utility~string_to_fields( |{ iv_string }| ).
+    DATA: substrings TYPE stringtab,
+          field      LIKE LINE OF rt_fields.
+
+    FIELD-SYMBOLS: <substring> LIKE LINE OF substrings.
+
+    SPLIT iv_string AT '&' INTO TABLE substrings.
+
+    LOOP AT substrings ASSIGNING <substring>.
+
+      CLEAR: field.
+
+      field-name = substring_before( val = <substring>
+                                     sub = '=' ).
+
+      field-value = substring_after( val = <substring>
+                                     sub = '=' ).
+
+      INSERT field INTO TABLE rt_fields.
+
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD parse_fields_upper_case_name.
+
+    rt_fields = parse_fields( iv_string ).
     field_keys_to_upper( CHANGING ct_fields = rt_fields ).
 
   ENDMETHOD.  " parse_fields.
@@ -38672,8 +38701,7 @@ CLASS lcl_html_action_utils IMPLEMENTATION.
 
     DATA: lt_fields TYPE tihttpnvp.
 
-
-    lt_fields = cl_http_utility=>if_http_utility~string_to_fields( |{ iv_string }| ).
+    lt_fields = lcl_html_action_utils=>parse_fields( iv_string ).
 
     get_field( EXPORTING name = 'TYPE' it = lt_fields CHANGING cv = ev_obj_type ).
     get_field( EXPORTING name = 'NAME' it = lt_fields CHANGING cv = ev_obj_name ).
@@ -38691,7 +38719,8 @@ CLASS lcl_html_action_utils IMPLEMENTATION.
   METHOD dir_decode.
 
     DATA: lt_fields TYPE tihttpnvp.
-    lt_fields = cl_http_utility=>if_http_utility~string_to_fields( |{ iv_string }| ).
+
+    lt_fields = lcl_html_action_utils=>parse_fields( iv_string ).
     get_field( EXPORTING name = 'PATH' it = lt_fields CHANGING cv = rv_path ).
 
   ENDMETHOD.                    "dir_decode
@@ -38729,7 +38758,7 @@ CLASS lcl_html_action_utils IMPLEMENTATION.
     ASSERT eg_file IS SUPPLIED OR eg_object IS SUPPLIED.
 
     CLEAR: ev_key, eg_file, eg_object.
-    lt_fields = parse_fields( iv_string ).
+    lt_fields = parse_fields_upper_case_name( iv_string ).
 
     get_field( EXPORTING name = 'KEY'      it = lt_fields CHANGING cv = ev_key ).
 
@@ -38760,7 +38789,7 @@ CLASS lcl_html_action_utils IMPLEMENTATION.
 
     DATA: lt_fields TYPE tihttpnvp.
 
-    lt_fields = parse_fields( iv_string ).
+    lt_fields = parse_fields_upper_case_name( cl_http_utility=>unescape_url( |{ iv_string }| ) ).
 
     get_field( EXPORTING name = 'TYPE'  it = lt_fields CHANGING cv = rs_key-type ).
     get_field( EXPORTING name = 'VALUE' it = lt_fields CHANGING cv = rs_key-value ).
@@ -38774,9 +38803,12 @@ CLASS lcl_html_action_utils IMPLEMENTATION.
 
 
     CONCATENATE LINES OF it_postdata INTO lv_string.
+
+    lv_string = cl_http_utility=>unescape_url( lv_string ).
+
     rs_content = dbkey_decode( lv_string ).
 
-    lt_fields = parse_fields( lv_string ).
+    lt_fields = parse_fields_upper_case_name( lv_string ).
 
     get_field( EXPORTING name = 'XMLDATA' it = lt_fields CHANGING cv = rs_content-data_str ).
     IF rs_content-data_str(1) <> '<' AND rs_content-data_str+1(1) = '<'. " Hmmm ???
@@ -38801,7 +38833,7 @@ CLASS lcl_html_action_utils IMPLEMENTATION.
     CONCATENATE LINES OF it_postdata INTO lv_string.
     REPLACE ALL OCCURRENCES OF lif_defs=>gc_crlf    IN lv_string WITH lc_replace.
     REPLACE ALL OCCURRENCES OF lif_defs=>gc_newline IN lv_string WITH lc_replace.
-    lt_fields = parse_fields( lv_string ).
+    lt_fields = parse_fields_upper_case_name( lv_string ).
 
     get_field( EXPORTING name = 'COMMITTER_NAME'  it = lt_fields CHANGING cv = es_fields ).
     get_field( EXPORTING name = 'COMMITTER_EMAIL' it = lt_fields CHANGING cv = es_fields ).
@@ -38822,7 +38854,7 @@ CLASS lcl_html_action_utils IMPLEMENTATION.
 
     DATA: lt_fields TYPE tihttpnvp.
 
-    lt_fields = parse_fields( iv_getdata ).
+    lt_fields = parse_fields_upper_case_name( iv_getdata ).
 
     get_field( EXPORTING name = 'METHOD'   it = lt_fields CHANGING cv = rs_fields ).
     get_field( EXPORTING name = 'USERNAME' it = lt_fields CHANGING cv = rs_fields ).
@@ -38839,7 +38871,7 @@ CLASS lcl_html_action_utils IMPLEMENTATION.
 
     DATA: lt_fields TYPE tihttpnvp.
 
-    lt_fields = parse_fields( iv_getdata ).
+    lt_fields = parse_fields_upper_case_name( iv_getdata ).
 
     get_field( EXPORTING name = 'KEY'  it = lt_fields CHANGING cv = ev_key ).
     get_field( EXPORTING name = 'SEED' it = lt_fields CHANGING cv = ev_seed ).
@@ -42591,7 +42623,7 @@ CLASS lcl_gui_page_boverview IMPLEMENTATION.
 
     CONCATENATE LINES OF it_postdata INTO lv_string.
 
-    lt_fields = cl_http_utility=>if_http_utility~string_to_fields( lv_string ).
+    lt_fields = lcl_html_action_utils=>parse_fields( lv_string ).
 
     READ TABLE lt_fields ASSIGNING <ls_field> WITH KEY name = 'source' ##NO_TEXT.
     ASSERT sy-subrc = 0.
@@ -44078,7 +44110,7 @@ CLASS lcl_gui_page_stage IMPLEMENTATION.
                    <ls_item> LIKE LINE OF lt_fields.
 
     CONCATENATE LINES OF it_postdata INTO lv_string.
-    lt_fields = cl_http_utility=>if_http_utility~string_to_fields( |{ lv_string }| ).
+    lt_fields = lcl_html_action_utils=>parse_fields( lv_string ).
 
     IF lines( lt_fields ) = 0.
       lcx_exception=>raise( 'process_stage_list: empty list' ).
@@ -44635,7 +44667,7 @@ CLASS lcl_gui_page_settings IMPLEMENTATION.
     DATA lv_serialized_post_data TYPE string.
 
     CONCATENATE LINES OF it_postdata INTO lv_serialized_post_data.
-    rt_post_fields = cl_http_utility=>if_http_utility~string_to_fields( lv_serialized_post_data ).
+    rt_post_fields = lcl_html_action_utils=>parse_fields( lv_serialized_post_data ).
 
   ENDMETHOD.
 
@@ -44786,7 +44818,7 @@ CLASS lcl_gui_page_repo_sett IMPLEMENTATION.
     DATA lv_serialized_post_data TYPE string.
 
     CONCATENATE LINES OF it_postdata INTO lv_serialized_post_data.
-    rt_post_fields = cl_http_utility=>if_http_utility~string_to_fields( lv_serialized_post_data ).
+    rt_post_fields = lcl_html_action_utils=>parse_fields( lv_serialized_post_data ).
 
   ENDMETHOD.
 
@@ -47381,12 +47413,57 @@ CLASS ltcl_html_action_utils DEFINITION FOR TESTING RISK LEVEL HARMLESS
 
   PUBLIC SECTION.
 
+    CLASS-METHODS class_constructor.
     METHODS add_field FOR TESTING.
     METHODS get_field FOR TESTING.
+    METHODS parse_fields_simple_case FOR TESTING.
+    METHODS parse_fields_advanced_case FOR TESTING.
+    METHODS parse_fields_german_umlauts FOR TESTING.
+
+  PRIVATE SECTION.
+
+    CONSTANTS: BEGIN OF co_german_umlaut_as_hex,
+                 lower_case_ae TYPE xstring VALUE 'C3A4',
+                 lower_case_oe TYPE xstring VALUE 'C3B6',
+                 lower_case_ue TYPE xstring VALUE 'C3BC',
+               END OF co_german_umlaut_as_hex.
+
+    CLASS-DATA: BEGIN OF ms_german_umlaut_as_char,
+                  lower_case_ae TYPE string,
+                  lower_case_oe TYPE string,
+                  lower_case_ue TYPE string,
+                END OF ms_german_umlaut_as_char.
+
+    DATA m_given_parse_string TYPE string.
+    DATA mt_parsed_fields TYPE tihttpnvp.
+
+    METHODS _given_string_is
+      IMPORTING
+        i_string TYPE string.
+    METHODS _when_fields_are_parsed.
+    METHODS _then_fields_should_be
+      IMPORTING
+        index TYPE i
+        name  TYPE string
+        value TYPE string.
+
+    CLASS-METHODS _hex_to_char
+      IMPORTING
+        i_x        TYPE xstring
+      RETURNING
+        VALUE(r_s) TYPE string.
 
 ENDCLASS. "ltcl_html_action_utils
 
 CLASS ltcl_html_action_utils IMPLEMENTATION.
+
+  METHOD class_constructor.
+
+    ms_german_umlaut_as_char-lower_case_ae = _hex_to_char( co_german_umlaut_as_hex-lower_case_ae ).
+    ms_german_umlaut_as_char-lower_case_oe = _hex_to_char( co_german_umlaut_as_hex-lower_case_oe ).
+    ms_german_umlaut_as_char-lower_case_ue = _hex_to_char( co_german_umlaut_as_hex-lower_case_ue ).
+
+  ENDMETHOD.
 
   METHOD add_field.
 
@@ -47431,6 +47508,143 @@ CLASS ltcl_html_action_utils IMPLEMENTATION.
     assert_equals( act = ls_field exp = ls_answer ). " Both field are filled!
 
   ENDMETHOD.  "get_field
+
+  METHOD parse_fields_simple_case.
+
+    _given_string_is( `committer_name=Gustav Gans` ).
+
+    _when_fields_are_parsed( ).
+
+    _then_fields_should_be( index = 1 name = `COMMITTER_NAME` value = `Gustav Gans` ).
+
+  ENDMETHOD.
+
+  METHOD parse_fields_advanced_case.
+
+    _given_string_is( `committer_name=Albert Schweitzer&`
+                   && `committer_email=albert.schweitzer@googlemail.com&`
+                   && `comment=dummy comment&`
+                   && `body=Message body<<new>><<new>>with line break<<new>>&`
+                   && `author_name=Karl Klammer&`
+                   && `author_email=karl@klammer.com` ).
+
+    _when_fields_are_parsed( ).
+
+    _then_fields_should_be( index = 1
+                            name  = `COMMITTER_NAME`
+                            value = `Albert Schweitzer` ).
+
+    _then_fields_should_be( index = 2
+                            name  = `COMMITTER_EMAIL`
+                            value = `albert.schweitzer@googlemail.com` ).
+
+    _then_fields_should_be( index = 3
+                            name  = `COMMENT`
+                            value = `dummy comment` ).
+
+    _then_fields_should_be( index = 4
+                            name  = `BODY`
+                            value = `Message body<<new>><<new>>with line break<<new>>` ).
+
+    _then_fields_should_be( index = 5
+                            name  = `AUTHOR_NAME`
+                            value = `Karl Klammer` ).
+
+    _then_fields_should_be( index = 6
+                            name  = `AUTHOR_EMAIL`
+                            value = `karl@klammer.com` ).
+
+  ENDMETHOD.
+
+  METHOD parse_fields_german_umlauts.
+
+    DATA: ae       TYPE string,
+          oe       TYPE string,
+          ue       TYPE string,
+          ae_oe_ue TYPE string.
+
+    ae = ms_german_umlaut_as_char-lower_case_ae.
+    oe = ms_german_umlaut_as_char-lower_case_oe.
+    ue = ms_german_umlaut_as_char-lower_case_ue.
+
+    ae_oe_ue = ae && oe && ue.
+
+    _given_string_is( |committer_name=Christian G{ ue }nter&|
+                   && |committer_email=guenne@googlemail.com&|
+                   && |comment={ ae_oe_ue }&|
+                   && |body=Message body<<new>><<new>>with line break<<new>>and umlauts. { ae_oe_ue }&|
+                   && |author_name=Gerd Schr{ oe }der&|
+                   && |author_email=gerd@schroeder.com| ).
+
+    _when_fields_are_parsed( ).
+
+    _then_fields_should_be( index = 1
+                            name  = `COMMITTER_NAME`
+                            value = |Christian G{ ue }nter| ).
+
+    _then_fields_should_be( index = 2
+                            name  = `COMMITTER_EMAIL`
+                            value = `guenne@googlemail.com` ).
+
+    _then_fields_should_be( index = 3
+                            name  = `COMMENT`
+                            value = ae_oe_ue ).
+
+    _then_fields_should_be( index = 4
+                            name  = `BODY`
+                            value = |Message body<<new>><<new>>with line break<<new>>and umlauts. { ae_oe_ue }| ).
+
+    _then_fields_should_be( index = 5
+                            name  = `AUTHOR_NAME`
+                            value = |Gerd Schr{ oe }der| ).
+
+    _then_fields_should_be( index = 6
+                            name  = `AUTHOR_EMAIL`
+                            value = `gerd@schroeder.com` ).
+
+  ENDMETHOD.
+
+  METHOD _given_string_is.
+
+    m_given_parse_string = i_string.
+
+  ENDMETHOD.
+
+  METHOD _when_fields_are_parsed.
+
+    mt_parsed_fields = lcl_html_action_utils=>parse_fields_upper_case_name( m_given_parse_string ).
+
+  ENDMETHOD.
+
+  METHOD _then_fields_should_be.
+
+    FIELD-SYMBOLS: <parsed_field> LIKE LINE OF mt_parsed_fields.
+
+    READ TABLE mt_parsed_fields ASSIGNING <parsed_field>
+                                INDEX index.
+
+    cl_abap_unit_assert=>assert_subrc( exp = 0
+                                       msg = |No parsed field found at index { index }| ).
+
+    cl_abap_unit_assert=>assert_equals( act = <parsed_field>-name
+                                        exp = name
+                                        msg = |Name at index { index } should be { name }| ).
+
+    cl_abap_unit_assert=>assert_equals( act = <parsed_field>-value
+                                        exp = value
+                                        msg = |Value at index { index } should be { value }| ).
+
+  ENDMETHOD.
+
+  METHOD _hex_to_char.
+
+    cl_abap_conv_in_ce=>create( )->convert(
+      EXPORTING
+        input = i_x
+      IMPORTING
+        data  = r_s ).
+
+  ENDMETHOD.
 
 ENDCLASS. "ltcl_html_action_utils
 
@@ -50037,5 +50251,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-07-14T11:39:54.221Z
+* abapmerge - 2017-07-17T17:55:56.905Z
 ****************************************************
