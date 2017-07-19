@@ -18493,6 +18493,9 @@ CLASS lcl_object_doct IMPLEMENTATION.
 
   METHOD lif_object~changed_by.
     rv_user = read( )-head-tdluser.
+    IF rv_user IS INITIAL.
+      rv_user = c_user_unknown.
+    ENDIF.
   ENDMETHOD.                    "lif_object~changed_by
 
   METHOD lif_object~exists.
@@ -50248,5 +50251,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-07-17T18:03:41.673Z
+* abapmerge - 2017-07-19T11:42:03.521Z
 ****************************************************
