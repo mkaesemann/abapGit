@@ -27503,14 +27503,16 @@ CLASS lcl_object_smim IMPLEMENTATION.
 
   METHOD lif_object~exists.
 
-    TRY.
-        get_url_for_io( ).
-        rv_bool = abap_true.
-      CATCH lcx_not_found.
-        rv_bool = abap_false.
-    ENDTRY.
+    DATA: lv_loio TYPE sdok_docid.
 
-  ENDMETHOD.                    "lif_object~exists
+
+    lv_loio = ms_item-obj_name.
+
+    SELECT SINGLE loio_id FROM smimloio INTO lv_loio
+      WHERE loio_id = lv_loio.
+    rv_bool = boolc( sy-subrc = 0 ).
+
+  ENDMETHOD.
 
   METHOD get_url_for_io.
 
@@ -50269,5 +50271,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-07-23T05:25:43.801Z
+* abapmerge - 2017-07-23T05:27:22.645Z
 ****************************************************
