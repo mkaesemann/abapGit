@@ -8313,8 +8313,13 @@ CLASS lcl_news IMPLEMENTATION.
 
     lv_last_seen = lcl_app=>user( )->get_repo_last_change_seen( lv_url ).
 
-    " Find changelog
-    lt_remote = io_repo->get_files_remote( ).
+    TRY.
+        " Find changelog
+        lt_remote = io_repo->get_files_remote( ).
+      CATCH lcx_exception.
+        RETURN.
+    ENDTRY.
+
     READ TABLE lt_remote ASSIGNING <file>
       WITH KEY path = lc_log_path filename = lc_log_filename.
 
@@ -50397,5 +50402,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-07-23T12:48:49.299Z
+* abapmerge - 2017-07-23T14:22:07.589Z
 ****************************************************
