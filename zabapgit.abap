@@ -7351,7 +7351,9 @@ INTERFACE lif_exit.
 
   METHODS:
     change_local_host
-      CHANGING ct_hosts TYPE lif_defs=>ty_icm_sinfo2_tt.
+      CHANGING ct_hosts TYPE lif_defs=>ty_icm_sinfo2_tt,
+    allow_sap_objects
+      RETURNING VALUE(rv_allowed) TYPE abap_bool.
 
 ENDINTERFACE.
 
@@ -7385,6 +7387,10 @@ CLASS lcl_exit IMPLEMENTATION.
   METHOD lif_exit~change_local_host.
 * default behavior
     RETURN.
+  ENDMETHOD.
+
+  METHOD lif_exit~allow_sap_objects.
+    rv_allowed = abap_false.
   ENDMETHOD.
 
 ENDCLASS.
@@ -34861,9 +34867,14 @@ CLASS lcl_repo_srv IMPLEMENTATION.
       lcx_exception=>raise( 'not possible to use $TMP, create new (local) package' ).
     ENDIF.
 
-    SELECT SINGLE devclass FROM tdevc INTO lv_devclass
-      WHERE devclass = iv_package
-      AND as4user <> 'SAP'.                             "#EC CI_GENBUFF
+    IF lcl_exit=>get_instance( )->allow_sap_objects( ) = abap_true.
+      SELECT SINGLE devclass FROM tdevc INTO lv_devclass
+        WHERE devclass = iv_package.                    "#EC CI_GENBUFF
+    ELSE.
+      SELECT SINGLE devclass FROM tdevc INTO lv_devclass
+        WHERE devclass = iv_package
+        AND as4user <> 'SAP'.                           "#EC CI_GENBUFF
+    ENDIF.
     IF sy-subrc <> 0.
       lcx_exception=>raise( 'package not found or not allowed' ).
     ENDIF.
@@ -50327,5 +50338,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-07-23T08:03:36.950Z
+* abapmerge - 2017-07-23T08:19:51.642Z
 ****************************************************
