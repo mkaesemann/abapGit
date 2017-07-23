@@ -38643,9 +38643,11 @@ CLASS lcl_html_action_utils IMPLEMENTATION.
 
       field-name = substring_before( val = <substring>
                                      sub = '=' ).
+      field-name = cl_http_utility=>unescape_url( field-name ).
 
       field-value = substring_after( val = <substring>
                                      sub = '=' ).
+      field-value = cl_http_utility=>unescape_url( field-value ).
 
       INSERT field INTO TABLE rt_fields.
 
@@ -50271,5 +50273,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-07-23T05:31:02.161Z
+* abapmerge - 2017-07-23T06:50:15.300Z
 ****************************************************
