@@ -1970,9 +1970,8 @@ CLASS lcl_convert DEFINITION FINAL.
       RETURNING VALUE(rv_i) TYPE i
       RAISING   lcx_exception.
 
-    CLASS-METHODS int_to_xstring
+    CLASS-METHODS int_to_xstring4
       IMPORTING iv_i              TYPE i
-                iv_length         TYPE i
       RETURNING VALUE(rv_xstring) TYPE xstring.
 
     CLASS-METHODS split_string
@@ -1988,12 +1987,11 @@ ENDCLASS.                    "lcl_convert DEFINITION
 *----------------------------------------------------------------------*
 CLASS lcl_convert IMPLEMENTATION.
 
-  METHOD int_to_xstring.
+  METHOD int_to_xstring4.
+* returns xstring of length 4 containing the integer value iv_i
 
     DATA: lv_x TYPE x LENGTH 4.
 
-
-    ASSERT iv_length = 4. " other cases not implemented
 
     lv_x = iv_i.
     rv_xstring = lv_x.
@@ -10368,6 +10366,12 @@ CLASS lcl_git_pack DEFINITION FINAL FRIENDS ltcl_git_pack.
       IMPORTING is_commit      TYPE ty_commit
       RETURNING VALUE(rv_data) TYPE xstring.
 
+    CLASS-METHODS type_and_length
+      IMPORTING iv_type           TYPE lif_defs=>ty_type
+                iv_length         TYPE i
+      RETURNING VALUE(rv_xstring) TYPE xstring
+      RAISING   lcx_exception.
+
   PRIVATE SECTION.
     CONSTANTS: c_pack_start TYPE x LENGTH 4 VALUE '5041434B', " PACK
                c_zlib       TYPE x LENGTH 2 VALUE '789C',
@@ -10377,11 +10381,6 @@ CLASS lcl_git_pack DEFINITION FINAL FRIENDS ltcl_git_pack.
     CLASS-METHODS decode_deltas
       CHANGING ct_objects TYPE lif_defs=>ty_objects_tt
       RAISING  lcx_exception.
-
-    CLASS-METHODS type_and_length
-      IMPORTING is_object         TYPE lif_defs=>ty_object
-      RETURNING VALUE(rv_xstring) TYPE xstring
-      RAISING   lcx_exception.
 
     CLASS-METHODS delta
       IMPORTING is_object  TYPE lif_defs=>ty_object
@@ -10684,7 +10683,7 @@ CLASS lcl_git_pack IMPLEMENTATION.
           lv_x      TYPE x LENGTH 1.
 
 
-    CASE is_object-type.
+    CASE iv_type.
       WHEN lif_defs=>gc_type-commit.
         lv_type = '001'.
       WHEN lif_defs=>gc_type-tree.
@@ -10697,7 +10696,7 @@ CLASS lcl_git_pack IMPLEMENTATION.
         lcx_exception=>raise( 'Unexpected object type while encoding pack' ).
     ENDCASE.
 
-    lv_x4 = xstrlen( is_object-data ).
+    lv_x4 = iv_length.
     DO 32 TIMES.
       GET BIT sy-index OF lv_x4 INTO lv_c.
       CONCATENATE lv_bits lv_c INTO lv_bits.
@@ -11279,22 +11278,20 @@ CLASS lcl_git_pack IMPLEMENTATION.
 
   METHOD encode.
 
-    DATA: lv_sha1       TYPE x LENGTH 20,
-          lv_adler32    TYPE lcl_hash=>ty_adler32,
-          lv_len        TYPE i,
-          lv_compressed TYPE xstring,
-          lv_xstring    TYPE xstring.
-    DATA: lv_objects_total     TYPE i.
-    DATA: lv_objects_processed TYPE i.
+    DATA: lv_sha1              TYPE x LENGTH 20,
+          lv_adler32           TYPE lcl_hash=>ty_adler32,
+          lv_compressed        TYPE xstring,
+          lv_xstring           TYPE xstring,
+          lv_objects_total     TYPE i,
+          lv_objects_processed TYPE i.
+
     FIELD-SYMBOLS: <ls_object> LIKE LINE OF it_objects.
 
     rv_data = c_pack_start.
 
     CONCATENATE rv_data c_version INTO rv_data IN BYTE MODE.
 
-    lv_len = lines( it_objects ).
-    lv_xstring = lcl_convert=>int_to_xstring( iv_i      = lv_len
-                                              iv_length = 4 ).
+    lv_xstring = lcl_convert=>int_to_xstring4( lines( it_objects ) ).
     CONCATENATE rv_data lv_xstring INTO rv_data IN BYTE MODE.
 
     lv_objects_total = lines( it_objects ).
@@ -11307,7 +11304,9 @@ CLASS lcl_git_pack IMPLEMENTATION.
                                                 i_processed = lv_objects_processed
                                                 i_total     = lv_objects_total ).
 
-      lv_xstring = type_and_length( <ls_object> ).
+      lv_xstring = type_and_length(
+        iv_type   = <ls_object>-type
+        iv_length = xstrlen( <ls_object>-data ) ).
       CONCATENATE rv_data lv_xstring INTO rv_data IN BYTE MODE.
 
       cl_abap_gzip=>compress_binary(
@@ -38676,6 +38675,11 @@ CLASS lcl_html_action_utils DEFINITION FINAL.
                 ev_seed    TYPE string
       RAISING   lcx_exception.
 
+  PRIVATE SECTION.
+    CLASS-METHODS unescape
+      IMPORTING iv_string        TYPE string
+      RETURNING VALUE(rv_string) TYPE string.
+
 ENDCLASS.       "lcl_html_action_utils DEFINITION
 
 *----------------------------------------------------------------------*
@@ -38708,15 +38712,24 @@ CLASS lcl_html_action_utils IMPLEMENTATION.
 
       field-name = substring_before( val = <substring>
                                      sub = '=' ).
-      field-name = cl_http_utility=>unescape_url( field-name ).
+      field-name = unescape( field-name ).
 
       field-value = substring_after( val = <substring>
                                      sub = '=' ).
-      field-value = cl_http_utility=>unescape_url( field-value ).
+      field-value = unescape( field-value ).
 
       INSERT field INTO TABLE rt_fields.
 
     ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD unescape.
+* do not use cl_http_utility as it does strange things with the encoding
+    rv_string = iv_string.
+
+* todo, more to be added here
+    REPLACE ALL OCCURRENCES OF '%3F' IN rv_string WITH '?'.
 
   ENDMETHOD.
 
@@ -45820,6 +45833,7 @@ ENDCLASS.                    "ltcl_convert DEFINITION
 CLASS ltcl_convert IMPLEMENTATION.
 
   METHOD convert_int.
+
     DATA: lv_xstring TYPE xstring,
           lv_input   TYPE i,
           lv_result  TYPE i.
@@ -45827,8 +45841,7 @@ CLASS ltcl_convert IMPLEMENTATION.
 
     DO 1000 TIMES.
       lv_input = sy-index.
-      lv_xstring = lcl_convert=>int_to_xstring( iv_i      = lv_input
-                                                iv_length = 4 ).
+      lv_xstring = lcl_convert=>int_to_xstring4( lv_input ).
       lv_result = lcl_convert=>xstring_to_int( lv_xstring ).
 
       cl_abap_unit_assert=>assert_equals(
@@ -46854,7 +46867,11 @@ CLASS ltcl_git_pack DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FI
       pack_multiple FOR TESTING
         RAISING lcx_exception,
       sort_tree1 FOR TESTING,
-      sort_tree2 FOR TESTING.
+      sort_tree2 FOR TESTING,
+      type_and_length01 FOR TESTING
+        RAISING lcx_exception,
+      type_and_length02 FOR TESTING
+        RAISING lcx_exception.
 
     METHODS:
       object_blob
@@ -46870,6 +46887,34 @@ ENDCLASS.                    "test DEFINITION
 *
 *----------------------------------------------------------------------*
 CLASS ltcl_git_pack IMPLEMENTATION.
+
+  METHOD type_and_length01.
+
+    DATA: lv_result TYPE xstring.
+
+    lv_result = lcl_git_pack=>type_and_length(
+      iv_type   = lif_defs=>gc_type-commit
+      iv_length = 100 ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_result
+      exp = '9406' ).
+
+  ENDMETHOD.
+
+  METHOD type_and_length02.
+
+    DATA: lv_result TYPE xstring.
+
+    lv_result = lcl_git_pack=>type_and_length(
+      iv_type   = lif_defs=>gc_type-blob
+      iv_length = 90000 ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_result
+      exp = 'B0F92B' ).
+
+  ENDMETHOD.
 
   METHOD sort_tree1.
 
@@ -47505,6 +47550,7 @@ CLASS ltcl_html_action_utils DEFINITION FOR TESTING RISK LEVEL HARMLESS
     METHODS get_field FOR TESTING.
     METHODS parse_fields_simple_case FOR TESTING.
     METHODS parse_fields_advanced_case FOR TESTING.
+    METHODS parse_fields_unescape FOR TESTING.
     METHODS parse_fields_german_umlauts FOR TESTING.
 
   PRIVATE SECTION.
@@ -47640,6 +47686,19 @@ CLASS ltcl_html_action_utils IMPLEMENTATION.
     _then_fields_should_be( index = 6
                             name  = `AUTHOR_EMAIL`
                             value = `karl@klammer.com` ).
+
+  ENDMETHOD.
+
+  METHOD parse_fields_unescape.
+* file status = '?', used in staging page
+
+    _given_string_is( '/SRC/ZFOOBAR.PROG.ABAP=%3F' ).
+
+    _when_fields_are_parsed( ).
+
+    _then_fields_should_be( index = 1
+                            name  = '/SRC/ZFOOBAR.PROG.ABAP'
+                            value = '?' ).
 
   ENDMETHOD.
 
@@ -50338,5 +50397,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-07-23T08:19:51.642Z
+* abapmerge - 2017-07-23T12:48:49.299Z
 ****************************************************
