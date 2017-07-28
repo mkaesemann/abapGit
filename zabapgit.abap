@@ -10948,24 +10948,23 @@ CLASS lcl_git_pack IMPLEMENTATION.
 
   METHOD delta.
 
+    DEFINE _eat_byte.
+      lv_x = lv_delta(1).
+      lv_delta = lv_delta+1.
+    END-OF-DEFINITION.
+
     DATA: lv_delta  TYPE xstring,
           lv_base   TYPE xstring,
           lv_result TYPE xstring,
-*          lv_bitbyte TYPE ty_bitbyte,
           lv_offset TYPE i,
           lv_sha1   TYPE lif_defs=>ty_sha1,
           ls_object LIKE LINE OF ct_objects,
           lv_len    TYPE i,
           lv_org    TYPE x,
-*          lv_i       TYPE i,
           lv_x      TYPE x.
 
     FIELD-SYMBOLS: <ls_object> LIKE LINE OF ct_objects.
 
-    DEFINE _eat_byte.
-      lv_x = lv_delta(1).
-      lv_delta = lv_delta+1.
-    END-OF-DEFINITION.
 
     lv_delta = is_object-data.
 
@@ -19738,7 +19737,7 @@ CLASS lcl_object_dtel IMPLEMENTATION.
         ON tparat~paramid = tpara~paramid AND
         tparat~sprache = mv_language
         INTO ls_tpara
-        WHERE tpara~paramid = ls_dd04v-memoryid.
+        WHERE tpara~paramid = ls_dd04v-memoryid.       "#EC CI_BUFFJOIN
     ENDIF.
 
     CLEAR: ls_dd04v-as4user,
@@ -24593,7 +24592,7 @@ CLASS lcl_object_pinf IMPLEMENTATION.
 
     IF rv_bool = abap_true.
       SELECT SINGLE mainpack FROM tdevc INTO lv_main_pack
-        WHERE devclass = lv_pack_name.
+        WHERE devclass = lv_pack_name.                  "#EC CI_GENBUFF
       rv_bool = boolc( sy-subrc = 0 ).
     ENDIF.
 
@@ -26786,7 +26785,7 @@ CLASS lcl_object_shlp IMPLEMENTATION.
     SELECT SINGLE as4date as4time FROM dd30l
        INTO (lv_date, lv_time)
        WHERE shlpname = ms_item-obj_name
-       AND as4local = 'A'.
+       AND as4local = 'A'.                              "#EC CI_GENBUFF
 
     rv_changed = check_timestamp(
      iv_timestamp = iv_timestamp
@@ -27520,7 +27519,7 @@ CLASS lcl_object_smim IMPLEMENTATION.
     lv_loio = ms_item-obj_name.
 
     SELECT SINGLE loio_id FROM smimloio INTO lv_loio
-      WHERE loio_id = lv_loio.
+      WHERE loio_id = lv_loio.                          "#EC CI_GENBUFF
     rv_bool = boolc( sy-subrc = 0 ).
 
   ENDMETHOD.
@@ -27655,7 +27654,8 @@ CLASS lcl_object_smim IMPLEMENTATION.
       ls_file-data     = lv_content.
       mo_files->add( ls_file ).
 
-      SELECT SINGLE lo_class FROM smimloio INTO lv_class WHERE loio_id = lv_loio.
+      SELECT SINGLE lo_class FROM smimloio INTO lv_class
+        WHERE loio_id = lv_loio.                        "#EC CI_GENBUFF
     ENDIF.
 
     io_xml->add( iv_name = 'URL'
@@ -29895,11 +29895,11 @@ CLASS lcl_object_tran DEFINITION INHERITING FROM lcl_objects_super FINAL.
 
       serialize_texts
         IMPORTING io_xml TYPE REF TO lcl_xml_output
-        RAISING lcx_exception,
+        RAISING   lcx_exception,
 
       deserialize_texts
         IMPORTING io_xml TYPE REF TO lcl_xml_input
-        RAISING lcx_exception.
+        RAISING   lcx_exception.
 
 ENDCLASS.                    "lcl_object_TRAN DEFINITION
 
@@ -30297,7 +30297,7 @@ CLASS lcl_object_tran IMPLEMENTATION.
       INTO CORRESPONDING FIELDS OF TABLE lt_tpool_i18n
       FROM tstct
       WHERE sprsl <> mv_language
-      AND   tcode = ms_item-obj_name.
+      AND   tcode = ms_item-obj_name.                   "#EC CI_GENBUFF
 
     IF lines( lt_tpool_i18n ) > 0.
       SORT lt_tpool_i18n BY sprsl ASCENDING.
@@ -50373,5 +50373,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-07-28T08:54:35.160Z
+* abapmerge - 2017-07-28T10:07:25.468Z
 ****************************************************
