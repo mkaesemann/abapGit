@@ -179,7 +179,7 @@ TYPE-POOLS seop.
 INTERFACE lif_defs.
 
   CONSTANTS: gc_xml_version  TYPE string VALUE 'v1.0.0',    "#EC NOTEXT
-             gc_abap_version TYPE string VALUE 'v1.37.6'.   "#EC NOTEXT
+             gc_abap_version TYPE string VALUE 'v1.37.7'.   "#EC NOTEXT
 
   TYPES: ty_type    TYPE c LENGTH 6,
          ty_bitbyte TYPE c LENGTH 8,
@@ -50373,5 +50373,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-07-28T08:50:36.285Z
+* abapmerge - 2017-07-28T08:52:30.017Z
 ****************************************************
