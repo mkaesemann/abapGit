@@ -18993,6 +18993,10 @@ CLASS lcl_object_doma IMPLEMENTATION.
       CLEAR ls_dd01v-masklen.
     ENDIF.
 
+    SORT lt_dd07v BY
+      valpos ASCENDING
+      ddlanguage ASCENDING.
+
     io_xml->add( iv_name = 'DD01V'
                  ig_data = ls_dd01v ).
     io_xml->add( iv_name = 'DD07V_TAB'
@@ -19103,7 +19107,7 @@ CLASS lcl_object_doma IMPLEMENTATION.
 
     SORT lt_i18n_langs ASCENDING.
     SORT lt_dd01_texts BY ddlanguage ASCENDING.
-    SORT lt_dd07_texts BY ddlanguage ASCENDING.
+    SORT lt_dd07_texts BY valpos ASCENDING ddlanguage ASCENDING.
 
     IF lines( lt_i18n_langs ) > 0.
       io_xml->add( iv_name = 'I18N_LANGS'
@@ -50622,5 +50626,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-07-25T06:15:14.377Z
+* abapmerge - 2017-07-28T08:46:30.970Z
 ****************************************************
