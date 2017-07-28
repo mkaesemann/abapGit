@@ -27050,6 +27050,10 @@ CLASS lcl_object_sicf IMPLEMENTATION.
 
     rv_user = ls_icfservice-icf_muser.
 
+    IF rv_user IS INITIAL.
+      rv_user = c_user_unknown.
+    ENDIF.
+
   ENDMETHOD.
 
   METHOD lif_object~get_metadata.
@@ -27421,12 +27425,12 @@ CLASS lcl_object_sicf IMPLEMENTATION.
     CALL FUNCTION 'ABAP4_CALL_TRANSACTION'
       STARTING NEW TASK 'GIT'
       EXPORTING
-        tcode                   = 'SICF'
-        mode_val                = 'E'
+        tcode     = 'SICF'
+        mode_val  = 'E'
       TABLES
-        using_tab               = lt_bcdata
+        using_tab = lt_bcdata
       EXCEPTIONS
-        OTHERS                  = 1.
+        OTHERS    = 1.
 
     IF sy-subrc <> 0.
       lcx_exception=>raise( 'error from ABAP4_CALL_TRANSACTION, SICF' ).
@@ -50373,5 +50377,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-07-28T10:07:25.468Z
+* abapmerge - 2017-07-28T10:11:04.853Z
 ****************************************************
