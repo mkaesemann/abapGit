@@ -18894,7 +18894,7 @@ CLASS lcl_object_doct DEFINITION INHERITING FROM lcl_objects_super FINAL.
            END OF ty_data.
 
     METHODS: read
-      RETURNING value(rs_data) TYPE ty_data.
+      RETURNING VALUE(rs_data) TYPE ty_data.
 
 ENDCLASS.                    "lcl_object_msag DEFINITION
 
@@ -18961,7 +18961,48 @@ CLASS lcl_object_doct IMPLEMENTATION.
 
   METHOD lif_object~jump.
 
-    lcx_exception=>raise( 'todo, jump DOCT' ).
+    DATA: ls_dokentry TYPE dokentry,
+          ls_bcdata   TYPE bdcdata,
+          lt_bcdata   TYPE STANDARD TABLE OF bdcdata.
+
+    " We need to modify dokentry directly, otherwise
+    " Batch Input on SE61 wouldn't work because it stores
+    " the last seen Document Class in this table. There's
+    " no standard function to do this. SE61 does this
+    " directly in its dialog modules
+    ls_dokentry-username = sy-uname.
+    ls_dokentry-langu    = sy-langu.
+    ls_dokentry-class    = c_id.
+    MODIFY dokentry FROM ls_dokentry.
+
+    ls_bcdata-program  = 'SAPMSDCU'.
+    ls_bcdata-dynpro   = '0100'.
+    ls_bcdata-dynbegin = 'X'.
+    APPEND ls_bcdata TO lt_bcdata.
+
+    CLEAR ls_bcdata.
+    ls_bcdata-fnam     = 'RSDCU-OBJECT7'.
+    ls_bcdata-fval     = ms_item-obj_name.
+    APPEND ls_bcdata TO lt_bcdata.
+
+    CLEAR ls_bcdata.
+    ls_bcdata-fnam = 'BDC_OKCODE'.
+    ls_bcdata-fval = '=SHOW'.
+    APPEND ls_bcdata TO lt_bcdata.
+
+    CALL FUNCTION 'ABAP4_CALL_TRANSACTION'
+      STARTING NEW TASK 'GIT'
+      EXPORTING
+        tcode     = 'SE61'
+        mode_val  = 'E'
+      TABLES
+        using_tab = lt_bcdata
+      EXCEPTIONS
+        OTHERS    = 1.
+
+    IF sy-subrc <> 0.
+      lcx_exception=>raise( 'error from ABAP4_CALL_TRANSACTION, DOCT' ).
+    ENDIF.
 
   ENDMETHOD.                    "jump
 
@@ -19126,7 +19167,7 @@ CLASS lcl_object_docv IMPLEMENTATION.
 
   METHOD lif_object~jump.
 
-    lcx_exception=>raise( 'todo, jump DOCT' ).
+    lcx_exception=>raise( 'todo, jump DOCV' ).
 
   ENDMETHOD.                    "jump
 
@@ -23010,7 +23051,13 @@ CLASS lcl_object_iarp IMPLEMENTATION.
   ENDMETHOD.                    "lif_object~exists
 
   METHOD lif_object~jump.
-    lcx_exception=>raise( 'todo, IARP, jump' ).
+
+    CALL FUNCTION 'RS_TOOL_ACCESS'
+      EXPORTING
+        operation   = 'SHOW'
+        object_name = ms_item-obj_name
+        object_type = ms_item-obj_type.
+
   ENDMETHOD.                    "lif_object~jump
 
   METHOD lif_object~compare_to_remote_version.
@@ -23210,7 +23257,13 @@ CLASS lcl_object_iasp IMPLEMENTATION.
   ENDMETHOD.                    "lif_object~exists
 
   METHOD lif_object~jump.
-    lcx_exception=>raise( 'todo, IASP, jump' ).
+
+    CALL FUNCTION 'RS_TOOL_ACCESS'
+      EXPORTING
+        operation   = 'SHOW'
+        object_name = ms_item-obj_name
+        object_type = ms_item-obj_type.
+
   ENDMETHOD.                    "lif_object~jump
 
   METHOD lif_object~compare_to_remote_version.
@@ -23427,7 +23480,13 @@ CLASS lcl_object_iatu IMPLEMENTATION.
   ENDMETHOD.                    "lif_object~exists
 
   METHOD lif_object~jump.
-    lcx_exception=>raise( 'todo, IATU, jump' ).
+
+    CALL FUNCTION 'RS_TOOL_ACCESS'
+      EXPORTING
+        operation   = 'SHOW'
+        object_name = ms_item-obj_name
+        object_type = ms_item-obj_type.
+
   ENDMETHOD.                    "lif_object~jump
 
   METHOD lif_object~compare_to_remote_version.
@@ -24343,7 +24402,37 @@ CLASS lcl_object_nrob IMPLEMENTATION.
 
   METHOD lif_object~jump.
 
-    lcx_exception=>raise( 'todo' ).
+    DATA: ls_bcdata   TYPE bdcdata,
+          lt_bcdata   TYPE STANDARD TABLE OF bdcdata.
+
+    ls_bcdata-program  = 'SAPMSNRO'.
+    ls_bcdata-dynpro   = '0150'.
+    ls_bcdata-dynbegin = 'X'.
+    APPEND ls_bcdata TO lt_bcdata.
+
+    CLEAR ls_bcdata.
+    ls_bcdata-fnam     = 'NRIV-OBJECT'.
+    ls_bcdata-fval     = ms_item-obj_name.
+    APPEND ls_bcdata TO lt_bcdata.
+
+    CLEAR ls_bcdata.
+    ls_bcdata-fnam = 'BDC_OKCODE'.
+    ls_bcdata-fval = '=DISP'.
+    APPEND ls_bcdata TO lt_bcdata.
+
+    CALL FUNCTION 'ABAP4_CALL_TRANSACTION'
+      STARTING NEW TASK 'GIT'
+      EXPORTING
+        tcode     = 'SNRO'
+        mode_val  = 'E'
+      TABLES
+        using_tab = lt_bcdata
+      EXCEPTIONS
+        OTHERS    = 1.
+
+    IF sy-subrc <> 0.
+      lcx_exception=>raise( 'error from ABAP4_CALL_TRANSACTION, NROB' ).
+    ENDIF.
 
   ENDMETHOD.                    "jump
 
@@ -25941,7 +26030,13 @@ CLASS lcl_object_sfpf IMPLEMENTATION.
   ENDMETHOD.                    "lif_object~exists
 
   METHOD lif_object~jump.
-    lcx_exception=>raise( 'todo, SFPF jump' ).
+
+    CALL FUNCTION 'RS_TOOL_ACCESS'
+      EXPORTING
+        operation   = 'SHOW'
+        object_name = ms_item-obj_name
+        object_type = ms_item-obj_type.
+
   ENDMETHOD.                    "jump
 
   METHOD lif_object~delete.
@@ -26164,7 +26259,13 @@ CLASS lcl_object_sfpi IMPLEMENTATION.
   ENDMETHOD.                    "lif_object~exists
 
   METHOD lif_object~jump.
-    lcx_exception=>raise( 'todo, SFPI jump' ).
+
+    CALL FUNCTION 'RS_TOOL_ACCESS'
+      EXPORTING
+        operation   = 'SHOW'
+        object_name = ms_item-obj_name
+        object_type = ms_item-obj_type.
+
   ENDMETHOD.                    "jump
 
   METHOD lif_object~delete.
@@ -27781,7 +27882,13 @@ CLASS lcl_object_smim IMPLEMENTATION.
   ENDMETHOD.                    "delete
 
   METHOD lif_object~jump.
-    lcx_exception=>raise( 'todo, SMIM, jump' ).
+
+    CALL FUNCTION 'RS_TOOL_ACCESS'
+      EXPORTING
+        operation   = 'SHOW'
+        object_name = ms_item-obj_name
+        object_type = ms_item-obj_type.
+
   ENDMETHOD.                    "jump
 
   METHOD lif_object~compare_to_remote_version.
@@ -28449,7 +28556,39 @@ CLASS lcl_object_ssst IMPLEMENTATION.
   ENDMETHOD.                    "delete
 
   METHOD lif_object~jump.
-    lcx_exception=>raise( 'todo' ).
+
+    DATA: ls_bcdata TYPE bdcdata,
+          lt_bcdata TYPE STANDARD TABLE OF bdcdata.
+
+    ls_bcdata-program  = 'SAPMSSFS'.
+    ls_bcdata-dynpro   = '0100'.
+    ls_bcdata-dynbegin = 'X'.
+    APPEND ls_bcdata TO lt_bcdata.
+
+    CLEAR ls_bcdata.
+    ls_bcdata-fnam     = 'SSFSCREENS-SNAME'.
+    ls_bcdata-fval     = ms_item-obj_name.
+    APPEND ls_bcdata TO lt_bcdata.
+
+    CLEAR ls_bcdata.
+    ls_bcdata-fnam = 'BDC_OKCODE'.
+    ls_bcdata-fval = '=DISPLAY'.
+    APPEND ls_bcdata TO lt_bcdata.
+
+    CALL FUNCTION 'ABAP4_CALL_TRANSACTION'
+      STARTING NEW TASK 'GIT'
+      EXPORTING
+        tcode     = 'SMARTSTYLES'
+        mode_val  = 'E'
+      TABLES
+        using_tab = lt_bcdata
+      EXCEPTIONS
+        OTHERS    = 1.
+
+    IF sy-subrc <> 0.
+      lcx_exception=>raise( 'error from ABAP4_CALL_TRANSACTION, SSST' ).
+    ENDIF.
+
   ENDMETHOD.                    "jump
 
   METHOD lif_object~compare_to_remote_version.
@@ -28550,7 +28689,47 @@ CLASS lcl_object_styl IMPLEMENTATION.
 
   METHOD lif_object~jump.
 
-    lcx_exception=>raise( 'todo, STYL jump' ).
+    DATA: ls_bcdata TYPE bdcdata,
+          lt_bcdata TYPE STANDARD TABLE OF bdcdata.
+
+    ls_bcdata-program  = 'SAPMSSCS'.
+    ls_bcdata-dynpro   = '1100'.
+    ls_bcdata-dynbegin = 'X'.
+    APPEND ls_bcdata TO lt_bcdata.
+
+    CLEAR ls_bcdata.
+    ls_bcdata-fnam     = 'RSSCS-TDSTYLE'.
+    ls_bcdata-fval     = ms_item-obj_name.
+    APPEND ls_bcdata TO lt_bcdata.
+
+    CLEAR ls_bcdata.
+    ls_bcdata-fnam     = 'RSSCS-TDSPRAS'.
+    ls_bcdata-fval     = sy-langu.
+    APPEND ls_bcdata TO lt_bcdata.
+
+    CLEAR ls_bcdata.
+    ls_bcdata-fnam     = 'RSSCS-TDHEADEROB'.
+    ls_bcdata-fval     = 'X'.
+    APPEND ls_bcdata TO lt_bcdata.
+
+    CLEAR ls_bcdata.
+    ls_bcdata-fnam = 'BDC_OKCODE'.
+    ls_bcdata-fval = '=SHOW'.
+    APPEND ls_bcdata TO lt_bcdata.
+
+    CALL FUNCTION 'ABAP4_CALL_TRANSACTION'
+      STARTING NEW TASK 'GIT'
+      EXPORTING
+        tcode     = 'SE72'
+        mode_val  = 'E'
+      TABLES
+        using_tab = lt_bcdata
+      EXCEPTIONS
+        OTHERS    = 1.
+
+    IF sy-subrc <> 0.
+      lcx_exception=>raise( 'error from ABAP4_CALL_TRANSACTION, STYL' ).
+    ENDIF.
 
   ENDMETHOD.                    "jump
 
@@ -29843,7 +30022,45 @@ CLASS lcl_object_tobj IMPLEMENTATION.
   ENDMETHOD.                    "delete
 
   METHOD lif_object~jump.
-    lcx_exception=>raise( 'todo, TOBJ jump' ).
+
+    DATA: ls_bcdata TYPE bdcdata,
+          lt_bcdata TYPE STANDARD TABLE OF bdcdata.
+
+    ls_bcdata-program  = 'SAPMSVIM'.
+    ls_bcdata-dynpro   = '0050'.
+    ls_bcdata-dynbegin = 'X'.
+    APPEND ls_bcdata TO lt_bcdata.
+
+    CLEAR ls_bcdata.
+    ls_bcdata-fnam = 'VIMDYNFLDS-VIEWNAME'.
+    ls_bcdata-fval = substring( val = ms_item-obj_name
+                                len = strlen( ms_item-obj_name ) - 1 ).
+    APPEND ls_bcdata TO lt_bcdata.
+
+    CLEAR ls_bcdata.
+    ls_bcdata-fnam = 'VIMDYNFLDS-ELEM_GEN'.
+    ls_bcdata-fval = abap_true.
+    APPEND ls_bcdata TO lt_bcdata.
+
+    CLEAR ls_bcdata.
+    ls_bcdata-fnam = 'BDC_OKCODE'.
+    ls_bcdata-fval = '=SHOW'.
+    APPEND ls_bcdata TO lt_bcdata.
+
+    CALL FUNCTION 'ABAP4_CALL_TRANSACTION'
+      STARTING NEW TASK 'GIT'
+      EXPORTING
+        tcode     = 'SE54'
+        mode_val  = 'E'
+      TABLES
+        using_tab = lt_bcdata
+      EXCEPTIONS
+        OTHERS    = 1.
+
+    IF sy-subrc <> 0.
+      lcx_exception=>raise( 'error from ABAP4_CALL_TRANSACTION, TOBJ' ).
+    ENDIF.
+
   ENDMETHOD.                    "jump
 
   METHOD lif_object~compare_to_remote_version.
@@ -50377,5 +50594,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-07-28T10:11:04.853Z
+* abapmerge - 2017-07-30T08:35:03.439Z
 ****************************************************
