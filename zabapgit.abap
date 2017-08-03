@@ -10153,8 +10153,8 @@ CLASS lcl_http IMPLEMENTATION.
   METHOD is_local_system.
 
     DATA: lv_host TYPE string,
-          lt_list TYPE lif_defs=>ty_icm_sinfo2_tt.
-
+          lt_list TYPE lif_defs=>ty_icm_sinfo2_tt,
+          li_exit TYPE ref to lif_exit.
 
     CALL FUNCTION 'ICM_GET_INFO2'
       TABLES
@@ -10167,6 +10167,9 @@ CLASS lcl_http IMPLEMENTATION.
     IF sy-subrc <> 0.
       RETURN.
     ENDIF.
+
+    li_exit = lcl_exit=>get_instance( ).
+    li_exit->change_local_host( CHANGING ct_hosts = lt_list ).
 
     lcl_exit=>get_instance( )->change_local_host( CHANGING ct_hosts = lt_list ).
 
@@ -47982,11 +47985,10 @@ CLASS ltcl_html_action_utils IMPLEMENTATION.
 
   METHOD _hex_to_char.
 
-    cl_abap_conv_in_ce=>create( )->convert(
-      EXPORTING
-        input = i_x
-      IMPORTING
-        data  = r_s ).
+    DATA lr_conv TYPE REF TO cl_abap_conv_in_ce.
+
+    lr_conv = cl_abap_conv_in_ce=>create( ).
+    lr_conv->convert( EXPORTING input = i_x IMPORTING data = r_s ).
 
   ENDMETHOD.
 
@@ -50595,5 +50597,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-08-03T15:37:06.635Z
+* abapmerge - 2017-08-03T15:41:49.532Z
 ****************************************************
