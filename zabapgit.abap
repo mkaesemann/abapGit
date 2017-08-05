@@ -12348,13 +12348,7 @@ CLASS lcl_objects_files IMPLEMENTATION.
     DATA: lv_obj_name TYPE string.
 
 
-    IF ms_item-obj_type = 'SICF'.
-* multiple SICF nodes with same name cannot be added to repository
-      lv_obj_name = ms_item-obj_name(15).
-    ELSE.
-      lv_obj_name = ms_item-obj_name.
-    ENDIF.
-
+    lv_obj_name = ms_item-obj_name.
 
     IF iv_extra IS INITIAL.
       CONCATENATE lv_obj_name '.' ms_item-obj_type '.' iv_ext
@@ -14264,6 +14258,11 @@ CLASS lcl_tadir DEFINITION FINAL.
                   iv_object       TYPE tadir-object
                   iv_obj_name     TYPE tadir-obj_name
         RETURNING VALUE(rs_tadir) TYPE tadir,
+      read_single_sicf
+        IMPORTING iv_pgmid        TYPE tadir-pgmid DEFAULT 'R3TR'
+                  iv_obj_name     TYPE tadir-obj_name
+        RETURNING VALUE(rs_tadir) TYPE tadir
+        RAISING   lcx_exception,
       get_object_package
         IMPORTING iv_pgmid           TYPE tadir-pgmid DEFAULT 'R3TR'
                   iv_object          TYPE tadir-object
@@ -14272,6 +14271,10 @@ CLASS lcl_tadir DEFINITION FINAL.
 
   PRIVATE SECTION.
     CLASS-METHODS:
+      read_sicf_url
+        IMPORTING iv_obj_name    TYPE tadir-obj_name
+        RETURNING VALUE(rv_hash) TYPE text25
+        RAISING   lcx_exception,
       check_exists
         IMPORTING it_tadir        TYPE lif_defs=>ty_tadir_tt
         RETURNING VALUE(rt_tadir) TYPE lif_defs=>ty_tadir_tt
@@ -14299,17 +14302,42 @@ CLASS lcl_tadir IMPLEMENTATION.
 
 
     IF iv_object = 'SICF'.
-      CONCATENATE iv_obj_name '%' INTO lv_obj_name.
+      rs_tadir = read_single_sicf( iv_pgmid = iv_pgmid
+                                   iv_obj_name = iv_obj_name ).
     ELSE.
-      lv_obj_name = iv_obj_name.
+      SELECT SINGLE * FROM tadir INTO rs_tadir
+        WHERE pgmid = iv_pgmid
+        AND object = iv_object
+        AND obj_name = iv_obj_name.                       "#EC CI_SUBRC
     ENDIF.
 
-    SELECT SINGLE * FROM tadir INTO rs_tadir
-      WHERE pgmid = iv_pgmid
-      AND object = iv_object
-      AND obj_name LIKE lv_obj_name.      "#EC CI_SUBRC "#EC CI_GENBUFF
-
   ENDMETHOD.                    "read_single
+
+  METHOD read_single_sicf.
+
+    DATA: lt_tadir    TYPE STANDARD TABLE OF tadir WITH DEFAULT KEY,
+          lv_hash     TYPE text25,
+          lv_obj_name TYPE tadir-obj_name.
+
+    FIELD-SYMBOLS: <ls_tadir> LIKE LINE OF lt_tadir.
+
+
+    lv_hash = iv_obj_name+15.
+    CONCATENATE iv_obj_name(15) '%' INTO lv_obj_name.
+
+    SELECT * FROM tadir INTO TABLE lt_tadir
+      WHERE pgmid = iv_pgmid
+      AND object = 'SICF'
+      AND obj_name LIKE lv_obj_name.
+
+    LOOP AT lt_tadir ASSIGNING <ls_tadir>.
+      IF read_sicf_url( <ls_tadir>-obj_name ) = lv_hash.
+        rs_tadir = <ls_tadir>.
+        RETURN.
+      ENDIF.
+    ENDLOOP.
+
+  ENDMETHOD.
 
   METHOD get_object_package.
 
@@ -14326,6 +14354,34 @@ CLASS lcl_tadir IMPLEMENTATION.
     rv_devclass = ls_tadir-devclass.
 
   ENDMETHOD.  "get_object_package.
+
+  METHOD read_sicf_url.
+
+    DATA: lv_name    TYPE icfname,
+          lv_url     TYPE string,
+          lv_parguid TYPE icfparguid.
+
+
+    lv_name    = iv_obj_name.
+    lv_parguid = iv_obj_name+15.
+
+    cl_icf_tree=>if_icf_tree~get_info_from_serv(
+      EXPORTING
+        icf_name          = lv_name
+        icfparguid        = lv_parguid
+      IMPORTING
+        url               = lv_url
+      EXCEPTIONS
+        wrong_name        = 1
+        wrong_parguid     = 2
+        incorrect_service = 3
+        no_authority      = 4
+        OTHERS            = 5 ).
+    IF sy-subrc = 0.
+      rv_hash = lcl_hash=>sha1_raw( lcl_convert=>string_to_xstring_utf8( lv_url ) ).
+    ENDIF.
+
+  ENDMETHOD.
 
   METHOD check_exists.
 
@@ -14400,7 +14456,8 @@ CLASS lcl_tadir IMPLEMENTATION.
 
       CASE <ls_tadir>-object.
         WHEN 'SICF'.
-          <ls_tadir>-obj_name = <ls_tadir>-obj_name(15).
+* replace the internal GUID with a hash of the path
+          <ls_tadir>-obj_name+15 = read_sicf_url( <ls_tadir>-obj_name ).
       ENDCASE.
     ENDLOOP.
 
@@ -27154,11 +27211,11 @@ CLASS lcl_object_sicf IMPLEMENTATION.
 
   METHOD lif_object~exists.
 
-    DATA: ls_icfservice TYPE icfservice.
+    DATA: ls_tadir TYPE tadir.
 
+    ls_tadir = lcl_tadir=>read_single_sicf( ms_item-obj_name ).
 
-    read( IMPORTING es_icfservice = ls_icfservice ).
-    rv_bool = boolc( NOT ls_icfservice IS INITIAL ).
+    rv_bool = boolc( NOT ls_tadir IS INITIAL ).
 
   ENDMETHOD.                    "lif_object~exists
 
@@ -27209,17 +27266,7 @@ CLASS lcl_object_sicf IMPLEMENTATION.
     CLEAR et_icfhandler.
     CLEAR ev_url.
 
-    ls_key = ms_item-obj_name.
-    IF ls_key-icfparguid IS INITIAL.
-* limitation: name must be unique
-      SELECT SINGLE icfparguid FROM icfservice
-        INTO ls_key-icfparguid
-        WHERE icf_name = ls_key-icf_name
-        AND icf_cuser <> 'SAP' ##warn_ok.
-      IF sy-subrc <> 0.
-        RETURN.
-      ENDIF.
-    ENDIF.
+    ls_key = lcl_tadir=>read_single_sicf( ms_item-obj_name )-obj_name.
 
     cl_icf_tree=>if_icf_tree~get_info_from_serv(
       EXPORTING
@@ -27267,6 +27314,7 @@ CLASS lcl_object_sicf IMPLEMENTATION.
           ls_read       TYPE icfservice,
           ls_icfdocu    TYPE icfdocu,
           lv_url        TYPE string,
+          lv_exists     TYPE abap_bool,
           lt_icfhandler TYPE TABLE OF icfhandler.
 
 
@@ -27279,14 +27327,16 @@ CLASS lcl_object_sicf IMPLEMENTATION.
     io_xml->read( EXPORTING iv_name = 'ICFHANDLER_TABLE'
                   CHANGING cg_data = lt_icfhandler ).
 
-    read( IMPORTING es_icfservice = ls_read ).
-    IF ls_read IS INITIAL.
+
+    lv_exists = lif_object~exists( ).
+    IF lv_exists = abap_false.
       insert_sicf( is_icfservice = ls_icfservice
                    is_icfdocu    = ls_icfdocu
                    it_icfhandler = lt_icfhandler
                    iv_package    = iv_package
                    iv_url        = lv_url ).
     ELSE.
+      read( IMPORTING es_icfservice = ls_read ).
       change_sicf( is_icfservice = ls_icfservice
                    is_icfdocu    = ls_icfdocu
                    it_icfhandler = lt_icfhandler
@@ -50597,5 +50647,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-08-03T15:45:13.630Z
+* abapmerge - 2017-08-05T05:42:18.842Z
 ****************************************************
