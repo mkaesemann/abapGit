@@ -27220,7 +27220,8 @@ CLASS lcl_object_sicf IMPLEMENTATION.
 
   METHOD lif_object~exists.
 
-    DATA: ls_tadir TYPE tadir.
+    DATA: ls_tadir TYPE tadir,
+          ls_key   TYPE ty_sicf_key.
 
     ls_tadir = lcl_tadir=>read_single_sicf( ms_item-obj_name ).
 
@@ -50726,5 +50727,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-08-05T09:28:29.650Z
+* abapmerge - 2017-08-05T09:30:17.005Z
 ****************************************************
