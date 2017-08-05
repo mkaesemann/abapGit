@@ -14257,7 +14257,8 @@ CLASS lcl_tadir DEFINITION FINAL.
         IMPORTING iv_pgmid        TYPE tadir-pgmid DEFAULT 'R3TR'
                   iv_object       TYPE tadir-object
                   iv_obj_name     TYPE tadir-obj_name
-        RETURNING VALUE(rs_tadir) TYPE tadir,
+        RETURNING VALUE(rs_tadir) TYPE tadir
+        RAISING   lcx_exception,
       read_single_sicf
         IMPORTING iv_pgmid        TYPE tadir-pgmid DEFAULT 'R3TR'
                   iv_obj_name     TYPE tadir-obj_name
@@ -14267,7 +14268,8 @@ CLASS lcl_tadir DEFINITION FINAL.
         IMPORTING iv_pgmid           TYPE tadir-pgmid DEFAULT 'R3TR'
                   iv_object          TYPE tadir-object
                   iv_obj_name        TYPE tadir-obj_name
-        RETURNING VALUE(rv_devclass) TYPE tadir-devclass.
+        RETURNING VALUE(rv_devclass) TYPE tadir-devclass
+        RAISING   lcx_exception.
 
   PRIVATE SECTION.
     CLASS-METHODS:
@@ -14512,7 +14514,8 @@ CLASS lcl_file_status DEFINITION FINAL
                   it_local          TYPE lif_defs=>ty_files_item_tt
                   it_remote         TYPE lif_defs=>ty_files_tt
                   it_cur_state      TYPE lif_defs=>ty_file_signatures_tt
-        RETURNING VALUE(rt_results) TYPE lif_defs=>ty_results_tt,
+        RETURNING VALUE(rt_results) TYPE lif_defs=>ty_results_tt
+        RAISING   lcx_exception,
       run_checks
         IMPORTING io_log     TYPE REF TO lcl_log
                   it_results TYPE lif_defs=>ty_results_tt
@@ -48214,7 +48217,8 @@ CLASS ltcl_file_status DEFINITION FOR TESTING RISK LEVEL HARMLESS
   INHERITING FROM cl_aunit_assert.
 
   PUBLIC SECTION.
-    METHODS calculate_status FOR TESTING.
+    METHODS calculate_status FOR TESTING
+      RAISING lcx_exception.
 
 ENDCLASS.   "ltcl_file_status
 
@@ -50655,5 +50659,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-08-05T06:18:02.633Z
+* abapmerge - 2017-08-05T07:26:19.515Z
 ****************************************************
