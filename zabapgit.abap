@@ -30824,6 +30824,8 @@ CLASS lcl_object_type DEFINITION INHERITING FROM lcl_objects_super FINAL.
     ALIASES mo_files FOR lif_object~mo_files.
 
   PRIVATE SECTION.
+    CONSTANTS: c_prefix TYPE c LENGTH 3 VALUE '%_C'.
+
     METHODS read
       EXPORTING ev_ddtext TYPE ddtypet-ddtext
                 et_source TYPE abaptxt255_tab
@@ -30932,10 +30934,6 @@ CLASS lcl_object_type IMPLEMENTATION.
 
     lv_typegroup = ms_item-obj_name.
 
-    IF lif_object~exists( ) = abap_true.
-      lif_object~delete( ).
-    ENDIF.
-
     CALL FUNCTION 'RS_DD_TYGR_INSERT_SOURCES'
       EXPORTING
         typegroupname        = lv_typegroup
@@ -30955,7 +30953,7 @@ CLASS lcl_object_type IMPLEMENTATION.
       lcx_exception=>raise( 'error from RS_DD_TYGR_INSERT_SOURCES' ).
     ENDIF.
 
-    CONCATENATE '%_C' lv_typegroup INTO lv_progname.
+    CONCATENATE c_prefix lv_typegroup INTO lv_progname.
     UPDATE progdir SET uccheck = abap_true
       WHERE name = lv_progname.
     IF sy-subrc <> 0.
@@ -30966,8 +30964,13 @@ CLASS lcl_object_type IMPLEMENTATION.
 
   METHOD lif_object~deserialize.
 
-    DATA: lv_ddtext TYPE ddtypet-ddtext,
-          lt_source TYPE abaptxt255_tab.
+    DATA: lv_ddtext    TYPE ddtypet-ddtext,
+          lt_source    TYPE abaptxt255_tab,
+          lv_progname  TYPE reposrc-progname,
+          lv_typegroup TYPE rsedd0-typegroup.
+
+
+    lv_typegroup = ms_item-obj_name.
 
 
     io_xml->read( EXPORTING iv_name = 'DDTEXT'
@@ -30975,9 +30978,14 @@ CLASS lcl_object_type IMPLEMENTATION.
 
     lt_source = mo_files->read_abap( ).
 
-    create( iv_ddtext   = lv_ddtext
-            it_source   = lt_source
-            iv_devclass = iv_package ).
+    IF lif_object~exists( ) = abap_false.
+      create( iv_ddtext   = lv_ddtext
+              it_source   = lt_source
+              iv_devclass = iv_package ).
+    ELSE.
+      CONCATENATE c_prefix lv_typegroup INTO lv_progname.
+      INSERT REPORT lv_progname FROM lt_source STATE 'I'.
+    ENDIF.
 
     lcl_objects_activation=>add_item( ms_item ).
 
@@ -50647,5 +50655,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-08-05T05:42:18.842Z
+* abapmerge - 2017-08-05T06:18:02.633Z
 ****************************************************
