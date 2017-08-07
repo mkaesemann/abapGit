@@ -19029,8 +19029,6 @@ CLASS lcl_object_dial IMPLEMENTATION.
     " It seems that there's no API for diapar, therefore we manipulate it directly
     INSERT diapar FROM TABLE ls_dialog_module-dia_pars.
 
-    tadir_insert( iv_package ).
-
   ENDMETHOD.
 
   METHOD lif_object~delete.
@@ -50939,5 +50937,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-08-07T16:13:11.332Z
+* abapmerge - 2017-08-07T16:15:17.834Z
 ****************************************************
