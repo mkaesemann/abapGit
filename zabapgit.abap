@@ -10171,8 +10171,6 @@ CLASS lcl_http IMPLEMENTATION.
     li_exit = lcl_exit=>get_instance( ).
     li_exit->change_local_host( CHANGING ct_hosts = lt_list ).
 
-    lcl_exit=>get_instance( )->change_local_host( CHANGING ct_hosts = lt_list ).
-
     FIND REGEX 'https?://([^/^:]*)' IN iv_url
       SUBMATCHES lv_host.
 
@@ -51161,5 +51159,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-08-09T15:28:06.780Z
+* abapmerge - 2017-08-10T15:10:55.794Z
 ****************************************************
