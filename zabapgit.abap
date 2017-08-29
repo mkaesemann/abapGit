@@ -13736,8 +13736,9 @@ CLASS lcl_objects_super IMPLEMENTATION.
 
 ENDCLASS.                    "lcl_objects_super IMPLEMENTATION
 
-CLASS lcl_objects_channel_super DEFINITION ABSTRACT
+CLASS lcl_objects_saxx_super DEFINITION ABSTRACT
                                 INHERITING FROM lcl_objects_super.
+* common class for SAPC and SAMC objects
 
   PUBLIC SECTION.
     INTERFACES:
@@ -13787,7 +13788,7 @@ CLASS lcl_objects_channel_super DEFINITION ABSTRACT
 
 ENDCLASS.
 
-CLASS lcl_objects_channel_super IMPLEMENTATION.
+CLASS lcl_objects_saxx_super IMPLEMENTATION.
 
   METHOD lif_object~has_changed_since.
     rv_changed = abap_true.
@@ -26336,7 +26337,7 @@ ENDCLASS.                    "lcl_object_prog IMPLEMENTATION
 *&  Include           ZABAPGIT_OBJECT_SAMC
 *&---------------------------------------------------------------------*
 
-CLASS lcl_object_samc DEFINITION INHERITING FROM lcl_objects_channel_super FINAL.
+CLASS lcl_object_samc DEFINITION INHERITING FROM lcl_objects_saxx_super FINAL.
 
   PROTECTED SECTION.
     METHODS:
@@ -26381,7 +26382,7 @@ ENDCLASS.                    "lcl_object_samc IMPLEMENTATION
 *&  Include           ZABAPGIT_OBJECT_SAPC
 *&---------------------------------------------------------------------*
 
-CLASS lcl_object_sapc DEFINITION INHERITING FROM lcl_objects_channel_super FINAL.
+CLASS lcl_object_sapc DEFINITION INHERITING FROM lcl_objects_saxx_super FINAL.
 
   PROTECTED SECTION.
     METHODS:
@@ -51985,5 +51986,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-08-29T13:21:19.932Z
+* abapmerge - 2017-08-29T13:40:51.547Z
 ****************************************************
