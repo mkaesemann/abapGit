@@ -8003,21 +8003,21 @@ CLASS lcl_repo DEFINITION ABSTRACT FRIENDS lcl_repo_srv.
         RETURNING VALUE(ro_dot_abapgit) TYPE REF TO lcl_dot_abapgit,
       set_dot_abapgit
         IMPORTING io_dot_abapgit TYPE REF TO lcl_dot_abapgit
-        RAISING lcx_exception,
+        RAISING   lcx_exception,
       deserialize
         RAISING lcx_exception,
       refresh
         IMPORTING iv_drop_cache TYPE abap_bool DEFAULT abap_false
-        RAISING lcx_exception,
+        RAISING   lcx_exception,
       refresh_local, " For testing purposes, maybe removed later
       update_local_checksums
         IMPORTING it_files TYPE lif_defs=>ty_file_signatures_tt
         RAISING   lcx_exception,
       rebuild_local_checksums
-        RAISING   lcx_exception,
+        RAISING lcx_exception,
       find_remote_dot_abapgit
         RETURNING VALUE(ro_dot) TYPE REF TO lcl_dot_abapgit
-        RAISING lcx_exception,
+        RAISING   lcx_exception,
       is_offline
         RETURNING VALUE(rv_offline) TYPE abap_bool
         RAISING   lcx_exception.
@@ -8069,7 +8069,7 @@ CLASS lcl_repo_online DEFINITION INHERITING FROM lcl_repo FINAL.
         IMPORTING iv_branch_name TYPE lcl_persistence_repo=>ty_repo-branch_name
         RAISING   lcx_exception,
       set_new_remote
-        IMPORTING iv_url TYPE lcl_persistence_repo=>ty_repo-url
+        IMPORTING iv_url         TYPE lcl_persistence_repo=>ty_repo-url
                   iv_branch_name TYPE lcl_persistence_repo=>ty_repo-branch_name
         RAISING   lcx_exception,
       get_sha1_local
@@ -8091,7 +8091,12 @@ CLASS lcl_repo_online DEFINITION INHERITING FROM lcl_repo FINAL.
       push
         IMPORTING is_comment TYPE lif_defs=>ty_comment
                   io_stage   TYPE REF TO lcl_stage
-        RAISING   lcx_exception.
+        RAISING   lcx_exception,
+      get_unnecessary_local_objs
+        RETURNING VALUE(rt_unnecessary_local_objects) TYPE LIF_DEFS=>TY_TADIR_TT
+        RAISING   lcx_exception,
+      delete_unnecessary_local_objs
+        RAISING   lcx_exception lcx_cancel.
 
   PRIVATE SECTION.
     DATA:
@@ -8110,8 +8115,8 @@ CLASS lcl_repo_online DEFINITION INHERITING FROM lcl_repo FINAL.
       actualize_head_branch
         RAISING lcx_exception,
       delete_initial_online_repo
-        importing iv_commit type flag
-        RAISING lcx_exception.
+        IMPORTING iv_commit TYPE flag
+        RAISING   lcx_exception.
 
 ENDCLASS.                    "lcl_repo_online DEFINITION
 
@@ -35763,6 +35768,61 @@ CLASS lcl_repo_online IMPLEMENTATION.
 
   ENDMETHOD.  " delete_initial_online_repo
 
+  METHOD delete_unnecessary_local_objs.
+
+    DATA: lt_tadir TYPE lif_defs=>ty_tadir_tt.
+
+    lt_tadir = get_unnecessary_local_objs( ).
+
+    IF lines( lt_tadir ) > 0.
+
+      lcl_objects=>delete( lt_tadir ).
+
+    ENDIF.
+
+  ENDMETHOD. "  delete_unneccessary_local_objs.
+
+
+  METHOD get_unnecessary_local_objs.
+
+    DATA: lt_tadir        TYPE lif_defs=>ty_tadir_tt,
+          lt_tadir_unique TYPE HASHED TABLE OF lif_defs=>ty_tadir
+                               WITH UNIQUE KEY pgmid object obj_name,
+          lt_local        TYPE lif_defs=>ty_files_item_tt,
+          lt_remote       TYPE lif_defs=>ty_files_tt,
+          lt_status       TYPE lif_defs=>ty_results_tt,
+          lt_package      TYPE lcl_persistence_repo=>ty_repo-package.
+
+    FIELD-SYMBOLS: <status> TYPE lif_defs=>ty_result,
+                   <tadir>  TYPE lif_defs=>ty_tadir.
+
+    " delete objects which are added locally but are not in remote repo
+    lt_local  = me->get_files_local( ).
+    lt_remote = me->get_files_remote( ).
+    lt_status = me->status( ).
+
+    lt_package = me->get_package( ).
+    lt_tadir = lcl_tadir=>read( lt_package ).
+
+    LOOP AT lt_status ASSIGNING <status>
+                      WHERE lstate = lif_defs=>gc_state-added.
+
+      READ TABLE lt_tadir ASSIGNING <tadir>
+                          WITH KEY pgmid    = 'R3TR'
+                                   object   = <status>-obj_type
+                                   obj_name = <status>-obj_name
+                                   devclass = <status>-package
+                          BINARY SEARCH.
+      ASSERT sy-subrc = 0.
+
+      INSERT <tadir> INTO TABLE lt_tadir_unique.
+
+    ENDLOOP.
+
+    rt_unnecessary_local_objects = lt_tadir_unique.
+
+  ENDMETHOD.
+
 ENDCLASS.                    "lcl_repo_online IMPLEMENTATION
 
 *----------------------------------------------------------------------*
@@ -37120,9 +37180,9 @@ CLASS lcl_services_git IMPLEMENTATION.
 
   METHOD reset.
 
-    DATA: lo_repo   TYPE REF TO lcl_repo_online,
-          lv_answer TYPE c LENGTH 1.
-
+    DATA: lo_repo                   TYPE REF TO lcl_repo_online,
+          lv_answer                 TYPE c LENGTH 1,
+          lt_unnecessary_local_objs TYPE lif_defs=>ty_tadir_tt.
 
     lo_repo ?= lcl_app=>repo_srv( )->get( iv_key ).
 
@@ -37142,6 +37202,26 @@ CLASS lcl_services_git IMPLEMENTATION.
 
     IF lv_answer = '2'.
       RAISE EXCEPTION TYPE lcx_cancel.
+    ENDIF.
+
+    lt_unnecessary_local_objs = lo_repo->get_unnecessary_local_objs( ).
+
+    IF lines( lt_unnecessary_local_objs ) > 0.
+
+      lv_answer = lcl_popups=>popup_to_confirm(
+        titlebar              = 'Question'
+        text_question         = |Delete { lines( lt_unnecessary_local_objs ) } unnecessary local objects?|
+        text_button_1         = 'Yes'
+        icon_button_1         = 'ICON_OKAY'
+        text_button_2         = 'No'
+        icon_button_2         = 'ICON_CANCEL'
+        default_button        = '2'
+        display_cancel_button = abap_false ).               "#EC NOTEXT
+
+      IF lv_answer = '1'.
+        lo_repo->delete_unnecessary_local_objs( ).
+      ENDIF.
+
     ENDIF.
 
     lo_repo->deserialize( ).
@@ -51905,5 +51985,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-08-24T09:56:57.929Z
+* abapmerge - 2017-08-29T13:21:19.932Z
 ****************************************************
