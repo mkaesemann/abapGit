@@ -21884,7 +21884,7 @@ CLASS lcl_object_enhs IMPLEMENTATION.
           EXPORTING
             spot_name      = lv_spot_name
             tooltype       = cl_enh_tool_badi_def=>tooltype
-            dark           = abap_true
+            dark           = abap_false
             compositename  = lv_parent
           IMPORTING
             spot           = li_spot_ref
@@ -52012,5 +52012,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-09-03T09:16:47.234Z
+* abapmerge - 2017-09-05T15:34:46.141Z
 ****************************************************
