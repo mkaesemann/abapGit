@@ -28748,6 +28748,11 @@ CLASS lcl_object_sicf IMPLEMENTATION.
       RETURN.
     ENDIF.
 
+    IF ls_icfservice-icfparguid CO '0'.
+* not supported by the SAP standard API
+      lcx_exception=>raise( 'SICF - cannot delete root node, delete node manually' ).
+    ENDIF.
+
     cl_icf_tree=>if_icf_tree~delete_node(
       EXPORTING
         icfparguid                  = ls_icfservice-icfparguid
@@ -52012,5 +52017,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-09-09T05:16:24.389Z
+* abapmerge - 2017-09-09T13:21:44.328Z
 ****************************************************
