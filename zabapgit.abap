@@ -19020,7 +19020,7 @@ CLASS lcl_object_ddls IMPLEMENTATION.
           EXPORTING
             name = ms_item-obj_name.
       CATCH cx_root.
-        lcx_exception=>raise( 'DDLS error' ).
+        lcx_exception=>raise( 'DDLS error deleting' ).
     ENDTRY.
 
   ENDMETHOD.                    "delete
@@ -19049,7 +19049,7 @@ CLASS lcl_object_ddls IMPLEMENTATION.
           IMPORTING
             ddddlsrcv_wa = <ls_data>.
       CATCH cx_root.
-        lcx_exception=>raise( 'DDLS error' ).
+        lcx_exception=>raise( 'DDLS error reading' ).
     ENDTRY.
 
     ASSIGN COMPONENT 'AS4USER' OF STRUCTURE <ls_data> TO <lv_field>.
@@ -19111,7 +19111,7 @@ CLASS lcl_object_ddls IMPLEMENTATION.
             devclass   = iv_package
             prid       = 0.
       CATCH cx_root.
-        lcx_exception=>raise( 'DDLS error' ).
+        lcx_exception=>raise( 'DDLS error writing TADIR' ).
     ENDTRY.
 
     lcl_objects_activation=>add_item( ms_item ).
@@ -52017,5 +52017,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-09-09T13:21:44.328Z
+* abapmerge - 2017-09-09T13:46:02.916Z
 ****************************************************
