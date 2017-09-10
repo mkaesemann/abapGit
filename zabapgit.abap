@@ -4531,7 +4531,7 @@ CLASS lcl_persistence_repo DEFINITION FINAL.
 
     TYPES: BEGIN OF ty_repo,
              key TYPE lcl_persistence_db=>ty_value.
-            INCLUDE TYPE ty_repo_xml.
+        INCLUDE TYPE ty_repo_xml.
     TYPES: END OF ty_repo.
     TYPES: tt_repo TYPE STANDARD TABLE OF ty_repo WITH DEFAULT KEY.
     TYPES: tt_repo_keys TYPE STANDARD TABLE OF ty_repo-key WITH DEFAULT KEY.
@@ -4648,7 +4648,7 @@ CLASS lcl_persist_background DEFINITION FINAL.
 
     TYPES: BEGIN OF ty_background,
              key TYPE lcl_persistence_db=>ty_value.
-            INCLUDE TYPE ty_xml.
+        INCLUDE TYPE ty_xml.
     TYPES: END OF ty_background.
     TYPES: tt_background TYPE STANDARD TABLE OF ty_background WITH DEFAULT KEY.
 
@@ -4696,59 +4696,70 @@ CLASS lcl_settings DEFINITION FINAL.
     CONSTANTS: c_commitmsg_body_size_dft      TYPE i VALUE 72.
     CONSTANTS: c_dbtype_settings TYPE lcl_persistence_db=>ty_type VALUE 'SETTINGS' ##NO_TEXT.
 
-    METHODS set_proxy_url
+    METHODS: set_proxy_url
       IMPORTING
-        iv_url TYPE string.
-    METHODS set_proxy_port
-      IMPORTING
-        iv_port TYPE string.
-    METHODS set_proxy_authentication
-      IMPORTING
-        iv_auth TYPE abap_bool.
-    METHODS get_proxy_url
-      RETURNING
-        VALUE(rv_proxy_url) TYPE string.
-    METHODS get_proxy_port
-      RETURNING
-        VALUE(rv_port) TYPE string.
-    METHODS get_proxy_authentication
-      RETURNING
-        VALUE(rv_auth) TYPE abap_bool.
-    METHODS set_run_critical_tests
-      IMPORTING
-        iv_run TYPE abap_bool.
-    METHODS
+        iv_url TYPE string,
+      set_proxy_port
+        IMPORTING
+          iv_port TYPE string,
+      set_proxy_authentication
+        IMPORTING
+          iv_auth TYPE abap_bool,
+      get_proxy_url
+        RETURNING
+          VALUE(rv_proxy_url) TYPE string,
+      get_proxy_port
+        RETURNING
+          VALUE(rv_port) TYPE string,
+      get_proxy_authentication
+        RETURNING
+          VALUE(rv_auth) TYPE abap_bool,
+      set_run_critical_tests
+        IMPORTING
+          iv_run TYPE abap_bool,
       get_run_critical_tests
-        RETURNING VALUE(rv_run) TYPE abap_bool.
-    METHODS set_max_lines
-      IMPORTING iv_lines TYPE i.
-    METHODS get_max_lines
-      RETURNING
-        VALUE(rv_lines) TYPE i.
-    METHODS set_adt_jump_enanbled
-      IMPORTING iv_adt_jump_enabled TYPE abap_bool.
-    METHODS get_adt_jump_enabled
-      RETURNING
-        VALUE(rv_adt_jump_enabled) TYPE abap_bool.
-    METHODS set_commitmsg_comment_length
-      IMPORTING iv_length TYPE i.
-    METHODS get_commitmsg_comment_length
-      RETURNING
-        VALUE(rv_length) TYPE i.
-    METHODS set_commitmsg_body_size
-      IMPORTING iv_length TYPE i.
-    METHODS get_commitmsg_body_size
-      RETURNING
-        VALUE(rv_length) TYPE i.
-    METHODS get_settings_xml
-      RETURNING VALUE(ev_settings_xml) TYPE string
-      RAISING   lcx_exception.
-    METHODS set_xml_settings
-      IMPORTING iv_settings_xml TYPE string
-      RAISING   lcx_exception.
-    METHODS set_defaults.
-
-
+        RETURNING
+          VALUE(rv_run) TYPE abap_bool,
+      set_experimental_features
+        IMPORTING
+          iv_run TYPE abap_bool,
+      get_experimental_features
+        RETURNING
+          VALUE(rv_run) TYPE abap_bool,
+      set_max_lines
+        IMPORTING iv_lines TYPE i,
+      get_max_lines
+        RETURNING
+          VALUE(rv_lines) TYPE i,
+      set_adt_jump_enanbled
+        IMPORTING
+          iv_adt_jump_enabled TYPE abap_bool,
+      get_adt_jump_enabled
+        RETURNING
+          VALUE(rv_adt_jump_enabled) TYPE abap_bool,
+      set_commitmsg_comment_length
+        IMPORTING
+          iv_length TYPE i,
+      get_commitmsg_comment_length
+        RETURNING
+          VALUE(rv_length) TYPE i,
+      set_commitmsg_body_size
+        IMPORTING
+          iv_length TYPE i,
+      get_commitmsg_body_size
+        RETURNING
+          VALUE(rv_length) TYPE i,
+      get_settings_xml
+        RETURNING
+          VALUE(ev_settings_xml) TYPE string
+        RAISING
+          lcx_exception,
+      set_xml_settings
+        IMPORTING
+          iv_settings_xml TYPE string
+        RAISING
+          lcx_exception,
+      set_defaults.
 
   PRIVATE SECTION.
     TYPES: BEGIN OF ty_s_settings,
@@ -4756,6 +4767,7 @@ CLASS lcl_settings DEFINITION FINAL.
              proxy_port               TYPE string,
              proxy_auth               TYPE string,
              run_critical_tests       TYPE abap_bool,
+             experimental_features    TYPE abap_bool,
              max_lines                TYPE i,
              adt_jump_enabled         TYPE abap_bool,
              commitmsg_comment_length TYPE i,
@@ -6240,6 +6252,14 @@ CLASS lcl_settings IMPLEMENTATION.
     rv_run = ms_settings-run_critical_tests.
   ENDMETHOD.
 
+  METHOD set_experimental_features.
+    ms_settings-experimental_features = iv_run.
+  ENDMETHOD.
+
+  METHOD get_experimental_features.
+    rv_run = ms_settings-experimental_features.
+  ENDMETHOD.
+
   METHOD get_max_lines.
     rv_lines = ms_settings-max_lines.
   ENDMETHOD.
@@ -6303,15 +6323,11 @@ CLASS lcl_settings IMPLEMENTATION.
     CLEAR ms_settings.
 
     set_proxy_authentication( abap_false ).
-
     set_run_critical_tests( abap_false ).
-
+    set_experimental_features( abap_false ).
     set_max_lines( 500 ).
-
     set_adt_jump_enanbled( abap_false ).
-
     set_commitmsg_comment_length( lcl_settings=>c_commitmsg_comment_length_dft ).
-
     set_commitmsg_body_size( lcl_settings=>c_commitmsg_body_size_dft ).
 
   ENDMETHOD.
@@ -46308,6 +46324,13 @@ CLASS lcl_gui_page_settings IMPLEMENTATION.
       mo_settings->set_run_critical_tests( abap_false ).
     ENDIF.
 
+    READ TABLE it_post_fields ASSIGNING <ls_post_field> WITH KEY name = 'experimental_features'.
+    IF sy-subrc = 0.
+      mo_settings->set_experimental_features( abap_true ).
+    ELSE.
+      mo_settings->set_experimental_features( abap_false ).
+    ENDIF.
+
     READ TABLE it_post_fields ASSIGNING <ls_post_field> WITH KEY name = 'max_lines'.
     IF sy-subrc = 0.
       lv_i_param_value = <ls_post_field>-value.
@@ -46407,16 +46430,24 @@ CLASS lcl_gui_page_settings IMPLEMENTATION.
 
   METHOD render_development_internals.
 
-    DATA lv_checked TYPE string.
+    DATA: lv_critical_tests TYPE string,
+          lv_experimental   TYPE string.
 
     IF mo_settings->get_run_critical_tests( ) = abap_true.
-      lv_checked = 'checked'.
+      lv_critical_tests = 'checked'.
+    ENDIF.
+
+    IF mo_settings->get_experimental_features( ) = abap_true.
+      lv_experimental = 'checked'.
     ENDIF.
 
     CREATE OBJECT ro_html.
     ro_html->add( |<h2>abapGit Development Internals settings</h2>| ).
-    ro_html->add( `<input type="checkbox" name="critical_tests" value="X" `
-                   && lv_checked && ` > Enable critical unit tests (see LTCL_DANGEROUS)` ).
+    ro_html->add( `<input type="checkbox" name="critical_tests" `
+                   && lv_critical_tests && ` > Enable critical unit tests (see LTCL_DANGEROUS)` ).
+    ro_html->add( |<br>| ).
+    ro_html->add( `<input type="checkbox" name="experimental_features" `
+                   && lv_experimental && ` > Enable experimental features` ).
     ro_html->add( |<br>| ).
     ro_html->add( |<br>| ).
 
@@ -52017,5 +52048,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-09-09T13:46:02.916Z
+* abapmerge - 2017-09-10T15:01:37.158Z
 ****************************************************
