@@ -18670,7 +18670,13 @@ CLASS lcl_oo_class_new IMPLEMENTATION.
     ENDIF.
 
     lo_update->set_dark_mode( seox_true ).
-    lo_update->set_amdp_support( abap_true ).
+    TRY.
+        CALL METHOD lo_update->('SET_AMDP_SUPPORT')
+          EXPORTING
+            enabled = abap_true.
+      CATCH cx_sy_dyn_call_illegal_method.
+* AMDP not supported in this system, ignore error
+    ENDTRY.
     lo_update->scan_section_source(
       RECEIVING
         scan_error             = lv_scan_error
@@ -52461,5 +52467,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-09-11T16:52:34.735Z
+* abapmerge - 2017-09-14T17:14:24.629Z
 ****************************************************
