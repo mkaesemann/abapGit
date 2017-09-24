@@ -3154,7 +3154,7 @@ CLASS lcl_xml IMPLEMENTATION.
       EXPORTING
         titel = 'abapGit XML version mismatch'
         txt1  = 'abapGit XML version mismatch'
-        txt2  = 'See https://github.com/larshp/abapGit/wiki/XML-Mismatch'
+        txt2  = 'See http://larshp.github.io/abapGit/other-xml-mismatch.html'
         txt3  = lv_version.                                 "#EC NOTEXT
 
     lcx_exception=>raise( 'XML error' ).
@@ -52468,5 +52468,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-09-24T09:37:45.632Z
+* abapmerge - 2017-09-24T09:39:19.803Z
 ****************************************************
