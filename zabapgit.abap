@@ -721,6 +721,7 @@ INTERFACE lif_defs.
                repo_refresh_checksums   TYPE string VALUE 'repo_refresh_checksums',
                repo_toggle_fav          TYPE string VALUE 'repo_toggle_fav',
                repo_transport_to_branch TYPE string VALUE 'repo_transport_to_branch',
+               repo_syntax_check        TYPE string VALUE 'repo_syntax_check',
 
                abapgit_home             TYPE string VALUE 'abapgit_home',
                abapgit_wiki             TYPE string VALUE 'abapgit_wiki',
@@ -43287,6 +43288,8 @@ CLASS lcl_gui_view_repo IMPLEMENTATION.
       lo_tb_advanced->add( iv_txt = 'Make on-line'
                            iv_act = |{ lif_defs=>gc_action-repo_remote_attach }?{ lv_key }| ).
     ENDIF.
+    lo_tb_advanced->add( iv_txt = 'Syntax Check'
+                         iv_act = |{ lif_defs=>gc_action-repo_syntax_check }?{ lv_key }| ).
     lo_tb_advanced->add( iv_txt = 'Repo settings'
                          iv_act = |{ lif_defs=>gc_action-repo_settings }?{ lv_key }| ).
     lo_tb_advanced->add( iv_txt = 'Update local checksums'
@@ -47470,6 +47473,70 @@ CLASS lcl_gui_page_repo_sett IMPLEMENTATION.
 ENDCLASS.                       "lcl_gui_page_debuginfo
 
 
+****************************************************
+* abapmerge - ZABAPGIT_PAGE_SYNTAX_CHECK
+****************************************************
+*&---------------------------------------------------------------------*
+*& Include          ZABAPGIT_PAGE_SYNTAX_CHECK
+*&---------------------------------------------------------------------*
+
+*&---------------------------------------------------------------------*
+*&  Include           ZABAPGIT_PAGE_REPO_SETTINGS
+*&---------------------------------------------------------------------*
+
+CLASS lcl_gui_page_syntax_check DEFINITION FINAL INHERITING FROM lcl_gui_page.
+  PUBLIC SECTION.
+    METHODS:
+      constructor
+        IMPORTING io_repo TYPE REF TO lcl_repo.
+
+  PROTECTED SECTION.
+    CONSTANTS:
+      BEGIN OF c_action,
+        back TYPE string VALUE 'back',
+      END OF c_action.
+
+    DATA: mo_repo TYPE REF TO lcl_repo.
+
+    METHODS:
+      render_content REDEFINITION.
+
+ENDCLASS.
+
+CLASS lcl_gui_page_syntax_check IMPLEMENTATION.
+
+  METHOD constructor.
+    super->constructor( ).
+    ms_control-page_title = 'SYNTAX CHECK'.
+    mo_repo = io_repo.
+  ENDMETHOD.  " constructor.
+
+  METHOD render_content.
+
+    DATA: lt_result TYPE scit_alvlist,
+          ls_result LIKE LINE OF lt_result.
+
+
+    lt_result = zcl_abapgit_syntax_check=>run( mo_repo->get_package( ) ).
+
+    CREATE OBJECT ro_html.
+    ro_html->add( '<div class="toc">' ).
+
+    IF lines( lt_result ) = 0.
+      ro_html->add( 'No errors' ).
+    ENDIF.
+
+    LOOP AT lt_result INTO ls_result.
+      ro_html->add( |{ ls_result-objtype } { ls_result-objname } { ls_result-kind } { ls_result-text }<br>| ).
+    ENDLOOP.
+
+    ro_html->add( '</div>' ).
+
+  ENDMETHOD.  "render_content
+
+ENDCLASS.                       "lcl_gui_page_debuginfo
+
+
 
 
 INCLUDE zabapgit_gui_pages_userexit IF FOUND.
@@ -47641,6 +47708,11 @@ CLASS lcl_gui_router IMPLEMENTATION.
       WHEN lif_defs=>gc_action-repo_refresh.                    " Repo refresh
         lcl_services_repo=>refresh( lv_key ).
         ev_state = lif_defs=>gc_event_state-re_render.
+      WHEN lif_defs=>gc_action-repo_syntax_check.
+        CREATE OBJECT ei_page TYPE lcl_gui_page_syntax_check
+          EXPORTING
+            io_repo = lcl_app=>repo_srv( )->get( lv_key ).
+        ev_state = lif_defs=>gc_event_state-new_page.
       WHEN lif_defs=>gc_action-repo_purge.                      " Repo remove & purge all objects
         lcl_services_repo=>purge( lv_key ).
         ev_state = lif_defs=>gc_event_state-re_render.
@@ -52917,5 +52989,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-10-01T10:34:34.461Z
+* abapmerge - 2017-10-01T10:36:05.644Z
 ****************************************************
