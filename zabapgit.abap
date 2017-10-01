@@ -14239,6 +14239,9 @@ CLASS lcl_objects DEFINITION FINAL.
                 iv_descr   TYPE string
       CHANGING  ct_files   TYPE lif_defs=>ty_file_signatures_tt
       RAISING   lcx_exception.
+    CLASS-METHODS resolve_ddls
+      CHANGING
+        ct_tadir TYPE lif_defs=>ty_tadir_tt.
 
 ENDCLASS.                    "lcl_object DEFINITION
 
@@ -16601,6 +16604,8 @@ CLASS lcl_objects IMPLEMENTATION.
 
     resolve_ddic( CHANGING ct_tadir = lt_tadir ).
 
+    resolve_ddls( CHANGING ct_tadir = lt_tadir ).
+
     SORT lt_tadir BY korrnum ASCENDING.
 
     LOOP AT lt_tadir ASSIGNING <ls_tadir>.
@@ -16996,6 +17001,68 @@ CLASS lcl_objects IMPLEMENTATION.
         ENDIF.
       ENDIF.
     ENDIF.
+
+  ENDMETHOD.
+
+
+  METHOD resolve_ddls.
+
+    " As CDS-Views aka DDLS can be dependent on each other,
+    " we wan't to ensure that they are deleted in the right order.
+    " Otherwise deletion is prohibited by standard API
+
+    TYPES: BEGIN OF ty_ddls_name.
+        INCLUDE TYPE ddsymtab.
+    TYPES: END OF ty_ddls_name.
+
+    TYPES: tty_ddls_names TYPE STANDARD TABLE OF ty_ddls_name
+                               WITH NON-UNIQUE DEFAULT KEY,
+           BEGIN OF ty_dependency,
+             depname  TYPE dd02l-tabname,
+             deptyp   TYPE c LENGTH 4,
+             deplocal TYPE dd02l-as4local,
+             refname  TYPE dd02l-tabname,
+             reftyp   TYPE c LENGTH 4,
+             kind     TYPE c LENGTH 1,
+           END OF ty_dependency.
+
+    DATA: lt_dependency TYPE STANDARD TABLE OF ty_dependency
+                             WITH NON-UNIQUE DEFAULT KEY,
+          lt_ddls_name  TYPE tty_ddls_names,
+          ls_ddls_name  LIKE LINE OF lt_ddls_name.
+
+    FIELD-SYMBOLS: <tadir_ddls>      TYPE lif_defs=>ty_tadir,
+                   <dependency>      TYPE ty_dependency,
+                   <tadir_dependent> TYPE lif_defs=>ty_tadir.
+
+    LOOP AT ct_tadir ASSIGNING <tadir_ddls>
+                     WHERE object = 'DDLS'.
+
+      CLEAR: lt_dependency,
+             lt_ddls_name.
+
+      ls_ddls_name-name = <tadir_ddls>-obj_name.
+      INSERT ls_ddls_name INTO TABLE lt_ddls_name.
+
+      PERFORM ('DDLS_GET_DEP') IN PROGRAM ('RADMASDL')
+                               TABLES lt_ddls_name lt_dependency.
+
+      LOOP AT lt_dependency ASSIGNING <dependency>
+                            WHERE deptyp = 'DDLS'
+                            AND   refname = <tadir_ddls>-obj_name.
+
+        READ TABLE ct_tadir ASSIGNING <tadir_dependent>
+                            WITH KEY pgmid    = 'R3TR'
+                                     object   = 'DDLS'
+                                     obj_name = <dependency>-depname
+                            BINARY SEARCH.
+        CHECK sy-subrc = 0.
+
+        <tadir_dependent>-korrnum = <tadir_dependent>-korrnum - 1.
+
+      ENDLOOP.
+
+    ENDLOOP.
 
   ENDMETHOD.
 
@@ -52692,5 +52759,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-10-01T07:05:56.358Z
+* abapmerge - 2017-10-01T07:08:45.382Z
 ****************************************************
