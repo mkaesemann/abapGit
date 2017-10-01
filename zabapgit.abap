@@ -33772,7 +33772,7 @@ CLASS lcl_object_w3super IMPLEMENTATION.
         OTHERS    = 1.
 
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from ABAP4_CALL_TRANSACTION, SE35' ).
+      zcx_abapgit_exception=>raise( 'error from ABAP4_CALL_TRANSACTION, SE35' ).
     ENDIF.
 
   ENDMETHOD.                    "jump
@@ -53079,5 +53079,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-10-01T10:38:38.603Z
+* abapmerge - 2017-10-01T10:42:28.557Z
 ****************************************************
