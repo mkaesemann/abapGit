@@ -36567,7 +36567,10 @@ CLASS lcl_repo_online IMPLEMENTATION.
                                    obj_name = <status>-obj_name
                                    devclass = <status>-package
                           BINARY SEARCH.
-      ASSERT sy-subrc = 0.
+      IF sy-subrc <> 0.
+* skip objects that does not exist locally
+        CONTINUE.
+      ENDIF.
 
       INSERT <tadir> INTO TABLE lt_tadir_unique.
 
@@ -52759,5 +52762,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-10-01T07:08:45.382Z
+* abapmerge - 2017-10-01T07:19:21.080Z
 ****************************************************
