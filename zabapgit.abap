@@ -30,8 +30,65 @@ SELECTION-SCREEN BEGIN OF SCREEN 1001.
 * dummy for triggering screen on Java SAP GUI
 SELECTION-SCREEN END OF SCREEN 1001.
 
+CLASS zcx_abapgit_exception DEFINITION
+  inheriting from CX_STATIC_CHECK
+  create public .
+
+public section.
+
+  data TEXT type STRING .
+
+  methods CONSTRUCTOR
+    importing
+      !TEXTID like TEXTID optional
+      !PREVIOUS like PREVIOUS optional
+      !TEXT type STRING optional .
+  class-methods RAISE
+    importing
+      !IV_TEXT type CLIKE
+    raising
+      ZCX_ABAPGIT_EXCEPTION .
+protected section.
+private section.
+ENDCLASS.
+CLASS ZCX_ABAPGIT_EXCEPTION IMPLEMENTATION.
+
+
+  method CONSTRUCTOR.
+CALL METHOD SUPER->CONSTRUCTOR
+EXPORTING
+TEXTID = TEXTID
+PREVIOUS = PREVIOUS
+.
+me->TEXT = TEXT .
+  endmethod.
+
+
+  METHOD raise.
+
+    RAISE EXCEPTION TYPE zcx_abapgit_exception
+      EXPORTING
+        text = iv_text.
+
+  ENDMETHOD.
+ENDCLASS.
+
+CLASS zcl_abapgit_time DEFINITION DEFERRED.
 CLASS zcl_abapgit_syntax_check DEFINITION DEFERRED.
 CLASS zcl_abapgit_zlib_convert DEFINITION DEFERRED.
+CLASS zcl_abapgit_time DEFINITION
+  CREATE PUBLIC .
+
+  PUBLIC SECTION.
+    TYPES: ty_unixtime TYPE c LENGTH 16.
+
+    CLASS-METHODS get
+      RETURNING VALUE(rv_time) TYPE ty_unixtime
+      RAISING   zcx_abapgit_exception.
+  PRIVATE SECTION.
+    CONSTANTS: c_epoch TYPE datum VALUE '19700101'.
+
+ENDCLASS.
 CLASS zcl_abapgit_syntax_check DEFINITION
   CREATE PUBLIC .
 
@@ -80,6 +137,55 @@ CLASS zcl_abapgit_zlib_convert DEFINITION CREATE PUBLIC.
         RETURNING VALUE(rv_hex) TYPE xstring.
 
 ENDCLASS.
+CLASS ZCL_ABAPGIT_TIME IMPLEMENTATION.
+
+
+  METHOD get.
+
+    DATA: lv_i       TYPE i,
+          lv_tz      TYPE tznzone,
+          lv_utcdiff TYPE tznutcdiff,
+          lv_utcsign TYPE tznutcsign.
+
+
+    lv_i = sy-datum - c_epoch.
+    lv_i = lv_i * 86400.
+    lv_i = lv_i + sy-uzeit.
+
+    CALL FUNCTION 'TZON_GET_OS_TIMEZONE'
+      IMPORTING
+        ef_timezone = lv_tz.
+
+    CALL FUNCTION 'TZON_GET_OFFSET'
+      EXPORTING
+        if_timezone      = lv_tz
+        if_local_date    = sy-datum
+        if_local_time    = sy-uzeit
+      IMPORTING
+        ef_utcdiff       = lv_utcdiff
+        ef_utcsign       = lv_utcsign
+      EXCEPTIONS
+        conversion_error = 1
+        OTHERS           = 2.
+    IF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise( 'Timezone error' ).
+    ENDIF.
+
+    CASE lv_utcsign.
+      WHEN '+'.
+        lv_i = lv_i - lv_utcdiff.
+      WHEN '-'.
+        lv_i = lv_i + lv_utcdiff.
+    ENDCASE.
+
+    rv_time = lv_i.
+    CONDENSE rv_time.
+    rv_time+11 = lv_utcsign.
+    rv_time+12 = lv_utcdiff.
+
+  ENDMETHOD.                    "get
+ENDCLASS.
+
 CLASS ZCL_ABAPGIT_SYNTAX_CHECK IMPLEMENTATION.
 
 
@@ -675,45 +781,6 @@ ENDINTERFACE.
 *&---------------------------------------------------------------------*
 *&  Include           ZABAPGIT_EXCEPTIONS
 *&---------------------------------------------------------------------*
-
-*----------------------------------------------------------------------*
-*       CLASS LCX_EXCEPTION DEFINITION
-*----------------------------------------------------------------------*
-CLASS lcx_exception DEFINITION INHERITING FROM cx_static_check FINAL.
-
-  PUBLIC SECTION.
-    DATA mv_text TYPE string.
-
-    METHODS constructor
-      IMPORTING iv_text     TYPE string
-                ix_previous TYPE REF TO cx_root OPTIONAL.
-
-    CLASS-METHODS: raise IMPORTING iv_text TYPE clike
-                         RAISING   lcx_exception.
-
-  PRIVATE SECTION.
-    DATA mx_previous TYPE REF TO cx_root.
-
-ENDCLASS.                    "CX_LOCAL_EXCEPTION DEFINITION
-
-*----------------------------------------------------------------------*
-*       CLASS LCX_EXCEPTION IMPLEMENTATION
-*----------------------------------------------------------------------*
-CLASS lcx_exception IMPLEMENTATION.
-
-  METHOD constructor.
-    super->constructor( ).
-    mv_text = iv_text.
-    mx_previous = previous.
-  ENDMETHOD.                    "CONSTRUCTOR
-
-  METHOD raise.
-    RAISE EXCEPTION TYPE lcx_exception
-      EXPORTING
-        iv_text = iv_text.
-  ENDMETHOD.
-
-ENDCLASS.                    "lcx_exception IMPLEMENTATION
 
 *----------------------------------------------------------------------*
 *       CLASS LCX_NOT_FOUND DEFINITION
@@ -2021,79 +2088,6 @@ CLASS lcl_state IMPLEMENTATION.
 ENDCLASS.
 
 *----------------------------------------------------------------------*
-*       CLASS lcl_time DEFINITION
-*----------------------------------------------------------------------*
-*
-*----------------------------------------------------------------------*
-CLASS lcl_time DEFINITION FINAL.
-
-  PUBLIC SECTION.
-    TYPES: ty_unixtime TYPE c LENGTH 16.
-
-    CLASS-METHODS get
-      RETURNING VALUE(rv_time) TYPE ty_unixtime
-      RAISING   lcx_exception.
-
-  PRIVATE SECTION.
-    CONSTANTS: c_epoch TYPE datum VALUE '19700101'.
-
-ENDCLASS.                    "lcl_time DEFINITION
-
-*----------------------------------------------------------------------*
-*       CLASS lcl_time IMPLEMENTATION
-*----------------------------------------------------------------------*
-*
-*----------------------------------------------------------------------*
-CLASS lcl_time IMPLEMENTATION.
-
-  METHOD get.
-
-    DATA: lv_i       TYPE i,
-          lv_tz      TYPE tznzone,
-          lv_utcdiff TYPE tznutcdiff,
-          lv_utcsign TYPE tznutcsign.
-
-
-    lv_i = sy-datum - c_epoch.
-    lv_i = lv_i * 86400.
-    lv_i = lv_i + sy-uzeit.
-
-    CALL FUNCTION 'TZON_GET_OS_TIMEZONE'
-      IMPORTING
-        ef_timezone = lv_tz.
-
-    CALL FUNCTION 'TZON_GET_OFFSET'
-      EXPORTING
-        if_timezone      = lv_tz
-        if_local_date    = sy-datum
-        if_local_time    = sy-uzeit
-      IMPORTING
-        ef_utcdiff       = lv_utcdiff
-        ef_utcsign       = lv_utcsign
-      EXCEPTIONS
-        conversion_error = 1
-        OTHERS           = 2.
-    IF sy-subrc <> 0.
-      lcx_exception=>raise( 'Timezone error' ).
-    ENDIF.
-
-    CASE lv_utcsign.
-      WHEN '+'.
-        lv_i = lv_i - lv_utcdiff.
-      WHEN '-'.
-        lv_i = lv_i + lv_utcdiff.
-    ENDCASE.
-
-    rv_time = lv_i.
-    CONDENSE rv_time.
-    rv_time+11 = lv_utcsign.
-    rv_time+12 = lv_utcdiff.
-
-  ENDMETHOD.                    "get
-
-ENDCLASS.                    "lcl_time IMPLEMENTATION
-
-*----------------------------------------------------------------------*
 *       CLASS lcl_convert DEFINITION
 *----------------------------------------------------------------------*
 *
@@ -2120,7 +2114,7 @@ CLASS lcl_convert DEFINITION FINAL.
     CLASS-METHODS xstring_to_int
       IMPORTING iv_xstring  TYPE xstring
       RETURNING VALUE(rv_i) TYPE i
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS int_to_xstring4
       IMPORTING iv_i              TYPE i
@@ -2271,12 +2265,12 @@ CLASS lcl_hash DEFINITION FINAL.
       IMPORTING iv_type        TYPE lif_defs=>ty_type
                 iv_data        TYPE xstring
       RETURNING VALUE(rv_sha1) TYPE lif_defs=>ty_sha1
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS sha1_raw
       IMPORTING iv_data        TYPE xstring
       RETURNING VALUE(rv_sha1) TYPE lif_defs=>ty_sha1
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_hash DEFINITION
 
@@ -2348,7 +2342,7 @@ CLASS lcl_hash IMPLEMENTATION.
         internal_error = 3
         OTHERS         = 4.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'Error while calculating SHA1' ).
+      zcx_abapgit_exception=>raise( 'Error while calculating SHA1' ).
     ENDIF.
 
     rv_sha1 = lv_hash.
@@ -2516,17 +2510,17 @@ CLASS lcl_url DEFINITION FINAL.
     CLASS-METHODS host
       IMPORTING iv_repo        TYPE string
       RETURNING VALUE(rv_host) TYPE string
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS name
       IMPORTING iv_repo        TYPE string
       RETURNING VALUE(rv_name) TYPE string
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS path_name
       IMPORTING iv_repo             TYPE string
       RETURNING VALUE(rv_path_name) TYPE string
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
   PRIVATE SECTION.
     CLASS-METHODS regex
@@ -2534,7 +2528,7 @@ CLASS lcl_url DEFINITION FINAL.
       EXPORTING ev_host TYPE string
                 ev_path TYPE string
                 ev_name TYPE string
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_repo DEFINITION
 
@@ -2569,7 +2563,7 @@ CLASS lcl_url IMPLEMENTATION.
     FIND REGEX '(.*://[^/]*)(.*/)([^\.]*)[\.git]?' IN iv_repo
       SUBMATCHES ev_host ev_path ev_name.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'Malformed URL' ).
+      zcx_abapgit_exception=>raise( 'Malformed URL' ).
     ENDIF.
 
   ENDMETHOD.                    "url
@@ -2926,18 +2920,18 @@ CLASS lcl_login_manager DEFINITION FINAL.
         IMPORTING iv_uri                  TYPE string
                   ii_client               TYPE REF TO if_http_client OPTIONAL
         RETURNING VALUE(rv_authorization) TYPE string
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       save
         IMPORTING iv_uri    TYPE string
                   ii_client TYPE REF TO if_http_client
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       clear,
       set
         IMPORTING iv_uri         TYPE string
                   iv_username    TYPE string
                   iv_password    TYPE string
         RETURNING VALUE(rv_auth) TYPE string
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
   PRIVATE SECTION.
     TYPES: BEGIN OF ty_auth,
@@ -2951,7 +2945,7 @@ CLASS lcl_login_manager DEFINITION FINAL.
       append
         IMPORTING iv_uri  TYPE string
                   iv_auth TYPE string
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
 ENDCLASS.
 
@@ -3242,15 +3236,15 @@ CLASS lcl_xml DEFINITION ABSTRACT.
     METHODS parse
       IMPORTING iv_normalize TYPE abap_bool DEFAULT abap_true
                 iv_xml       TYPE string
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
   PRIVATE SECTION.
     METHODS error
       IMPORTING ii_parser TYPE REF TO if_ixml_parser
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS display_xml_error
-      RAISING lcx_exception.
+      RAISING zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_xml DEFINITION
 
@@ -3317,7 +3311,7 @@ CLASS lcl_xml IMPLEMENTATION.
         txt2  = 'See http://larshp.github.io/abapGit/other-xml-mismatch.html'
         txt3  = lv_version.                                 "#EC NOTEXT
 
-    lcx_exception=>raise( 'XML error' ).
+    zcx_abapgit_exception=>raise( 'XML error' ).
 
   ENDMETHOD.                    "display_xml_error
 
@@ -3372,7 +3366,7 @@ CLASS lcl_xml IMPLEMENTATION.
       ENDDO.
     ENDIF.
 
-    lcx_exception=>raise( 'Error while parsing XML' ).
+    zcx_abapgit_exception=>raise( 'Error while parsing XML' ).
   ENDMETHOD.                    "error
 
 ENDCLASS.                    "lcl_xml IMPLEMENTATION
@@ -3389,7 +3383,7 @@ CLASS lcl_xml_output DEFINITION FINAL INHERITING FROM lcl_xml CREATE PUBLIC.
       add
         IMPORTING iv_name TYPE clike
                   ig_data TYPE any
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       set_raw
         IMPORTING ii_raw TYPE REF TO if_ixml_element,
       add_xml
@@ -3530,11 +3524,11 @@ CLASS lcl_xml_input DEFINITION FINAL INHERITING FROM lcl_xml CREATE PUBLIC.
     METHODS:
       constructor
         IMPORTING iv_xml TYPE clike
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       read
         IMPORTING iv_name TYPE clike
         CHANGING  cg_data TYPE any
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       get_raw
         RETURNING VALUE(ri_raw) TYPE REF TO if_ixml_document,
 * todo, add read_xml to match add_xml in lcl_xml_output
@@ -3599,7 +3593,7 @@ CLASS lcl_xml_input IMPLEMENTATION.
           SOURCE XML mi_xml_doc
           RESULT (lt_rtab) ##no_text.
       CATCH cx_transformation_error INTO lx_error.
-        lcx_exception=>raise( lx_error->if_message~get_text( ) ).
+        zcx_abapgit_exception=>raise( lx_error->if_message~get_text( ) ).
     ENDTRY.
 
   ENDMETHOD.                    "read
@@ -3618,7 +3612,7 @@ CLASS lcl_xml_pretty DEFINITION FINAL.
                 iv_ignore_errors TYPE abap_bool DEFAULT abap_true
                 iv_unpretty      TYPE abap_bool DEFAULT abap_false
       RETURNING VALUE(rv_xml)    TYPE string
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
 ENDCLASS.
 
@@ -3651,7 +3645,7 @@ CLASS lcl_xml_pretty IMPLEMENTATION.
         rv_xml = iv_xml.
         RETURN.
       ELSE.
-        lcx_exception=>raise( 'error parsing xml' ).
+        zcx_abapgit_exception=>raise( 'error parsing xml' ).
       ENDIF.
     ENDIF.
     li_istream->close( ).
@@ -3693,12 +3687,12 @@ CLASS lcl_app DEFINITION FINAL.
 
     CLASS-METHODS gui
       RETURNING VALUE(ro_gui) TYPE REF TO lcl_gui
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS user
       IMPORTING iv_user        TYPE xubname DEFAULT sy-uname
       RETURNING VALUE(ro_user) TYPE REF TO lcl_persistence_user
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS repo_srv
       RETURNING VALUE(ro_repo_srv) TYPE REF TO lcl_repo_srv.
@@ -3749,13 +3743,13 @@ CLASS lcl_persistence DEFINITION FINAL FRIENDS lcl_persist_migrate.
 
     METHODS list
       RETURNING VALUE(rt_repos) TYPE ty_repos_persi_tt
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS update
       IMPORTING iv_url         TYPE ty_repo_persi-url
                 iv_branch_name TYPE ty_repo_persi-branch_name
                 iv_branch      TYPE lif_defs=>ty_sha1
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS add
       IMPORTING iv_url         TYPE string
@@ -3763,31 +3757,31 @@ CLASS lcl_persistence DEFINITION FINAL FRIENDS lcl_persist_migrate.
                 iv_branch      TYPE lif_defs=>ty_sha1 OPTIONAL
                 iv_package     TYPE devclass
                 iv_offline     TYPE sap_bool DEFAULT abap_false
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS delete
       IMPORTING iv_url         TYPE ty_repo_persi-url
                 iv_branch_name TYPE ty_repo_persi-branch_name
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS read_text_online
       RETURNING VALUE(rt_repos) TYPE ty_repos_persi_tt
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS save_text_online
       IMPORTING it_repos TYPE ty_repos_persi_tt
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS header_online
       RETURNING VALUE(rs_header) TYPE thead.
 
     METHODS read_text_offline
       RETURNING VALUE(rt_repos) TYPE ty_repos_persi_tt
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS save_text_offline
       IMPORTING it_repos TYPE ty_repos_persi_tt
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS header_offline
       RETURNING VALUE(rs_header) TYPE thead.
@@ -3795,12 +3789,12 @@ CLASS lcl_persistence DEFINITION FINAL FRIENDS lcl_persist_migrate.
     METHODS read_text
       IMPORTING is_header       TYPE thead
       RETURNING VALUE(rt_lines) TYPE tlinetab
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS save_text
       IMPORTING is_header TYPE thead
                 it_lines  TYPE tlinetab
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_persistence DEFINITION
 
@@ -3826,7 +3820,7 @@ CLASS lcl_persistence IMPLEMENTATION.
         OTHERS   = 5.
     IF sy-subrc <> 0.
       ROLLBACK WORK.                                   "#EC CI_ROLLBACK
-      lcx_exception=>raise( 'error from SAVE_TEXT' ).
+      zcx_abapgit_exception=>raise( 'error from SAVE_TEXT' ).
     ENDIF.
 
   ENDMETHOD.                    "save_text
@@ -3854,7 +3848,7 @@ CLASS lcl_persistence IMPLEMENTATION.
 
     DELETE lt_repos WHERE url = iv_url AND branch_name = iv_branch_name.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'repo not found, delete' ).
+      zcx_abapgit_exception=>raise( 'repo not found, delete' ).
     ENDIF.
 
     save_text_online( lt_repos ).
@@ -3931,7 +3925,7 @@ CLASS lcl_persistence IMPLEMENTATION.
     READ TABLE lt_repos WITH KEY url = iv_url branch_name = iv_branch_name
       TRANSPORTING NO FIELDS.
     IF sy-subrc = 0.
-      lcx_exception=>raise( 'already inserted' ).
+      zcx_abapgit_exception=>raise( 'already inserted' ).
     ENDIF.
 
     APPEND INITIAL LINE TO lt_repos ASSIGNING <ls_repo>.
@@ -3954,7 +3948,7 @@ CLASS lcl_persistence IMPLEMENTATION.
 
 
     IF iv_branch IS INITIAL.
-      lcx_exception=>raise( 'update, sha empty' ).
+      zcx_abapgit_exception=>raise( 'update, sha empty' ).
     ENDIF.
 
     lt_repos = list( ).
@@ -3962,7 +3956,7 @@ CLASS lcl_persistence IMPLEMENTATION.
     READ TABLE lt_repos ASSIGNING <ls_repo>
       WITH KEY url = iv_url branch_name = iv_branch_name.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'persist update, repo not found' ).
+      zcx_abapgit_exception=>raise( 'persist update, repo not found' ).
     ENDIF.
 
     <ls_repo>-sha1 = iv_branch.
@@ -3999,7 +3993,7 @@ CLASS lcl_persistence IMPLEMENTATION.
     IF sy-subrc = 4.
       RETURN.
     ELSEIF sy-subrc <> 0.
-      lcx_exception=>raise( 'Error from READ_TEXT' ).
+      zcx_abapgit_exception=>raise( 'Error from READ_TEXT' ).
     ENDIF.
 
   ENDMETHOD.                    "read_text
@@ -4021,7 +4015,7 @@ CLASS lcl_persistence IMPLEMENTATION.
     IF lines( lt_lines ) MOD 4 <> 0.
 * if this happens, delete text ZABAPGIT in SO10 or edit the text
 * manually, so it contains the right information
-      lcx_exception=>raise( 'Persistence, text broken' ).
+      zcx_abapgit_exception=>raise( 'Persistence, text broken' ).
     ENDIF.
 
     CLEAR ls_repo.
@@ -4032,7 +4026,7 @@ CLASS lcl_persistence IMPLEMENTATION.
           ls_repo-package = <ls_line>-tdline.
 
           IF ls_repo-url IS INITIAL OR ls_repo-branch_name IS INITIAL.
-            lcx_exception=>raise( 'Persistence, text broken 2' ).
+            zcx_abapgit_exception=>raise( 'Persistence, text broken 2' ).
           ENDIF.
           APPEND ls_repo TO rt_repos.
           CLEAR ls_repo.
@@ -4066,13 +4060,13 @@ CLASS lcl_persistence IMPLEMENTATION.
     IF lines( lt_lines ) MOD 2 <> 0.
 * if this happens, delete text ZABAPGIT in SO10 or edit the text
 * manually, so it contains the right information
-      lcx_exception=>raise( 'Persistence, text broken' ).
+      zcx_abapgit_exception=>raise( 'Persistence, text broken' ).
     ENDIF.
 
     CLEAR ls_repo.
     LOOP AT lt_lines ASSIGNING <ls_line>.
       IF <ls_line>-tdline IS INITIAL.
-        lcx_exception=>raise( 'Persistence, text broken' ).
+        zcx_abapgit_exception=>raise( 'Persistence, text broken' ).
       ENDIF.
       IF ls_repo-url IS INITIAL.
         ls_repo-url = <ls_line>-tdline.
@@ -4110,36 +4104,36 @@ CLASS lcl_user DEFINITION FINAL FRIENDS lcl_persist_migrate.
     CLASS-METHODS set_username
       IMPORTING iv_user     TYPE xubname DEFAULT sy-uname
                 iv_username TYPE string
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS get_username
       IMPORTING iv_user            TYPE xubname DEFAULT sy-uname
       RETURNING VALUE(rv_username) TYPE string
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS set_email
       IMPORTING iv_user  TYPE xubname DEFAULT sy-uname
                 iv_email TYPE string
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS get_email
       IMPORTING iv_user         TYPE xubname DEFAULT sy-uname
       RETURNING VALUE(rv_email) TYPE string
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS list
       RETURNING VALUE(rt_data) TYPE ty_user_tt
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS read
       IMPORTING iv_name         TYPE tdobname
       RETURNING VALUE(rv_value) TYPE string
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS save
       IMPORTING iv_name  TYPE tdobname
                 iv_value TYPE string
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_user DEFINITION
 
@@ -4176,7 +4170,7 @@ CLASS lcl_user IMPLEMENTATION.
         wrong_access_to_archive = 7
         OTHERS                  = 8.
     IF sy-subrc <> 4 AND sy-subrc <> 0.
-      lcx_exception=>raise( 'error from READ_TEXT' ).
+      zcx_abapgit_exception=>raise( 'error from READ_TEXT' ).
     ENDIF.
 
     READ TABLE lt_lines INTO ls_line INDEX 1.
@@ -4215,7 +4209,7 @@ CLASS lcl_user IMPLEMENTATION.
         OTHERS   = 5.
     IF sy-subrc <> 0.
       ROLLBACK WORK.                                   "#EC CI_ROLLBACK
-      lcx_exception=>raise( 'error from SAVE_TEXT' ).
+      zcx_abapgit_exception=>raise( 'error from SAVE_TEXT' ).
     ENDIF.
 
     COMMIT WORK.
@@ -4330,14 +4324,14 @@ CLASS lcl_dot_abapgit DEFINITION FINAL FRIENDS ltcl_dot_abapgit.
       deserialize
         IMPORTING iv_xstr               TYPE xstring
         RETURNING VALUE(ro_dot_abapgit) TYPE REF TO lcl_dot_abapgit
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
     METHODS:
       constructor
         IMPORTING is_data TYPE ty_dot_abapgit,
       serialize
         RETURNING VALUE(rv_xstr) TYPE xstring
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       get_data
         RETURNING VALUE(rs_data) TYPE ty_dot_abapgit,
       add_ignore
@@ -4364,7 +4358,7 @@ CLASS lcl_dot_abapgit DEFINITION FINAL FRIENDS ltcl_dot_abapgit.
 *        IMPORTING iv_language TYPE spras,
       get_signature
         RETURNING VALUE(rs_signature) TYPE lif_defs=>ty_file_signature
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
   PRIVATE SECTION.
     DATA: ms_data TYPE ty_dot_abapgit.
@@ -4373,7 +4367,7 @@ CLASS lcl_dot_abapgit DEFINITION FINAL FRIENDS ltcl_dot_abapgit.
       to_xml
         IMPORTING is_data       TYPE ty_dot_abapgit
         RETURNING VALUE(rv_xml) TYPE string
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       from_xml
         IMPORTING iv_xml         TYPE string
         RETURNING VALUE(rs_data) TYPE ty_dot_abapgit.
@@ -4579,7 +4573,7 @@ CLASS lcl_settings DEFINITION DEFERRED.
 CLASS lcl_persist_migrate DEFINITION FINAL.
 
   PUBLIC SECTION.
-    CLASS-METHODS: run RAISING lcx_exception.
+    CLASS-METHODS: run RAISING zcx_abapgit_exception.
 
   PRIVATE SECTION.
     CONSTANTS:
@@ -4587,17 +4581,17 @@ CLASS lcl_persist_migrate DEFINITION FINAL.
 
     CLASS-METHODS:
       migrate_settings
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       migrate_repo
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       migrate_user
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       table_create
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       table_exists
         RETURNING VALUE(rv_exists) TYPE abap_bool,
       lock_create
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       lock_exists
         RETURNING VALUE(rv_exists) TYPE abap_bool,
       settings_exists
@@ -4632,21 +4626,21 @@ CLASS lcl_persistence_db DEFINITION FINAL CREATE PRIVATE FRIENDS lcl_app.
         IMPORTING iv_type  TYPE ty_type
                   iv_value TYPE ty_content-value
                   iv_data  TYPE ty_content-data_str
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       delete
         IMPORTING iv_type  TYPE ty_type
                   iv_value TYPE ty_content-value
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       update
         IMPORTING iv_type  TYPE ty_type
                   iv_value TYPE ty_content-value
                   iv_data  TYPE ty_content-data_str
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       modify
         IMPORTING iv_type  TYPE ty_type
                   iv_value TYPE ty_content-value
                   iv_data  TYPE ty_content-data_str
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       read
         IMPORTING iv_type        TYPE ty_type
                   iv_value       TYPE ty_content-value
@@ -4656,13 +4650,13 @@ CLASS lcl_persistence_db DEFINITION FINAL CREATE PRIVATE FRIENDS lcl_app.
         IMPORTING iv_mode  TYPE enqmode DEFAULT 'E'
                   iv_type  TYPE ty_type
                   iv_value TYPE ty_content-value
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
   PRIVATE SECTION.
     METHODS: validate_and_unprettify_xml
       IMPORTING iv_xml        TYPE string
       RETURNING VALUE(rv_xml) TYPE string
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
 ENDCLASS.
 
@@ -4700,42 +4694,42 @@ CLASS lcl_persistence_repo DEFINITION FINAL.
 
     METHODS list
       RETURNING VALUE(rt_repos) TYPE tt_repo
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS update_sha1
       IMPORTING iv_key         TYPE ty_repo-key
                 iv_branch_sha1 TYPE ty_repo_xml-sha1
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS update_local_checksums
       IMPORTING iv_key       TYPE ty_repo-key
                 it_checksums TYPE ty_repo_xml-local_checksums
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS update_url
       IMPORTING iv_key TYPE ty_repo-key
                 iv_url TYPE ty_repo_xml-url
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS update_branch_name
       IMPORTING iv_key         TYPE ty_repo-key
                 iv_branch_name TYPE ty_repo_xml-branch_name
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS update_head_branch
       IMPORTING iv_key         TYPE ty_repo-key
                 iv_head_branch TYPE ty_repo_xml-head_branch
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS update_offline
       IMPORTING iv_key     TYPE ty_repo-key
                 iv_offline TYPE ty_repo_xml-offline
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS update_dot_abapgit
       IMPORTING iv_key         TYPE ty_repo-key
                 is_dot_abapgit TYPE lcl_dot_abapgit=>ty_dot_abapgit
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS add
       IMPORTING iv_url         TYPE string
@@ -4745,22 +4739,22 @@ CLASS lcl_persistence_repo DEFINITION FINAL.
                 iv_offline     TYPE sap_bool DEFAULT abap_false
                 is_dot_abapgit TYPE lcl_dot_abapgit=>ty_dot_abapgit
       RETURNING VALUE(rv_key)  TYPE ty_repo-key
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS delete
       IMPORTING iv_key TYPE ty_repo-key
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS read
       IMPORTING iv_key         TYPE ty_repo-key
       RETURNING VALUE(rs_repo) TYPE ty_repo
-      RAISING   lcx_exception
+      RAISING   zcx_abapgit_exception
                 lcx_not_found.
 
     METHODS lock
       IMPORTING iv_mode TYPE enqmode
                 iv_key  TYPE ty_repo-key
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
   PRIVATE SECTION.
     CONSTANTS c_type_repo TYPE lcl_persistence_db=>ty_type VALUE 'REPO'.
@@ -4770,7 +4764,7 @@ CLASS lcl_persistence_repo DEFINITION FINAL.
     METHODS from_xml
       IMPORTING iv_repo_xml_string TYPE string
       RETURNING VALUE(rs_repo)     TYPE ty_repo_xml
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS to_xml
       IMPORTING is_repo                   TYPE ty_repo
@@ -4778,7 +4772,7 @@ CLASS lcl_persistence_repo DEFINITION FINAL.
 
     METHODS get_next_id
       RETURNING VALUE(rv_next_repo_id) TYPE lcl_persistence_db=>ty_content-value
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
 ENDCLASS.
 
@@ -4816,20 +4810,20 @@ CLASS lcl_persist_background DEFINITION FINAL.
 
     METHODS list
       RETURNING VALUE(rt_list) TYPE tt_background
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS modify
       IMPORTING is_data TYPE ty_background
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS delete
       IMPORTING iv_key TYPE ty_background-key
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS exists
       IMPORTING iv_key        TYPE ty_background-key
       RETURNING VALUE(rv_yes) TYPE abap_bool
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
   PRIVATE SECTION.
     CONSTANTS c_type TYPE lcl_persistence_db=>ty_type VALUE 'BACKGROUND'.
@@ -4840,7 +4834,7 @@ CLASS lcl_persist_background DEFINITION FINAL.
     METHODS from_xml
       IMPORTING iv_string     TYPE string
       RETURNING VALUE(rs_xml) TYPE ty_xml
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS to_xml
       IMPORTING is_background    TYPE ty_background
@@ -4913,12 +4907,12 @@ CLASS lcl_settings DEFINITION FINAL.
         RETURNING
           VALUE(ev_settings_xml) TYPE string
         RAISING
-          lcx_exception,
+          zcx_abapgit_exception,
       set_xml_settings
         IMPORTING
           iv_settings_xml TYPE string
         RAISING
-          lcx_exception,
+          zcx_abapgit_exception,
       set_defaults.
 
   PRIVATE SECTION.
@@ -4944,7 +4938,7 @@ CLASS lcl_persist_settings DEFINITION FINAL.
       IMPORTING
         io_settings TYPE REF TO lcl_settings
       RAISING
-        lcx_exception.
+        zcx_abapgit_exception.
     METHODS read
       RETURNING
         VALUE(ro_settings) TYPE REF TO lcl_settings.
@@ -5055,104 +5049,104 @@ CLASS lcl_persistence_user DEFINITION FINAL CREATE PRIVATE FRIENDS lcl_app.
 
     METHODS set_default_git_user_name
       IMPORTING iv_username TYPE string
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS get_default_git_user_name
       RETURNING VALUE(rv_username) TYPE string
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS set_default_git_user_email
       IMPORTING iv_email TYPE string
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS get_default_git_user_email
       RETURNING VALUE(rv_email) TYPE string
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS set_repo_show
       IMPORTING iv_key TYPE lcl_persistence_repo=>ty_repo-key
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS get_repo_show
       RETURNING VALUE(rv_key) TYPE lcl_persistence_repo=>ty_repo-key
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS set_repo_git_user_name
       IMPORTING iv_url      TYPE lcl_persistence_repo=>ty_repo-url
                 iv_username TYPE string
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS get_repo_git_user_name
       IMPORTING iv_url             TYPE lcl_persistence_repo=>ty_repo-url
       RETURNING VALUE(rv_username) TYPE string
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS set_repo_login
       IMPORTING iv_url   TYPE lcl_persistence_repo=>ty_repo-url
                 iv_login TYPE string
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS get_repo_login
       IMPORTING iv_url          TYPE lcl_persistence_repo=>ty_repo-url
       RETURNING VALUE(rv_login) TYPE string
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS set_repo_git_user_email
       IMPORTING iv_url   TYPE lcl_persistence_repo=>ty_repo-url
                 iv_email TYPE string
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS get_repo_git_user_email
       IMPORTING iv_url          TYPE lcl_persistence_repo=>ty_repo-url
       RETURNING VALUE(rv_email) TYPE string
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS set_repo_last_change_seen
       IMPORTING iv_url     TYPE lcl_persistence_repo=>ty_repo-url
                 iv_version TYPE string
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS get_repo_last_change_seen
       IMPORTING iv_url            TYPE lcl_persistence_repo=>ty_repo-url
       RETURNING VALUE(rv_version) TYPE string
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS toggle_hide_files
       RETURNING VALUE(rv_hide) TYPE abap_bool
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS get_hide_files
       RETURNING VALUE(rv_hide) TYPE abap_bool
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS toggle_changes_only
       RETURNING VALUE(rv_changes_only) TYPE abap_bool
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS get_changes_only
       RETURNING VALUE(rv_changes_only) TYPE abap_bool
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS toggle_diff_unified
       RETURNING VALUE(rv_diff_unified) TYPE abap_bool
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS get_diff_unified
       RETURNING VALUE(rv_diff_unified) TYPE abap_bool
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS get_favorites
       RETURNING VALUE(rt_favorites) TYPE tt_favorites
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS toggle_favorite
       IMPORTING iv_repo_key TYPE lcl_persistence_repo=>ty_repo-key
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS is_favorite_repo
       IMPORTING iv_repo_key   TYPE lcl_persistence_repo=>ty_repo-key
       RETURNING VALUE(rv_yes) TYPE abap_bool
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
   PRIVATE SECTION.
     CONSTANTS c_type_user TYPE lcl_persistence_db=>ty_type VALUE 'USER'.
@@ -5186,7 +5180,7 @@ CLASS lcl_persistence_user DEFINITION FINAL CREATE PRIVATE FRIENDS lcl_app.
     METHODS from_xml
       IMPORTING iv_xml         TYPE string
       RETURNING VALUE(rs_user) TYPE ty_user
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS to_xml
       IMPORTING is_user       TYPE ty_user
@@ -5194,21 +5188,21 @@ CLASS lcl_persistence_user DEFINITION FINAL CREATE PRIVATE FRIENDS lcl_app.
 
     METHODS read
       RETURNING VALUE(rs_user) TYPE ty_user
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS update
       IMPORTING is_user TYPE ty_user
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS read_repo_config
       IMPORTING iv_url                TYPE lcl_persistence_repo=>ty_repo-url
       RETURNING VALUE(rs_repo_config) TYPE ty_repo_config
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS update_repo_config
       IMPORTING iv_url         TYPE lcl_persistence_repo=>ty_repo-url
                 is_repo_config TYPE ty_repo_config
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
 ENDCLASS.             "lcl_persistence_user DEFINITION
 
@@ -5543,7 +5537,7 @@ CLASS lcl_persistence_db IMPLEMENTATION.
         system_failure = 2
         OTHERS         = 3.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( |Could not aquire lock { iv_type } { iv_value }| ).
+      zcx_abapgit_exception=>raise( |Could not aquire lock { iv_type } { iv_value }| ).
     ENDIF.
 
 * trigger dummy update task to automatically release locks at commit
@@ -5574,7 +5568,7 @@ CLASS lcl_persistence_db IMPLEMENTATION.
       WHERE type = iv_type
       AND value = iv_value.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'DB Delete failed' ).
+      zcx_abapgit_exception=>raise( 'DB Delete failed' ).
     ENDIF.
 
   ENDMETHOD.
@@ -5601,7 +5595,7 @@ CLASS lcl_persistence_db IMPLEMENTATION.
       WHERE type  = iv_type
       AND   value = iv_value.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'DB update failed' ).
+      zcx_abapgit_exception=>raise( 'DB update failed' ).
     ENDIF.
 
   ENDMETHOD.  "update
@@ -5619,7 +5613,7 @@ CLASS lcl_persistence_db IMPLEMENTATION.
 
     MODIFY (c_tabname) FROM ls_content.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'DB modify failed' ).
+      zcx_abapgit_exception=>raise( 'DB modify failed' ).
     ENDIF.
 
   ENDMETHOD.
@@ -5679,7 +5673,7 @@ CLASS lcl_persistence_repo IMPLEMENTATION.
     TRY.
         ls_repo = read( iv_key ).
       CATCH lcx_not_found.
-        lcx_exception=>raise( 'key not found' ).
+        zcx_abapgit_exception=>raise( 'key not found' ).
     ENDTRY.
 
     ls_repo-dot_abapgit = is_dot_abapgit.
@@ -5715,7 +5709,7 @@ CLASS lcl_persistence_repo IMPLEMENTATION.
     TRY.
         ls_repo = read( iv_key ).
       CATCH lcx_not_found.
-        lcx_exception=>raise( 'key not found' ).
+        zcx_abapgit_exception=>raise( 'key not found' ).
     ENDTRY.
 
     ls_repo-local_checksums = it_checksums.
@@ -5735,7 +5729,7 @@ CLASS lcl_persistence_repo IMPLEMENTATION.
 
 
     IF iv_url IS INITIAL.
-      lcx_exception=>raise( 'update, url empty' ).
+      zcx_abapgit_exception=>raise( 'update, url empty' ).
     ENDIF.
 
     ASSERT NOT iv_key IS INITIAL.
@@ -5743,7 +5737,7 @@ CLASS lcl_persistence_repo IMPLEMENTATION.
     TRY.
         ls_repo = read( iv_key ).
       CATCH lcx_not_found.
-        lcx_exception=>raise( 'key not found' ).
+        zcx_abapgit_exception=>raise( 'key not found' ).
     ENDTRY.
 
     ls_repo-url = iv_url.
@@ -5767,7 +5761,7 @@ CLASS lcl_persistence_repo IMPLEMENTATION.
     TRY.
         ls_repo = read( iv_key ).
       CATCH lcx_not_found.
-        lcx_exception=>raise( 'key not found' ).
+        zcx_abapgit_exception=>raise( 'key not found' ).
     ENDTRY.
 
     ls_repo-branch_name = iv_branch_name.
@@ -5791,7 +5785,7 @@ CLASS lcl_persistence_repo IMPLEMENTATION.
     TRY.
         ls_repo = read( iv_key ).
       CATCH lcx_not_found.
-        lcx_exception=>raise( 'key not found' ).
+        zcx_abapgit_exception=>raise( 'key not found' ).
     ENDTRY.
 
     ls_repo-head_branch = iv_head_branch.
@@ -5814,7 +5808,7 @@ CLASS lcl_persistence_repo IMPLEMENTATION.
     TRY.
         ls_repo = read( iv_key ).
       CATCH lcx_not_found.
-        lcx_exception=>raise( 'key not found' ).
+        zcx_abapgit_exception=>raise( 'key not found' ).
     ENDTRY.
 
     ls_repo-offline = iv_offline.
@@ -5838,7 +5832,7 @@ CLASS lcl_persistence_repo IMPLEMENTATION.
     TRY.
         ls_repo = read( iv_key ).
       CATCH lcx_not_found.
-        lcx_exception=>raise( 'key not found' ).
+        zcx_abapgit_exception=>raise( 'key not found' ).
     ENDTRY.
 
     ls_repo-sha1 = iv_branch_sha1.
@@ -5923,7 +5917,7 @@ CLASS lcl_persistence_repo IMPLEMENTATION.
       RESULT repo = rs_repo ##NO_TEXT.
 
     IF rs_repo IS INITIAL.
-      lcx_exception=>raise( 'Inconsistent repo metadata' ).
+      zcx_abapgit_exception=>raise( 'Inconsistent repo metadata' ).
     ENDIF.
 
   ENDMETHOD.
@@ -6081,56 +6075,56 @@ CLASS lcl_persist_migrate IMPLEMENTATION.
         lcl_app=>db( )->delete(
           iv_type  = 'SETTINGS'
           iv_value = 'PROXY_URL' ).
-      CATCH lcx_exception.
+      CATCH zcx_abapgit_exception.
     ENDTRY.
 
     TRY.
         lcl_app=>db( )->delete(
           iv_type  = 'SETTINGS'
           iv_value = 'PROXY_PORT' ).
-      CATCH lcx_exception.
+      CATCH zcx_abapgit_exception.
     ENDTRY.
 
     TRY.
         lcl_app=>db( )->delete(
           iv_type  = 'SETTINGS'
           iv_value = 'PROXY_AUTH' ).
-      CATCH lcx_exception.
+      CATCH zcx_abapgit_exception.
     ENDTRY.
 
     TRY.
         lcl_app=>db( )->delete(
            iv_type  = 'SETTINGS'
            iv_value = 'CRIT_TESTS' ).
-      CATCH lcx_exception.
+      CATCH zcx_abapgit_exception.
     ENDTRY.
 
     TRY.
         lcl_app=>db( )->delete(
            iv_type  = 'SETTINGS'
            iv_value = 'MAX_LINES' ).
-      CATCH lcx_exception.
+      CATCH zcx_abapgit_exception.
     ENDTRY.
 
     TRY.
         lcl_app=>db( )->delete(
            iv_type  = 'SETTINGS'
            iv_value = 'ADT_JUMP' ).
-      CATCH lcx_exception.
+      CATCH zcx_abapgit_exception.
     ENDTRY.
 
     TRY.
         lcl_app=>db( )->delete(
            iv_type  = 'SETTINGS'
            iv_value = 'COMMENT_LEN' ).
-      CATCH lcx_exception.
+      CATCH zcx_abapgit_exception.
     ENDTRY.
 
     TRY.
         lcl_app=>db( )->delete(
            iv_type  = 'SETTINGS'
            iv_value = 'BODY_SIZE' ).
-      CATCH lcx_exception.
+      CATCH zcx_abapgit_exception.
     ENDTRY.
 
   ENDMETHOD.
@@ -6241,7 +6235,7 @@ CLASS lcl_persist_migrate IMPLEMENTATION.
         put_refused       = 5
         OTHERS            = 6.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'migrate, error from DDIF_ENQU_PUT' ).
+      zcx_abapgit_exception=>raise( 'migrate, error from DDIF_ENQU_PUT' ).
     ENDIF.
 
     lv_obj_name = lcl_persistence_db=>c_lock.
@@ -6256,7 +6250,7 @@ CLASS lcl_persist_migrate IMPLEMENTATION.
       EXCEPTIONS
         OTHERS            = 1.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'migrate, error from TR_TADIR_INTERFACE' ).
+      zcx_abapgit_exception=>raise( 'migrate, error from TR_TADIR_INTERFACE' ).
     ENDIF.
 
     CALL FUNCTION 'DDIF_ENQU_ACTIVATE'
@@ -6267,7 +6261,7 @@ CLASS lcl_persist_migrate IMPLEMENTATION.
         put_failure = 2
         OTHERS      = 3.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'migrate, error from DDIF_ENQU_ACTIVATE' ).
+      zcx_abapgit_exception=>raise( 'migrate, error from DDIF_ENQU_ACTIVATE' ).
     ENDIF.
 
   ENDMETHOD.
@@ -6342,7 +6336,7 @@ CLASS lcl_persist_migrate IMPLEMENTATION.
         put_refused       = 5
         OTHERS            = 6.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'migrate, error from DDIF_TABL_PUT' ).
+      zcx_abapgit_exception=>raise( 'migrate, error from DDIF_TABL_PUT' ).
     ENDIF.
 
     lv_obj_name = lcl_persistence_db=>c_tabname.
@@ -6357,7 +6351,7 @@ CLASS lcl_persist_migrate IMPLEMENTATION.
       EXCEPTIONS
         OTHERS            = 1.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'migrate, error from TR_TADIR_INTERFACE' ).
+      zcx_abapgit_exception=>raise( 'migrate, error from TR_TADIR_INTERFACE' ).
     ENDIF.
 
     CALL FUNCTION 'DDIF_TABL_ACTIVATE'
@@ -6371,7 +6365,7 @@ CLASS lcl_persist_migrate IMPLEMENTATION.
         put_failure = 2
         OTHERS      = 3.
     IF sy-subrc <> 0 OR lv_rc <> 0.
-      lcx_exception=>raise( 'migrate, error from DDIF_TABL_ACTIVATE' ).
+      zcx_abapgit_exception=>raise( 'migrate, error from DDIF_TABL_ACTIVATE' ).
     ENDIF.
 
   ENDMETHOD.
@@ -6515,7 +6509,7 @@ CLASS lcl_persist_settings IMPLEMENTATION.
           lcl_app=>db( )->read( iv_type  = lcl_settings=>c_dbtype_settings
                                 iv_value = '' ) ).
 
-      CATCH lcx_not_found lcx_exception.
+      CATCH lcx_not_found zcx_abapgit_exception.
 
         ro_settings->set_defaults( ).
 
@@ -6546,7 +6540,7 @@ INTERFACE lif_sap_package.
       RETURNING VALUE(rv_parentcl) TYPE tdevc-parentcl,
     create_child
       IMPORTING iv_child TYPE devclass
-      RAISING   lcx_exception,
+      RAISING   zcx_abapgit_exception,
     exists
       RETURNING VALUE(rv_bool) TYPE abap_bool.
 
@@ -6572,10 +6566,10 @@ CLASS lcl_sap_package DEFINITION FINAL CREATE PRIVATE
         RETURNING VALUE(ri_package) TYPE REF TO lif_sap_package,
       create
         IMPORTING is_package TYPE scompkdtln
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       create_local
         IMPORTING iv_package TYPE devclass
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
     METHODS:
       constructor
@@ -6655,7 +6649,7 @@ CLASS lcl_sap_package IMPLEMENTATION.
         no_access                  = 4
         object_locked_and_modified = 5 ).
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error reading parent package' ).
+      zcx_abapgit_exception=>raise( 'error reading parent package' ).
     ENDIF.
 
     ls_child-devclass  = iv_child.
@@ -6731,7 +6725,7 @@ CLASS lcl_sap_package IMPLEMENTATION.
 *        error_in_cts_checks        = 21
         OTHERS                     = 18 ).
     IF sy-subrc <> 0.
-      lcx_exception=>raise( |Package { is_package-devclass } could not be created| ).
+      zcx_abapgit_exception=>raise( |Package { is_package-devclass } could not be created| ).
     ENDIF.
 
     li_package->save(
@@ -6748,7 +6742,7 @@ CLASS lcl_sap_package IMPLEMENTATION.
     IF sy-subrc <> 0.
       MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
         WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4 INTO lv_err.
-      lcx_exception=>raise( lv_err ).
+      zcx_abapgit_exception=>raise( lv_err ).
     ENDIF.
 
     li_package->set_changeable( abap_false ).
@@ -6836,7 +6830,7 @@ CLASS lcl_folder_logic DEFINITION.
           iv_package     TYPE devclass
         RETURNING
           VALUE(rv_path) TYPE string
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       path_to_package
         IMPORTING
           iv_top            TYPE devclass
@@ -6845,7 +6839,7 @@ CLASS lcl_folder_logic DEFINITION.
         RETURNING
           VALUE(rv_package) TYPE devclass
         RAISING
-          lcx_exception.
+          zcx_abapgit_exception.
 
 ENDCLASS.
 
@@ -6861,7 +6855,7 @@ CLASS lcl_folder_logic IMPLEMENTATION.
 
     lv_length  = strlen( io_dot->get_starting_folder( ) ).
     IF lv_length > strlen( iv_path ).
-      lcx_exception=>raise( 'unexpected folder structure' ).
+      zcx_abapgit_exception=>raise( 'unexpected folder structure' ).
     ENDIF.
     lv_path    = iv_path+lv_length.
     lv_parent  = iv_top.
@@ -6909,7 +6903,7 @@ CLASS lcl_folder_logic IMPLEMENTATION.
       lv_parentcl = lcl_sap_package=>get( iv_package )->read_parent( ).
 
       IF lv_parentcl IS INITIAL.
-        lcx_exception=>raise( |error, expected parent package, { iv_package }| ).
+        zcx_abapgit_exception=>raise( |error, expected parent package, { iv_package }| ).
       ELSE.
         CASE io_dot->get_folder_logic( ).
           WHEN lcl_dot_abapgit=>c_folder_logic-full.
@@ -6925,7 +6919,7 @@ CLASS lcl_folder_logic IMPLEMENTATION.
 * ZZZ_something. This will define the folder name in the zip file to be "something",
 * similarily with online projects. Alternatively change to FULL folder logic
               lv_message = 'PREFIX: Unexpected package naming(' && iv_package && ')' ##no_text.
-              lcx_exception=>raise( lv_message ).
+              zcx_abapgit_exception=>raise( lv_message ).
             ENDIF.
           WHEN OTHERS.
             ASSERT 0 = 1.
@@ -6933,7 +6927,7 @@ CLASS lcl_folder_logic IMPLEMENTATION.
 
         lv_path = iv_package+lv_len.
         IF strlen( lv_path ) = 0.
-          lcx_exception=>raise( 'Folder logic: length = 0' ).
+          zcx_abapgit_exception=>raise( 'Folder logic: length = 0' ).
         ENDIF.
 
         IF lv_path(1) = '_'.
@@ -6966,7 +6960,7 @@ CLASS ltcl_folder_logic_helper DEFINITION FOR TESTING FINAL.
               iv_logic    TYPE string
               iv_package  TYPE devclass
               iv_path     TYPE string
-            RAISING lcx_exception.
+            RAISING zcx_abapgit_exception.
 
 ENDCLASS.
 
@@ -7017,11 +7011,11 @@ CLASS ltcl_folder_logic DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHOR
     METHODS:
       setup,
       teardown,
-      prefix1 FOR TESTING RAISING lcx_exception,
-      prefix2 FOR TESTING RAISING lcx_exception,
-      prefix_error1 FOR TESTING RAISING lcx_exception,
-      full1 FOR TESTING RAISING lcx_exception,
-      full2 FOR TESTING RAISING lcx_exception.
+      prefix1 FOR TESTING RAISING zcx_abapgit_exception,
+      prefix2 FOR TESTING RAISING zcx_abapgit_exception,
+      prefix_error1 FOR TESTING RAISING zcx_abapgit_exception,
+      full1 FOR TESTING RAISING zcx_abapgit_exception,
+      full2 FOR TESTING RAISING zcx_abapgit_exception.
 
 ENDCLASS.                    "ltcl_convert DEFINITION
 
@@ -7097,7 +7091,7 @@ CLASS ltcl_folder_logic IMPLEMENTATION.
           iv_package  = '$FOOBAR'
           iv_path     = '/src/' ).
         cl_abap_unit_assert=>fail( 'Error expected' ).
-      CATCH lcx_exception ##NO_HANDLER.
+      CATCH zcx_abapgit_exception ##NO_HANDLER.
     ENDTRY.
   ENDMETHOD.
 
@@ -7133,10 +7127,10 @@ CLASS ltcl_folder_logic_namespaces DEFINITION FOR TESTING RISK LEVEL HARMLESS DU
     METHODS:
       setup,
       teardown,
-      prefix1 FOR TESTING RAISING lcx_exception,
-      prefix2 FOR TESTING RAISING lcx_exception,
-      full1 FOR TESTING RAISING lcx_exception,
-      full2 FOR TESTING RAISING lcx_exception.
+      prefix1 FOR TESTING RAISING zcx_abapgit_exception,
+      prefix2 FOR TESTING RAISING zcx_abapgit_exception,
+      full1 FOR TESTING RAISING zcx_abapgit_exception,
+      full2 FOR TESTING RAISING zcx_abapgit_exception.
 
 ENDCLASS.                    "ltcl_convert DEFINITION
 
@@ -7256,21 +7250,21 @@ CLASS lcl_requirement_helper DEFINITION FINAL.
       "! </p>
       "! @parameter it_requirements | The requirements to check
       "! @parameter iv_show_popup | Show popup with requirements
-      "! @raising lcx_exception | Cancelled by user or internal error
+      "! @raising zcx_abapgit_exception | Cancelled by user or internal error
       check_requirements IMPORTING it_requirements TYPE lcl_dot_abapgit=>ty_requirement_tt
                                    iv_show_popup   TYPE abap_bool DEFAULT abap_true
-                         RAISING   lcx_exception,
+                         RAISING   zcx_abapgit_exception,
       "! Get a table with information about each requirement
       "! @parameter it_requirements | Requirements
       "! @parameter rt_status | Result
-      "! @raising lcx_exception | Internal error
+      "! @raising zcx_abapgit_exception | Internal error
       get_requirement_met_status IMPORTING it_requirements  TYPE lcl_dot_abapgit=>ty_requirement_tt
                                  RETURNING value(rt_status) TYPE ty_requirement_status_tt
-                                 RAISING   lcx_exception.
+                                 RAISING   zcx_abapgit_exception.
   PRIVATE SECTION.
     CLASS-METHODS:
       show_requirement_popup IMPORTING it_requirements TYPE ty_requirement_status_tt
-                             RAISING   lcx_exception,
+                             RAISING   zcx_abapgit_exception,
       version_greater_or_equal IMPORTING is_status      TYPE ty_requirement_status
                                RETURNING value(rv_true) TYPE abap_bool.
 ENDCLASS.                    "lcl_requirement_helper DEFINITION
@@ -7302,7 +7296,7 @@ CLASS lcl_requirement_helper IMPLEMENTATION.
         IMPORTING
           answer        = lv_answer.
       IF lv_answer <> '1'.
-        lcx_exception=>raise( 'Cancelling because of unmet requirements.' ).
+        zcx_abapgit_exception=>raise( 'Cancelling because of unmet requirements.' ).
       ENDIF.
     ENDIF.
   ENDMETHOD.                    "check_requirements
@@ -7320,7 +7314,7 @@ CLASS lcl_requirement_helper IMPLEMENTATION.
         no_release_found = 1
         OTHERS           = 2.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( |Error from DELIVERY_GET_INSTALLED_COMPS { sy-subrc }| ) ##no_text.
+      zcx_abapgit_exception=>raise( |Error from DELIVERY_GET_INSTALLED_COMPS { sy-subrc }| ) ##no_text.
     ENDIF.
 
     LOOP AT it_requirements ASSIGNING <ls_requirement>.
@@ -7440,10 +7434,7 @@ CLASS lcl_requirement_helper IMPLEMENTATION.
         lo_alv->display( ).
 
       CATCH cx_salv_msg cx_salv_not_found cx_salv_data_error INTO lx_ex.
-        RAISE EXCEPTION TYPE lcx_exception
-          EXPORTING
-            iv_text     = lx_ex->get_text( )
-            ix_previous = lx_ex.
+        zcx_abapgit_exception=>raise( lx_ex->get_text( ) ).
     ENDTRY.
   ENDMETHOD.                    "show_requirement_popup
 ENDCLASS.                    "lcl_requirement_helper IMPLEMENTATION
@@ -7594,7 +7585,7 @@ CLASS lcl_stage DEFINITION FINAL.
     CLASS-METHODS method_description
       IMPORTING iv_method             TYPE ty_method
       RETURNING VALUE(rv_description) TYPE string
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS:
       constructor
@@ -7609,21 +7600,21 @@ CLASS lcl_stage DEFINITION FINAL.
         IMPORTING iv_path     TYPE lif_defs=>ty_file-path
                   iv_filename TYPE lif_defs=>ty_file-filename
                   iv_data     TYPE xstring
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       reset
         IMPORTING iv_path     TYPE lif_defs=>ty_file-path
                   iv_filename TYPE lif_defs=>ty_file-filename
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       reset_all
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       rm
         IMPORTING iv_path     TYPE lif_defs=>ty_file-path
                   iv_filename TYPE lif_defs=>ty_file-filename
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       ignore
         IMPORTING iv_path     TYPE lif_defs=>ty_file-path
                   iv_filename TYPE lif_defs=>ty_file-filename
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       lookup
         IMPORTING iv_path          TYPE lif_defs=>ty_file-path
                   iv_filename      TYPE lif_defs=>ty_file-filename
@@ -7647,7 +7638,7 @@ CLASS lcl_stage DEFINITION FINAL.
                   iv_filename TYPE lif_defs=>ty_file-filename
                   iv_method   TYPE ty_method
                   iv_data     TYPE xstring OPTIONAL
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
 ENDCLASS.   "lcl_stage DEFINITION
 
@@ -7723,7 +7714,7 @@ CLASS lcl_stage IMPLEMENTATION.
       WHEN c_method-ignore.
         rv_description = 'ignore' ##NO_TEXT.
       WHEN OTHERS.
-        lcx_exception=>raise( 'unknown staging method type' ).
+        zcx_abapgit_exception=>raise( 'unknown staging method type' ).
     ENDCASE.
 
   ENDMETHOD.        "method_description
@@ -7783,12 +7774,12 @@ CLASS lcl_git_utils DEFINITION FINAL. " > Maybe better move to lcl_git_pack ??
     CLASS-METHODS pkt_string
       IMPORTING iv_string     TYPE string
       RETURNING VALUE(rv_pkt) TYPE string
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS length_utf8_hex
       IMPORTING iv_data       TYPE xstring
       RETURNING VALUE(rv_len) TYPE i
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
 ENDCLASS. "lcl_git_utils
 
@@ -7830,7 +7821,7 @@ CLASS lcl_git_utils IMPLEMENTATION.
         lo_obj->read( EXPORTING n    = lv_len
                       IMPORTING data = lv_string ).
       CATCH cx_sy_conversion_codepage.
-        lcx_exception=>raise( 'error converting to hex, LENGTH_UTF8_HEX' ).
+        zcx_abapgit_exception=>raise( 'error converting to hex, LENGTH_UTF8_HEX' ).
     ENDTRY.
 
     lv_char4 = lv_string.
@@ -7849,7 +7840,7 @@ CLASS lcl_git_utils IMPLEMENTATION.
     lv_len = strlen( iv_string ).
 
     IF lv_len >= 255.
-      lcx_exception=>raise( 'PKT, todo' ).
+      zcx_abapgit_exception=>raise( 'PKT, todo' ).
     ENDIF.
 
     lv_x = lv_len + 4.
@@ -7884,27 +7875,27 @@ CLASS lcl_git_branch_list DEFINITION FINAL.
 
     METHODS constructor
       IMPORTING iv_data TYPE string
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS find_by_name
       IMPORTING iv_branch_name   TYPE clike
       RETURNING VALUE(rs_branch) TYPE ty_git_branch
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS get_head " For potential future use
       RETURNING VALUE(rs_branch) TYPE ty_git_branch
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS get_head_symref
       RETURNING VALUE(rv_head_symref) TYPE string.
 
     METHODS get_branches_only
       RETURNING VALUE(rt_branches) TYPE ty_git_branch_list_tt
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS get_tags_only " For potential future use
       RETURNING VALUE(rt_branches) TYPE ty_git_branch_list_tt
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS is_ignored
       IMPORTING iv_branch_name   TYPE clike
@@ -7934,7 +7925,7 @@ CLASS lcl_git_branch_list DEFINITION FINAL.
       IMPORTING iv_data        TYPE string
       EXPORTING et_list        TYPE ty_git_branch_list_tt
                 ev_head_symref TYPE string
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS parse_head_params
       IMPORTING iv_data        TYPE string
@@ -7961,13 +7952,13 @@ CLASS lcl_git_branch_list IMPLEMENTATION.
   METHOD find_by_name.
 
     IF iv_branch_name IS INITIAL.
-      lcx_exception=>raise( 'Branch name empty' ).
+      zcx_abapgit_exception=>raise( 'Branch name empty' ).
     ENDIF.
 
     READ TABLE mt_branches INTO rs_branch
       WITH KEY name = iv_branch_name.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'Branch not found' ).
+      zcx_abapgit_exception=>raise( 'Branch not found' ).
     ENDIF.
 
   ENDMETHOD.  "find_by_name
@@ -8013,7 +8004,7 @@ CLASS lcl_git_branch_list IMPLEMENTATION.
         lv_hash = lv_data+4.
         lv_name = lv_data+45.
       ELSEIF sy-tabix = 2 AND strlen( lv_data ) = 8 AND lv_data(8) = '00000000'.
-        lcx_exception=>raise( 'No branches, create branch manually by adding file' ).
+        zcx_abapgit_exception=>raise( 'No branches, create branch manually by adding file' ).
       ELSE.
         CONTINUE.
       ENDIF.
@@ -8144,19 +8135,19 @@ CLASS lcl_repo DEFINITION ABSTRACT FRIENDS lcl_repo_srv.
         RETURNING VALUE(rv_key) TYPE lcl_persistence_db=>ty_value,
       get_name
         RETURNING VALUE(rv_name) TYPE string
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       get_files_local
         IMPORTING io_log          TYPE REF TO lcl_log OPTIONAL
                   it_filter       TYPE scts_tadir OPTIONAL
         RETURNING VALUE(rt_files) TYPE lif_defs=>ty_files_item_tt
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       get_local_checksums
         RETURNING VALUE(rt_checksums) TYPE lcl_persistence_repo=>ty_local_checksum_tt,
       get_local_checksums_per_file
         RETURNING VALUE(rt_checksums) TYPE lif_defs=>ty_file_signatures_tt,
       get_files_remote
         RETURNING VALUE(rt_files) TYPE lif_defs=>ty_files_tt
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       get_package
         RETURNING VALUE(rv_package) TYPE lcl_persistence_repo=>ty_repo-package,
       get_master_language
@@ -8166,29 +8157,29 @@ CLASS lcl_repo DEFINITION ABSTRACT FRIENDS lcl_repo_srv.
       ignore_subpackages
         RETURNING VALUE(rv_yes) TYPE sap_bool,
       delete
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       get_dot_abapgit
         RETURNING VALUE(ro_dot_abapgit) TYPE REF TO lcl_dot_abapgit,
       set_dot_abapgit
         IMPORTING io_dot_abapgit TYPE REF TO lcl_dot_abapgit
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       deserialize
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       refresh
         IMPORTING iv_drop_cache TYPE abap_bool DEFAULT abap_false
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       refresh_local, " For testing purposes, maybe removed later
       update_local_checksums
         IMPORTING it_files TYPE lif_defs=>ty_file_signatures_tt
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       rebuild_local_checksums
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       find_remote_dot_abapgit
         RETURNING VALUE(ro_dot) TYPE REF TO lcl_dot_abapgit
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       is_offline
         RETURNING VALUE(rv_offline) TYPE abap_bool
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
   PROTECTED SECTION.
     DATA: mt_local              TYPE lif_defs=>ty_files_item_tt,
@@ -8206,7 +8197,7 @@ CLASS lcl_repo DEFINITION ABSTRACT FRIENDS lcl_repo_srv.
                   iv_head_branch TYPE lcl_persistence_repo=>ty_repo-head_branch OPTIONAL
                   iv_offline     TYPE lcl_persistence_repo=>ty_repo-offline OPTIONAL
                   is_dot_abapgit TYPE lcl_persistence_repo=>ty_repo-dot_abapgit OPTIONAL
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_repo DEFINITION
 
@@ -8220,7 +8211,7 @@ CLASS lcl_repo_online DEFINITION INHERITING FROM lcl_repo FINAL.
       refresh REDEFINITION,
       constructor
         IMPORTING is_data TYPE lcl_persistence_repo=>ty_repo
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       get_url
         RETURNING VALUE(rv_url) TYPE lcl_persistence_repo=>ty_repo-url,
       get_branch_name
@@ -8229,42 +8220,42 @@ CLASS lcl_repo_online DEFINITION INHERITING FROM lcl_repo FINAL.
         RETURNING VALUE(rv_name) TYPE lcl_persistence_repo=>ty_repo-head_branch,
       get_branches
         RETURNING VALUE(ro_branches) TYPE REF TO lcl_git_branch_list
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       set_url
         IMPORTING iv_url TYPE lcl_persistence_repo=>ty_repo-url
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       set_branch_name
         IMPORTING iv_branch_name TYPE lcl_persistence_repo=>ty_repo-branch_name
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       set_new_remote
         IMPORTING iv_url         TYPE lcl_persistence_repo=>ty_repo-url
                   iv_branch_name TYPE lcl_persistence_repo=>ty_repo-branch_name
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       get_sha1_local
         RETURNING VALUE(rv_sha1) TYPE lcl_persistence_repo=>ty_repo-sha1,
       get_sha1_remote
         RETURNING VALUE(rv_sha1) TYPE lcl_persistence_repo=>ty_repo-sha1
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       get_files_remote REDEFINITION,
       get_objects
         RETURNING VALUE(rt_objects) TYPE lif_defs=>ty_objects_tt
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       deserialize REDEFINITION,
       status
         IMPORTING io_log            TYPE REF TO lcl_log OPTIONAL
         RETURNING VALUE(rt_results) TYPE lif_defs=>ty_results_tt
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       reset_status,
       rebuild_local_checksums REDEFINITION,
       push
         IMPORTING is_comment TYPE lif_defs=>ty_comment
                   io_stage   TYPE REF TO lcl_stage
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       get_unnecessary_local_objs
         RETURNING VALUE(rt_unnecessary_local_objects) TYPE LIF_DEFS=>TY_TADIR_TT
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       delete_unnecessary_local_objs
-        RAISING   lcx_exception lcx_cancel.
+        RAISING   zcx_abapgit_exception lcx_cancel.
 
   PRIVATE SECTION.
     DATA:
@@ -8277,14 +8268,14 @@ CLASS lcl_repo_online DEFINITION INHERITING FROM lcl_repo FINAL.
     METHODS:
       handle_stage_ignore
         IMPORTING io_stage TYPE REF TO lcl_stage
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       initialize
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       actualize_head_branch
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       delete_initial_online_repo
         IMPORTING iv_commit TYPE flag
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_repo_online DEFINITION
 
@@ -8297,7 +8288,7 @@ CLASS lcl_repo_offline DEFINITION INHERITING FROM lcl_repo FINAL.
     METHODS:
       set_files_remote
         IMPORTING it_files TYPE lif_defs=>ty_files_tt
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_repo_offline DEFINITION
 
@@ -8312,43 +8303,43 @@ CLASS lcl_repo_srv DEFINITION FINAL CREATE PRIVATE FRIENDS lcl_app.
 
     METHODS list
       RETURNING VALUE(rt_list) TYPE ty_repo_tt
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS refresh
-      RAISING lcx_exception.
+      RAISING zcx_abapgit_exception.
 
     METHODS new_online
       IMPORTING iv_url         TYPE string
                 iv_branch_name TYPE string
                 iv_package     TYPE devclass
       RETURNING VALUE(ro_repo) TYPE REF TO lcl_repo_online
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS new_offline
       IMPORTING iv_url         TYPE string
                 iv_package     TYPE devclass
       RETURNING VALUE(ro_repo) TYPE REF TO lcl_repo_offline
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS delete
       IMPORTING io_repo TYPE REF TO lcl_repo
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS get
       IMPORTING iv_key         TYPE lcl_persistence_db=>ty_value
       RETURNING VALUE(ro_repo) TYPE REF TO lcl_repo
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS is_repo_installed
       IMPORTING iv_url              TYPE string
                 iv_target_package   TYPE devclass OPTIONAL
       RETURNING VALUE(rv_installed) TYPE abap_bool
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS switch_repo_type
       IMPORTING iv_key     TYPE lcl_persistence_db=>ty_value
                 iv_offline TYPE abap_bool
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
   PRIVATE SECTION.
 
@@ -8360,11 +8351,11 @@ CLASS lcl_repo_srv DEFINITION FINAL CREATE PRIVATE FRIENDS lcl_app.
 
     METHODS add
       IMPORTING io_repo TYPE REF TO lcl_repo
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS validate_package
       IMPORTING iv_package TYPE devclass
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_repo_srv DEFINITION
 
@@ -8402,7 +8393,7 @@ CLASS lcl_news DEFINITION CREATE PRIVATE FRIENDS ltcl_news.
       create " TODO REFACTOR
         IMPORTING io_repo            TYPE REF TO lcl_repo
         RETURNING VALUE(ro_instance) TYPE REF TO lcl_news
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
     METHODS:
       get_log
@@ -8489,7 +8480,7 @@ CLASS lcl_news IMPLEMENTATION.
     TRY.
         " Find changelog
         lt_remote = io_repo->get_files_remote( ).
-      CATCH lcx_exception.
+      CATCH zcx_abapgit_exception.
         RETURN.
     ENDTRY.
 
@@ -8924,11 +8915,11 @@ CLASS lcl_stage_logic DEFINITION FINAL.
       get
         IMPORTING io_repo         TYPE REF TO lcl_repo_online
         RETURNING VALUE(rs_files) TYPE lif_defs=>ty_stage_files
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       count
         IMPORTING io_repo         TYPE REF TO lcl_repo_online
         RETURNING VALUE(rv_count) TYPE i
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
   PRIVATE SECTION.
     CLASS-METHODS:
@@ -9675,11 +9666,11 @@ CLASS lcl_2fa_auth_registry DEFINITION
       "! @parameter cv_username | Username
       "! @parameter cv_password | Password, will be replaced by an access token if two factor
       "!                          authentication succeeds
-      "! @raising lcx_exception | Error in two factor authentication
+      "! @raising zcx_abapgit_exception | Error in two factor authentication
       use_2fa_if_required IMPORTING iv_url      TYPE string
                           CHANGING  cv_username TYPE string
                                     cv_password TYPE string
-                          RAISING   lcx_exception.
+                          RAISING   zcx_abapgit_exception.
     CLASS-DATA:
       "! All authenticators managed by the registry
       gt_registered_authenticators TYPE HASHED TABLE OF REF TO lif_2fa_authenticator
@@ -9688,7 +9679,7 @@ CLASS lcl_2fa_auth_registry DEFINITION
     CLASS-METHODS:
       popup_token
         RETURNING VALUE(rv_token) TYPE string
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 ENDCLASS.
 
 CLASS lcl_2fa_auth_registry IMPLEMENTATION.
@@ -9772,10 +9763,7 @@ CLASS lcl_2fa_auth_registry IMPLEMENTATION.
           CATCH lcx_2fa_illegal_state ##NO_HANDLER.
         ENDTRY.
 
-        RAISE EXCEPTION TYPE lcx_exception
-          EXPORTING
-            iv_text     = |2FA error: { lx_ex->get_text( ) }|
-            ix_previous = lx_ex.
+        zcx_abapgit_exception=>raise( |2FA error: { lx_ex->get_text( ) }| ).
     ENDTRY.
   ENDMETHOD.
 
@@ -9804,11 +9792,11 @@ CLASS lcl_2fa_auth_registry IMPLEMENTATION.
         error_in_fields = 1
         OTHERS          = 2. "#EC NOTEXT
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'Error from POPUP_GET_VALUES' ).
+      zcx_abapgit_exception=>raise( 'Error from POPUP_GET_VALUES' ).
     ENDIF.
 
     IF lv_returncode = 'A'.
-      lcx_exception=>raise( 'Authentication cancelled' ).
+      zcx_abapgit_exception=>raise( 'Authentication cancelled' ).
     ENDIF.
 
     READ TABLE lt_fields INDEX 1 ASSIGNING <ls_field>.
@@ -9833,13 +9821,13 @@ CLASS lcl_proxy_auth DEFINITION FINAL.
     CLASS-METHODS:
       run
         IMPORTING ii_client TYPE REF TO if_http_client
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
   PRIVATE SECTION.
     CLASS-DATA: gv_username TYPE string,
                 gv_password TYPE string.
 
-    CLASS-METHODS: enter RAISING lcx_exception.
+    CLASS-METHODS: enter RAISING zcx_abapgit_exception.
 
 ENDCLASS.
 
@@ -9868,7 +9856,7 @@ CLASS lcl_proxy_auth IMPLEMENTATION.
         cv_pass     = gv_password ).
 
     IF gv_username IS INITIAL OR gv_password IS INITIAL.
-      lcx_exception=>raise( 'Proxy auth failed' ).
+      zcx_abapgit_exception=>raise( 'Proxy auth failed' ).
     ENDIF.
 
   ENDMETHOD.
@@ -9884,11 +9872,11 @@ CLASS lcl_http_digest DEFINITION FINAL.
                   ii_client   TYPE REF TO if_http_client
                   iv_username TYPE string
                   iv_password TYPE string
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       run
         IMPORTING
                   ii_client TYPE REF TO if_http_client
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
   PRIVATE SECTION.
     DATA: mv_ha1      TYPE string,
@@ -9905,7 +9893,7 @@ CLASS lcl_http_digest DEFINITION FINAL.
                   iv_data        TYPE string
         RETURNING
                   VALUE(rv_hash) TYPE string
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
     METHODS:
       hash
@@ -9917,7 +9905,7 @@ CLASS lcl_http_digest DEFINITION FINAL.
                   iv_cnonse          TYPE string
         RETURNING
                   VALUE(rv_response) TYPE string
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       parse
         IMPORTING
           ii_client TYPE REF TO if_http_client.
@@ -9939,17 +9927,17 @@ CLASS lcl_http_client DEFINITION FINAL.
                   iv_data        TYPE xstring
         RETURNING
                   VALUE(rv_data) TYPE xstring
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       get_cdata
         RETURNING VALUE(rv_value) TYPE string,
       check_http_200
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       send_receive
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       set_headers
         IMPORTING iv_url     TYPE string
                   iv_service TYPE string
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
   PRIVATE SECTION.
     DATA: mi_client TYPE REF TO if_http_client,
@@ -10047,7 +10035,7 @@ CLASS lcl_http_client IMPLEMENTATION.
         WHEN OTHERS.
           lv_text = 'Another error occured'.                "#EC NOTEXT
       ENDCASE.
-      lcx_exception=>raise( lv_text ).
+      zcx_abapgit_exception=>raise( lv_text ).
     ENDIF.
 
   ENDMETHOD.  "send_receive
@@ -10065,18 +10053,18 @@ CLASS lcl_http_client IMPLEMENTATION.
       WHEN 200.
         RETURN.
       WHEN 302.
-        lcx_exception=>raise( 'HTTP redirect, check URL' ).
+        zcx_abapgit_exception=>raise( 'HTTP redirect, check URL' ).
       WHEN 401.
-        lcx_exception=>raise( 'HTTP 401, unauthorized' ).
+        zcx_abapgit_exception=>raise( 'HTTP 401, unauthorized' ).
       WHEN 403.
-        lcx_exception=>raise( 'HTTP 403, forbidden' ).
+        zcx_abapgit_exception=>raise( 'HTTP 403, forbidden' ).
       WHEN 404.
-        lcx_exception=>raise( 'HTTP 404, not found' ).
+        zcx_abapgit_exception=>raise( 'HTTP 404, not found' ).
       WHEN 415.
-        lcx_exception=>raise( 'HTTP 415, unsupported media type' ).
+        zcx_abapgit_exception=>raise( 'HTTP 415, unsupported media type' ).
       WHEN OTHERS.
         lv_text = mi_client->response->get_cdata( ).
-        lcx_exception=>raise( |HTTP error code: { lv_code }, { lv_text }| ).
+        zcx_abapgit_exception=>raise( |HTTP error code: { lv_code }, { lv_text }| ).
     ENDCASE.
 
   ENDMETHOD.                                                "http_200
@@ -10184,7 +10172,7 @@ CLASS lcl_http_digest IMPLEMENTATION.
         internal_error = 3
         OTHERS         = 4.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from CALCULATE_HASH_FOR_RAW' ).
+      zcx_abapgit_exception=>raise( 'error from CALCULATE_HASH_FOR_RAW' ).
     ENDIF.
 
     rv_hash = lv_hash.
@@ -10208,14 +10196,14 @@ CLASS lcl_http DEFINITION FINAL.
         IMPORTING iv_url           TYPE string
                   iv_service       TYPE string
         RETURNING VALUE(ro_client) TYPE REF TO lcl_http_client
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
   PRIVATE SECTION.
     CLASS-METHODS:
       check_auth_requested
         IMPORTING ii_client                TYPE REF TO if_http_client
         RETURNING VALUE(rv_auth_requested) TYPE abap_bool
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       is_local_system
         IMPORTING iv_url         TYPE string
         RETURNING VALUE(rv_bool) TYPE abap_bool,
@@ -10224,7 +10212,7 @@ CLASS lcl_http DEFINITION FINAL.
                   io_client        TYPE REF TO lcl_http_client
                   iv_url           TYPE string
         RETURNING VALUE(rv_scheme) TYPE string
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
 ENDCLASS.
 
@@ -10271,7 +10259,7 @@ CLASS lcl_http IMPLEMENTATION.
           lv_text = 'While creating HTTP Client'.           "#EC NOTEXT
 
       ENDCASE.
-      lcx_exception=>raise( lv_text ).
+      zcx_abapgit_exception=>raise( lv_text ).
     ENDIF.
 
     IF lo_settings->get_proxy_authentication( ) = abap_true.
@@ -10384,7 +10372,7 @@ CLASS lcl_http IMPLEMENTATION.
         cv_pass         = lv_pass ).
 
     IF lv_user IS INITIAL.
-      lcx_exception=>raise( 'HTTP 401, unauthorized' ).
+      zcx_abapgit_exception=>raise( 'HTTP 401, unauthorized' ).
     ENDIF.
 
     IF lv_user <> lv_default_user.
@@ -10449,7 +10437,7 @@ CLASS lcl_git_transport DEFINITION FINAL.
                 it_branches TYPE lcl_git_branch_list=>ty_git_branch_list_tt OPTIONAL
       EXPORTING et_objects  TYPE lif_defs=>ty_objects_tt
                 ev_branch   TYPE lif_defs=>ty_sha1
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
 * local to remote
     CLASS-METHODS receive_pack
@@ -10458,12 +10446,12 @@ CLASS lcl_git_transport DEFINITION FINAL.
                 iv_new         TYPE lif_defs=>ty_sha1
                 iv_branch_name TYPE string
                 iv_pack        TYPE xstring
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS branches
       IMPORTING iv_url                TYPE string
       RETURNING VALUE(ro_branch_list) TYPE REF TO lcl_git_branch_list
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
   PRIVATE SECTION.
     CONSTANTS: BEGIN OF c_service,
@@ -10476,7 +10464,7 @@ CLASS lcl_git_transport DEFINITION FINAL.
                 iv_service     TYPE string
       EXPORTING eo_client      TYPE REF TO lcl_http_client
                 eo_branch_list TYPE REF TO lcl_git_branch_list
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS find_branch
       IMPORTING iv_url         TYPE string
@@ -10484,12 +10472,12 @@ CLASS lcl_git_transport DEFINITION FINAL.
                 iv_branch_name TYPE string
       EXPORTING eo_client      TYPE REF TO lcl_http_client
                 ev_branch      TYPE lif_defs=>ty_sha1
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS parse
       EXPORTING ev_pack TYPE xstring
       CHANGING  cv_data TYPE xstring
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_transport DEFINITION
 
@@ -10520,22 +10508,22 @@ CLASS lcl_git_pack DEFINITION FINAL FRIENDS ltcl_git_pack.
     CLASS-METHODS decode
       IMPORTING iv_data           TYPE xstring
       RETURNING VALUE(rt_objects) TYPE lif_defs=>ty_objects_tt
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS decode_tree
       IMPORTING iv_data         TYPE xstring
       RETURNING VALUE(rt_nodes) TYPE ty_nodes_tt
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS decode_commit
       IMPORTING iv_data          TYPE xstring
       RETURNING VALUE(rs_commit) TYPE ty_commit
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS encode
       IMPORTING it_objects     TYPE lif_defs=>ty_objects_tt
       RETURNING VALUE(rv_data) TYPE xstring
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS encode_tree
       IMPORTING it_nodes       TYPE ty_nodes_tt
@@ -10549,7 +10537,7 @@ CLASS lcl_git_pack DEFINITION FINAL FRIENDS ltcl_git_pack.
       IMPORTING iv_type           TYPE lif_defs=>ty_type
                 iv_length         TYPE i
       RETURNING VALUE(rv_xstring) TYPE xstring
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
   PRIVATE SECTION.
     CONSTANTS: c_pack_start TYPE x LENGTH 4 VALUE '5041434B', " PACK
@@ -10559,12 +10547,12 @@ CLASS lcl_git_pack DEFINITION FINAL FRIENDS ltcl_git_pack.
 
     CLASS-METHODS decode_deltas
       CHANGING ct_objects TYPE lif_defs=>ty_objects_tt
-      RAISING  lcx_exception.
+      RAISING  zcx_abapgit_exception.
 
     CLASS-METHODS delta
       IMPORTING is_object  TYPE lif_defs=>ty_object
       CHANGING  ct_objects TYPE lif_defs=>ty_objects_tt
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS delta_header
       EXPORTING ev_header TYPE i
@@ -10577,7 +10565,7 @@ CLASS lcl_git_pack DEFINITION FINAL FRIENDS ltcl_git_pack.
     CLASS-METHODS get_type
       IMPORTING iv_x           TYPE x
       RETURNING VALUE(rv_type) TYPE lif_defs=>ty_type
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS get_length
       EXPORTING ev_length TYPE i
@@ -10586,7 +10574,7 @@ CLASS lcl_git_pack DEFINITION FINAL FRIENDS ltcl_git_pack.
     CLASS-METHODS zlib_decompress
       CHANGING cv_data         TYPE xstring
                cv_decompressed TYPE xstring
-      RAISING  lcx_exception.
+      RAISING  zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_pack DEFINITION
 
@@ -10695,11 +10683,11 @@ CLASS lcl_git_transport IMPLEMENTATION.
 
     lv_string = lcl_convert=>xstring_to_string_utf8( lv_xstring ).
     IF NOT lv_string CP '*unpack ok*'.
-      lcx_exception=>raise( 'unpack not ok' ).
+      zcx_abapgit_exception=>raise( 'unpack not ok' ).
     ELSEIF lv_string CP '*pre-receive hook declined*'.
-      lcx_exception=>raise( 'pre-receive hook declined' ).
+      zcx_abapgit_exception=>raise( 'pre-receive hook declined' ).
     ELSEIF lv_string CP '*funny refname*'.
-      lcx_exception=>raise( 'funny refname' ).
+      zcx_abapgit_exception=>raise( 'funny refname' ).
     ENDIF.
 
   ENDMETHOD.                    "receive_pack
@@ -10717,7 +10705,7 @@ CLASS lcl_git_transport IMPLEMENTATION.
       lv_len = lcl_git_utils=>length_utf8_hex( cv_data ).
 
       IF lv_len > xstrlen( cv_data ).
-        lcx_exception=>raise( 'parse, string length too large' ).
+        zcx_abapgit_exception=>raise( 'parse, string length too large' ).
       ENDIF.
 
       lv_contents = cv_data(lv_len).
@@ -10803,7 +10791,7 @@ CLASS lcl_git_transport IMPLEMENTATION.
            CHANGING cv_data = lv_xstring ).
 
     IF lv_pack IS INITIAL.
-      lcx_exception=>raise( 'empty pack' ).
+      zcx_abapgit_exception=>raise( 'empty pack' ).
     ENDIF.
 
     et_objects = lcl_git_pack=>decode( lv_pack ).
@@ -10872,7 +10860,7 @@ CLASS lcl_git_pack IMPLEMENTATION.
       WHEN lif_defs=>gc_type-ref_d.
         lv_type = '111'.
       WHEN OTHERS.
-        lcx_exception=>raise( 'Unexpected object type while encoding pack' ).
+        zcx_abapgit_exception=>raise( 'Unexpected object type while encoding pack' ).
     ENDCASE.
 
     lv_x4 = iv_length.
@@ -10897,7 +10885,7 @@ CLASS lcl_git_pack IMPLEMENTATION.
       CONCATENATE lv_result '0' lv_bits+7(7) INTO lv_result.
     ELSE.
 * this IF can be refactored, use shifting?
-      lcx_exception=>raise( 'Todo, encoding length' ).
+      zcx_abapgit_exception=>raise( 'Todo, encoding length' ).
     ENDIF.
 
 * convert bit string to xstring
@@ -11034,7 +11022,7 @@ CLASS lcl_git_pack IMPLEMENTATION.
       WHEN '111'.
         rv_type = lif_defs=>gc_type-ref_d.
       WHEN OTHERS.
-        lcx_exception=>raise( 'Todo, unknown type' ).
+        zcx_abapgit_exception=>raise( 'Todo, unknown type' ).
     ENDCASE.
 
   ENDMETHOD.                    "get_type
@@ -11094,7 +11082,7 @@ CLASS lcl_git_pack IMPLEMENTATION.
     IF rs_commit-author IS INITIAL
         OR rs_commit-committer IS INITIAL
         OR rs_commit-tree IS INITIAL.
-      lcx_exception=>raise( 'multiple parents? not supported' ).
+      zcx_abapgit_exception=>raise( 'multiple parents? not supported' ).
     ENDIF.
 
   ENDMETHOD.                    "decode_commit
@@ -11145,10 +11133,10 @@ CLASS lcl_git_pack IMPLEMENTATION.
 * find base
     READ TABLE ct_objects ASSIGNING <ls_object> WITH KEY sha1 = is_object-sha1.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( |Base not found, { is_object-sha1 }| ).
+      zcx_abapgit_exception=>raise( |Base not found, { is_object-sha1 }| ).
     ELSEIF <ls_object>-type = lif_defs=>gc_type-ref_d.
 * sanity check
-      lcx_exception=>raise( 'Delta, base eq delta' ).
+      zcx_abapgit_exception=>raise( 'Delta, base eq delta' ).
     ENDIF.
 
     lv_base = <ls_object>-data.
@@ -11288,7 +11276,7 @@ CLASS lcl_git_pack IMPLEMENTATION.
         IF ls_node-chmod <> lif_defs=>gc_chmod-dir
             AND ls_node-chmod <> lif_defs=>gc_chmod-file
             AND ls_node-chmod <> lif_defs=>gc_chmod-executable.
-          lcx_exception=>raise( 'Unknown chmod' ).
+          zcx_abapgit_exception=>raise( 'Unknown chmod' ).
         ENDIF.
 
         ls_node-name = lv_name.
@@ -11317,7 +11305,7 @@ CLASS lcl_git_pack IMPLEMENTATION.
     cv_decompressed = ls_data-raw.
 
     IF lv_compressed_len IS INITIAL.
-      lcx_exception=>raise( 'Decompression falied :o/' ).
+      zcx_abapgit_exception=>raise( 'Decompression falied :o/' ).
     ENDIF.
 
     cv_data = cv_data+lv_compressed_len.
@@ -11330,7 +11318,7 @@ CLASS lcl_git_pack IMPLEMENTATION.
       cv_data = cv_data+1.
     ENDIF.
     IF cv_data(4) <> lv_adler32.
-      lcx_exception=>raise( 'Wrong Adler checksum' ).
+      zcx_abapgit_exception=>raise( 'Wrong Adler checksum' ).
     ENDIF.
   ENDMETHOD.
 
@@ -11357,13 +11345,13 @@ CLASS lcl_git_pack IMPLEMENTATION.
 
 * header
     IF NOT xstrlen( lv_data ) > 4 OR lv_data(4) <> c_pack_start.
-      lcx_exception=>raise( 'Unexpected pack header' ).
+      zcx_abapgit_exception=>raise( 'Unexpected pack header' ).
     ENDIF.
     lv_data = lv_data+4.
 
 * version
     IF lv_data(4) <> c_version.
-      lcx_exception=>raise( 'Version not supported' ).
+      zcx_abapgit_exception=>raise( 'Version not supported' ).
     ENDIF.
     lv_data = lv_data+4.
 
@@ -11389,7 +11377,7 @@ CLASS lcl_git_pack IMPLEMENTATION.
 * strip header, '789C', CMF + FLG
       lv_zlib = lv_data(2).
       IF lv_zlib <> c_zlib AND lv_zlib <> c_zlib_hmm.
-        lcx_exception=>raise( 'Unexpected zlib header' ).
+        zcx_abapgit_exception=>raise( 'Unexpected zlib header' ).
       ENDIF.
       lv_data = lv_data+2.
 
@@ -11404,7 +11392,7 @@ CLASS lcl_git_pack IMPLEMENTATION.
             raw_out_len = lv_decompress_len ).
 
         IF lv_expected <> lv_decompress_len.
-          lcx_exception=>raise( 'Decompression falied' ).
+          zcx_abapgit_exception=>raise( 'Decompression falied' ).
         ENDIF.
 
         cl_abap_gzip=>compress_binary(
@@ -11455,7 +11443,7 @@ CLASS lcl_git_pack IMPLEMENTATION.
     lv_xstring = iv_data(lv_len).
     lv_sha1 = lcl_hash=>sha1_raw( lv_xstring ).
     IF to_upper( lv_sha1 ) <> lv_data.
-      lcx_exception=>raise( 'SHA1 at end of pack doesnt match' ).
+      zcx_abapgit_exception=>raise( 'SHA1 at end of pack doesnt match' ).
     ENDIF.
 
     decode_deltas( CHANGING ct_objects = rt_objects ).
@@ -11540,7 +11528,7 @@ CLASS lcl_git_porcelain DEFINITION FINAL FRIENDS ltcl_git_porcelain.
       EXPORTING et_files   TYPE lif_defs=>ty_files_tt
                 et_objects TYPE lif_defs=>ty_objects_tt
                 ev_branch  TYPE lif_defs=>ty_sha1
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS push
       IMPORTING io_repo          TYPE REF TO lcl_repo_online
@@ -11548,24 +11536,24 @@ CLASS lcl_git_porcelain DEFINITION FINAL FRIENDS ltcl_git_porcelain.
                 io_stage         TYPE REF TO lcl_stage
       EXPORTING ev_branch        TYPE lif_defs=>ty_sha1
                 et_updated_files TYPE lif_defs=>ty_file_signatures_tt
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS create_branch
       IMPORTING io_repo TYPE REF TO lcl_repo_online
                 iv_name TYPE string
                 iv_from TYPE lif_defs=>ty_sha1
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS delete_branch
       IMPORTING io_repo   TYPE REF TO lcl_repo_online
                 is_branch TYPE lcl_git_branch_list=>ty_git_branch
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS full_tree
       IMPORTING it_objects         TYPE lif_defs=>ty_objects_tt
                 iv_branch          TYPE lif_defs=>ty_sha1
       RETURNING VALUE(rt_expanded) TYPE ty_expanded_tt
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
   PRIVATE SECTION.
 
@@ -11590,7 +11578,7 @@ CLASS lcl_git_porcelain DEFINITION FINAL FRIENDS ltcl_git_porcelain.
     CLASS-METHODS build_trees
       IMPORTING it_expanded     TYPE ty_expanded_tt
       RETURNING VALUE(rt_trees) TYPE ty_trees_tt
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS find_folders
       IMPORTING it_expanded       TYPE ty_expanded_tt
@@ -11601,14 +11589,14 @@ CLASS lcl_git_porcelain DEFINITION FINAL FRIENDS ltcl_git_porcelain.
                 iv_sha1    TYPE lif_defs=>ty_sha1
                 iv_path    TYPE string
       CHANGING  ct_files   TYPE lif_defs=>ty_files_tt
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS walk_tree
       IMPORTING it_objects         TYPE lif_defs=>ty_objects_tt
                 iv_tree            TYPE lif_defs=>ty_sha1
                 iv_base            TYPE string
       RETURNING VALUE(rt_expanded) TYPE ty_expanded_tt
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS receive_pack
       IMPORTING is_comment       TYPE lif_defs=>ty_comment
@@ -11617,7 +11605,7 @@ CLASS lcl_git_porcelain DEFINITION FINAL FRIENDS ltcl_git_porcelain.
                 it_blobs         TYPE lif_defs=>ty_files_tt
                 io_stage         TYPE REF TO lcl_stage
       RETURNING VALUE(rv_branch) TYPE lif_defs=>ty_sha1
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_porcelain DEFINITION
 
@@ -11630,7 +11618,7 @@ CLASS lcl_git_porcelain IMPLEMENTATION.
 
   METHOD receive_pack.
 
-    DATA: lv_time    TYPE lcl_time=>ty_unixtime,
+    DATA: lv_time    TYPE zcl_abapgit_time=>ty_unixtime,
           lv_commit  TYPE xstring,
           lt_objects TYPE lif_defs=>ty_objects_tt,
           lv_pack    TYPE xstring,
@@ -11641,7 +11629,7 @@ CLASS lcl_git_porcelain IMPLEMENTATION.
                    <ls_blob> LIKE LINE OF it_blobs.
 
 
-    lv_time = lcl_time=>get( ).
+    lv_time = zcl_abapgit_time=>get( ).
 
     READ TABLE it_trees ASSIGNING <ls_tree> WITH KEY path = '/'.
     ASSERT sy-subrc = 0.
@@ -11733,7 +11721,7 @@ CLASS lcl_git_porcelain IMPLEMENTATION.
           lv_pack    TYPE xstring.
 
     IF iv_name CS ` `.
-      lcx_exception=>raise( 'Branch name cannot contain blank spaces' ).
+      zcx_abapgit_exception=>raise( 'Branch name cannot contain blank spaces' ).
     ENDIF.
 
 * "client MUST send an empty packfile"
@@ -11822,7 +11810,7 @@ CLASS lcl_git_porcelain IMPLEMENTATION.
           CLEAR <ls_updated>-sha1.       " Mark as deleted
 
         WHEN OTHERS.
-          lcx_exception=>raise( 'stage method not supported, todo' ).
+          zcx_abapgit_exception=>raise( 'stage method not supported, todo' ).
       ENDCASE.
     ENDLOOP.
 
@@ -11850,7 +11838,7 @@ CLASS lcl_git_porcelain IMPLEMENTATION.
       WITH KEY sha1 = iv_tree
       type = lif_defs=>gc_type-tree.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'tree not found' ).
+      zcx_abapgit_exception=>raise( 'tree not found' ).
     ENDIF.
     lt_nodes = lcl_git_pack=>decode_tree( ls_object-data ).
 
@@ -11870,7 +11858,7 @@ CLASS lcl_git_porcelain IMPLEMENTATION.
             iv_base    = iv_base && <ls_node>-name && '/' ).
           APPEND LINES OF lt_expanded TO rt_expanded.
         WHEN OTHERS.
-          lcx_exception=>raise( 'walk_tree: unknown chmod' ).
+          zcx_abapgit_exception=>raise( 'walk_tree: unknown chmod' ).
       ENDCASE.
     ENDLOOP.
 
@@ -11884,7 +11872,7 @@ CLASS lcl_git_porcelain IMPLEMENTATION.
 
     READ TABLE it_objects INTO ls_object WITH KEY sha1 = iv_branch type = lif_defs=>gc_type-commit.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'commit not found' ).
+      zcx_abapgit_exception=>raise( 'commit not found' ).
     ENDIF.
     ls_commit = lcl_git_pack=>decode_commit( ls_object-data ).
 
@@ -11910,7 +11898,7 @@ CLASS lcl_git_porcelain IMPLEMENTATION.
 
     READ TABLE et_objects INTO ls_object WITH KEY sha1 = ev_branch type = lif_defs=>gc_type-commit.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'Commit/branch not found' ).
+      zcx_abapgit_exception=>raise( 'Commit/branch not found' ).
     ENDIF.
     ls_commit = lcl_git_pack=>decode_commit( ls_object-data ).
 
@@ -12030,7 +12018,7 @@ CLASS lcl_git_porcelain IMPLEMENTATION.
 
     READ TABLE it_objects ASSIGNING <ls_tree> WITH KEY sha1 = iv_sha1 type = lif_defs=>gc_type-tree.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'Walk, tree not found' ).
+      zcx_abapgit_exception=>raise( 'Walk, tree not found' ).
     ENDIF.
 
     lt_nodes = lcl_git_pack=>decode_tree( <ls_tree>-data ).
@@ -12040,7 +12028,7 @@ CLASS lcl_git_porcelain IMPLEMENTATION.
         READ TABLE it_objects ASSIGNING <ls_blob>
           WITH KEY sha1 = <ls_node>-sha1 type = lif_defs=>gc_type-blob.
         IF sy-subrc <> 0.
-          lcx_exception=>raise( 'Walk, blob not found' ).
+          zcx_abapgit_exception=>raise( 'Walk, blob not found' ).
         ENDIF.
 
         CLEAR ls_file.
@@ -12083,15 +12071,15 @@ CLASS lcl_objects_activation DEFINITION FINAL.
     CLASS-METHODS add
       IMPORTING iv_type TYPE trobjtype
                 iv_name TYPE clike
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS add_item
       IMPORTING is_item TYPE lif_defs=>ty_item
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS activate
       IMPORTING iv_ddic TYPE abap_bool DEFAULT abap_false
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS clear.
 
@@ -12135,7 +12123,7 @@ CLASS lcl_objects_activation IMPLEMENTATION.
           insert_into_corr_error = 3
           OTHERS                 = 4.
       IF sy-subrc <> 0.
-        lcx_exception=>raise( 'error from RS_WORKING_OBJECTS_ACTIVATE' ).
+        zcx_abapgit_exception=>raise( 'error from RS_WORKING_OBJECTS_ACTIVATE' ).
       ENDIF.
     ENDIF.
 
@@ -12202,7 +12190,7 @@ CLASS lcl_objects_activation IMPLEMENTATION.
             object_not_found = 1
             OTHERS           = 2.
         IF sy-subrc <> 0.
-          lcx_exception=>raise( 'Error from RS_INACTIVE_OBJECTS_IN_OBJECT' ).
+          zcx_abapgit_exception=>raise( 'Error from RS_INACTIVE_OBJECTS_IN_OBJECT' ).
         ENDIF.
 
         IF iv_type = 'CLAS'.
@@ -12236,49 +12224,49 @@ CLASS lcl_objects_files DEFINITION.
         IMPORTING iv_extra  TYPE clike OPTIONAL
                   iv_ext    TYPE string
                   iv_string TYPE string
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       read_string
         IMPORTING iv_extra         TYPE clike OPTIONAL
                   iv_ext           TYPE string
         RETURNING VALUE(rv_string) TYPE string
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       add_xml
         IMPORTING iv_extra     TYPE clike OPTIONAL
                   io_xml       TYPE REF TO lcl_xml_output
                   iv_normalize TYPE sap_bool DEFAULT abap_true
                   is_metadata  TYPE lif_defs=>ty_metadata OPTIONAL
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
 * needed since type-check during dynamic call fails even if the object is compatible
       add_xml_from_plugin
         IMPORTING iv_extra     TYPE clike OPTIONAL
                   io_xml       TYPE REF TO object
                   iv_normalize TYPE sap_bool DEFAULT abap_true
-        RAISING   lcx_exception ##called,
+        RAISING   zcx_abapgit_exception ##called,
       read_xml
         IMPORTING iv_extra      TYPE clike OPTIONAL
         RETURNING VALUE(ro_xml) TYPE REF TO lcl_xml_input
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       read_abap
         IMPORTING iv_extra       TYPE clike OPTIONAL
                   iv_error       TYPE sap_bool DEFAULT abap_true
         RETURNING VALUE(rt_abap) TYPE abaptxt255_tab
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       add_abap
         IMPORTING iv_extra TYPE clike OPTIONAL
                   it_abap  TYPE STANDARD TABLE
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       add
         IMPORTING is_file TYPE lif_defs=>ty_file,
       add_raw
         IMPORTING iv_extra TYPE clike OPTIONAL
                   iv_ext   TYPE string
                   iv_data  TYPE xstring
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       read_raw
         IMPORTING iv_extra       TYPE clike OPTIONAL
                   iv_ext         TYPE string
         RETURNING VALUE(rv_data) TYPE xstring
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       get_files
         RETURNING VALUE(rt_files) TYPE lif_defs=>ty_files_tt,
       set_files
@@ -12296,7 +12284,7 @@ CLASS lcl_objects_files DEFINITION.
         IMPORTING iv_filename TYPE string
                   iv_error    TYPE abap_bool DEFAULT abap_true
         EXPORTING ev_data     TYPE xstring
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       filename
         IMPORTING iv_extra           TYPE clike OPTIONAL
                   iv_ext             TYPE string
@@ -12339,32 +12327,32 @@ INTERFACE lif_object.
   METHODS:
     serialize
       IMPORTING io_xml TYPE REF TO lcl_xml_output
-      RAISING   lcx_exception,
+      RAISING   zcx_abapgit_exception,
     deserialize
       IMPORTING iv_package TYPE devclass
                 io_xml     TYPE REF TO lcl_xml_input
-      RAISING   lcx_exception,
+      RAISING   zcx_abapgit_exception,
     delete
-      RAISING lcx_exception,
+      RAISING zcx_abapgit_exception,
     exists
       RETURNING VALUE(rv_bool) TYPE abap_bool
-      RAISING   lcx_exception,
+      RAISING   zcx_abapgit_exception,
     changed_by
       RETURNING VALUE(rv_user) TYPE xubname
-      RAISING   lcx_exception,
+      RAISING   zcx_abapgit_exception,
     jump
-      RAISING lcx_exception,
+      RAISING zcx_abapgit_exception,
     get_metadata
       RETURNING VALUE(rs_metadata) TYPE lif_defs=>ty_metadata,
     has_changed_since
       IMPORTING iv_timestamp      TYPE timestamp
       RETURNING VALUE(rv_changed) TYPE abap_bool
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
   METHODS:
     compare_to_remote_version
       IMPORTING io_remote_version_xml       TYPE REF TO lcl_xml_input
       RETURNING VALUE(ro_comparison_result) TYPE REF TO lif_comparison_result
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
   DATA: mo_files TYPE REF TO lcl_objects_files.
 
@@ -12561,7 +12549,7 @@ CLASS lcl_objects_files IMPLEMENTATION.
 
     IF sy-subrc <> 0.
       IF iv_error = abap_true.
-        lcx_exception=>raise( |File not found: { iv_filename }| ).
+        zcx_abapgit_exception=>raise( |File not found: { iv_filename }| ).
       ELSE.
         RETURN.
       ENDIF.
@@ -12625,7 +12613,7 @@ CLASS lcl_objects_super DEFINITION ABSTRACT.
       jump_adt
         IMPORTING i_obj_name TYPE lif_defs=>ty_item-obj_name
                   i_obj_type TYPE lif_defs=>ty_item-obj_type
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
     CONSTANTS: c_user_unknown TYPE xubname VALUE 'UNKNOWN'.
 
@@ -12646,14 +12634,14 @@ CLASS lcl_objects_super DEFINITION ABSTRACT.
         RETURNING VALUE(rs_metadata) TYPE lif_defs=>ty_metadata,
       corr_insert
         IMPORTING iv_package TYPE devclass
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       tadir_insert
         IMPORTING iv_package TYPE devclass
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       jump_se11
         IMPORTING iv_radio TYPE string
                   iv_field TYPE string
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
   PRIVATE SECTION.
 
@@ -12662,7 +12650,7 @@ CLASS lcl_objects_super DEFINITION ABSTRACT.
         IMPORTING io_object                     TYPE REF TO cl_wb_object
                   io_adt                        TYPE REF TO object
         RETURNING VALUE(r_is_adt_jump_possible) TYPE abap_bool
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_objects_super DEFINITION
 
@@ -12760,10 +12748,7 @@ CLASS lcl_objects_bridge IMPLEMENTATION.
             iv_package = iv_package
             io_xml     = io_xml.
       CATCH cx_static_check INTO lx_plugin.
-        RAISE EXCEPTION TYPE lcx_exception
-          EXPORTING
-            ix_previous = lx_plugin
-            iv_text     = lx_plugin->get_text( ).
+        zcx_abapgit_exception=>raise( lx_plugin->get_text( ) ).
     ENDTRY.
   ENDMETHOD.                    "lif_object~deserialize
 
@@ -12773,10 +12758,7 @@ CLASS lcl_objects_bridge IMPLEMENTATION.
     TRY.
         CALL METHOD mo_plugin->('ZIF_ABAPGIT_PLUGIN~DELETE').
       CATCH cx_static_check INTO lx_plugin.
-        RAISE EXCEPTION TYPE lcx_exception
-          EXPORTING
-            ix_previous = lx_plugin
-            iv_text     = lx_plugin->get_text( ).
+        zcx_abapgit_exception=>raise( lx_plugin->get_text( ) ).
     ENDTRY.
 
   ENDMETHOD.                    "lif_object~delete
@@ -12905,7 +12887,7 @@ CLASS lcl_objects_program DEFINITION INHERITING FROM lcl_objects_super.
                 io_files   TYPE REF TO lcl_objects_files
                 iv_program TYPE programm OPTIONAL
                 iv_extra   TYPE clike OPTIONAL
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS read_progdir
       IMPORTING iv_program        TYPE programm
@@ -12916,7 +12898,7 @@ CLASS lcl_objects_program DEFINITION INHERITING FROM lcl_objects_super.
                 it_source  TYPE abaptxt255_tab
                 it_tpool   TYPE textpool_table
                 iv_package TYPE devclass
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
   PROTECTED SECTION.
 
@@ -12950,27 +12932,27 @@ CLASS lcl_objects_program DEFINITION INHERITING FROM lcl_objects_super.
     METHODS serialize_dynpros
       IMPORTING iv_program_name  TYPE programm
       RETURNING VALUE(rt_dynpro) TYPE ty_dynpro_tt
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS serialize_cua
       IMPORTING iv_program_name TYPE programm
       RETURNING VALUE(rs_cua)   TYPE ty_cua
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS deserialize_dynpros
       IMPORTING it_dynpros TYPE ty_dynpro_tt
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS deserialize_textpool
       IMPORTING iv_program  TYPE programm
                 it_tpool    TYPE textpool_table
                 iv_language TYPE langu OPTIONAL
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS deserialize_cua
       IMPORTING iv_program_name TYPE programm
                 is_cua          TYPE ty_cua
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS check_prog_changed_since
       IMPORTING iv_program        TYPE programm
@@ -13080,7 +13062,7 @@ CLASS lcl_objects_program IMPLEMENTATION.
     IF sy-subrc = 2.
       RETURN.
     ELSEIF sy-subrc <> 0.
-      lcx_exception=>raise( 'Error reading program' ).
+      zcx_abapgit_exception=>raise( 'Error reading program' ).
     ENDIF.
 
     ls_progdir = read_progdir( lv_program_name ).
@@ -13147,9 +13129,9 @@ CLASS lcl_objects_program IMPLEMENTATION.
         unknown_objectclass = 3
         OTHERS              = 4.
     IF sy-subrc = 1.
-      lcx_exception=>raise( 'Cancelled' ).
+      zcx_abapgit_exception=>raise( 'Cancelled' ).
     ELSEIF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from RS_CORR_INSERT' ).
+      zcx_abapgit_exception=>raise( 'error from RS_CORR_INSERT' ).
     ENDIF.
 
     READ TABLE it_tpool INTO ls_tpool WITH KEY id = 'R'.  "#EC CI_SUBRC
@@ -13188,9 +13170,9 @@ CLASS lcl_objects_program IMPLEMENTATION.
           OTHERS           = 4.
       IF sy-subrc <> 0.
         IF sy-msgid = 'EU' AND sy-msgno = '510'.
-          lcx_exception=>raise( 'User is currently editing program' ).
+          zcx_abapgit_exception=>raise( 'User is currently editing program' ).
         ELSE.
-          lcx_exception=>raise( 'PROG, error updating' ).
+          zcx_abapgit_exception=>raise( 'PROG, error updating' ).
         ENDIF.
       ENDIF.
     ELSE.
@@ -13208,7 +13190,7 @@ CLASS lcl_objects_program IMPLEMENTATION.
          STATE 'I'
          EXTENSION TYPE is_progdir-name+30.
         IF sy-subrc <> 0.
-          lcx_exception=>raise( 'error from INSERT REPORT .. EXTENSION TYPE' ).
+          zcx_abapgit_exception=>raise( 'error from INSERT REPORT .. EXTENSION TYPE' ).
         ENDIF.
       ELSE.
         INSERT REPORT is_progdir-name
@@ -13216,7 +13198,7 @@ CLASS lcl_objects_program IMPLEMENTATION.
           STATE 'I'
           PROGRAM TYPE is_progdir-subc.
         IF sy-subrc <> 0.
-          lcx_exception=>raise( 'error from INSERT REPORT' ).
+          zcx_abapgit_exception=>raise( 'error from INSERT REPORT' ).
         ENDIF.
       ENDIF.
 
@@ -13226,7 +13208,7 @@ CLASS lcl_objects_program IMPLEMENTATION.
           LANGUAGE mv_language
           STATE 'I'.
         IF sy-subrc <> 0.
-          lcx_exception=>raise( 'error from INSERT TEXTPOOL' ).
+          zcx_abapgit_exception=>raise( 'error from INSERT TEXTPOOL' ).
         ENDIF.
       ENDIF.
 
@@ -13242,7 +13224,7 @@ CLASS lcl_objects_program IMPLEMENTATION.
         not_exists = 1
         OTHERS     = 2.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'not found in PROGDIR' ).
+      zcx_abapgit_exception=>raise( 'not found in PROGDIR' ).
     ENDIF.
 
 * todo, package?
@@ -13265,7 +13247,7 @@ CLASS lcl_objects_program IMPLEMENTATION.
         not_executed = 1
         OTHERS       = 2.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'PROG, error inserting' ).
+      zcx_abapgit_exception=>raise( 'PROG, error inserting' ).
     ENDIF.
 
     SELECT SINGLE * FROM progdir INTO ls_progdir_new
@@ -13337,7 +13319,7 @@ CLASS lcl_objects_program IMPLEMENTATION.
         unknown_version = 2
         OTHERS          = 3.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from RS_CUA_INTERNAL_FETCH' ).
+      zcx_abapgit_exception=>raise( 'error from RS_CUA_INTERNAL_FETCH' ).
     ENDIF.
 
   ENDMETHOD.                    "serialize_cua
@@ -13366,7 +13348,7 @@ CLASS lcl_objects_program IMPLEMENTATION.
         not_found = 1
         OTHERS    = 2.
     IF sy-subrc = 2.
-      lcx_exception=>raise( 'error from screen_list' ).
+      zcx_abapgit_exception=>raise( 'error from screen_list' ).
     ENDIF.
 
 * loop dynpros and skip generated selection screens
@@ -13388,7 +13370,7 @@ CLASS lcl_objects_program IMPLEMENTATION.
           permission_error     = 3
           OTHERS               = 4.
       IF sy-subrc <> 0.
-        lcx_exception=>raise( 'Error while reading dynpro' ).
+        zcx_abapgit_exception=>raise( 'Error while reading dynpro' ).
       ENDIF.
 
       LOOP AT lt_fields_to_containers ASSIGNING <ls_field>.
@@ -13448,7 +13430,7 @@ CLASS lcl_objects_program IMPLEMENTATION.
           illegal_field_position = 9
           OTHERS                 = 10.
       IF sy-subrc <> 2 AND sy-subrc <> 0.
-        lcx_exception=>raise( 'error from RPY_DYNPRO_INSERT' ).
+        zcx_abapgit_exception=>raise( 'error from RPY_DYNPRO_INSERT' ).
       ENDIF.
 * todo, RPY_DYNPRO_UPDATE?
 
@@ -13518,7 +13500,7 @@ CLASS lcl_objects_program IMPLEMENTATION.
       LANGUAGE lv_language
       STATE 'I'.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from INSERT TEXTPOOL' ).
+      zcx_abapgit_exception=>raise( 'error from INSERT TEXTPOOL' ).
     ENDIF.
 
     IF lv_language = mv_language. " Add just once
@@ -13553,7 +13535,7 @@ CLASS lcl_objects_program IMPLEMENTATION.
       AND object = ms_item-obj_type
       AND obj_name = ms_item-obj_name.                  "#EC CI_GENBUFF
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'not found in tadir' ).
+      zcx_abapgit_exception=>raise( 'not found in tadir' ).
     ENDIF.
 
     ls_tr_key-obj_type = ms_item-obj_type.
@@ -13586,7 +13568,7 @@ CLASS lcl_objects_program IMPLEMENTATION.
         OTHERS    = 2.
     IF sy-subrc <> 0.
 * if moving code from SAPlink, see https://github.com/larshp/abapGit/issues/562
-      lcx_exception=>raise( 'error from RS_CUA_INTERNAL_WRITE' ).
+      zcx_abapgit_exception=>raise( 'error from RS_CUA_INTERNAL_WRITE' ).
     ENDIF.
 
     lcl_objects_activation=>add( iv_type = 'CUAD'
@@ -13744,7 +13726,7 @@ CLASS lcl_objects_super IMPLEMENTATION.
                                                  RECEIVING  p_wb_object = li_object
                                                  EXCEPTIONS OTHERS   = 1 ).
         IF sy-subrc <> 0.
-          lcx_exception=>raise( 'ADT Jump Error' ).
+          zcx_abapgit_exception=>raise( 'ADT Jump Error' ).
         ENDIF.
 
         CALL METHOD ('CL_ADT_TOOLS_CORE_FACTORY')=>('GET_INSTANCE')
@@ -13753,7 +13735,7 @@ CLASS lcl_objects_super IMPLEMENTATION.
 
         IF is_adt_jump_possible( io_object = li_object
                                  io_adt    = li_adt ) = abap_false.
-          lcx_exception=>raise( 'ADT Jump Error' ).
+          zcx_abapgit_exception=>raise( 'ADT Jump Error' ).
         ENDIF.
 
         CALL METHOD li_adt->('IF_ADT_TOOLS_CORE_FACTORY~GET_URI_MAPPER')
@@ -13775,11 +13757,11 @@ CLASS lcl_objects_super IMPLEMENTATION.
                                            EXCEPTIONS OTHERS   = 1 ).
 
         IF sy-subrc <> 0.
-          lcx_exception=>raise( 'ADT Jump Error' ).
+          zcx_abapgit_exception=>raise( 'ADT Jump Error' ).
         ENDIF.
 
       CATCH cx_root.
-        lcx_exception=>raise( 'ADT Jump Error' ).
+        zcx_abapgit_exception=>raise( 'ADT Jump Error' ).
     ENDTRY.
 
   ENDMETHOD.
@@ -13825,7 +13807,7 @@ CLASS lcl_objects_super IMPLEMENTATION.
       EXCEPTIONS
         OTHERS              = 1.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from TR_TADIR_INTERFACE' ).
+      zcx_abapgit_exception=>raise( 'error from TR_TADIR_INTERFACE' ).
     ENDIF.
 
   ENDMETHOD.
@@ -13851,9 +13833,9 @@ CLASS lcl_objects_super IMPLEMENTATION.
         unknown_objectclass = 3
         OTHERS              = 4.
     IF sy-subrc = 1.
-      lcx_exception=>raise( 'Cancelled' ).
+      zcx_abapgit_exception=>raise( 'Cancelled' ).
     ELSEIF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from RS_CORR_INSERT' ).
+      zcx_abapgit_exception=>raise( 'error from RS_CORR_INSERT' ).
     ENDIF.
 
   ENDMETHOD.                    "corr_insert
@@ -13876,7 +13858,7 @@ CLASS lcl_objects_super IMPLEMENTATION.
         OTHERS            = 3 ).
 
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'ADT Jump Error' ).
+      zcx_abapgit_exception=>raise( 'ADT Jump Error' ).
     ENDIF.
 
     TRY.
@@ -13897,7 +13879,7 @@ CLASS lcl_objects_super IMPLEMENTATION.
         ENDIF.
 
       CATCH cx_root.
-        lcx_exception=>raise( 'ADT Jump Error' ).
+        zcx_abapgit_exception=>raise( 'ADT Jump Error' ).
     ENDTRY.
 
   ENDMETHOD.
@@ -13936,21 +13918,21 @@ CLASS lcl_objects_saxx_super DEFINITION ABSTRACT
     METHODS:
       create_channel_objects
         RAISING
-          lcx_exception,
+          zcx_abapgit_exception,
 
       get_data
         EXPORTING
           p_data TYPE any
         RAISING
-          lcx_exception,
+          zcx_abapgit_exception,
 
       lock
         RAISING
-          lcx_exception,
+          zcx_abapgit_exception,
 
       unlock
         RAISING
-          lcx_exception,
+          zcx_abapgit_exception,
 
       get_names.
 
@@ -13977,7 +13959,7 @@ CLASS lcl_objects_saxx_super IMPLEMENTATION.
         ASSIGN lr_data->* TO <ls_data>.
 
       CATCH cx_root.
-        lcx_exception=>raise( |{ ms_item-obj_name } not supported| ).
+        zcx_abapgit_exception=>raise( |{ ms_item-obj_name } not supported| ).
     ENDTRY.
 
     get_data(
@@ -14035,7 +14017,7 @@ CLASS lcl_objects_saxx_super IMPLEMENTATION.
         ASSIGN lr_data->* TO <ls_data>.
 
       CATCH cx_root.
-        lcx_exception=>raise( |{ ms_item-obj_type } not supported| ).
+        zcx_abapgit_exception=>raise( |{ ms_item-obj_type } not supported| ).
     ENDTRY.
 
     get_data(
@@ -14095,7 +14077,7 @@ CLASS lcl_objects_saxx_super IMPLEMENTATION.
         ASSIGN lr_data->* TO <ls_data>.
 
       CATCH cx_root.
-        lcx_exception=>raise( |{ ms_item-obj_type } not supported| ).
+        zcx_abapgit_exception=>raise( |{ ms_item-obj_type } not supported| ).
     ENDTRY.
 
     io_xml->read(
@@ -14126,7 +14108,7 @@ CLASS lcl_objects_saxx_super IMPLEMENTATION.
             OTHERS              = 4.
 
         IF sy-subrc <> 0.
-          lcx_exception=>raise( |Error occured while creating { ms_item-obj_type }| ).
+          zcx_abapgit_exception=>raise( |Error occured while creating { ms_item-obj_type }| ).
         ENDIF.
 
         mo_appl_obj_data->set_data( <ls_data> ).
@@ -14136,7 +14118,7 @@ CLASS lcl_objects_saxx_super IMPLEMENTATION.
         unlock( ).
 
       CATCH cx_swb_exception.
-        lcx_exception=>raise( |Error occured while creating { ms_item-obj_type }| ).
+        zcx_abapgit_exception=>raise( |Error occured while creating { ms_item-obj_type }| ).
     ENDTRY.
 
   ENDMETHOD.
@@ -14157,7 +14139,7 @@ CLASS lcl_objects_saxx_super IMPLEMENTATION.
         unlock( ).
 
       CATCH cx_swb_exception.
-        lcx_exception=>raise( |Error occured while deleting { ms_item-obj_type }| ).
+        zcx_abapgit_exception=>raise( |Error occured while deleting { ms_item-obj_type }| ).
     ENDTRY.
 
   ENDMETHOD.
@@ -14190,7 +14172,7 @@ CLASS lcl_objects_saxx_super IMPLEMENTATION.
         ENDIF.
 
       CATCH cx_root.
-        lcx_exception=>raise( |{ ms_item-obj_type } not supported| ).
+        zcx_abapgit_exception=>raise( |{ ms_item-obj_type } not supported| ).
     ENDTRY.
 
   ENDMETHOD.
@@ -14210,7 +14192,7 @@ CLASS lcl_objects_saxx_super IMPLEMENTATION.
             p_object_data = mo_appl_obj_data ).
 
       CATCH cx_root.
-        lcx_exception=>raise( |{ ms_item-obj_type } not supported| ).
+        zcx_abapgit_exception=>raise( |{ ms_item-obj_type } not supported| ).
     ENDTRY.
 
     mo_appl_obj_data->get_data(
@@ -14240,7 +14222,7 @@ CLASS lcl_objects_saxx_super IMPLEMENTATION.
         OTHERS         = 3 ).
 
     IF sy-subrc <> 0.
-      lcx_exception=>raise( |Error occured while locking { ms_item-obj_type } | && objname ).
+      zcx_abapgit_exception=>raise( |Error occured while locking { ms_item-obj_type } | && objname ).
     ENDIF.
 
   ENDMETHOD.                    "lock
@@ -14303,31 +14285,31 @@ CLASS lcl_objects DEFINITION FINAL.
                 iv_language     TYPE spras
                 io_log          TYPE REF TO lcl_log OPTIONAL
       RETURNING VALUE(rt_files) TYPE lif_defs=>ty_files_tt
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS deserialize
       IMPORTING io_repo                  TYPE REF TO lcl_repo
       RETURNING VALUE(rt_accessed_files) TYPE lif_defs=>ty_file_signatures_tt
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS delete
       IMPORTING it_tadir TYPE lif_defs=>ty_tadir_tt
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS jump
       IMPORTING is_item TYPE lif_defs=>ty_item
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS changed_by
       IMPORTING is_item        TYPE lif_defs=>ty_item
       RETURNING VALUE(rv_user) TYPE xubname
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS has_changed_since
       IMPORTING is_item           TYPE lif_defs=>ty_item
                 iv_timestamp      TYPE timestamp
       RETURNING VALUE(rv_changed) TYPE abap_bool
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS is_supported
       IMPORTING is_item        TYPE lif_defs=>ty_item
@@ -14345,7 +14327,7 @@ CLASS lcl_objects DEFINITION FINAL.
 
     CLASS-METHODS check_duplicates
       IMPORTING it_files TYPE lif_defs=>ty_files_tt
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS create_object
       IMPORTING is_item        TYPE lif_defs=>ty_item
@@ -14353,7 +14335,7 @@ CLASS lcl_objects DEFINITION FINAL.
                 is_metadata    TYPE lif_defs=>ty_metadata OPTIONAL
                 iv_native_only TYPE abap_bool DEFAULT abap_false
       RETURNING VALUE(ri_obj)  TYPE REF TO lif_object
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS
       prioritize_deser
@@ -14366,24 +14348,24 @@ CLASS lcl_objects DEFINITION FINAL.
 
     CLASS-METHODS resolve_ddic
       CHANGING ct_tadir TYPE lif_defs=>ty_tadir_tt
-      RAISING  lcx_exception.
+      RAISING  zcx_abapgit_exception.
 
     CLASS-METHODS warning_overwrite
       CHANGING ct_results TYPE lif_defs=>ty_results_tt
-      RAISING  lcx_exception.
+      RAISING  zcx_abapgit_exception.
 
     CLASS-METHODS warning_package
       IMPORTING is_item          TYPE lif_defs=>ty_item
                 iv_package       TYPE devclass
       RETURNING VALUE(rv_cancel) TYPE abap_bool
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS update_package_tree
       IMPORTING iv_package TYPE devclass.
 
     CLASS-METHODS delete_obj
       IMPORTING is_item TYPE lif_defs=>ty_item
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS compare_remote_to_local
       IMPORTING
@@ -14391,14 +14373,14 @@ CLASS lcl_objects DEFINITION FINAL.
         it_remote TYPE lif_defs=>ty_files_tt
         is_result TYPE lif_defs=>ty_result
       RAISING
-        lcx_exception.
+        zcx_abapgit_exception.
 
     CLASS-METHODS deserialize_objects
       IMPORTING it_objects TYPE ty_deserialization_tt
                 iv_ddic    TYPE abap_bool DEFAULT abap_false
                 iv_descr   TYPE string
       CHANGING  ct_files   TYPE lif_defs=>ty_file_signatures_tt
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
     CLASS-METHODS resolve_ddls
       CHANGING
         ct_tadir TYPE lif_defs=>ty_tadir_tt.
@@ -14446,35 +14428,35 @@ CLASS lcl_tadir DEFINITION FINAL.
                   io_dot                TYPE REF TO lcl_dot_abapgit OPTIONAL
                   io_log                TYPE REF TO lcl_log OPTIONAL
         RETURNING VALUE(rt_tadir)       TYPE lif_defs=>ty_tadir_tt
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       read_single
         IMPORTING iv_pgmid        TYPE tadir-pgmid DEFAULT 'R3TR'
                   iv_object       TYPE tadir-object
                   iv_obj_name     TYPE tadir-obj_name
         RETURNING VALUE(rs_tadir) TYPE tadir
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       read_single_sicf
         IMPORTING iv_pgmid        TYPE tadir-pgmid DEFAULT 'R3TR'
                   iv_obj_name     TYPE tadir-obj_name
         RETURNING VALUE(rs_tadir) TYPE tadir
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       get_object_package
         IMPORTING iv_pgmid           TYPE tadir-pgmid DEFAULT 'R3TR'
                   iv_object          TYPE tadir-object
                   iv_obj_name        TYPE tadir-obj_name
         RETURNING VALUE(rv_devclass) TYPE tadir-devclass
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
   PRIVATE SECTION.
     CLASS-METHODS:
       read_sicf_url
         IMPORTING iv_obj_name    TYPE tadir-obj_name
         RETURNING VALUE(rv_hash) TYPE text25
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       check_exists
         IMPORTING it_tadir        TYPE lif_defs=>ty_tadir_tt
         RETURNING VALUE(rt_tadir) TYPE lif_defs=>ty_tadir_tt
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       build
         IMPORTING iv_package            TYPE tadir-devclass
                   iv_top                TYPE tadir-devclass
@@ -14482,7 +14464,7 @@ CLASS lcl_tadir DEFINITION FINAL.
                   iv_ignore_subpackages TYPE abap_bool DEFAULT abap_false
                   io_log                TYPE REF TO lcl_log OPTIONAL
         RETURNING VALUE(rt_tadir)       TYPE lif_defs=>ty_tadir_tt
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_tadir DEFINITION
 
@@ -14713,7 +14695,7 @@ CLASS lcl_file_status DEFINITION FINAL
       IMPORTING io_repo           TYPE REF TO lcl_repo
                 io_log            TYPE REF TO lcl_log OPTIONAL
       RETURNING VALUE(rt_results) TYPE lif_defs=>ty_results_tt
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
   PRIVATE SECTION.
 
@@ -14724,13 +14706,13 @@ CLASS lcl_file_status DEFINITION FINAL
                   it_remote         TYPE lif_defs=>ty_files_tt
                   it_cur_state      TYPE lif_defs=>ty_file_signatures_tt
         RETURNING VALUE(rt_results) TYPE lif_defs=>ty_results_tt
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       run_checks
         IMPORTING io_log     TYPE REF TO lcl_log
                   it_results TYPE lif_defs=>ty_results_tt
                   io_dot     TYPE REF TO lcl_dot_abapgit
                   iv_top     TYPE devclass
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       build_existing
         IMPORTING is_local         TYPE lif_defs=>ty_file_item
                   is_remote        TYPE lif_defs=>ty_file
@@ -15108,27 +15090,27 @@ CLASS lcl_popups DEFINITION FINAL.
       popup_package_export
         EXPORTING ev_package      TYPE devclass
                   ev_folder_logic TYPE string
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       popup_object
         RETURNING VALUE(rs_tadir) TYPE tadir
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       create_branch_popup
         EXPORTING ev_name   TYPE string
                   ev_cancel TYPE abap_bool
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       run_page_class_popup
         EXPORTING ev_name   TYPE string
                   ev_cancel TYPE abap_bool
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       repo_new_offline
         RETURNING VALUE(rs_popup) TYPE ty_popup
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       branch_list_popup
         IMPORTING iv_url             TYPE string
                   iv_default_branch  TYPE string OPTIONAL
                   iv_show_new_option TYPE abap_bool OPTIONAL
         RETURNING VALUE(rs_branch)   TYPE lcl_git_branch_list=>ty_git_branch
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       repo_popup
         IMPORTING iv_url            TYPE string
                   iv_package        TYPE devclass  OPTIONAL
@@ -15137,7 +15119,7 @@ CLASS lcl_popups DEFINITION FINAL.
                   iv_freeze_url     TYPE abap_bool OPTIONAL
                   iv_title          TYPE clike     DEFAULT 'Clone repository ...'
         RETURNING VALUE(rs_popup)   TYPE ty_popup
-        RAISING   lcx_exception ##NO_TEXT,
+        RAISING   zcx_abapgit_exception ##NO_TEXT,
       popup_to_confirm
         IMPORTING
                   titlebar              TYPE clike
@@ -15149,27 +15131,27 @@ CLASS lcl_popups DEFINITION FINAL.
                   default_button        TYPE char1 DEFAULT '1'
                   display_cancel_button TYPE char1 DEFAULT abap_true
         RETURNING VALUE(rv_answer)      TYPE char1
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       popup_to_inform
         IMPORTING
                   titlebar     TYPE clike
                   text_message TYPE clike
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       popup_to_create_package
         EXPORTING es_package_data TYPE scompkdtln
                   ev_create       TYPE boolean
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       popup_to_create_transp_branch
         IMPORTING it_transport_headers       TYPE trwbo_request_headers
         RETURNING VALUE(rs_transport_branch) TYPE lif_defs=>ty_transport_to_branch
-        RAISING   lcx_exception
+        RAISING   zcx_abapgit_exception
                   lcx_cancel,
       popup_to_select_transports
         RETURNING VALUE(rt_trkorr) TYPE trwbo_request_headers,
       popup_select_obj_overwrite
         IMPORTING it_list TYPE lif_defs=>ty_results_tt
         RETURNING VALUE(rt_list) TYPE lif_defs=>ty_results_tt
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
   PRIVATE SECTION.
     TYPES: ty_sval_tt TYPE STANDARD TABLE OF sval WITH DEFAULT KEY.
@@ -15253,7 +15235,7 @@ CLASS lcl_popups IMPLEMENTATION.
         error_in_fields = 1
         OTHERS          = 2.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'Error from POPUP_GET_VALUES' ).
+      zcx_abapgit_exception=>raise( 'Error from POPUP_GET_VALUES' ).
     ENDIF.
 
     IF lv_returncode = 'A'.
@@ -15306,7 +15288,7 @@ CLASS lcl_popups IMPLEMENTATION.
         error_in_fields = 1
         OTHERS          = 2.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'Error from POPUP_GET_VALUES' ).
+      zcx_abapgit_exception=>raise( 'Error from POPUP_GET_VALUES' ).
     ENDIF.
 
     IF lv_returncode = 'A'.
@@ -15352,7 +15334,7 @@ CLASS lcl_popups IMPLEMENTATION.
         error_in_fields = 1
         OTHERS          = 2 ##NO_TEXT.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from POPUP_GET_VALUES' ).
+      zcx_abapgit_exception=>raise( 'error from POPUP_GET_VALUES' ).
     ENDIF.
 
     IF lv_answer = 'A'.
@@ -15393,7 +15375,7 @@ CLASS lcl_popups IMPLEMENTATION.
         error_in_fields = 1
         OTHERS          = 2 ##NO_TEXT.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from POPUP_GET_VALUES' ).
+      zcx_abapgit_exception=>raise( 'error from POPUP_GET_VALUES' ).
     ENDIF.
 
     IF lv_answer = 'A'.
@@ -15450,7 +15432,7 @@ CLASS lcl_popups IMPLEMENTATION.
         error_in_fields   = 1
         OTHERS            = 2.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'Error from POPUP_GET_VALUES' ).
+      zcx_abapgit_exception=>raise( 'Error from POPUP_GET_VALUES' ).
     ENDIF.
 
     IF lv_returncode = 'A'.
@@ -15547,7 +15529,7 @@ CLASS lcl_popups IMPLEMENTATION.
         too_much_marks     = 3
         OTHERS             = 4.                             "#EC NOTEXT
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'Error from POPUP_TO_DECIDE_LIST' ).
+      zcx_abapgit_exception=>raise( 'Error from POPUP_TO_DECIDE_LIST' ).
     ENDIF.
 
     IF lv_answer = 'A'. " cancel
@@ -15643,7 +15625,7 @@ CLASS lcl_popups IMPLEMENTATION.
         error_in_fields   = 1
         OTHERS            = 2.                              "#EC NOTEXT
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'Error from POPUP_GET_VALUES' ).
+      zcx_abapgit_exception=>raise( 'Error from POPUP_GET_VALUES' ).
     ENDIF.
     IF lv_returncode = 'A'.
       rs_popup-cancel = abap_true.
@@ -15684,7 +15666,7 @@ CLASS lcl_popups IMPLEMENTATION.
         text_not_found        = 1
         OTHERS                = 2.                        "#EC NOTEXT
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from POPUP_TO_CONFIRM' ).
+      zcx_abapgit_exception=>raise( 'error from POPUP_TO_CONFIRM' ).
     ENDIF.
 
   ENDMETHOD.  "popup_to_confirm
@@ -15717,7 +15699,7 @@ CLASS lcl_popups IMPLEMENTATION.
     IF sy-subrc = 1.
 * looks like the function module used does not exist on all
 * versions since 702, so show an error
-      lcx_exception=>raise( 'Function module PB_POPUP_PACKAGE_CREATE does not exist' ).
+      zcx_abapgit_exception=>raise( 'Function module PB_POPUP_PACKAGE_CREATE does not exist' ).
     ENDIF.
 
     CALL FUNCTION 'PB_POPUP_PACKAGE_CREATE'
@@ -15800,7 +15782,7 @@ CLASS lcl_popups IMPLEMENTATION.
         error_in_fields = 1
         OTHERS          = 2.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'Error from POPUP_GET_VALUES' ).
+      zcx_abapgit_exception=>raise( 'Error from POPUP_GET_VALUES' ).
     ENDIF.
 
     IF lv_returncode = 'A'.
@@ -15882,7 +15864,7 @@ CLASS lcl_popups IMPLEMENTATION.
         mo_select_list_popup->display( ).
 
       CATCH cx_salv_msg.
-        lcx_exception=>raise( 'Error from POPUP_SELECT_OBJ_OVERWRITE' ).
+        zcx_abapgit_exception=>raise( 'Error from POPUP_SELECT_OBJ_OVERWRITE' ).
     ENDTRY.
 
     LOOP AT lt_popup_list INTO ls_popup_list WHERE selected = abap_true.
@@ -15946,48 +15928,48 @@ CLASS lcl_zip DEFINITION FINAL.
   PUBLIC SECTION.
     CLASS-METHODS import
       IMPORTING iv_key TYPE lcl_persistence_db=>ty_value
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS export
       IMPORTING io_repo   TYPE REF TO lcl_repo
                 it_filter TYPE scts_tadir OPTIONAL
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS export_package
-      RAISING lcx_exception lcx_cancel.
+      RAISING zcx_abapgit_exception lcx_cancel.
 
     CLASS-METHODS export_object
-      RAISING lcx_exception lcx_cancel.
+      RAISING zcx_abapgit_exception lcx_cancel.
 
   PRIVATE SECTION.
     CLASS-METHODS file_upload
       RETURNING VALUE(rv_xstr) TYPE xstring
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS unzip_file
       IMPORTING iv_xstr         TYPE xstring
       RETURNING VALUE(rt_files) TYPE lif_defs=>ty_files_tt
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS normalize_path
       CHANGING ct_files TYPE lif_defs=>ty_files_tt
-      RAISING  lcx_exception.
+      RAISING  zcx_abapgit_exception.
 
     CLASS-METHODS filename
       IMPORTING iv_str      TYPE string
       EXPORTING ev_path     TYPE string
                 ev_filename TYPE string
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS file_download
       IMPORTING iv_package TYPE devclass
                 iv_xstr    TYPE xstring
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS encode_files
       IMPORTING it_files       TYPE lif_defs=>ty_files_item_tt
       RETURNING VALUE(rv_xstr) TYPE xstring
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_zip DEFINITION
 
@@ -16029,10 +16011,10 @@ CLASS lcl_zip IMPLEMENTATION.
         not_supported_by_gui = 3
         OTHERS               = 4 ).                         "#EC NOTEXT
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from file_save_dialog' ).
+      zcx_abapgit_exception=>raise( 'error from file_save_dialog' ).
     ENDIF.
     IF lv_action = cl_gui_frontend_services=>action_cancel.
-      lcx_exception=>raise( 'cancelled' ).
+      zcx_abapgit_exception=>raise( 'cancelled' ).
     ENDIF.
 
     lt_rawdata = cl_bcs_convert=>xstring_to_solix( iv_xstr ).
@@ -16070,7 +16052,7 @@ CLASS lcl_zip IMPLEMENTATION.
         error_no_gui              = 23
         OTHERS                    = 24 ).
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from gui_download' ).
+      zcx_abapgit_exception=>raise( 'error from gui_download' ).
     ENDIF.
 
   ENDMETHOD.                    "file_download
@@ -16101,7 +16083,7 @@ CLASS lcl_zip IMPLEMENTATION.
       FIND REGEX '(.*/)(.*)' IN iv_str
         SUBMATCHES ev_path ev_filename.
       IF sy-subrc <> 0.
-        lcx_exception=>raise( 'Malformed path' ).
+        zcx_abapgit_exception=>raise( 'Malformed path' ).
       ENDIF.
       IF ev_path <> '/'.
         CONCATENATE '/' ev_path INTO ev_path.
@@ -16140,10 +16122,10 @@ CLASS lcl_zip IMPLEMENTATION.
         not_supported_by_gui    = 4
         OTHERS                  = 5 ).                      "#EC NOTEXT
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from file_open_dialog' ).
+      zcx_abapgit_exception=>raise( 'error from file_open_dialog' ).
     ENDIF.
     IF lv_action = cl_gui_frontend_services=>action_cancel.
-      lcx_exception=>raise( 'cancelled' ).
+      zcx_abapgit_exception=>raise( 'cancelled' ).
     ENDIF.
 
     READ TABLE lt_file_table INDEX 1 INTO ls_file_table.
@@ -16179,7 +16161,7 @@ CLASS lcl_zip IMPLEMENTATION.
         error_no_gui            = 18
         OTHERS                  = 19 ).
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from gui_upload' ).
+      zcx_abapgit_exception=>raise( 'error from gui_upload' ).
     ENDIF.
 
     CONCATENATE LINES OF lt_data INTO rv_xstr IN BYTE MODE.
@@ -16247,7 +16229,7 @@ CLASS lcl_zip IMPLEMENTATION.
                     zip_parse_error = 1
                     OTHERS          = 2 ).
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from zip' ).
+      zcx_abapgit_exception=>raise( 'error from zip' ).
     ENDIF.
 
     LOOP AT lo_zip->files ASSIGNING <ls_zipfile>.
@@ -16262,7 +16244,7 @@ CLASS lcl_zip IMPLEMENTATION.
           zip_decompression_error = 2
           OTHERS                  = 3 ).
       IF sy-subrc <> 0.
-        lcx_exception=>raise( 'error from zip get' ).
+        zcx_abapgit_exception=>raise( 'error from zip get' ).
       ENDIF.
 
       APPEND INITIAL LINE TO rt_files ASSIGNING <ls_file>.
@@ -16426,7 +16408,7 @@ CLASS lcl_zip IMPLEMENTATION.
           error_no_gui              = 23
           OTHERS                    = 24 ).
       IF sy-subrc <> 0.
-        lcx_exception=>raise( 'error from gui_download' ).
+        zcx_abapgit_exception=>raise( 'error from gui_download' ).
       ENDIF.
     ENDLOOP.
 
@@ -16581,10 +16563,10 @@ CLASS lcl_objects IMPLEMENTATION.
                 EXPORTING
                   is_item = is_item.
             CATCH cx_sy_create_object_error.
-              lcx_exception=>raise( lv_message ).
+              zcx_abapgit_exception=>raise( lv_message ).
           ENDTRY.
         ELSE. " No native support? -> fail
-          lcx_exception=>raise( lv_message ).
+          zcx_abapgit_exception=>raise( lv_message ).
         ENDIF.
     ENDTRY.
 
@@ -16610,7 +16592,7 @@ CLASS lcl_objects IMPLEMENTATION.
                        iv_language    = lif_defs=>gc_english
                        iv_native_only = iv_native_only ).
         rv_bool = abap_true.
-      CATCH lcx_exception.
+      CATCH zcx_abapgit_exception.
         rv_bool = abap_false.
     ENDTRY.
 
@@ -16651,7 +16633,7 @@ CLASS lcl_objects IMPLEMENTATION.
         li_obj = create_object( is_item = is_item
                                 iv_language = lif_defs=>gc_english ).
         rv_bool = li_obj->exists( ).
-      CATCH lcx_exception.
+      CATCH zcx_abapgit_exception.
 * ignore all errors and assume the object exists
         rv_bool = abap_true.
     ENDTRY.
@@ -16678,7 +16660,7 @@ CLASS lcl_objects IMPLEMENTATION.
       TRY.
           lcl_objects_super=>jump_adt( i_obj_name = is_item-obj_name
                                        i_obj_type = is_item-obj_type ).
-        CATCH lcx_exception.
+        CATCH zcx_abapgit_exception.
           li_obj->jump( ).
       ENDTRY.
     ELSE.
@@ -16860,7 +16842,7 @@ CLASS lcl_objects IMPLEMENTATION.
           WHEN 'DA'.
             <ls_edge>-to-obj_type = 'TTYP'.
           WHEN OTHERS.
-            lcx_exception=>raise( 'resolve_ddic, unknown object_cls' ).
+            zcx_abapgit_exception=>raise( 'resolve_ddic, unknown object_cls' ).
         ENDCASE.
       ENDLOOP.
 
@@ -16963,7 +16945,7 @@ CLASS lcl_objects IMPLEMENTATION.
     SORT lt_files BY path ASCENDING filename ASCENDING.
     DELETE ADJACENT DUPLICATES FROM lt_files COMPARING path filename.
     IF lines( lt_files ) <> lines( it_files ).
-      lcx_exception=>raise( 'Duplicates' ).
+      zcx_abapgit_exception=>raise( 'Duplicates' ).
     ENDIF.
 
   ENDMETHOD.
@@ -17048,7 +17030,7 @@ CLASS lcl_objects IMPLEMENTATION.
       lv_cancel = warning_package( is_item    = ls_item
                                    iv_package = lv_package ).
       IF lv_cancel = abap_true.
-        lcx_exception=>raise( 'cancelled' ).
+        zcx_abapgit_exception=>raise( 'cancelled' ).
       ENDIF.
 
       CREATE OBJECT lo_files
@@ -17155,9 +17137,7 @@ CLASS lcl_objects IMPLEMENTATION.
         lo_comparison_result->show_confirmation_dialog( ).
 
         IF lo_comparison_result->is_result_complete_halt( ) = abap_true.
-          RAISE EXCEPTION TYPE lcx_exception
-            EXPORTING
-              iv_text = 'Deserialization aborted by user'.
+          zcx_abapgit_exception=>raise( 'Deserialization aborted by user' ).
         ENDIF.
       ENDIF.
     ENDIF.
@@ -17260,7 +17240,7 @@ CLASS lcl_object_acid DEFINITION INHERITING FROM lcl_objects_super FINAL.
   PRIVATE SECTION.
     METHODS: create_object
       RETURNING VALUE(ro_aab) TYPE REF TO cl_aab_id
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_object_acid DEFINITION
 
@@ -17298,7 +17278,7 @@ CLASS lcl_object_acid IMPLEMENTATION.
         name_not_allowed = 1
         OTHERS           = 2.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error creating CL_AAB_ID object' ).
+      zcx_abapgit_exception=>raise( 'error creating CL_AAB_ID object' ).
     ENDIF.
 
   ENDMETHOD.                    "create_object
@@ -17361,7 +17341,7 @@ CLASS lcl_object_acid IMPLEMENTATION.
         where_used_error = 9
         OTHERS           = 10 ).
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error deleting ACID object' ).
+      zcx_abapgit_exception=>raise( 'error deleting ACID object' ).
     ENDIF.
     lo_aab->dequeue( ).
 
@@ -17469,12 +17449,12 @@ CLASS lcl_object_auth IMPLEMENTATION.
     CREATE OBJECT lo_auth.
 
     IF lo_auth->add_afield_to_trkorr( ls_authx-fieldname ) <> 0.
-      lcx_exception=>raise( 'Error deserializing AUTH' ).
+      zcx_abapgit_exception=>raise( 'Error deserializing AUTH' ).
     ENDIF.
 
     MODIFY authx FROM ls_authx.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'Error deserializing AUTH' ).
+      zcx_abapgit_exception=>raise( 'Error deserializing AUTH' ).
     ENDIF.
 
     CALL FUNCTION 'DB_COMMIT'.
@@ -17501,7 +17481,7 @@ CLASS lcl_object_auth IMPLEMENTATION.
         no_authority        = 4
         OTHERS              = 5.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from SUSR_AUTF_DELETE_FIELD' ).
+      zcx_abapgit_exception=>raise( 'error from SUSR_AUTF_DELETE_FIELD' ).
     ENDIF.
 
   ENDMETHOD.                    "lif_object~delete
@@ -17557,7 +17537,7 @@ INTERFACE lif_oo_object_fnc.
       CHANGING
         is_properties TYPE any
       RAISING
-        lcx_exception,
+        zcx_abapgit_exception,
     generate_locals
       IMPORTING
         is_key                   TYPE seoclskey
@@ -17567,13 +17547,13 @@ INTERFACE lif_oo_object_fnc.
         it_local_macros          TYPE seop_source_string OPTIONAL
         it_local_test_classes    TYPE seop_source_string OPTIONAL
       RAISING
-        lcx_exception,
+        zcx_abapgit_exception,
     deserialize_source
       IMPORTING
         is_key    TYPE seoclskey
         it_source TYPE lif_defs=>ty_string_tt
       RAISING
-        lcx_exception
+        zcx_abapgit_exception
         cx_sy_dyn_call_error,
     insert_text_pool
       IMPORTING
@@ -17581,7 +17561,7 @@ INTERFACE lif_oo_object_fnc.
         it_text_pool  TYPE textpool_table
         iv_language   TYPE spras
       RAISING
-        lcx_exception,
+        zcx_abapgit_exception,
     update_descriptions
       IMPORTING
         is_key          TYPE seoclskey
@@ -17590,27 +17570,27 @@ INTERFACE lif_oo_object_fnc.
       IMPORTING
         is_item TYPE lif_defs=>ty_item
       RAISING
-        lcx_exception,
+        zcx_abapgit_exception,
     create_sotr
       IMPORTING
         iv_package TYPE devclass
         it_sotr    TYPE lif_defs=>ty_sotr_tt
       RAISING
-        lcx_exception,
+        zcx_abapgit_exception,
     create_documentation
       IMPORTING
         it_lines       TYPE tlinetab
         iv_object_name TYPE dokhl-object
         iv_language    TYPE spras
       RAISING
-        lcx_exception,
+        zcx_abapgit_exception,
     get_includes
       IMPORTING
         iv_object_name     TYPE sobj_name
       RETURNING
         VALUE(rt_includes) TYPE ty_includes_tt
       RAISING
-        lcx_exception,
+        zcx_abapgit_exception,
     exists
       IMPORTING
         iv_object_name   TYPE seoclskey
@@ -17623,7 +17603,7 @@ INTERFACE lif_oo_object_fnc.
       RETURNING
         VALUE(rt_source) TYPE lif_defs=>ty_string_tt
       RAISING
-        lcx_exception
+        zcx_abapgit_exception
         cx_sy_dyn_call_error,
     get_skip_test_classes
       RETURNING
@@ -17634,14 +17614,14 @@ INTERFACE lif_oo_object_fnc.
       RETURNING
         VALUE(rs_class_properties) TYPE vseoclass
       RAISING
-        lcx_exception,
+        zcx_abapgit_exception,
     get_interface_properties
       IMPORTING
         is_interface_key               TYPE seoclskey
       RETURNING
         VALUE(rs_interface_properties) TYPE vseointerf
       RAISING
-        lcx_exception,
+        zcx_abapgit_exception,
     read_text_pool
       IMPORTING
         iv_class_name       TYPE seoclsname
@@ -17660,7 +17640,7 @@ INTERFACE lif_oo_object_fnc.
       RETURNING
         VALUE(rt_sotr) TYPE lif_defs=>ty_sotr_tt
       RAISING
-        lcx_exception,
+        zcx_abapgit_exception,
     read_descriptions
       IMPORTING
         iv_obejct_name         TYPE seoclsname
@@ -17670,7 +17650,7 @@ INTERFACE lif_oo_object_fnc.
       IMPORTING
         is_deletion_key TYPE seoclskey
       RAISING
-        lcx_exception,
+        zcx_abapgit_exception,
     read_superclass
       IMPORTING
         iv_classname         TYPE seoclsname
@@ -17688,7 +17668,7 @@ CLASS lcl_oo_serializer DEFINITION.
         RETURNING
           VALUE(rt_source) TYPE lif_defs=>ty_string_tt
         RAISING
-          lcx_exception
+          zcx_abapgit_exception
           cx_sy_dyn_call_error,
       are_test_classes_skipped
         RETURNING
@@ -17696,33 +17676,33 @@ CLASS lcl_oo_serializer DEFINITION.
     METHODS serialize_locals_imp
       IMPORTING is_clskey        TYPE seoclskey
       RETURNING VALUE(rt_source) TYPE lif_defs=>ty_string_tt
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS serialize_locals_def
       IMPORTING is_clskey        TYPE seoclskey
       RETURNING VALUE(rt_source) TYPE lif_defs=>ty_string_tt
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
     METHODS serialize_testclasses
       IMPORTING
                 is_clskey        TYPE seoclskey
       RETURNING VALUE(rt_source) TYPE lif_defs=>ty_string_tt
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS serialize_macros
       IMPORTING is_clskey        TYPE seoclskey
       RETURNING VALUE(rt_source) TYPE lif_defs=>ty_string_tt
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
   PRIVATE SECTION.
     DATA mv_skip_testclass TYPE abap_bool.
     METHODS serialize_abap_old
       IMPORTING is_clskey        TYPE seoclskey
       RETURNING VALUE(rt_source) TYPE lif_defs=>ty_string_tt
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS serialize_abap_new
       IMPORTING is_clskey        TYPE seoclskey
       RETURNING VALUE(rt_source) TYPE lif_defs=>ty_string_tt
-      RAISING   lcx_exception
+      RAISING   zcx_abapgit_exception
                 cx_sy_dyn_call_error.
     METHODS remove_signatures
       CHANGING ct_source TYPE lif_defs=>ty_string_tt.
@@ -17757,7 +17737,7 @@ CLASS lcl_oo_serializer IMPLEMENTATION.
         class_not_existing = 1
         OTHERS             = 2.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from CL_OO_SOURCE' ).
+      zcx_abapgit_exception=>raise( 'error from CL_OO_SOURCE' ).
     ENDIF.
 
     lo_source->read( 'A' ).
@@ -17944,12 +17924,12 @@ CLASS lcl_oo_base DEFINITION ABSTRACT.
     METHODS deserialize_abap_source_old
       IMPORTING is_clskey TYPE seoclskey
                 it_source TYPE lif_defs=>ty_string_tt
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS deserialize_abap_source_new
       IMPORTING is_clskey TYPE seoclskey
                 it_source TYPE lif_defs=>ty_string_tt
-      RAISING   lcx_exception
+      RAISING   zcx_abapgit_exception
                 cx_sy_dyn_call_error.
 ENDCLASS.
 
@@ -17987,7 +17967,7 @@ CLASS lcl_oo_base IMPLEMENTATION.
         class_not_existing = 1
         OTHERS             = 2.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from CL_OO_SOURCE' ).
+      zcx_abapgit_exception=>raise( 'error from CL_OO_SOURCE' ).
     ENDIF.
 
     TRY.
@@ -17996,9 +17976,9 @@ CLASS lcl_oo_base IMPLEMENTATION.
         lo_source->save( ).
         lo_source->access_permission( seok_access_free ).
       CATCH cx_oo_access_permission.
-        lcx_exception=>raise( 'permission error' ).
+        zcx_abapgit_exception=>raise( 'permission error' ).
       CATCH cx_oo_source_save_failure.
-        lcx_exception=>raise( 'save failure' ).
+        zcx_abapgit_exception=>raise( 'save failure' ).
     ENDTRY.
 
   ENDMETHOD.
@@ -18020,7 +18000,7 @@ CLASS lcl_oo_base IMPLEMENTATION.
     TRY.
         CALL METHOD lo_source->('IF_OO_CLIF_SOURCE~LOCK').
       CATCH cx_oo_access_permission.
-        lcx_exception=>raise( 'source_new, access permission exception' ).
+        zcx_abapgit_exception=>raise( 'source_new, access permission exception' ).
     ENDTRY.
 
     CALL METHOD lo_source->('IF_OO_CLIF_SOURCE~SET_SOURCE')
@@ -18062,7 +18042,7 @@ CLASS lcl_oo_base IMPLEMENTATION.
         ret_code = 1
         OTHERS   = 2.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from DOCU_UPD' ).
+      zcx_abapgit_exception=>raise( 'error from DOCU_UPD' ).
     ENDIF.
   ENDMETHOD.
 
@@ -18221,20 +18201,20 @@ CLASS lcl_object_clas DEFINITION INHERITING FROM lcl_objects_program.
       deserialize_abap
         IMPORTING io_xml     TYPE REF TO lcl_xml_input
                   iv_package TYPE devclass
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       deserialize_docu
         IMPORTING io_xml TYPE REF TO lcl_xml_input
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       deserialize_tpool
         IMPORTING io_xml TYPE REF TO lcl_xml_input
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       deserialize_sotr
         IMPORTING io_xml     TYPE REF TO lcl_xml_input
                   iv_package TYPE devclass
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       serialize_xml
         IMPORTING io_xml TYPE REF TO lcl_xml_output
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_object_dtel DEFINITION
 
@@ -18626,7 +18606,7 @@ CLASS lcl_oo_class IMPLEMENTATION.
         other           = 6
         OTHERS          = 7.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from SEO_CLASS_CREATE_COMPLETE' ).
+      zcx_abapgit_exception=>raise( 'error from SEO_CLASS_CREATE_COMPLETE' ).
     ENDIF.
   ENDMETHOD.
 
@@ -18646,7 +18626,7 @@ CLASS lcl_oo_class IMPLEMENTATION.
         locals_not_initialised = 4
         OTHERS                 = 5.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from generate_locals' ).
+      zcx_abapgit_exception=>raise( 'error from generate_locals' ).
     ENDIF.
   ENDMETHOD.
 
@@ -18660,7 +18640,7 @@ CLASS lcl_oo_class IMPLEMENTATION.
       LANGUAGE iv_language
       STATE 'I'.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from INSERT TEXTPOOL' ).
+      zcx_abapgit_exception=>raise( 'error from INSERT TEXTPOOL' ).
     ENDIF.
 
     lcl_objects_activation=>add( iv_type = 'REPT'
@@ -18685,7 +18665,7 @@ CLASS lcl_oo_class IMPLEMENTATION.
           object_not_found = 1
           OTHERS           = 2.
       IF sy-subrc <> 0.
-        lcx_exception=>raise( 'error from SOTR_OBJECT_GET_OBJECTS' ).
+        zcx_abapgit_exception=>raise( 'error from SOTR_OBJECT_GET_OBJECTS' ).
       ENDIF.
 
       READ TABLE lt_objects INDEX 1 INTO lv_object.
@@ -18722,7 +18702,7 @@ CLASS lcl_oo_class IMPLEMENTATION.
           no_entry_found                = 18
           OTHERS                        = 19.
       IF sy-subrc <> 0.
-        lcx_exception=>raise( 'error from SOTR_CREATE_CONCEPT' ).
+        zcx_abapgit_exception=>raise( 'error from SOTR_CREATE_CONCEPT' ).
       ENDIF.
     ENDLOOP.
   ENDMETHOD.
@@ -18762,7 +18742,7 @@ CLASS lcl_oo_class IMPLEMENTATION.
         class_not_existing = 1 ).
 
     IF sy-subrc <> 0.
-      lcx_exception=>raise( |Class { lv_class_name } not existing| ).
+      zcx_abapgit_exception=>raise( |Class { lv_class_name } not existing| ).
     ENDIF.
 
     LOOP AT lt_methods ASSIGNING <ls_method>.
@@ -18786,7 +18766,7 @@ CLASS lcl_oo_class IMPLEMENTATION.
     IF sy-subrc = 1.
       RETURN. " in case only inactive version exists
     ELSEIF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from seo_clif_get' ).
+      zcx_abapgit_exception=>raise( 'error from seo_clif_get' ).
     ENDIF.
   ENDMETHOD.
 
@@ -18869,7 +18849,7 @@ CLASS lcl_oo_class IMPLEMENTATION.
         other        = 5
         OTHERS       = 6.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'Error from SEO_CLASS_DELETE_COMPLETE' ).
+      zcx_abapgit_exception=>raise( 'Error from SEO_CLASS_DELETE_COMPLETE' ).
     ENDIF.
   ENDMETHOD.
 
@@ -18906,14 +18886,14 @@ CLASS lcl_oo_class_new DEFINITION INHERITING FROM lcl_oo_class.
         IMPORTING
           iv_name TYPE seoclsname
         RAISING
-          lcx_exception,
+          zcx_abapgit_exception,
       update_meta
         IMPORTING
           iv_name     TYPE seoclsname
           iv_exposure TYPE seoexpose
           it_source   TYPE rswsourcet
         RAISING
-          lcx_exception,
+          zcx_abapgit_exception,
       determine_method_include
         IMPORTING
           iv_name           TYPE seoclsname
@@ -18921,7 +18901,7 @@ CLASS lcl_oo_class_new DEFINITION INHERITING FROM lcl_oo_class.
         RETURNING
           VALUE(rv_program) TYPE programm
         RAISING
-          lcx_exception,
+          zcx_abapgit_exception,
       init_scanner
         IMPORTING
           it_source         TYPE lif_defs=>ty_string_tt
@@ -18970,7 +18950,7 @@ CLASS lcl_oo_class_new IMPLEMENTATION.
         internal_error_insert_report   = 11
         OTHERS                         = 12.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from SEO_METHOD_GENERATE_INCLUDE' ).
+      zcx_abapgit_exception=>raise( 'error from SEO_METHOD_GENERATE_INCLUDE' ).
     ENDIF.
 
     rv_program = cl_oo_classname_service=>get_method_include( ls_mtdkey ).
@@ -18996,7 +18976,7 @@ CLASS lcl_oo_class_new IMPLEMENTATION.
         other           = 6
         OTHERS          = 7.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from SEO_CLASS_CREATE_COMPLETE' ).
+      zcx_abapgit_exception=>raise( 'error from SEO_CLASS_CREATE_COMPLETE' ).
     ENDIF.
 
   ENDMETHOD.
@@ -19073,7 +19053,7 @@ CLASS lcl_oo_class_new IMPLEMENTATION.
         read_source_error             = 2
         OTHERS                        = 3.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error instantiating CL_OO_CLASS_SECTION_SOURCE' ).
+      zcx_abapgit_exception=>raise( 'error instantiating CL_OO_CLASS_SECTION_SOURCE' ).
     ENDIF.
 
     lo_update->set_dark_mode( seox_true ).
@@ -19091,7 +19071,7 @@ CLASS lcl_oo_class_new IMPLEMENTATION.
         scan_abap_source_error = 1
         OTHERS                 = 2 ).
     IF sy-subrc <> 0 OR lv_scan_error = abap_true.
-      lcx_exception=>raise( 'CLAS, error while scanning source' ).
+      zcx_abapgit_exception=>raise( 'CLAS, error while scanning source' ).
     ENDIF.
 
 * this will update the SEO* database tables
@@ -19135,7 +19115,7 @@ CLASS lcl_oo_class_new IMPLEMENTATION.
         _internal_class_overflow      = 19
         OTHERS                        = 20.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from SEO_CLASS_GENERATE_CLASSPOOL' ).
+      zcx_abapgit_exception=>raise( 'error from SEO_CLASS_GENERATE_CLASSPOOL' ).
     ENDIF.
 
   ENDMETHOD.
@@ -19194,7 +19174,7 @@ CLASS lcl_oo_class_new IMPLEMENTATION.
       TRY.
           lt_source = lo_scanner->get_method_impl_source( lv_method ).
         CATCH cx_oo_clif_component.
-          lcx_exception=>raise( 'error from GET_METHOD_IMPL_SOURCE' ).
+          zcx_abapgit_exception=>raise( 'error from GET_METHOD_IMPL_SOURCE' ).
       ENDTRY.
       lv_program = determine_method_include(
         iv_name   = is_key-clsname
@@ -19357,7 +19337,7 @@ CLASS lcl_object_cmpt IMPLEMENTATION.
             r_user = rv_user.
 
       CATCH cx_root.
-        lcx_exception=>raise( 'CMPT not supported' ).
+        zcx_abapgit_exception=>raise( 'CMPT not supported' ).
     ENDTRY.
 
   ENDMETHOD.
@@ -19384,7 +19364,7 @@ CLASS lcl_object_cmpt IMPLEMENTATION.
             r_flg_exists = rv_bool.
 
       CATCH cx_root.
-        lcx_exception=>raise( 'CMPT not supported' ).
+        zcx_abapgit_exception=>raise( 'CMPT not supported' ).
     ENDTRY.
 
   ENDMETHOD.
@@ -19409,7 +19389,7 @@ CLASS lcl_object_cmpt IMPLEMENTATION.
                      ig_data = <template> ).
 
       CATCH cx_root.
-        lcx_exception=>raise( 'CMPT not supported' ).
+        zcx_abapgit_exception=>raise( 'CMPT not supported' ).
     ENDTRY.
 
 
@@ -19437,7 +19417,7 @@ CLASS lcl_object_cmpt IMPLEMENTATION.
             i_flg_lines   = abap_true.
 
       CATCH cx_root.
-        lcx_exception=>raise( 'CMPT not supported' ).
+        zcx_abapgit_exception=>raise( 'CMPT not supported' ).
     ENDTRY.
 
     CALL FUNCTION 'RS_CORR_INSERT'
@@ -19455,7 +19435,7 @@ CLASS lcl_object_cmpt IMPLEMENTATION.
         OTHERS              = 4.
 
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from RS_CORR_INSERT, CMPT' ).
+      zcx_abapgit_exception=>raise( 'error from RS_CORR_INSERT, CMPT' ).
     ENDIF.
 
   ENDMETHOD.
@@ -19475,11 +19455,11 @@ CLASS lcl_object_cmpt IMPLEMENTATION.
             r_flg_deleted = deleted.
 
       CATCH cx_root.
-        lcx_exception=>raise( 'CMPT not supported' ).
+        zcx_abapgit_exception=>raise( 'CMPT not supported' ).
     ENDTRY.
 
     IF deleted = abap_false.
-      lcx_exception=>raise( |Error deleting CMPT { ms_item-obj_name }| ).
+      zcx_abapgit_exception=>raise( |Error deleting CMPT { ms_item-obj_name }| ).
     ENDIF.
 
   ENDMETHOD.
@@ -19498,7 +19478,7 @@ CLASS lcl_object_cmpt IMPLEMENTATION.
         OTHERS              = 3.
 
     IF sy-subrc <> 0.
-      lcx_exception=>raise( |Error from RS_TOOL_ACCESS, CMPT| ).
+      zcx_abapgit_exception=>raise( |Error from RS_TOOL_ACCESS, CMPT| ).
     ENDIF.
 
   ENDMETHOD.
@@ -19572,8 +19552,8 @@ CLASS lcl_object_dcls IMPLEMENTATION.
         jump_adt( i_obj_name = ms_item-obj_name
                   i_obj_type = ms_item-obj_type ).
 
-      CATCH lcx_exception.
-        lcx_exception=>raise( 'DCLS Jump Error' ).
+      CATCH zcx_abapgit_exception.
+        zcx_abapgit_exception=>raise( 'DCLS Jump Error' ).
     ENDTRY.
 
   ENDMETHOD.
@@ -19592,7 +19572,7 @@ CLASS lcl_object_dcls IMPLEMENTATION.
             iv_dclname = ms_item-obj_name.
 
       CATCH cx_root.
-        lcx_exception=>raise( 'DCLS error' ).
+        zcx_abapgit_exception=>raise( 'DCLS error' ).
     ENDTRY.
 
   ENDMETHOD.
@@ -19650,7 +19630,7 @@ CLASS lcl_object_dcls IMPLEMENTATION.
                      ig_data = <ls_data> ).
 
       CATCH cx_root.
-        lcx_exception=>raise( 'DCLS error' ).
+        zcx_abapgit_exception=>raise( 'DCLS error' ).
     ENDTRY.
 
   ENDMETHOD.
@@ -19692,7 +19672,7 @@ CLASS lcl_object_dcls IMPLEMENTATION.
         tadir_insert( iv_package ).
 
       CATCH cx_root.
-        lcx_exception=>raise( 'DCLS error' ).
+        zcx_abapgit_exception=>raise( 'DCLS error' ).
     ENDTRY.
 
     lcl_objects_activation=>add_item( ms_item ).
@@ -19727,7 +19707,7 @@ CLASS lcl_object_ddls DEFINITION INHERITING FROM lcl_objects_super FINAL.
   PROTECTED SECTION.
     METHODS open_adt_stob
       IMPORTING iv_ddls_name TYPE tadir-obj_name
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_object_dtel DEFINITION
 
@@ -19834,7 +19814,7 @@ CLASS lcl_object_ddls IMPLEMENTATION.
 
         me->open_adt_stob( iv_ddls_name = ms_item-obj_name ).
       WHEN OTHERS.
-        lcx_exception=>raise( 'DDLS Jump Error' ).
+        zcx_abapgit_exception=>raise( 'DDLS Jump Error' ).
     ENDCASE.
 
   ENDMETHOD.                    "jump
@@ -19853,7 +19833,7 @@ CLASS lcl_object_ddls IMPLEMENTATION.
           EXPORTING
             name = ms_item-obj_name.
       CATCH cx_root.
-        lcx_exception=>raise( 'DDLS error deleting' ).
+        zcx_abapgit_exception=>raise( 'DDLS error deleting' ).
     ENDTRY.
 
   ENDMETHOD.                    "delete
@@ -19882,7 +19862,7 @@ CLASS lcl_object_ddls IMPLEMENTATION.
           IMPORTING
             ddddlsrcv_wa = <ls_data>.
       CATCH cx_root.
-        lcx_exception=>raise( 'DDLS error reading' ).
+        zcx_abapgit_exception=>raise( 'DDLS error reading' ).
     ENDTRY.
 
     ASSIGN COMPONENT 'AS4USER' OF STRUCTURE <ls_data> TO <lv_field>.
@@ -19944,7 +19924,7 @@ CLASS lcl_object_ddls IMPLEMENTATION.
             devclass   = iv_package
             prid       = 0.
       CATCH cx_root.
-        lcx_exception=>raise( 'DDLS error writing TADIR' ).
+        zcx_abapgit_exception=>raise( 'DDLS error writing TADIR' ).
     ENDTRY.
 
     lcl_objects_activation=>add_item( ms_item ).
@@ -20004,7 +19984,7 @@ CLASS lcl_object_ddls IMPLEMENTATION.
         ENDIF.
 
       CATCH cx_root.
-        lcx_exception=>raise( 'DDLS Jump Error' ).
+        zcx_abapgit_exception=>raise( 'DDLS Jump Error' ).
     ENDTRY.
 
   ENDMETHOD.                    "open_adt_stob
@@ -20110,7 +20090,7 @@ CLASS lcl_object_dial IMPLEMENTATION.
         OTHERS                = 3.
 
     IF sy-subrc <> 0.
-      lcx_exception=>raise( |Error deserializing dialogmodule { ms_item-obj_name }| ).
+      zcx_abapgit_exception=>raise( |Error deserializing dialogmodule { ms_item-obj_name }| ).
     ENDIF.
 
     " It seems that there's no API for diapar, therefore we manipulate it directly
@@ -20174,7 +20154,7 @@ CLASS lcl_object_dial IMPLEMENTATION.
         OTHERS    = 1.
 
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from ABAP4_CALL_TRANSACTION, SE35' ).
+      zcx_abapgit_exception=>raise( 'error from ABAP4_CALL_TRANSACTION, SE35' ).
     ENDIF.
 
   ENDMETHOD.
@@ -20195,7 +20175,7 @@ CLASS lcl_object_dial IMPLEMENTATION.
         OTHERS           = 2.
 
     IF sy-subrc <> 0.
-      lcx_exception=>raise( |Error from RS_DIALOG_SHOW, DIAL| ).
+      zcx_abapgit_exception=>raise( |Error from RS_DIALOG_SHOW, DIAL| ).
     ENDIF.
 
   ENDMETHOD.
@@ -20355,7 +20335,7 @@ CLASS lcl_object_doct IMPLEMENTATION.
         OTHERS    = 1.
 
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from ABAP4_CALL_TRANSACTION, DOCT' ).
+      zcx_abapgit_exception=>raise( 'error from ABAP4_CALL_TRANSACTION, DOCT' ).
     ENDIF.
 
   ENDMETHOD.                    "jump
@@ -20377,7 +20357,7 @@ CLASS lcl_object_doct IMPLEMENTATION.
         ret_code = 1
         OTHERS   = 2.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from DOCU_DEL' ).
+      zcx_abapgit_exception=>raise( 'error from DOCU_DEL' ).
     ENDIF.
 
   ENDMETHOD.                    "delete
@@ -20521,7 +20501,7 @@ CLASS lcl_object_docv IMPLEMENTATION.
 
   METHOD lif_object~jump.
 
-    lcx_exception=>raise( 'todo, jump DOCV' ).
+    zcx_abapgit_exception=>raise( 'todo, jump DOCV' ).
 
   ENDMETHOD.                    "jump
 
@@ -20544,7 +20524,7 @@ CLASS lcl_object_docv IMPLEMENTATION.
         ret_code = 1
         OTHERS   = 2.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from DOCU_DEL' ).
+      zcx_abapgit_exception=>raise( 'error from DOCU_DEL' ).
     ENDIF.
 
   ENDMETHOD.                    "delete
@@ -20635,12 +20615,12 @@ CLASS lcl_object_doma DEFINITION INHERITING FROM lcl_objects_super FINAL.
     METHODS:
       serialize_texts
         IMPORTING io_xml TYPE REF TO lcl_xml_output
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       deserialize_texts
         IMPORTING io_xml   TYPE REF TO lcl_xml_input
                   is_dd01v TYPE dd01v
                   it_dd07v TYPE dd07v_tab
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_object_doma DEFINITION
 
@@ -20725,7 +20705,7 @@ CLASS lcl_object_doma IMPLEMENTATION.
         object_not_specified = 3
         permission_failure   = 4.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from RS_DD_DELETE_OBJ, DOMA' ).
+      zcx_abapgit_exception=>raise( 'error from RS_DD_DELETE_OBJ, DOMA' ).
     ENDIF.
 
   ENDMETHOD.                    "delete
@@ -20752,7 +20732,7 @@ CLASS lcl_object_doma IMPLEMENTATION.
         illegal_input = 1
         OTHERS        = 2.
     IF sy-subrc <> 0 OR ls_dd01v IS INITIAL.
-      lcx_exception=>raise( 'error from DDIF_DOMA_GET' ).
+      zcx_abapgit_exception=>raise( 'error from DDIF_DOMA_GET' ).
     ENDIF.
 
     CLEAR: ls_dd01v-as4user,
@@ -20818,7 +20798,7 @@ CLASS lcl_object_doma IMPLEMENTATION.
         put_refused       = 5
         OTHERS            = 6.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from DDIF_DOMA_PUT' ).
+      zcx_abapgit_exception=>raise( 'error from DDIF_DOMA_PUT' ).
     ENDIF.
 
     deserialize_texts( io_xml   = io_xml
@@ -20932,7 +20912,7 @@ CLASS lcl_object_doma IMPLEMENTATION.
       ls_dd01v_tmp = is_dd01v.
       READ TABLE lt_dd01_texts ASSIGNING <dd01_text> WITH KEY ddlanguage = <lang>.
       IF sy-subrc > 0.
-        lcx_exception=>raise( |DD01_TEXTS cannot find lang { <lang> } in XML| ).
+        zcx_abapgit_exception=>raise( |DD01_TEXTS cannot find lang { <lang> } in XML| ).
       ENDIF.
       MOVE-CORRESPONDING <dd01_text> TO ls_dd01v_tmp.
 
@@ -20960,7 +20940,7 @@ CLASS lcl_object_doma IMPLEMENTATION.
           put_refused       = 5
           OTHERS            = 6.
       IF sy-subrc <> 0.
-        lcx_exception=>raise( 'error from DDIF_DOMA_PUT @TEXTS' ).
+        zcx_abapgit_exception=>raise( 'error from DDIF_DOMA_PUT @TEXTS' ).
       ENDIF.
     ENDLOOP.
 
@@ -21006,11 +20986,11 @@ CLASS lcl_object_dtel DEFINITION INHERITING FROM lcl_objects_super FINAL.
     METHODS:
       serialize_texts
         IMPORTING io_xml TYPE REF TO lcl_xml_output
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       deserialize_texts
         IMPORTING io_xml   TYPE REF TO lcl_xml_input
                   is_dd04v TYPE dd04v
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_object_dtel DEFINITION
 
@@ -21094,7 +21074,7 @@ CLASS lcl_object_dtel IMPLEMENTATION.
         object_not_specified = 3
         permission_failure   = 4.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from RS_DD_DELETE_OBJ, DTEL' ).
+      zcx_abapgit_exception=>raise( 'error from RS_DD_DELETE_OBJ, DTEL' ).
     ENDIF.
 
   ENDMETHOD.                    "delete
@@ -21116,7 +21096,7 @@ CLASS lcl_object_dtel IMPLEMENTATION.
       AND as4local = 'A'
       AND as4vers = '0000'.
     IF sy-subrc <> 0 OR ls_dd04v IS INITIAL.
-      lcx_exception=>raise( 'Not found in DD04L' ).
+      zcx_abapgit_exception=>raise( 'Not found in DD04L' ).
     ENDIF.
 
     SELECT SINGLE * FROM dd04t
@@ -21197,7 +21177,7 @@ CLASS lcl_object_dtel IMPLEMENTATION.
         put_refused       = 5
         OTHERS            = 6.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from DDIF_DTEL_PUT' ).
+      zcx_abapgit_exception=>raise( 'error from DDIF_DTEL_PUT' ).
     ENDIF.
 
     deserialize_texts( io_xml   = io_xml
@@ -21286,7 +21266,7 @@ CLASS lcl_object_dtel IMPLEMENTATION.
       ls_dd04v_tmp = is_dd04v.
       READ TABLE lt_dd04_texts ASSIGNING <dd04_text> WITH KEY ddlanguage = <lang>.
       IF sy-subrc > 0.
-        lcx_exception=>raise( |DD04_TEXTS cannot find lang { <lang> } in XML| ).
+        zcx_abapgit_exception=>raise( |DD04_TEXTS cannot find lang { <lang> } in XML| ).
       ENDIF.
       MOVE-CORRESPONDING <dd04_text> TO ls_dd04v_tmp.
       CALL FUNCTION 'DDIF_DTEL_PUT'
@@ -21301,7 +21281,7 @@ CLASS lcl_object_dtel IMPLEMENTATION.
           put_refused       = 5
           OTHERS            = 6.
       IF sy-subrc <> 0.
-        lcx_exception=>raise( 'error from DDIF_DTEL_PUT @TEXTS' ).
+        zcx_abapgit_exception=>raise( 'error from DDIF_DTEL_PUT @TEXTS' ).
       ENDIF.
     ENDLOOP.
 
@@ -21329,11 +21309,11 @@ INTERFACE lif_object_enho.
     deserialize
       IMPORTING io_xml     TYPE REF TO lcl_xml_input
                 iv_package TYPE devclass
-      RAISING   lcx_exception,
+      RAISING   zcx_abapgit_exception,
     serialize
       IMPORTING io_xml      TYPE REF TO lcl_xml_output
                 ii_enh_tool TYPE REF TO if_enh_tool
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
 ENDINTERFACE.                    "lif_object_enho
 
@@ -21404,7 +21384,7 @@ CLASS lcl_object_enho_wdyc IMPLEMENTATION.
         lo_wdyconf->if_enh_object~save( ).
         lo_wdyconf->if_enh_object~unlock( ).
       CATCH cx_enh_root.
-        lcx_exception=>raise( 'error deserializing ENHO wdyconf' ).
+        zcx_abapgit_exception=>raise( 'error deserializing ENHO wdyconf' ).
     ENDTRY.
 
   ENDMETHOD.                    "lif_object_enho~deserialize
@@ -21542,7 +21522,7 @@ CLASS lcl_object_enho_wdyn IMPLEMENTATION.
         lo_wdyn->if_enh_object~unlock( ).
 
       CATCH cx_root.
-        lcx_exception=>raise( |error deserializing ENHO wdyn { ms_item-obj_name }| ).
+        zcx_abapgit_exception=>raise( |error deserializing ENHO wdyn { ms_item-obj_name }| ).
     ENDTRY.
 
   ENDMETHOD.                    "lif_object_enho~deserialize
@@ -21571,7 +21551,7 @@ CLASS lcl_object_enho_wdyn IMPLEMENTATION.
                      ig_data = ls_enh_data ).
 
       CATCH cx_enh_not_found.
-        lcx_exception=>raise( |error serializing ENHO wdyn { ms_item-obj_name }| ).
+        zcx_abapgit_exception=>raise( |error serializing ENHO wdyn { ms_item-obj_name }| ).
     ENDTRY.
 
   ENDMETHOD.                    "lif_object_enho~serialize
@@ -21590,19 +21570,19 @@ CLASS lcl_object_enho_clif DEFINITION.
       deserialize
         IMPORTING io_xml  TYPE REF TO lcl_xml_input
                   io_clif TYPE REF TO cl_enh_tool_clif
-        RAISING   lcx_exception
+        RAISING   zcx_abapgit_exception
                   cx_enh_root,
       serialize
         IMPORTING io_xml   TYPE REF TO lcl_xml_output
                   io_files TYPE REF TO lcl_objects_files
                   io_clif  TYPE REF TO cl_enh_tool_clif
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
   PRIVATE SECTION.
     CLASS-METHODS: serialize_includes
       IMPORTING io_files TYPE REF TO lcl_objects_files
                 io_clif  TYPE REF TO cl_enh_tool_clif
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_object_enho_clif DEFINITION
 *----------------------------------------------------------------------*
@@ -21860,7 +21840,7 @@ CLASS lcl_object_enho_badi IMPLEMENTATION.
         lo_badi->if_enh_object~save( ).
         lo_badi->if_enh_object~unlock( ).
       CATCH cx_enh_root.
-        lcx_exception=>raise( 'error deserializing ENHO badi' ).
+        zcx_abapgit_exception=>raise( 'error deserializing ENHO badi' ).
     ENDTRY.
 
   ENDMETHOD.                    "lif_object_enho~deserialize
@@ -21895,12 +21875,12 @@ CLASS lcl_object_enho_hook DEFINITION.
     METHODS hook_impl_deserialize
       IMPORTING it_spaces TYPE ty_spaces_tt
       CHANGING  ct_impl   TYPE enh_hook_impl_it
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS hook_impl_serialize
       EXPORTING et_spaces TYPE ty_spaces_tt
       CHANGING  ct_impl   TYPE enh_hook_impl_it
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_object_enho_hook DEFINITION
 
@@ -22066,7 +22046,7 @@ CLASS lcl_object_enho_hook IMPLEMENTATION.
         lo_hook_impl->if_enh_object~save( ).
         lo_hook_impl->if_enh_object~unlock( ).
       CATCH cx_enh_root.
-        lcx_exception=>raise( 'error deserializing ENHO hook' ).
+        zcx_abapgit_exception=>raise( 'error deserializing ENHO hook' ).
     ENDTRY.
 
   ENDMETHOD.                    "lif_object_enho~deserialize
@@ -22171,7 +22151,7 @@ CLASS lcl_object_enho_intf IMPLEMENTATION.
         lo_enh_intf->if_enh_object~save( ).
         lo_enh_intf->if_enh_object~unlock( ).
       CATCH cx_enh_root.
-        lcx_exception=>raise( 'error deserializing ENHO interface' ).
+        zcx_abapgit_exception=>raise( 'error deserializing ENHO interface' ).
     ENDTRY.
 
   ENDMETHOD.                    "lif_object_enho~deserialize
@@ -22311,7 +22291,7 @@ CLASS lcl_object_enho_class IMPLEMENTATION.
         lo_enh_class->if_enh_object~save( ).
         lo_enh_class->if_enh_object~unlock( ).
       CATCH cx_enh_root.
-        lcx_exception=>raise( 'error deserializing ENHO class' ).
+        zcx_abapgit_exception=>raise( 'error deserializing ENHO class' ).
     ENDTRY.
 
   ENDMETHOD.                    "lif_object_enho~deserialize
@@ -22401,7 +22381,7 @@ CLASS lcl_object_enho_fugr IMPLEMENTATION.
         lo_fugrdata->if_enh_object~unlock( ).
 
       CATCH cx_enh_root.
-        lcx_exception=>raise( |error deserializing ENHO fugrdata { ms_item-obj_name }| ).
+        zcx_abapgit_exception=>raise( |error deserializing ENHO fugrdata { ms_item-obj_name }| ).
     ENDTRY.
 
   ENDMETHOD.                    "lif_object_enho~deserialize
@@ -22435,7 +22415,7 @@ CLASS lcl_object_enho_fugr IMPLEMENTATION.
         ENDLOOP.
 
       CATCH cx_enh_not_found.
-        lcx_exception=>raise( |error deserializing ENHO fugrdata { ms_item-obj_name }| ).
+        zcx_abapgit_exception=>raise( |error deserializing ENHO fugrdata { ms_item-obj_name }| ).
     ENDTRY.
 
     io_xml->add( iv_name = 'TOOL'
@@ -22468,7 +22448,7 @@ CLASS lcl_object_enho DEFINITION INHERITING FROM lcl_objects_super FINAL.
         RETURNING
           VALUE(ri_enho) TYPE REF TO lif_object_enho
         RAISING
-          lcx_exception.
+          zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_object_enho DEFINITION
 
@@ -22525,7 +22505,7 @@ CLASS lcl_object_enho IMPLEMENTATION.
           enhancement_id   = lv_enh_id
           bypassing_buffer = abap_true ).
       CATCH cx_enh_root.
-        lcx_exception=>raise( 'Error from CL_ENH_FACTORY' ).
+        zcx_abapgit_exception=>raise( 'Error from CL_ENH_FACTORY' ).
     ENDTRY.
 
     li_enho = factory( li_enh_tool->get_tool( ) ).
@@ -22574,7 +22554,7 @@ CLASS lcl_object_enho IMPLEMENTATION.
             is_item  = ms_item
             io_files = mo_files.
       WHEN OTHERS.
-        lcx_exception=>raise( |Unsupported ENHO type { iv_tool }| ).
+        zcx_abapgit_exception=>raise( |Unsupported ENHO type { iv_tool }| ).
     ENDCASE.
 
   ENDMETHOD.                    "factory
@@ -22616,7 +22596,7 @@ CLASS lcl_object_enho IMPLEMENTATION.
         li_enh_object->save( ).
         li_enh_object->unlock( ).
       CATCH cx_enh_root.
-        lcx_exception=>raise( 'Error deleting ENHO' ).
+        zcx_abapgit_exception=>raise( 'Error deleting ENHO' ).
     ENDTRY.
 
   ENDMETHOD.                    "delete
@@ -22739,7 +22719,7 @@ CLASS lcl_object_enhs IMPLEMENTATION.
       CATCH cx_enh_root INTO lx_root.
         lv_message = `Error occured while deserializing EHNS: `
           && lx_root->get_text( ) ##NO_TEXT.
-        lcx_exception=>raise( lv_message ).
+        zcx_abapgit_exception=>raise( lv_message ).
     ENDTRY.
 
   ENDMETHOD.  "deserialize
@@ -22780,7 +22760,7 @@ CLASS lcl_object_enhs IMPLEMENTATION.
                      iv_name = 'BADI_DATA' ).
 
       CATCH cx_enh_root INTO lx_root.
-        lcx_exception=>raise( `Error occured while serializing EHNS: `
+        zcx_abapgit_exception=>raise( `Error occured while serializing EHNS: `
           && lx_root->get_text( ) ) ##NO_TEXT.
     ENDTRY.
 
@@ -22834,7 +22814,7 @@ CLASS lcl_object_enhs IMPLEMENTATION.
         ENDIF.
         lo_badidef_tool->if_enh_object~unlock( ).
       CATCH cx_enh_root INTO lx_root.
-        lcx_exception=>raise( `Error occured while deleting EHNS: `
+        zcx_abapgit_exception=>raise( `Error occured while deleting EHNS: `
           && lx_root->get_text( ) ) ##NO_TEXT.
     ENDTRY.
 
@@ -22963,7 +22943,7 @@ CLASS lcl_object_enqu IMPLEMENTATION.
         object_not_specified = 3
         permission_failure   = 4.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from RS_DD_DELETE_OBJ, ENQU' ).
+      zcx_abapgit_exception=>raise( 'error from RS_DD_DELETE_OBJ, ENQU' ).
     ENDIF.
 
   ENDMETHOD.                    "delete
@@ -22992,7 +22972,7 @@ CLASS lcl_object_enqu IMPLEMENTATION.
         illegal_input = 1
         OTHERS        = 2.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from DDIF_ENQU_GET' ).
+      zcx_abapgit_exception=>raise( 'error from DDIF_ENQU_GET' ).
     ENDIF.
     IF ls_dd25v IS INITIAL.
       RETURN. " does not exist in system
@@ -23045,7 +23025,7 @@ CLASS lcl_object_enqu IMPLEMENTATION.
         put_refused       = 5
         OTHERS            = 6.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from DDIF_ENQU_PUT' ).
+      zcx_abapgit_exception=>raise( 'error from DDIF_ENQU_PUT' ).
     ENDIF.
 
     lcl_objects_activation=>add_item( ms_item ).
@@ -23144,7 +23124,7 @@ CLASS lcl_object_ensc IMPLEMENTATION.
       CATCH cx_enh_root INTO lx_root.
         lv_message = `Error occured while deserializing ENSC: `
           && lx_root->get_text( ) ##NO_TEXT.
-        lcx_exception=>raise( lv_message ).
+        zcx_abapgit_exception=>raise( lv_message ).
     ENDTRY.
 
   ENDMETHOD.  "deserialize
@@ -23188,7 +23168,7 @@ CLASS lcl_object_ensc IMPLEMENTATION.
       CATCH cx_enh_root INTO lx_root.
         lv_message = `Error occured while serializing ENSC: `
           && lx_root->get_text( ) ##NO_TEXT.
-        lcx_exception=>raise( lv_message ).
+        zcx_abapgit_exception=>raise( lv_message ).
     ENDTRY.
 
   ENDMETHOD.  "serialize
@@ -23234,7 +23214,7 @@ CLASS lcl_object_ensc IMPLEMENTATION.
       CATCH cx_enh_root INTO lx_root.
         lv_message = `Error occured while deleting ENSC: `
           && lx_root->get_text( ) ##NO_TEXT.
-        lcx_exception=>raise( lv_message ).
+        zcx_abapgit_exception=>raise( lv_message ).
     ENDTRY.
 
   ENDMETHOD.  "delete
@@ -23323,7 +23303,7 @@ CLASS lcl_object_form DEFINITION INHERITING FROM lcl_objects_super FINAL.
       RETURNING
         VALUE(et_lines) TYPE lcl_object_form=>tyt_lines
       RAISING
-        lcx_exception.
+        zcx_abapgit_exception.
 
     METHODS _clear_changed_fields
       CHANGING
@@ -23334,7 +23314,7 @@ CLASS lcl_object_form DEFINITION INHERITING FROM lcl_objects_super FINAL.
         is_form_data TYPE lcl_object_form=>tys_form_data
         it_lines     TYPE lcl_object_form=>tyt_lines
       RAISING
-        lcx_exception.
+        zcx_abapgit_exception.
 
     METHODS _find_form
       IMPORTING
@@ -23727,45 +23707,45 @@ CLASS lcl_object_fugr DEFINITION INHERITING FROM lcl_objects_program FINAL.
 
     METHODS main_name
       RETURNING VALUE(rv_program) TYPE program
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS functions
       RETURNING VALUE(rt_functab) TYPE ty_rs38l_incl_tt
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS includes
       RETURNING VALUE(rt_includes) TYPE rso_t_objnm
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS serialize_functions
       RETURNING VALUE(rt_functions) TYPE ty_function_tt
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS deserialize_functions
       IMPORTING it_functions TYPE ty_function_tt
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS serialize_xml
       IMPORTING io_xml TYPE REF TO lcl_xml_output
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS deserialize_xml
       IMPORTING io_xml     TYPE REF TO lcl_xml_input
                 iv_package TYPE devclass
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS serialize_includes
-      RAISING lcx_exception.
+      RAISING zcx_abapgit_exception.
 
     METHODS deserialize_includes
       IMPORTING io_xml     TYPE REF TO lcl_xml_input
                 iv_package TYPE devclass
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS are_exceptions_class_based
       IMPORTING iv_function_name TYPE rs38l_fnam
       RETURNING VALUE(rv_return) TYPE abap_bool
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_object_fugr DEFINITION
 
@@ -23836,7 +23816,7 @@ CLASS lcl_object_fugr IMPLEMENTATION.
         no_program   = 2
         OTHERS       = 3.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'Error from RS_GET_ALL_INCLUDES' ).
+      zcx_abapgit_exception=>raise( 'Error from RS_GET_ALL_INCLUDES' ).
     ENDIF.
 
     SELECT unam AS user udat AS date utime AS time FROM reposrc
@@ -23921,7 +23901,7 @@ CLASS lcl_object_fugr IMPLEMENTATION.
           OTHERS                       = 12.
 
       IF sy-subrc <> 0.
-        lcx_exception=>raise( 'error from FUNCTION_INCLUDE_SPLIT' ).
+        zcx_abapgit_exception=>raise( 'error from FUNCTION_INCLUDE_SPLIT' ).
       ENDIF.
 
       CALL FUNCTION 'FUNCTION_EXISTS'
@@ -23942,7 +23922,7 @@ CLASS lcl_object_fugr IMPLEMENTATION.
             error_message            = 1
             OTHERS                   = 2.
         IF sy-subrc <> 0.
-          lcx_exception=>raise( 'error from FUNCTION_DELETE' ).
+          zcx_abapgit_exception=>raise( 'error from FUNCTION_DELETE' ).
         ENDIF.
       ENDIF.
 
@@ -23979,7 +23959,7 @@ CLASS lcl_object_fugr IMPLEMENTATION.
           canceled_in_corr        = 10
           OTHERS                  = 11.
       IF sy-subrc <> 0.
-        lcx_exception=>raise( |error from RS_FUNCTIONMODULE_INSERT: {
+        zcx_abapgit_exception=>raise( |error from RS_FUNCTIONMODULE_INSERT: {
           sy-subrc } { sy-msgid }{ sy-msgno }| ).
       ENDIF.
 
@@ -24061,7 +24041,7 @@ CLASS lcl_object_fugr IMPLEMENTATION.
         area_length_error            = 11
         OTHERS                       = 12.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from FUNCTION_INCLUDE_SPLIT' ).
+      zcx_abapgit_exception=>raise( 'error from FUNCTION_INCLUDE_SPLIT' ).
     ENDIF.
 
     io_xml->read( EXPORTING iv_name = 'AREAT'
@@ -24089,7 +24069,7 @@ CLASS lcl_object_fugr IMPLEMENTATION.
         OTHERS                  = 12.
     IF sy-subrc <> 0 AND sy-subrc <> 1 AND sy-subrc <> 3.
 * todo, change description
-      lcx_exception=>raise( 'error from RS_FUNCTION_POOL_INSERT' ).
+      zcx_abapgit_exception=>raise( 'error from RS_FUNCTION_POOL_INSERT' ).
     ENDIF.
 
   ENDMETHOD.                    "deserialize_xml
@@ -24147,7 +24127,7 @@ CLASS lcl_object_fugr IMPLEMENTATION.
         no_program   = 2
         OTHERS       = 3.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'Error from RS_GET_ALL_INCLUDES' ).
+      zcx_abapgit_exception=>raise( 'Error from RS_GET_ALL_INCLUDES' ).
     ENDIF.
 
     LOOP AT lt_functab ASSIGNING <ls_func>.
@@ -24207,7 +24187,7 @@ CLASS lcl_object_fugr IMPLEMENTATION.
         function_pool_not_found = 1
         OTHERS                  = 2.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'Error from RS_FUNCTION_POOL_CONTENTS' ).
+      zcx_abapgit_exception=>raise( 'Error from RS_FUNCTION_POOL_CONTENTS' ).
     ENDIF.
 
     SORT rt_functab BY funcname ASCENDING.
@@ -24244,7 +24224,7 @@ CLASS lcl_object_fugr IMPLEMENTATION.
         area_length_error            = 11
         OTHERS                       = 12.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'Error from FUNCTION_INCLUDE_SPLIT' ).
+      zcx_abapgit_exception=>raise( 'Error from FUNCTION_INCLUDE_SPLIT' ).
     ENDIF.
 
     CONCATENATE lv_namespace 'SAPL' lv_group INTO rv_program.
@@ -24300,7 +24280,7 @@ CLASS lcl_object_fugr IMPLEMENTATION.
       IF sy-subrc = 2.
         CONTINUE.
       ELSEIF sy-subrc <> 0.
-        lcx_exception=>raise( 'Error from RPY_FUNCTIONMODULE_READ_NEW' ).
+        zcx_abapgit_exception=>raise( 'Error from RPY_FUNCTIONMODULE_READ_NEW' ).
       ENDIF.
 
       ls_function-exception_classes = are_exceptions_class_based( <ls_func>-funcname ).
@@ -24365,7 +24345,7 @@ CLASS lcl_object_fugr IMPLEMENTATION.
         invalid_name       = 3
         OTHERS             = 4.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'Error from FUNCTION_IMPORT_DOKU' ).
+      zcx_abapgit_exception=>raise( 'Error from FUNCTION_IMPORT_DOKU' ).
     ENDIF.
   ENDMETHOD.
 
@@ -24465,7 +24445,7 @@ CLASS lcl_object_fugr IMPLEMENTATION.
         cancelled              = 9
         OTHERS                 = 10.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from RS_FUNCTION_POOL_DELETE' ).
+      zcx_abapgit_exception=>raise( 'error from RS_FUNCTION_POOL_DELETE' ).
     ENDIF.
 
   ENDMETHOD.                    "delete
@@ -24511,11 +24491,11 @@ CLASS lcl_object_iarp DEFINITION INHERITING FROM lcl_objects_super FINAL.
       read
         EXPORTING es_attr       TYPE w3resoattr
                   et_parameters TYPE w3resopara_tabletype
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       save
         IMPORTING is_attr       TYPE w3resoattr
                   it_parameters TYPE w3resopara_tabletype
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_object_dtel DEFINITION
 
@@ -24557,7 +24537,7 @@ CLASS lcl_object_iarp IMPLEMENTATION.
         error_occured       = 3
         OTHERS              = 4 ).
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from w3api_resource~load' ).
+      zcx_abapgit_exception=>raise( 'error from w3api_resource~load' ).
     ENDIF.
 
     li_resource->get_attributes( IMPORTING p_attributes = es_attr ).
@@ -24643,7 +24623,7 @@ CLASS lcl_object_iarp IMPLEMENTATION.
         error_occured       = 3
         OTHERS              = 4 ).
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from if_w3_api_resource~load' ).
+      zcx_abapgit_exception=>raise( 'error from if_w3_api_resource~load' ).
     ENDIF.
 
     li_resource->if_w3_api_object~set_changeable( abap_true ).
@@ -24670,7 +24650,7 @@ CLASS lcl_object_iarp IMPLEMENTATION.
     IF sy-subrc = 1.
       rv_bool = abap_false.
     ELSEIF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from w3_api_resource~load' ).
+      zcx_abapgit_exception=>raise( 'error from w3_api_resource~load' ).
     ELSE.
       rv_bool = abap_true.
     ENDIF.
@@ -24717,11 +24697,11 @@ CLASS lcl_object_iasp DEFINITION INHERITING FROM lcl_objects_super FINAL.
       read
         EXPORTING es_attr       TYPE w3servattr
                   et_parameters TYPE w3servpara_tabletype
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       save
         IMPORTING is_attr       TYPE w3servattr
                   it_parameters TYPE w3servpara_tabletype
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_object_dtel DEFINITION
 
@@ -24763,7 +24743,7 @@ CLASS lcl_object_iasp IMPLEMENTATION.
         error_occured       = 3
         OTHERS              = 4 ).
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from w3api_service~load' ).
+      zcx_abapgit_exception=>raise( 'error from w3api_service~load' ).
     ENDIF.
 
     li_service->get_attributes( IMPORTING p_attributes = es_attr ).
@@ -24849,7 +24829,7 @@ CLASS lcl_object_iasp IMPLEMENTATION.
         error_occured       = 3
         OTHERS              = 4 ).
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from if_w3_api_service~load' ).
+      zcx_abapgit_exception=>raise( 'error from if_w3_api_service~load' ).
     ENDIF.
 
     li_service->if_w3_api_object~set_changeable( abap_true ).
@@ -24876,7 +24856,7 @@ CLASS lcl_object_iasp IMPLEMENTATION.
     IF sy-subrc = 1.
       rv_bool = abap_false.
     ELSEIF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from w3_api_service~load' ).
+      zcx_abapgit_exception=>raise( 'error from w3_api_service~load' ).
     ELSE.
       rv_bool = abap_true.
     ENDIF.
@@ -24923,11 +24903,11 @@ CLASS lcl_object_iatu DEFINITION INHERITING FROM lcl_objects_super FINAL.
       read
         EXPORTING es_attr   TYPE w3tempattr
                   ev_source TYPE string
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       save
         IMPORTING is_attr   TYPE w3tempattr
                   iv_source TYPE string
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_object_iatu DEFINITION
 
@@ -24970,7 +24950,7 @@ CLASS lcl_object_iatu IMPLEMENTATION.
         error_occured       = 3
         OTHERS              = 4 ).
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from w3api_template~load' ).
+      zcx_abapgit_exception=>raise( 'error from w3api_template~load' ).
     ENDIF.
 
     li_template->get_attributes( IMPORTING p_attributes = es_attr ).
@@ -25072,7 +25052,7 @@ CLASS lcl_object_iatu IMPLEMENTATION.
         error_occured       = 3
         OTHERS              = 4 ).
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from if_w3_api_template~load' ).
+      zcx_abapgit_exception=>raise( 'error from if_w3_api_template~load' ).
     ENDIF.
 
     li_template->if_w3_api_object~set_changeable( abap_true ).
@@ -25099,7 +25079,7 @@ CLASS lcl_object_iatu IMPLEMENTATION.
     IF sy-subrc = 1.
       rv_bool = abap_false.
     ELSEIF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from w3_api_template~load' ).
+      zcx_abapgit_exception=>raise( 'error from w3_api_template~load' ).
     ELSE.
       rv_bool = abap_true.
     ENDIF.
@@ -25175,7 +25155,7 @@ CLASS lcl_object_jobd IMPLEMENTATION.
             ex_is_existing = rv_bool.
 
       CATCH cx_root.
-        lcx_exception=>raise( |JOBD not supported| ).
+        zcx_abapgit_exception=>raise( |JOBD not supported| ).
     ENDTRY.
 
   ENDMETHOD.
@@ -25229,7 +25209,7 @@ CLASS lcl_object_jobd IMPLEMENTATION.
                      ig_data = <ls_job_definition> ).
 
       CATCH cx_root.
-        lcx_exception=>raise( |Error serializing JOBD| ).
+        zcx_abapgit_exception=>raise( |Error serializing JOBD| ).
     ENDTRY.
 
   ENDMETHOD.
@@ -25270,7 +25250,7 @@ CLASS lcl_object_jobd IMPLEMENTATION.
             im_jd_attributes = <ls_job_definition>.
 
       CATCH cx_root.
-        lcx_exception=>raise( |Error deserializing JOBD| ).
+        zcx_abapgit_exception=>raise( |Error deserializing JOBD| ).
     ENDTRY.
 
     lcl_objects_activation=>add_item( ms_item ).
@@ -25292,7 +25272,7 @@ CLASS lcl_object_jobd IMPLEMENTATION.
         CALL METHOD lo_job_definition->('DELETE_JD').
 
       CATCH cx_root.
-        lcx_exception=>raise( |Error deleting JOBD| ).
+        zcx_abapgit_exception=>raise( |Error deleting JOBD| ).
     ENDTRY.
 
   ENDMETHOD.
@@ -25314,7 +25294,7 @@ CLASS lcl_object_jobd IMPLEMENTATION.
         OTHERS            = 2.
 
     IF sy-subrc <> 0.
-      lcx_exception=>raise( |Error from TR_OBJECT_JUMP_TO_TOOL, JOBD| ).
+      zcx_abapgit_exception=>raise( |Error from TR_OBJECT_JUMP_TO_TOOL, JOBD| ).
     ENDIF.
 
   ENDMETHOD.
@@ -25352,18 +25332,18 @@ CLASS lcl_object_intf DEFINITION FINAL INHERITING FROM lcl_objects_program.
     METHODS deserialize_abap
       IMPORTING io_xml     TYPE REF TO lcl_xml_input
                 iv_package TYPE devclass
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS deserialize_docu
       IMPORTING io_xml TYPE REF TO lcl_xml_input
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
   PRIVATE SECTION.
     DATA mo_object_oriented_object_fct TYPE REF TO lif_oo_object_fnc.
 
     METHODS serialize_xml
       IMPORTING io_xml TYPE REF TO lcl_xml_output
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_object_intf DEFINITION
 
@@ -25621,7 +25601,7 @@ CLASS lcl_oo_interface IMPLEMENTATION.
         other           = 6
         OTHERS          = 7.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'Error from SEO_INTERFACE_CREATE_COMPLETE' ).
+      zcx_abapgit_exception=>raise( 'Error from SEO_INTERFACE_CREATE_COMPLETE' ).
     ENDIF.
   ENDMETHOD.
 
@@ -25646,7 +25626,7 @@ CLASS lcl_oo_interface IMPLEMENTATION.
     IF sy-subrc = 1.
       RETURN. " in case only inactive version exists
     ELSEIF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from seo_clif_get' ).
+      zcx_abapgit_exception=>raise( 'error from seo_clif_get' ).
     ENDIF.
   ENDMETHOD.
 
@@ -25662,7 +25642,7 @@ CLASS lcl_oo_interface IMPLEMENTATION.
         other        = 5
         OTHERS       = 6.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'Error from SEO_INTERFACE_DELETE_COMPLETE' ).
+      zcx_abapgit_exception=>raise( 'Error from SEO_INTERFACE_DELETE_COMPLETE' ).
     ENDIF.
   ENDMETHOD.
 ENDCLASS.
@@ -25697,10 +25677,10 @@ CLASS lcl_object_msag DEFINITION INHERITING FROM lcl_objects_super FINAL.
     METHODS:
       serialize_texts
         IMPORTING io_xml TYPE REF TO lcl_xml_output
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       deserialize_texts
         IMPORTING io_xml TYPE REF TO lcl_xml_input
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
 
 ENDCLASS.                    "lcl_object_msag DEFINITION
@@ -25765,7 +25745,7 @@ CLASS lcl_object_msag IMPLEMENTATION.
         no_permission     = 3
         OTHERS            = 4.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'Error from RS_DELETE_MESSAGE_ID' ).
+      zcx_abapgit_exception=>raise( 'Error from RS_DELETE_MESSAGE_ID' ).
     ENDIF.
 
   ENDMETHOD.                    "delete
@@ -25799,7 +25779,7 @@ CLASS lcl_object_msag IMPLEMENTATION.
         permission_failure  = 02
         unknown_objectclass = 03.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'Error from RS_CORR_INSERT' ).
+      zcx_abapgit_exception=>raise( 'Error from RS_CORR_INSERT' ).
     ENDIF.
 
     SELECT * FROM t100u INTO TABLE lt_before
@@ -25809,7 +25789,7 @@ CLASS lcl_object_msag IMPLEMENTATION.
       DELETE lt_before WHERE msgnr = <ls_t100>-msgnr.
       MODIFY t100 FROM <ls_t100>.                         "#EC CI_SUBRC
       IF sy-subrc <> 0.
-        lcx_exception=>raise( 'MSAG: Table T100 modify failed' ).
+        zcx_abapgit_exception=>raise( 'MSAG: Table T100 modify failed' ).
       ENDIF.
       CLEAR ls_t100u.
       MOVE-CORRESPONDING <ls_t100> TO ls_t100u ##enh_ok.
@@ -25818,7 +25798,7 @@ CLASS lcl_object_msag IMPLEMENTATION.
       ls_t100u-selfdef = '3'.
       MODIFY t100u FROM ls_t100u.                         "#EC CI_SUBRC
       IF sy-subrc <> 0.
-        lcx_exception=>raise( 'MSAG: Table T100U modify failed' ).
+        zcx_abapgit_exception=>raise( 'MSAG: Table T100U modify failed' ).
       ENDIF.
     ENDLOOP.
 
@@ -25829,7 +25809,7 @@ CLASS lcl_object_msag IMPLEMENTATION.
     ls_t100a-ltime = sy-uzeit.
     MODIFY t100a FROM ls_t100a.                           "#EC CI_SUBRC
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'MSAG: Table T100A modify failed' ).
+      zcx_abapgit_exception=>raise( 'MSAG: Table T100A modify failed' ).
     ENDIF.
 
     ls_t100t-sprsl = mv_language.
@@ -25837,7 +25817,7 @@ CLASS lcl_object_msag IMPLEMENTATION.
     ls_t100t-stext = ls_t100a-stext.
     MODIFY t100t FROM ls_t100t.                           "#EC CI_SUBRC
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'MSAG: Table T100T modify failed' ).
+      zcx_abapgit_exception=>raise( 'MSAG: Table T100T modify failed' ).
     ENDIF.
 
     LOOP AT lt_before INTO ls_t100u.
@@ -25966,7 +25946,7 @@ CLASS lcl_object_msag IMPLEMENTATION.
       ls_t100-arbgb = lv_msg_id.
       MODIFY t100 FROM ls_t100.                           "#EC CI_SUBRC
       IF sy-subrc <> 0.
-        lcx_exception=>raise( 'MSAG: Table T100 modify failed' ).
+        zcx_abapgit_exception=>raise( 'MSAG: Table T100 modify failed' ).
       ENDIF.
     ENDLOOP.
 
@@ -26000,7 +25980,7 @@ CLASS lcl_object_nrob DEFINITION INHERITING FROM lcl_objects_super FINAL.
   PRIVATE SECTION.
     METHODS:
       delete_intervals IMPORTING iv_object TYPE inri-object
-                       RAISING   lcx_exception.
+                       RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_object_nrob DEFINITION
 
@@ -26088,7 +26068,7 @@ CLASS lcl_object_nrob IMPLEMENTATION.
     IF sy-subrc = 1.
       RETURN.
     ELSEIF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from NUMBER_RANGE_OBJECT_READ' ).
+      zcx_abapgit_exception=>raise( 'error from NUMBER_RANGE_OBJECT_READ' ).
     ENDIF.
 
     io_xml->add( iv_name = 'ATTRIBUTES'
@@ -26125,7 +26105,7 @@ CLASS lcl_object_nrob IMPLEMENTATION.
         wrong_indicator           = 5
         OTHERS                    = 6.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from NUMBER_RANGE_OBJECT_UPDATE' ).
+      zcx_abapgit_exception=>raise( 'error from NUMBER_RANGE_OBJECT_UPDATE' ).
     ENDIF.
 
     CALL FUNCTION 'NUMBER_RANGE_OBJECT_CLOSE'
@@ -26134,7 +26114,7 @@ CLASS lcl_object_nrob IMPLEMENTATION.
       EXCEPTIONS
         object_not_initialized = 1.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from NUMBER_RANGE_OBJECT_CLOSE' ).
+      zcx_abapgit_exception=>raise( 'error from NUMBER_RANGE_OBJECT_CLOSE' ).
     ENDIF.
 
     tadir_insert( iv_package ).
@@ -26167,7 +26147,7 @@ CLASS lcl_object_nrob IMPLEMENTATION.
         subobject_not_found        = 8
         OTHERS                     = 9.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from NUMBER_RANGE_INTERVAL_LIST' ).
+      zcx_abapgit_exception=>raise( 'error from NUMBER_RANGE_INTERVAL_LIST' ).
     ENDIF.
 
     IF lines( lt_list ) = 0.
@@ -26192,7 +26172,7 @@ CLASS lcl_object_nrob IMPLEMENTATION.
         object_not_found = 1
         OTHERS           = 2.
     IF sy-subrc <> 0 OR lv_error = abap_true.
-      lcx_exception=>raise( 'error from NUMBER_RANGE_INTERVAL_UPDATE' ).
+      zcx_abapgit_exception=>raise( 'error from NUMBER_RANGE_INTERVAL_UPDATE' ).
     ENDIF.
 
     CALL FUNCTION 'NUMBER_RANGE_UPDATE_CLOSE'
@@ -26203,7 +26183,7 @@ CLASS lcl_object_nrob IMPLEMENTATION.
         object_not_initialized = 2
         OTHERS                 = 3.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from NUMBER_RANGE_UPDATE_CLOSE' ).
+      zcx_abapgit_exception=>raise( 'error from NUMBER_RANGE_UPDATE_CLOSE' ).
     ENDIF.
 
   ENDMETHOD.
@@ -26227,7 +26207,7 @@ CLASS lcl_object_nrob IMPLEMENTATION.
         wrong_indicator    = 3
         OTHERS             = 4.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from NUMBER_RANGE_OBJECT_DELETE' ).
+      zcx_abapgit_exception=>raise( 'error from NUMBER_RANGE_OBJECT_DELETE' ).
     ENDIF.
 
   ENDMETHOD.                    "delete
@@ -26263,7 +26243,7 @@ CLASS lcl_object_nrob IMPLEMENTATION.
         OTHERS    = 1.
 
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from ABAP4_CALL_TRANSACTION, NROB' ).
+      zcx_abapgit_exception=>raise( 'error from ABAP4_CALL_TRANSACTION, NROB' ).
     ENDIF.
 
   ENDMETHOD.                    "jump
@@ -26384,7 +26364,7 @@ CLASS lcl_object_para IMPLEMENTATION.
         unknown_objectclass = 3
         OTHERS              = 4.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from RS_CORR_INSERT, PARA' ).
+      zcx_abapgit_exception=>raise( 'error from RS_CORR_INSERT, PARA' ).
     ENDIF.
 
     MODIFY tpara FROM ls_tpara.                           "#EC CI_SUBRC
@@ -26408,7 +26388,7 @@ CLASS lcl_object_para IMPLEMENTATION.
         cancelled  = 1
         OTHERS     = 2.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from RS_PRAMETER_DELETE' ).
+      zcx_abapgit_exception=>raise( 'error from RS_PRAMETER_DELETE' ).
     ENDIF.
 
   ENDMETHOD.                    "delete
@@ -26461,18 +26441,18 @@ CLASS lcl_object_pinf DEFINITION INHERITING FROM lcl_objects_super FINAL.
         IMPORTING is_pinf             TYPE ty_pinf
                   iv_package          TYPE devclass
         RETURNING VALUE(ri_interface) TYPE REF TO if_package_interface
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       delete_elements
         IMPORTING ii_interface TYPE REF TO if_package_interface
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       update_attributes
         IMPORTING is_pinf      TYPE ty_pinf
                   ii_interface TYPE REF TO if_package_interface
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       update_elements
         IMPORTING is_pinf      TYPE ty_pinf
                   ii_interface TYPE REF TO if_package_interface
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_object_PINF DEFINITION
 
@@ -26702,7 +26682,7 @@ CLASS lcl_object_pinf IMPLEMENTATION.
           unexpected_error        = 4
           OTHERS                  = 7 ).
       IF sy-subrc <> 0.
-        lcx_exception=>raise( 'error creating new package interface' ).
+        zcx_abapgit_exception=>raise( 'error creating new package interface' ).
       ENDIF.
     ELSE.
       cl_package_interface=>load_package_interface(
@@ -26719,7 +26699,7 @@ CLASS lcl_object_pinf IMPLEMENTATION.
           object_locked_and_modified = 5
           OTHERS                     = 6 ).
       IF sy-subrc <> 0.
-        lcx_exception=>raise( 'error loading package interface' ).
+        zcx_abapgit_exception=>raise( 'error loading package interface' ).
       ENDIF.
     ENDIF.
 
@@ -26765,7 +26745,7 @@ CLASS lcl_object_pinf IMPLEMENTATION.
         object_locked_and_modified = 5
         OTHERS                     = 6 ).
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error loading package interface, delete' ).
+      zcx_abapgit_exception=>raise( 'error loading package interface, delete' ).
     ENDIF.
 
 * elements must be deleted before the package interface
@@ -26821,15 +26801,15 @@ CLASS lcl_object_prag DEFINITION INHERITING FROM lcl_objects_super FINAL.
     METHODS:
       _raise_pragma_not_exists
         RAISING
-          lcx_exception,
+          zcx_abapgit_exception,
 
       _raise_pragma_exists
         RAISING
-          lcx_exception,
+          zcx_abapgit_exception,
 
       _raise_pragma_enqueue
         RAISING
-          lcx_exception.
+          zcx_abapgit_exception.
 
 ENDCLASS.
 
@@ -26960,19 +26940,19 @@ CLASS lcl_object_prag IMPLEMENTATION.
 
   METHOD _raise_pragma_enqueue.
 
-    lcx_exception=>raise( |Pragma { ms_item-obj_name } enqueue error| ).
+    zcx_abapgit_exception=>raise( |Pragma { ms_item-obj_name } enqueue error| ).
 
   ENDMETHOD.
 
   METHOD _raise_pragma_exists.
 
-    lcx_exception=>raise( |Pragma { ms_item-obj_name } exists| ).
+    zcx_abapgit_exception=>raise( |Pragma { ms_item-obj_name } exists| ).
 
   ENDMETHOD.
 
   METHOD _raise_pragma_not_exists.
 
-    lcx_exception=>raise( |Pragma { ms_item-obj_name } doesn't exist| ).
+    zcx_abapgit_exception=>raise( |Pragma { ms_item-obj_name } doesn't exist| ).
 
   ENDMETHOD.
 
@@ -27007,10 +26987,10 @@ CLASS lcl_object_prog DEFINITION INHERITING FROM lcl_objects_program FINAL.
     METHODS:
       serialize_texts
         IMPORTING io_xml TYPE REF TO lcl_xml_output
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       deserialize_texts
         IMPORTING io_xml TYPE REF TO lcl_xml_input
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_object_prog DEFINITION
 
@@ -27082,7 +27062,7 @@ CLASS lcl_object_prog IMPLEMENTATION.
         reject_deletion    = 4
         OTHERS             = 5.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( |Error from RS_DELETE_PROGRAM: { sy-subrc }| ).
+      zcx_abapgit_exception=>raise( |Error from RS_DELETE_PROGRAM: { sy-subrc }| ).
     ENDIF.
 
   ENDMETHOD.                    "delete
@@ -27310,7 +27290,7 @@ CLASS lcl_object_sfbf DEFINITION INHERITING FROM lcl_objects_super FINAL.
     METHODS:
       get
         RETURNING VALUE(ro_bf) TYPE REF TO cl_sfw_bf
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_object_SFBF DEFINITION
 
@@ -27377,7 +27357,7 @@ CLASS lcl_object_sfbf IMPLEMENTATION.
         ro_bf->free( ).
         ro_bf = cl_sfw_bf=>get_bf( lv_bf ).
       CATCH cx_pak_invalid_data cx_pak_invalid_state cx_pak_not_authorized.
-        lcx_exception=>raise( 'Error from CL_SFW_BF=>GET_BF' ).
+        zcx_abapgit_exception=>raise( 'Error from CL_SFW_BF=>GET_BF' ).
     ENDTRY.
 
   ENDMETHOD.
@@ -27484,7 +27464,7 @@ CLASS lcl_object_sfbf IMPLEMENTATION.
     TRY.
         lo_bf = cl_sfw_bf=>create_bf( lv_bf ).
       CATCH cx_pak_not_authorized cx_pak_invalid_state cx_pak_invalid_data.
-        lcx_exception=>raise( 'error in CL_SFW_BF=>CREATE_BF' ).
+        zcx_abapgit_exception=>raise( 'error in CL_SFW_BF=>CREATE_BF' ).
     ENDTRY.
 
     ls_header-author = sy-uname.
@@ -27526,7 +27506,7 @@ CLASS lcl_object_sfbf IMPLEMENTATION.
 
     READ TABLE lt_msgtab WITH KEY severity = 'E' TRANSPORTING NO FIELDS.
     IF sy-subrc = 0.
-      lcx_exception=>raise( 'Error deleting SFBF' ).
+      zcx_abapgit_exception=>raise( 'Error deleting SFBF' ).
     ENDIF.
 
   ENDMETHOD.                    "delete
@@ -27570,7 +27550,7 @@ CLASS lcl_object_sfbs DEFINITION INHERITING FROM lcl_objects_super FINAL.
     METHODS:
       get
         RETURNING VALUE(ro_bfs) TYPE REF TO cl_sfw_bfs
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_object_SFBS DEFINITION
 
@@ -27611,7 +27591,7 @@ CLASS lcl_object_sfbs IMPLEMENTATION.
         ro_bfs->free( ).
         ro_bfs = cl_sfw_bfs=>get_bfs( lv_bfset ).
       CATCH cx_pak_invalid_data cx_pak_invalid_state cx_pak_not_authorized.
-        lcx_exception=>raise( 'Error from CL_SFW_BFS=>GET_BFS' ).
+        zcx_abapgit_exception=>raise( 'Error from CL_SFW_BFS=>GET_BFS' ).
     ENDTRY.
 
   ENDMETHOD.
@@ -27722,7 +27702,7 @@ CLASS lcl_object_sfbs IMPLEMENTATION.
     TRY.
         lo_bfs = cl_sfw_bfs=>create_bfs( lv_bfset ).
       CATCH cx_pak_not_authorized cx_pak_invalid_state cx_pak_invalid_data.
-        lcx_exception=>raise( 'error in CL_SFW_BFS=>CREATE_BFS' ).
+        zcx_abapgit_exception=>raise( 'error in CL_SFW_BFS=>CREATE_BFS' ).
     ENDTRY.
 
     ls_header-author = sy-uname.
@@ -27760,7 +27740,7 @@ CLASS lcl_object_sfbs IMPLEMENTATION.
 
     READ TABLE lt_msgtab WITH KEY severity = 'E' TRANSPORTING NO FIELDS.
     IF sy-subrc = 0.
-      lcx_exception=>raise( 'Error deleting SFBS' ).
+      zcx_abapgit_exception=>raise( 'Error deleting SFBS' ).
     ENDIF.
 
   ENDMETHOD.                    "delete
@@ -27809,10 +27789,10 @@ CLASS lcl_object_sfpf DEFINITION INHERITING FROM lcl_objects_super FINAL.
     METHODS:
       load
         RETURNING VALUE(ri_wb_form) TYPE REF TO if_fp_wb_form
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       form_to_xstring
         RETURNING VALUE(rv_xstr) TYPE xstring
-        RAISING lcx_exception.
+        RAISING zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_object_doma DEFINITION
 
@@ -27884,7 +27864,7 @@ CLASS lcl_object_sfpf IMPLEMENTATION.
     TRY.
         lo_wb_form->delete( lv_name ).
       CATCH cx_fp_api.
-        lcx_exception=>raise( 'SFPI error, delete' ).
+        zcx_abapgit_exception=>raise( 'SFPI error, delete' ).
     ENDTRY.
 
   ENDMETHOD.                    "delete
@@ -27899,7 +27879,7 @@ CLASS lcl_object_sfpf IMPLEMENTATION.
     TRY.
         ri_wb_form = cl_fp_wb_form=>load( lv_name ).
       CATCH cx_fp_api.
-        lcx_exception=>raise( 'SFPF error, load' ).
+        zcx_abapgit_exception=>raise( 'SFPF error, load' ).
     ENDTRY.
 
   ENDMETHOD.
@@ -27915,7 +27895,7 @@ CLASS lcl_object_sfpf IMPLEMENTATION.
         li_fp_form ?= li_wb_form->get_object( ).
         rv_xstr = cl_fp_helper=>convert_form_to_xstring( li_fp_form ).
       CATCH cx_fp_api.
-        lcx_exception=>raise( 'SFPF error, form_to_xstring' ).
+        zcx_abapgit_exception=>raise( 'SFPF error, form_to_xstring' ).
     ENDTRY.
 
   ENDMETHOD.
@@ -28002,7 +27982,7 @@ CLASS lcl_object_sfpf IMPLEMENTATION.
         li_wb_object->save( ).
         li_wb_object->free( ).
       CATCH cx_fp_api.
-        lcx_exception=>raise( 'SFPF error, deserialize' ).
+        zcx_abapgit_exception=>raise( 'SFPF error, deserialize' ).
     ENDTRY.
 
     lcl_objects_activation=>add_item( ms_item ).
@@ -28038,10 +28018,10 @@ CLASS lcl_object_sfpi DEFINITION INHERITING FROM lcl_objects_super FINAL.
     METHODS:
       load
         RETURNING VALUE(ri_wb_interface) TYPE REF TO if_fp_wb_interface
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       interface_to_xstring
         RETURNING VALUE(rv_xstr) TYPE xstring
-        RAISING lcx_exception.
+        RAISING zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_object_doma DEFINITION
 
@@ -28113,7 +28093,7 @@ CLASS lcl_object_sfpi IMPLEMENTATION.
     TRY.
         lo_wb_interface->delete( lv_name ).
       CATCH cx_fp_api.
-        lcx_exception=>raise( 'SFPI error, delete' ).
+        zcx_abapgit_exception=>raise( 'SFPI error, delete' ).
     ENDTRY.
 
   ENDMETHOD.                    "delete
@@ -28128,7 +28108,7 @@ CLASS lcl_object_sfpi IMPLEMENTATION.
     TRY.
         ri_wb_interface = cl_fp_wb_interface=>load( lv_name ).
       CATCH cx_fp_api.
-        lcx_exception=>raise( 'SFPI error, load' ).
+        zcx_abapgit_exception=>raise( 'SFPI error, load' ).
     ENDTRY.
 
   ENDMETHOD.
@@ -28144,7 +28124,7 @@ CLASS lcl_object_sfpi IMPLEMENTATION.
         li_fp_interface ?= li_wb_interface->get_object( ).
         rv_xstr = cl_fp_helper=>convert_interface_to_xstring( li_fp_interface ).
       CATCH cx_fp_api.
-        lcx_exception=>raise( 'SFPI error, interface_to_xstring' ).
+        zcx_abapgit_exception=>raise( 'SFPI error, interface_to_xstring' ).
     ENDTRY.
 
   ENDMETHOD.
@@ -28181,7 +28161,7 @@ CLASS lcl_object_sfpi IMPLEMENTATION.
         li_wb_object->save( ).
         li_wb_object->free( ).
       CATCH cx_fp_api.
-        lcx_exception=>raise( 'SFPI error, deserialize' ).
+        zcx_abapgit_exception=>raise( 'SFPI error, deserialize' ).
     ENDTRY.
 
     lcl_objects_activation=>add_item( ms_item ).
@@ -28216,7 +28196,7 @@ CLASS lcl_object_sfsw DEFINITION INHERITING FROM lcl_objects_super FINAL.
     METHODS:
       get
         RETURNING VALUE(ro_switch) TYPE REF TO cl_sfw_sw
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_object_sfsw DEFINITION
 
@@ -28280,7 +28260,7 @@ CLASS lcl_object_sfsw IMPLEMENTATION.
     TRY.
         ro_switch = cl_sfw_sw=>get_switch_from_db( lv_switch_id ).
       CATCH cx_pak_invalid_data cx_pak_invalid_state cx_pak_not_authorized.
-        lcx_exception=>raise( 'Error from CL_SFW_SW=>GET_SWITCH' ).
+        zcx_abapgit_exception=>raise( 'Error from CL_SFW_SW=>GET_SWITCH' ).
     ENDTRY.
 
   ENDMETHOD.
@@ -28357,7 +28337,7 @@ CLASS lcl_object_sfsw IMPLEMENTATION.
     TRY.
         lo_switch = cl_sfw_sw=>create_switch( lv_switch_id ).
       CATCH cx_pak_not_authorized cx_pak_invalid_state cx_pak_invalid_data.
-        lcx_exception=>raise( 'error in CL_SFW_SW=>CREATE_SWITCH' ).
+        zcx_abapgit_exception=>raise( 'error in CL_SFW_SW=>CREATE_SWITCH' ).
     ENDTRY.
 
     ls_header-author = sy-uname.
@@ -28378,7 +28358,7 @@ CLASS lcl_object_sfsw IMPLEMENTATION.
         OTHERS    = 2 ).
     SET PARAMETER ID 'EUK' FIELD ''.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error in CL_SFW_SW->SAVE_ALL' ).
+      zcx_abapgit_exception=>raise( 'error in CL_SFW_SW->SAVE_ALL' ).
     ENDIF.
 
 
@@ -28398,7 +28378,7 @@ CLASS lcl_object_sfsw IMPLEMENTATION.
         lo_switch->set_delete_flag( lv_switch_id ).
         lo_switch->save_all( ).
       CATCH cx_pak_invalid_data cx_pak_invalid_state cx_pak_not_authorized.
-        lcx_exception=>raise( 'Error deleting Switch' ).
+        zcx_abapgit_exception=>raise( 'Error deleting Switch' ).
     ENDTRY.
 
   ENDMETHOD.                    "delete
@@ -28447,7 +28427,7 @@ CLASS lcl_object_shi3 DEFINITION INHERITING FROM lcl_objects_super FINAL.
     DATA: mv_tree_id TYPE ttree-id.
 
     METHODS jump_se43
-      RAISING lcx_exception.
+      RAISING zcx_abapgit_exception.
 
     METHODS clear_fields
       CHANGING cs_head  TYPE ttree
@@ -28520,7 +28500,7 @@ CLASS lcl_object_shi3 IMPLEMENTATION.
         OTHERS                = 4.
 
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from ABAP4_CALL_TRANSACTION, SHI3' ).
+      zcx_abapgit_exception=>raise( 'error from ABAP4_CALL_TRANSACTION, SHI3' ).
     ENDIF.
 
   ENDMETHOD.                    "jump_se43
@@ -28559,7 +28539,7 @@ CLASS lcl_object_shi3 IMPLEMENTATION.
         canceled           = 3
         OTHERS             = 4.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from BMENU_DELETE_TREE, SHI3' ).
+      zcx_abapgit_exception=>raise( 'error from BMENU_DELETE_TREE, SHI3' ).
     ENDIF.
 
   ENDMETHOD.                    "delete
@@ -28671,7 +28651,7 @@ CLASS lcl_object_shi3 IMPLEMENTATION.
         no_nodes_given           = 1
         OTHERS                   = 2.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'Error from STREE_HIERARCHY_SAVE, SHI3' ).
+      zcx_abapgit_exception=>raise( 'Error from STREE_HIERARCHY_SAVE, SHI3' ).
     ENDIF.
 
   ENDMETHOD.                    "deserialize
@@ -28780,7 +28760,7 @@ CLASS lcl_object_shlp IMPLEMENTATION.
         object_not_specified = 3
         permission_failure   = 4.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from RS_DD_DELETE_OBJ, SHLP' ).
+      zcx_abapgit_exception=>raise( 'error from RS_DD_DELETE_OBJ, SHLP' ).
     ENDIF.
 
   ENDMETHOD.                    "delete
@@ -28813,7 +28793,7 @@ CLASS lcl_object_shlp IMPLEMENTATION.
         illegal_input = 1
         OTHERS        = 2.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from DDIF_SHLP_GET' ).
+      zcx_abapgit_exception=>raise( 'error from DDIF_SHLP_GET' ).
     ENDIF.
     IF ls_dd30v IS INITIAL.
       RETURN. " does not exist in system
@@ -28887,7 +28867,7 @@ CLASS lcl_object_shlp IMPLEMENTATION.
         put_refused       = 5
         OTHERS            = 6.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from DDIF_SHLP_PUT' ).
+      zcx_abapgit_exception=>raise( 'error from DDIF_SHLP_PUT' ).
     ENDIF.
 
     lcl_objects_activation=>add_item( ms_item ).
@@ -28973,7 +28953,7 @@ CLASS lcl_object_shma IMPLEMENTATION.
                      ig_data = ls_area_attributes ).
 
       CATCH cx_root.
-        lcx_exception=>raise( |Error serializing SHMA { ms_item-obj_name }| ).
+        zcx_abapgit_exception=>raise( |Error serializing SHMA { ms_item-obj_name }| ).
     ENDTRY.
 
   ENDMETHOD.
@@ -29001,7 +28981,7 @@ CLASS lcl_object_shma IMPLEMENTATION.
             silent_mode         = abap_true.
 
       CATCH cx_root.
-        lcx_exception=>raise( |Error serializing SHMA { ms_item-obj_name }| ).
+        zcx_abapgit_exception=>raise( |Error serializing SHMA { ms_item-obj_name }| ).
     ENDTRY.
 
   ENDMETHOD.
@@ -29043,7 +29023,7 @@ CLASS lcl_object_shma IMPLEMENTATION.
             OTHERS               = 3.
 
         IF sy-subrc <> 0.
-          lcx_exception=>raise( |Error deleting SHMA { ms_item-obj_name }| ).
+          zcx_abapgit_exception=>raise( |Error deleting SHMA { ms_item-obj_name }| ).
         ENDIF.
 
         CALL METHOD ('\PROGRAM=SAPMSHM_MONITOR\CLASS=LCL_SHMM')=>('FREE_AREA_BY_NAME')
@@ -29063,7 +29043,7 @@ CLASS lcl_object_shma IMPLEMENTATION.
             appendable  = lv_append.
 
         IF lv_request <> lc_request_delete.
-          lcx_exception=>raise( |Error deleting SHMA { ms_item-obj_name }| ).
+          zcx_abapgit_exception=>raise( |Error deleting SHMA { ms_item-obj_name }| ).
         ENDIF.
 
         CALL METHOD lo_cts_if->('INSERT_AREA')
@@ -29129,7 +29109,7 @@ CLASS lcl_object_shma IMPLEMENTATION.
             _collect             = ' '.
 
       CATCH cx_root.
-        lcx_exception=>raise( |Error deleting SHMA { ms_item-obj_name }| ).
+        zcx_abapgit_exception=>raise( |Error deleting SHMA { ms_item-obj_name }| ).
     ENDTRY.
 
   ENDMETHOD.
@@ -29165,7 +29145,7 @@ CLASS lcl_object_shma IMPLEMENTATION.
         OTHERS    = 1.
 
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from ABAP4_CALL_TRANSACTION, SHMA' ).
+      zcx_abapgit_exception=>raise( 'error from ABAP4_CALL_TRANSACTION, SHMA' ).
     ENDIF.
 
   ENDMETHOD.
@@ -29211,7 +29191,7 @@ CLASS lcl_object_sicf DEFINITION INHERITING FROM lcl_objects_super FINAL.
                 es_icfdocu    TYPE icfdocu
                 et_icfhandler TYPE ty_icfhandler_tt
                 ev_url        TYPE string
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS insert_sicf
       IMPORTING is_icfservice TYPE icfservice
@@ -29219,7 +29199,7 @@ CLASS lcl_object_sicf DEFINITION INHERITING FROM lcl_objects_super FINAL.
                 it_icfhandler TYPE ty_icfhandler_tt
                 iv_package    TYPE devclass
                 iv_url        TYPE string
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS change_sicf
       IMPORTING is_icfservice TYPE icfservice
@@ -29227,7 +29207,7 @@ CLASS lcl_object_sicf DEFINITION INHERITING FROM lcl_objects_super FINAL.
                 it_icfhandler TYPE ty_icfhandler_tt
                 iv_package    TYPE devclass
                 iv_parent     TYPE icfparguid
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS to_icfhndlist
       IMPORTING it_list        TYPE ty_icfhandler_tt
@@ -29236,7 +29216,7 @@ CLASS lcl_object_sicf DEFINITION INHERITING FROM lcl_objects_super FINAL.
     METHODS find_parent
       IMPORTING iv_url           TYPE string
       RETURNING VALUE(rv_parent) TYPE icfparguid
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_object_sicf DEFINITION
 
@@ -29355,7 +29335,7 @@ CLASS lcl_object_sicf IMPLEMENTATION.
         no_authority      = 4
         OTHERS            = 5 ).
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'SICF - error from get_info_from_serv' ).
+      zcx_abapgit_exception=>raise( 'SICF - error from get_info_from_serv' ).
     ENDIF.
 
     ASSERT lines( lt_serv_info ) = 1.
@@ -29445,7 +29425,7 @@ CLASS lcl_object_sicf IMPLEMENTATION.
         no_authority          = 5
         OTHERS                = 6 ).
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'SICF - error from service_from_url' ).
+      zcx_abapgit_exception=>raise( 'SICF - error from service_from_url' ).
     ENDIF.
 
   ENDMETHOD.                    "find_parent
@@ -29506,7 +29486,7 @@ CLASS lcl_object_sicf IMPLEMENTATION.
         no_authority              = 26
         OTHERS                    = 27 ).
     IF sy-subrc <> 0.
-      lcx_exception=>raise( |SICF - error from insert_node: { sy-subrc }| ).
+      zcx_abapgit_exception=>raise( |SICF - error from insert_node: { sy-subrc }| ).
     ENDIF.
 
   ENDMETHOD.                    "insert_sicf
@@ -29572,7 +29552,7 @@ CLASS lcl_object_sicf IMPLEMENTATION.
         no_authority              = 26
         OTHERS                    = 27 ).
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'SICF - error from change_node' ).
+      zcx_abapgit_exception=>raise( 'SICF - error from change_node' ).
     ENDIF.
 
   ENDMETHOD.                    "change_sicf
@@ -29593,7 +29573,7 @@ CLASS lcl_object_sicf IMPLEMENTATION.
 
     IF ls_icfservice-icfparguid CO '0'.
 * not supported by the SAP standard API
-      lcx_exception=>raise( 'SICF - cannot delete root node, delete node manually' ).
+      zcx_abapgit_exception=>raise( 'SICF - cannot delete root node, delete node manually' ).
     ENDIF.
 
     cl_icf_tree=>if_icf_tree~delete_node(
@@ -29615,7 +29595,7 @@ CLASS lcl_object_sicf IMPLEMENTATION.
         no_authority                = 11
         OTHERS                      = 12 ).
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'SICF - error from delete_node' ).
+      zcx_abapgit_exception=>raise( 'SICF - error from delete_node' ).
     ENDIF.
 
   ENDMETHOD.                    "delete
@@ -29651,7 +29631,7 @@ CLASS lcl_object_sicf IMPLEMENTATION.
         OTHERS    = 1.
 
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from ABAP4_CALL_TRANSACTION, SICF' ).
+      zcx_abapgit_exception=>raise( 'error from ABAP4_CALL_TRANSACTION, SICF' ).
     ENDIF.
 
   ENDMETHOD.                    "jump
@@ -29689,7 +29669,7 @@ CLASS lcl_object_smim DEFINITION INHERITING FROM lcl_objects_super FINAL.
     METHODS find_content
       IMPORTING iv_url            TYPE string
       RETURNING VALUE(rv_content) TYPE xstring
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS build_filename
       IMPORTING iv_filename        TYPE string
@@ -29699,7 +29679,7 @@ CLASS lcl_object_smim DEFINITION INHERITING FROM lcl_objects_super FINAL.
       EXPORTING ev_url       TYPE string
                 ev_is_folder TYPE boole_d
       RAISING   lcx_not_found
-                lcx_exception.
+                zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_object_smim DEFINITION
 
@@ -29808,7 +29788,7 @@ CLASS lcl_object_smim IMPLEMENTATION.
 
     READ TABLE lt_files ASSIGNING <ls_file> WITH KEY filename = lv_filename.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'SMIM, file not found' ).
+      zcx_abapgit_exception=>raise( 'SMIM, file not found' ).
     ENDIF.
 
     rv_content = <ls_file>-data.
@@ -29866,7 +29846,7 @@ CLASS lcl_object_smim IMPLEMENTATION.
           permission_failure = 4
           OTHERS             = 5 ).
       IF sy-subrc <> 0 AND sy-subrc <> 2 AND sy-subrc <> 3.
-        lcx_exception=>raise( 'error from mime api->get:' && sy-msgv1 ).
+        zcx_abapgit_exception=>raise( 'error from mime api->get:' && sy-msgv1 ).
       ENDIF.
 
       lv_filename = get_filename( lv_url ).
@@ -29928,7 +29908,7 @@ CLASS lcl_object_smim IMPLEMENTATION.
           folder_exists      = 5
           OTHERS             = 6 ).
       IF sy-subrc <> 5 AND sy-subrc <> 0.
-        lcx_exception=>raise( 'error frrom SMIM create_folder' ).
+        zcx_abapgit_exception=>raise( 'error frrom SMIM create_folder' ).
       ENDIF.
     ELSE.
       lv_filename = get_filename( lv_url ).
@@ -29960,7 +29940,7 @@ CLASS lcl_object_smim IMPLEMENTATION.
           is_folder               = 7
           OTHERS                  = 8 ).
       IF sy-subrc <> 0.
-        lcx_exception=>raise( 'error from SMIM put' ).
+        zcx_abapgit_exception=>raise( 'error from SMIM put' ).
       ENDIF.
     ENDIF.
 
@@ -29993,7 +29973,7 @@ CLASS lcl_object_smim IMPLEMENTATION.
         not_found          = 5
         OTHERS             = 6 ).
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from delete' ).
+      zcx_abapgit_exception=>raise( 'error from delete' ).
     ENDIF.
 
   ENDMETHOD.                    "delete
@@ -30136,7 +30116,7 @@ CLASS lcl_object_splo IMPLEMENTATION.
   ENDMETHOD.                    "lif_object~exists
 
   METHOD lif_object~jump.
-    lcx_exception=>raise( 'todo, jump, SPLO' ).
+    zcx_abapgit_exception=>raise( 'todo, jump, SPLO' ).
   ENDMETHOD.                    "lif_object~jump
 
   METHOD lif_object~compare_to_remote_version.
@@ -30267,7 +30247,7 @@ CLASS lcl_object_ssfo IMPLEMENTATION.
         illegal_formtype      = 6
         OTHERS                = 7.
     IF sy-subrc <> 0 AND sy-subrc <> 2.
-      lcx_exception=>raise( 'Error from FB_DELETE_FORM' ).
+      zcx_abapgit_exception=>raise( 'Error from FB_DELETE_FORM' ).
     ENDIF.
 
   ENDMETHOD.                    "delete
@@ -30465,7 +30445,7 @@ CLASS lcl_object_ssst DEFINITION INHERITING FROM lcl_objects_super FINAL.
   PRIVATE SECTION.
     METHODS validate_font
       IMPORTING iv_tdfamily TYPE tdfamily
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_object_ssst DEFINITION
 
@@ -30516,7 +30496,7 @@ CLASS lcl_object_ssst IMPLEMENTATION.
     SELECT SINGLE tdfamily FROM tfo01 INTO lv_tdfamily
       WHERE tdfamily = iv_tdfamily.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'Font family not found' ).
+      zcx_abapgit_exception=>raise( 'Font family not found' ).
     ENDIF.
 
   ENDMETHOD.                    "validate_font
@@ -30558,7 +30538,7 @@ CLASS lcl_object_ssst IMPLEMENTATION.
     IF sy-subrc = 2.
       RETURN.
     ELSEIF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from SSF_READ_STYLE' ).
+      zcx_abapgit_exception=>raise( 'error from SSF_READ_STYLE' ).
     ENDIF.
 
     CLEAR ls_header-version.
@@ -30639,7 +30619,7 @@ CLASS lcl_object_ssst IMPLEMENTATION.
           illegal_language     = 5
           OTHERS               = 6.
       IF sy-subrc <> 0.
-        lcx_exception=>raise( 'error from SSF_ACTIVATE_STYLE' ).
+        zcx_abapgit_exception=>raise( 'error from SSF_ACTIVATE_STYLE' ).
       ENDIF.
 
     ENDIF.
@@ -30667,7 +30647,7 @@ CLASS lcl_object_ssst IMPLEMENTATION.
         illegal_language      = 6
         OTHERS                = 7.
     IF sy-subrc <> 0 AND sy-subrc <> 2.
-      lcx_exception=>raise( 'error from SSF_DELETE_STYLE' ).
+      zcx_abapgit_exception=>raise( 'error from SSF_DELETE_STYLE' ).
     ENDIF.
 
   ENDMETHOD.                    "delete
@@ -30703,7 +30683,7 @@ CLASS lcl_object_ssst IMPLEMENTATION.
         OTHERS    = 1.
 
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from ABAP4_CALL_TRANSACTION, SSST' ).
+      zcx_abapgit_exception=>raise( 'error from ABAP4_CALL_TRANSACTION, SSST' ).
     ENDIF.
 
   ENDMETHOD.                    "jump
@@ -30845,7 +30825,7 @@ CLASS lcl_object_styl IMPLEMENTATION.
         OTHERS    = 1.
 
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from ABAP4_CALL_TRANSACTION, STYL' ).
+      zcx_abapgit_exception=>raise( 'error from ABAP4_CALL_TRANSACTION, STYL' ).
     ENDIF.
 
   ENDMETHOD.                    "jump
@@ -31127,7 +31107,7 @@ CLASS lcl_object_suso IMPLEMENTATION.
       WHERE object = ms_item-obj_name
       AND langu = mv_language.                          "#EC CI_GENBUFF
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'TOBJT no english description' ).
+      zcx_abapgit_exception=>raise( 'TOBJT no english description' ).
     ENDIF.
 
     SELECT SINGLE * FROM tobjvorflg INTO ls_tobjvorflg
@@ -31255,7 +31235,7 @@ CLASS lcl_object_tabl_valid DEFINITION FINAL.
       RETURNING
         VALUE(rv_message) TYPE string
       RAISING
-        lcx_exception.
+        zcx_abapgit_exception.
 ENDCLASS.
 
 CLASS lcl_tabl_valid_dialog DEFINITION FINAL.
@@ -31325,7 +31305,7 @@ CLASS lcl_tabl_valid_dialog IMPLEMENTATION.
           icon_button_2         = 'ICON_OKAY'
           default_button        = '2'
           display_cancel_button = abap_false ).
-      CATCH lcx_exception.
+      CATCH zcx_abapgit_exception.
         mv_halt = abap_true.
     ENDTRY.
 
@@ -31340,13 +31320,13 @@ CLASS lct_table_validation DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION S
   PRIVATE SECTION.
     METHODS:
       setup,
-      type_changed         FOR TESTING RAISING lcx_exception,
-      no_type_changes      FOR TESTING RAISING lcx_exception,
-      field_not_found      FOR TESTING RAISING lcx_exception,
-      no_fields_no_message FOR TESTING RAISING lcx_exception,
+      type_changed         FOR TESTING RAISING zcx_abapgit_exception,
+      no_type_changes      FOR TESTING RAISING zcx_abapgit_exception,
+      field_not_found      FOR TESTING RAISING zcx_abapgit_exception,
+      no_fields_no_message FOR TESTING RAISING zcx_abapgit_exception,
       create_xmls
         RAISING
-          lcx_exception.
+          zcx_abapgit_exception.
 
     DATA: mo_table_validator            TYPE REF TO lcl_object_tabl_valid,
           mo_previous_version_out_xml   TYPE REF TO lcl_xml_output,
@@ -31635,7 +31615,7 @@ CLASS lcl_object_tabl IMPLEMENTATION.
         object_not_specified = 3
         permission_failure   = 4.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from RS_DD_DELETE_OBJ, TABL' ).
+      zcx_abapgit_exception=>raise( 'error from RS_DD_DELETE_OBJ, TABL' ).
     ENDIF.
 
   ENDMETHOD.                    "delete
@@ -31682,7 +31662,7 @@ CLASS lcl_object_tabl IMPLEMENTATION.
         illegal_input = 1
         OTHERS        = 2.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from DDIF_TABL_GET' ).
+      zcx_abapgit_exception=>raise( 'error from DDIF_TABL_GET' ).
     ENDIF.
     IF ls_dd02v IS INITIAL.
       RETURN. " object does not exits
@@ -31876,7 +31856,7 @@ CLASS lcl_object_tabl IMPLEMENTATION.
         put_refused       = 5
         OTHERS            = 6.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from DDIF_TABL_PUT' ).
+      zcx_abapgit_exception=>raise( 'error from DDIF_TABL_PUT' ).
     ENDIF.
 
     lcl_objects_activation=>add_item( ms_item ).
@@ -31907,7 +31887,7 @@ CLASS lcl_object_tabl IMPLEMENTATION.
           put_refused       = 5
           OTHERS            = 6.
       IF sy-subrc <> 0.
-        lcx_exception=>raise( 'error from DDIF_INDX_PUT' ).
+        zcx_abapgit_exception=>raise( 'error from DDIF_INDX_PUT' ).
       ENDIF.
 
       CALL FUNCTION 'DD_DD_TO_E071'
@@ -32097,7 +32077,7 @@ CLASS lcl_object_tobj IMPLEMENTATION.
     IF sy-subrc = 1.
       RETURN.
     ELSEIF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from CTO_OBJECT_GET' ).
+      zcx_abapgit_exception=>raise( 'error from CTO_OBJECT_GET' ).
     ENDIF.
 
     CLEAR: ls_objh-luser,
@@ -32164,7 +32144,7 @@ CLASS lcl_object_tobj IMPLEMENTATION.
     IF sy-subrc <> 0.
 * TOBJ has to be saved/generated after the DDIC tables have been
 * activated - fixed with late deserialization
-      lcx_exception=>raise( 'error from OBJ_GENERATE' ).
+      zcx_abapgit_exception=>raise( 'error from OBJ_GENERATE' ).
     ENDIF.
 
     io_xml->read( EXPORTING iv_name = 'TOBJ'
@@ -32197,7 +32177,7 @@ CLASS lcl_object_tobj IMPLEMENTATION.
         object_enqueue_failed = 5
         OTHERS                = 6.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from OBJ_GENERATE' ).
+      zcx_abapgit_exception=>raise( 'error from OBJ_GENERATE' ).
     ENDIF.
 
     delete_extra( ls_objh-objectname ).
@@ -32241,7 +32221,7 @@ CLASS lcl_object_tobj IMPLEMENTATION.
         OTHERS    = 1.
 
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from ABAP4_CALL_TRANSACTION, TOBJ' ).
+      zcx_abapgit_exception=>raise( 'error from ABAP4_CALL_TRANSACTION, TOBJ' ).
     ENDIF.
 
   ENDMETHOD.                    "jump
@@ -32299,11 +32279,11 @@ CLASS lcl_object_tran DEFINITION INHERITING FROM lcl_objects_super FINAL.
 
       serialize_texts
         IMPORTING io_xml TYPE REF TO lcl_xml_output
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
 
       deserialize_texts
         IMPORTING io_xml TYPE REF TO lcl_xml_input
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_object_TRAN DEFINITION
 
@@ -32529,7 +32509,7 @@ CLASS lcl_object_tran IMPLEMENTATION.
         object_not_found = 2
         OTHERS           = 3.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'Error from RPY_TRANSACTION_DELETE' ).
+      zcx_abapgit_exception=>raise( 'Error from RPY_TRANSACTION_DELETE' ).
     ENDIF.
 
   ENDMETHOD.                    "delete
@@ -32579,7 +32559,7 @@ CLASS lcl_object_tran IMPLEMENTATION.
         lv_type = ststc_c_type_parameters.
 * todo, or ststc_c_type_variant?
       WHEN OTHERS.
-        lcx_exception=>raise( 'Transaction, unknown CINFO' ).
+        zcx_abapgit_exception=>raise( 'Transaction, unknown CINFO' ).
     ENDCASE.
 
     IF ls_tstcp IS NOT INITIAL.
@@ -32620,7 +32600,7 @@ CLASS lcl_object_tran IMPLEMENTATION.
         db_access_error         = 8
         OTHERS                  = 9.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'Error from RPY_TRANSACTION_INSERT' ).
+      zcx_abapgit_exception=>raise( 'Error from RPY_TRANSACTION_INSERT' ).
     ENDIF.
 
     " Texts deserializing (translations)
@@ -32656,7 +32636,7 @@ CLASS lcl_object_tran IMPLEMENTATION.
     IF sy-subrc = 4 OR sy-subrc = 3.
       RETURN.
     ELSEIF sy-subrc <> 0.
-      lcx_exception=>raise( 'Error from RPY_TRANSACTION_READ' ).
+      zcx_abapgit_exception=>raise( 'Error from RPY_TRANSACTION_READ' ).
     ENDIF.
 
     SELECT SINGLE * FROM tstct INTO ls_tstct
@@ -32729,7 +32709,7 @@ CLASS lcl_object_tran IMPLEMENTATION.
     IF lines( lt_tpool_i18n ) > 0.
       MODIFY tstct FROM TABLE lt_tpool_i18n.
       IF sy-subrc <> 0.
-        lcx_exception=>raise( 'Update of t-code translations failed' ).
+        zcx_abapgit_exception=>raise( 'Update of t-code translations failed' ).
       ENDIF.
     ENDIF.
 
@@ -32834,7 +32814,7 @@ CLASS lcl_object_ttyp IMPLEMENTATION.
         object_not_specified = 3
         permission_failure   = 4.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from RS_DD_DELETE_OBJ, TTYP' ).
+      zcx_abapgit_exception=>raise( 'error from RS_DD_DELETE_OBJ, TTYP' ).
     ENDIF.
 
   ENDMETHOD.                    "delete
@@ -32863,7 +32843,7 @@ CLASS lcl_object_ttyp IMPLEMENTATION.
         illegal_input = 1
         OTHERS        = 2.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from DDIF_TTYP_GET' ).
+      zcx_abapgit_exception=>raise( 'error from DDIF_TTYP_GET' ).
     ENDIF.
     IF ls_dd40v IS INITIAL.
       RETURN. " does not exist in system
@@ -32920,7 +32900,7 @@ CLASS lcl_object_ttyp IMPLEMENTATION.
         put_refused       = 5
         OTHERS            = 6.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from DDIF_TTYP_PUT' ).
+      zcx_abapgit_exception=>raise( 'error from DDIF_TTYP_PUT' ).
     ENDIF.
 
     lcl_objects_activation=>add_item( ms_item ).
@@ -32958,14 +32938,14 @@ CLASS lcl_object_type DEFINITION INHERITING FROM lcl_objects_super FINAL.
     METHODS read
       EXPORTING ev_ddtext TYPE ddtypet-ddtext
                 et_source TYPE abaptxt255_tab
-      RAISING   lcx_exception
+      RAISING   zcx_abapgit_exception
                 lcx_not_found.
 
     METHODS create
       IMPORTING iv_ddtext   TYPE ddtypet-ddtext
                 it_source   TYPE abaptxt255_tab
                 iv_devclass TYPE devclass
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_object_type DEFINITION
 
@@ -32993,7 +32973,7 @@ CLASS lcl_object_type IMPLEMENTATION.
     TRY.
         read( ).
         rv_bool = abap_true.
-      CATCH lcx_not_found lcx_exception.
+      CATCH lcx_not_found zcx_abapgit_exception.
         rv_bool = abap_false.
     ENDTRY.
 
@@ -33029,7 +33009,7 @@ CLASS lcl_object_type IMPLEMENTATION.
         reps_not_exist    = 2
         OTHERS            = 3.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from TYPD_GET_OBJECT' ).
+      zcx_abapgit_exception=>raise( 'error from TYPD_GET_OBJECT' ).
     ENDIF.
 
   ENDMETHOD.                    "read
@@ -33079,14 +33059,14 @@ CLASS lcl_object_type IMPLEMENTATION.
         illegal_name         = 5
         OTHERS               = 6.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from RS_DD_TYGR_INSERT_SOURCES' ).
+      zcx_abapgit_exception=>raise( 'error from RS_DD_TYGR_INSERT_SOURCES' ).
     ENDIF.
 
     CONCATENATE c_prefix lv_typegroup INTO lv_progname.
     UPDATE progdir SET uccheck = abap_true
       WHERE name = lv_progname.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error setting uccheck' ).
+      zcx_abapgit_exception=>raise( 'error setting uccheck' ).
     ENDIF.
 
   ENDMETHOD.                    "create
@@ -33140,7 +33120,7 @@ CLASS lcl_object_type IMPLEMENTATION.
         dialog_needed        = 5
         OTHERS               = 6.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error deleting TYPE' ).
+      zcx_abapgit_exception=>raise( 'error deleting TYPE' ).
     ENDIF.
 
   ENDMETHOD.                    "delete
@@ -33245,7 +33225,7 @@ CLASS lcl_object_vcls IMPLEMENTATION.
         incomplete_viewcluster = 2
         OTHERS                 = 3.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error in VIEWCLUSTER_GET_DEFINITION' ).
+      zcx_abapgit_exception=>raise( 'error in VIEWCLUSTER_GET_DEFINITION' ).
     ENDIF.
 
     CLEAR ls_vcldir_entry-author.
@@ -33304,7 +33284,7 @@ CLASS lcl_object_vcls IMPLEMENTATION.
         object_enqueue_failed = 5
         OTHERS                = 6.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error in OBJ_GENERATE for VCLS' ).
+      zcx_abapgit_exception=>raise( 'error in OBJ_GENERATE for VCLS' ).
     ENDIF.
 
   ENDMETHOD.                    "deserialize
@@ -33352,7 +33332,7 @@ CLASS lcl_object_vcls IMPLEMENTATION.
         missing_corr_number          = 15
         OTHERS                       = 16.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error in VIEWCLUSTER_MAINTENANCE_CALL' ).
+      zcx_abapgit_exception=>raise( 'error in VIEWCLUSTER_MAINTENANCE_CALL' ).
     ENDIF.
 
   ENDMETHOD.                    "jump
@@ -33497,7 +33477,7 @@ CLASS lcl_object_view IMPLEMENTATION.
         object_not_specified = 3
         permission_failure   = 4.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from RS_DD_DELETE_OBJ, VIEW' ).
+      zcx_abapgit_exception=>raise( 'error from RS_DD_DELETE_OBJ, VIEW' ).
     ENDIF.
 
   ENDMETHOD.                    "delete
@@ -33534,7 +33514,7 @@ CLASS lcl_object_view IMPLEMENTATION.
         illegal_input = 1
         OTHERS        = 2.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from DDIF_VIEW_GET' ).
+      zcx_abapgit_exception=>raise( 'error from DDIF_VIEW_GET' ).
     ENDIF.
     IF ls_dd25v IS INITIAL.
       RETURN. " does not exist in system
@@ -33633,7 +33613,7 @@ CLASS lcl_object_view IMPLEMENTATION.
         put_refused       = 5
         OTHERS            = 6.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from DDIF_VIEW_PUT' ).
+      zcx_abapgit_exception=>raise( 'error from DDIF_VIEW_PUT' ).
     ENDIF.
 
     lcl_objects_activation=>add_item( ms_item ).
@@ -33690,22 +33670,22 @@ CLASS lcl_object_w3super DEFINITION INHERITING FROM lcl_objects_super ABSTRACT.
     METHODS get_ext
       IMPORTING it_params     TYPE ty_wwwparams_tt
       RETURNING VALUE(rv_ext) TYPE string
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS normalize_params
       IMPORTING iv_size   TYPE i
       CHANGING  ct_params TYPE ty_wwwparams_tt  " Param table to patch
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS strip_params
       CHANGING ct_params TYPE ty_wwwparams_tt
-      RAISING  lcx_exception.
+      RAISING  zcx_abapgit_exception.
 
     METHODS find_param
       IMPORTING it_params       TYPE ty_wwwparams_tt
                 iv_name         TYPE w3_name
       RETURNING VALUE(rv_value) TYPE string
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
 ENDCLASS. "lcl_object_W3SUPER DEFINITION
 
@@ -33742,7 +33722,7 @@ CLASS lcl_object_w3super IMPLEMENTATION.
 
   METHOD lif_object~jump.
     " No idea how to jump to SMW0
-    lcx_exception=>raise( 'Please go to SMW0 for W3MI object' ).
+    zcx_abapgit_exception=>raise( 'Please go to SMW0 for W3MI object' ).
   ENDMETHOD.                    "jump
 
   METHOD lif_object~get_metadata.
@@ -33799,7 +33779,7 @@ CLASS lcl_object_w3super IMPLEMENTATION.
         import_error      = 2.
 
     IF sy-subrc IS NOT INITIAL.
-      lcx_exception=>raise( 'Cannot read W3xx data' ).
+      zcx_abapgit_exception=>raise( 'Cannot read W3xx data' ).
     ENDIF.
 
     CALL FUNCTION 'WWWPARAMS_READ_ALL'
@@ -33812,7 +33792,7 @@ CLASS lcl_object_w3super IMPLEMENTATION.
         entry_not_exists = 1.
 
     IF sy-subrc IS NOT INITIAL.
-      lcx_exception=>raise( 'Cannot read W3xx data' ).
+      zcx_abapgit_exception=>raise( 'Cannot read W3xx data' ).
     ENDIF.
 
     lv_size = find_param( it_params = lt_w3params iv_name = c_param_names-filesize ).
@@ -33839,11 +33819,11 @@ CLASS lcl_object_w3super IMPLEMENTATION.
           EXCEPTIONS
             failed   = 1.
       WHEN OTHERS.
-        lcx_exception=>raise( 'Wrong W3xx type' ).
+        zcx_abapgit_exception=>raise( 'Wrong W3xx type' ).
     ENDCASE.
 
     IF sy-subrc IS NOT INITIAL.
-      lcx_exception=>raise( 'Cannot convert W3xx to xstring' ).
+      zcx_abapgit_exception=>raise( 'Cannot convert W3xx to xstring' ).
     ENDIF.
 
     io_xml->add( iv_name = 'NAME'
@@ -33888,7 +33868,7 @@ CLASS lcl_object_w3super IMPLEMENTATION.
         lv_xstring = lif_object~mo_files->read_raw( iv_extra = 'data'
                                                     iv_ext   = get_ext( lt_w3params ) ).
       WHEN OTHERS.
-        lcx_exception=>raise( 'W3xx: Unknown serializer version' ).
+        zcx_abapgit_exception=>raise( 'W3xx: Unknown serializer version' ).
     ENDCASE.
 
     CASE ms_key-relid.
@@ -33920,12 +33900,12 @@ CLASS lcl_object_w3super IMPLEMENTATION.
           EXCEPTIONS
             failed        = 1.
         IF sy-subrc IS NOT INITIAL.
-          lcx_exception=>raise( 'Cannot update W3xx params' ).
+          zcx_abapgit_exception=>raise( 'Cannot update W3xx params' ).
         ENDIF.
 
         CLEAR lt_w3mime.
       WHEN OTHERS.
-        lcx_exception=>raise( 'Wrong W3xx type' ).
+        zcx_abapgit_exception=>raise( 'Wrong W3xx type' ).
     ENDCASE.
 
     " Update size of file based on actual data file size, prove param object name
@@ -33939,7 +33919,7 @@ CLASS lcl_object_w3super IMPLEMENTATION.
         update_error = 1.
 
     IF sy-subrc IS NOT INITIAL.
-      lcx_exception=>raise( 'Cannot update W3xx params' ).
+      zcx_abapgit_exception=>raise( 'Cannot update W3xx params' ).
     ENDIF.
 
     ms_key-tdate    = sy-datum.
@@ -33958,7 +33938,7 @@ CLASS lcl_object_w3super IMPLEMENTATION.
         export_error      = 2.
 
     IF sy-subrc IS NOT INITIAL.
-      lcx_exception=>raise( 'Cannot upload W3xx data' ).
+      zcx_abapgit_exception=>raise( 'Cannot upload W3xx data' ).
     ENDIF.
 
     CONCATENATE 'W3' ms_key-relid INTO lv_tadir_obj.
@@ -33998,7 +33978,7 @@ CLASS lcl_object_w3super IMPLEMENTATION.
         OTHERS                         = 99.
 
     IF sy-subrc IS NOT INITIAL.
-      lcx_exception=>raise( 'Cannot update TADIR for W3xx' ).
+      zcx_abapgit_exception=>raise( 'Cannot update TADIR for W3xx' ).
     ENDIF.
 
   ENDMETHOD.                    "lif_object~deserialize
@@ -34013,7 +33993,7 @@ CLASS lcl_object_w3super IMPLEMENTATION.
         delete_error      = 2.
 
     IF sy-subrc IS NOT INITIAL.
-      lcx_exception=>raise( 'Cannot delete W3xx data' ).
+      zcx_abapgit_exception=>raise( 'Cannot delete W3xx data' ).
     ENDIF.
 
     CALL FUNCTION 'WWWPARAMS_DELETE_ALL'
@@ -34023,7 +34003,7 @@ CLASS lcl_object_w3super IMPLEMENTATION.
         delete_error = 1.
 
     IF sy-subrc IS NOT INITIAL.
-      lcx_exception=>raise( 'Cannot delete W3xx params' ).
+      zcx_abapgit_exception=>raise( 'Cannot delete W3xx params' ).
     ENDIF.
 
   ENDMETHOD.                    "lif_object~delete
@@ -34078,7 +34058,7 @@ CLASS lcl_object_w3super IMPLEMENTATION.
 
     READ TABLE it_params ASSIGNING <param> WITH KEY name = iv_name.
     IF sy-subrc > 0.
-      lcx_exception=>raise( |W3xx: Cannot find { iv_name } for { ms_key-objid }| ).
+      zcx_abapgit_exception=>raise( |W3xx: Cannot find { iv_name } for { ms_key-objid }| ).
     ENDIF.
 
     rv_value = <param>-value.
@@ -34154,7 +34134,7 @@ CLASS lcl_object_wapa DEFINITION INHERITING FROM lcl_objects_super FINAL.
       read_page
         IMPORTING is_page        TYPE o2pagattr
         RETURNING VALUE(rs_page) TYPE ty_page
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_object_TRAN DEFINITION
 
@@ -34330,7 +34310,7 @@ CLASS lcl_object_wapa IMPLEMENTATION.
         error_occured           = 7
         invalid_parameter       = 8 ).
     IF sy-subrc <> 0.
-      lcx_exception=>raise( |WAPA - error from create_new: { sy-subrc }| ).
+      zcx_abapgit_exception=>raise( |WAPA - error from create_new: { sy-subrc }| ).
     ENDIF.
 
     lo_bsp->save( ).
@@ -34569,13 +34549,13 @@ CLASS lcl_object_wdya DEFINITION INHERITING FROM lcl_objects_super FINAL.
     METHODS read
       EXPORTING es_app        TYPE wdy_application
                 et_properties TYPE wdy_app_property_table
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS save
       IMPORTING is_app        TYPE wdy_application
                 it_properties TYPE wdy_app_property_table
                 iv_package    TYPE devclass
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_object_wdya DEFINITION
 
@@ -34635,7 +34615,7 @@ CLASS lcl_object_wdya IMPLEMENTATION.
       CATCH cx_wdy_md_not_existing.
         rv_bool = abap_false.
       CATCH cx_wdy_md_permission_failure.
-        lcx_exception=>raise( 'WDYA, permission failure' ).
+        zcx_abapgit_exception=>raise( 'WDYA, permission failure' ).
     ENDTRY.
 
   ENDMETHOD.                    "lif_object~exists
@@ -34660,7 +34640,7 @@ CLASS lcl_object_wdya IMPLEMENTATION.
       CATCH cx_wdy_md_not_existing.
         RETURN.
       CATCH cx_wdy_md_permission_failure.
-        lcx_exception=>raise( 'WDYA, permission failure' ).
+        zcx_abapgit_exception=>raise( 'WDYA, permission failure' ).
     ENDTRY.
 
     li_app->if_wdy_md_object~get_definition( IMPORTING definition = es_app ).
@@ -34718,7 +34698,7 @@ CLASS lcl_object_wdya IMPLEMENTATION.
 
         lo_app->if_wdy_md_lockable_object~save_to_database( ).
       CATCH cx_wdy_md_exception.
-        lcx_exception=>raise( 'error saving WDYA' ).
+        zcx_abapgit_exception=>raise( 'error saving WDYA' ).
     ENDTRY.
 
   ENDMETHOD.                    "save
@@ -34771,7 +34751,7 @@ CLASS lcl_object_wdya IMPLEMENTATION.
       CATCH cx_wdy_md_not_existing.
         RETURN.
       CATCH cx_wdy_md_exception.
-        lcx_exception=>raise( 'WDYA, error deleting' ).
+        zcx_abapgit_exception=>raise( 'WDYA, error deleting' ).
     ENDTRY.
 
   ENDMETHOD.                    "delete
@@ -34823,42 +34803,42 @@ CLASS lcl_object_wdyn DEFINITION INHERITING FROM lcl_objects_super FINAL.
         RETURNING VALUE(rt_objects) TYPE wdy_md_transport_keys,
       read
         RETURNING VALUE(rs_component) TYPE wdy_component_metadata
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       read_controller
         IMPORTING is_key               TYPE wdy_md_controller_key
         RETURNING VALUE(rs_controller) TYPE wdy_md_controller_meta_data
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       read_definition
         IMPORTING is_key               TYPE wdy_md_component_key
         RETURNING VALUE(rs_definition) TYPE wdy_md_component_meta_data
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       read_view
         IMPORTING is_key         TYPE wdy_md_view_key
         RETURNING VALUE(rs_view) TYPE wdy_md_view_meta_data
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       recover_controller
         IMPORTING is_controller TYPE wdy_md_controller_meta_data
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       recover_definition
         IMPORTING is_definition TYPE wdy_md_component_meta_data
                   iv_package    TYPE devclass
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       recover_view
         IMPORTING is_view TYPE wdy_md_view_meta_data
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       delta_controller
         IMPORTING is_controller   TYPE wdy_md_controller_meta_data
         RETURNING VALUE(rs_delta) TYPE svrs2_xversionable_object
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       delta_definition
         IMPORTING is_definition     TYPE wdy_md_component_meta_data
                   VALUE(iv_package) TYPE devclass
         RETURNING VALUE(rs_delta)   TYPE svrs2_xversionable_object
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       delta_view
         IMPORTING is_view         TYPE wdy_md_view_meta_data
         RETURNING VALUE(rs_delta) TYPE svrs2_xversionable_object
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       add_fm_param_exporting
         IMPORTING i_name   TYPE string
                   i_value  TYPE any
@@ -34930,7 +34910,7 @@ CLASS lcl_object_wdyn IMPLEMENTATION.
           li_component->save_to_database( ).
           li_component->unlock( ).
         CATCH cx_wdy_md_exception.
-          lcx_exception=>raise( 'error creating dummy component' ).
+          zcx_abapgit_exception=>raise( 'error creating dummy component' ).
       ENDTRY.
     ENDIF.
 
@@ -34957,7 +34937,7 @@ CLASS lcl_object_wdyn IMPLEMENTATION.
       EXCEPTIONS
         inconsistent_objects = 1.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from SVRS_MAKE_OBJECT_DELTA' ).
+      zcx_abapgit_exception=>raise( 'error from SVRS_MAKE_OBJECT_DELTA' ).
     ENDIF.
 
   ENDMETHOD.                    "delta_definition
@@ -34993,7 +34973,7 @@ CLASS lcl_object_wdyn IMPLEMENTATION.
           li_controller->save_to_database( ).
           li_controller->unlock( ).
         CATCH cx_wdy_md_exception.
-          lcx_exception=>raise( 'error creating dummy controller' ).
+          zcx_abapgit_exception=>raise( 'error creating dummy controller' ).
       ENDTRY.
     ENDIF.
 
@@ -35053,7 +35033,7 @@ CLASS lcl_object_wdyn IMPLEMENTATION.
       EXCEPTIONS
         inconsistent_objects = 1.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from SVRS_MAKE_OBJECT_DELTA' ).
+      zcx_abapgit_exception=>raise( 'error from SVRS_MAKE_OBJECT_DELTA' ).
     ENDIF.
 
   ENDMETHOD.                    "delta_controller
@@ -35084,7 +35064,7 @@ CLASS lcl_object_wdyn IMPLEMENTATION.
           li_view->save_to_database( ).
           li_view->unlock( ).
         CATCH cx_wdy_md_exception.
-          lcx_exception=>raise( 'error creating dummy view' ).
+          zcx_abapgit_exception=>raise( 'error creating dummy view' ).
       ENDTRY.
     ENDIF.
 
@@ -35124,7 +35104,7 @@ CLASS lcl_object_wdyn IMPLEMENTATION.
       EXCEPTIONS
         inconsistent_objects = 1.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from SVRS_MAKE_OBJECT_DELTA' ).
+      zcx_abapgit_exception=>raise( 'error from SVRS_MAKE_OBJECT_DELTA' ).
     ENDIF.
 
   ENDMETHOD.                    "delta_view
@@ -35284,7 +35264,7 @@ CLASS lcl_object_wdyn IMPLEMENTATION.
       EXCEPTION-TABLE
       lt_fm_exception.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from WDYC_GET_OBJECT' ).
+      zcx_abapgit_exception=>raise( 'error from WDYC_GET_OBJECT' ).
     ENDIF.
 
     APPEND LINES OF lt_components TO mt_components.
@@ -35292,7 +35272,7 @@ CLASS lcl_object_wdyn IMPLEMENTATION.
 
     READ TABLE lt_definition INDEX 1 INTO rs_controller-definition.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'WDYC, definition not found' ).
+      zcx_abapgit_exception=>raise( 'WDYC, definition not found' ).
     ENDIF.
 
     CLEAR: rs_controller-definition-author,
@@ -35329,12 +35309,12 @@ CLASS lcl_object_wdyn IMPLEMENTATION.
     IF sy-subrc = 1.
       RETURN.
     ELSEIF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from WDYD_GET_OBJECT' ).
+      zcx_abapgit_exception=>raise( 'error from WDYD_GET_OBJECT' ).
     ENDIF.
 
     READ TABLE lt_definition INDEX 1 INTO rs_definition-definition.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'WDYD, definition not found' ).
+      zcx_abapgit_exception=>raise( 'WDYD, definition not found' ).
     ENDIF.
 
     CLEAR: rs_definition-definition-author,
@@ -35384,7 +35364,7 @@ CLASS lcl_object_wdyn IMPLEMENTATION.
         not_existing           = 1
         OTHERS                 = 2.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from WDYV_GET_OBJECT' ).
+      zcx_abapgit_exception=>raise( 'error from WDYV_GET_OBJECT' ).
     ENDIF.
 
     READ TABLE lt_definition INDEX 1 ASSIGNING <ls_definition>.
@@ -35657,19 +35637,19 @@ CLASS lcl_object_webi DEFINITION INHERITING FROM lcl_objects_super FINAL.
     METHODS:
       handle_endpoint
         IMPORTING is_webi TYPE ty_webi
-        RAISING   lcx_exception
+        RAISING   zcx_abapgit_exception
                   cx_ws_md_exception,
       handle_types
         IMPORTING is_webi TYPE ty_webi
-        RAISING   lcx_exception
+        RAISING   zcx_abapgit_exception
                   cx_ws_md_exception,
       handle_soap
         IMPORTING is_webi TYPE ty_webi
-        RAISING   lcx_exception
+        RAISING   zcx_abapgit_exception
                   cx_ws_md_exception,
       handle_function
         IMPORTING is_webi TYPE ty_webi
-        RAISING   lcx_exception
+        RAISING   zcx_abapgit_exception
                   cx_ws_md_exception.
 
 ENDCLASS.                    "lcl_object_SFBS DEFINITION
@@ -35725,7 +35705,7 @@ CLASS lcl_object_webi IMPLEMENTATION.
         webi_not_exist    = 2
         OTHERS            = 3.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from WEBI_GET_OBJECT' ).
+      zcx_abapgit_exception=>raise( 'error from WEBI_GET_OBJECT' ).
     ENDIF.
 
     SORT ls_webi-pveptype BY
@@ -35738,7 +35718,7 @@ CLASS lcl_object_webi IMPLEMENTATION.
         li_vi = cl_ws_md_factory=>get_vif_root( )->get_virtual_interface( lv_name ).
         ls_webi-veptext = li_vi->get_short_text( sews_c_vif_version-active ).
       CATCH cx_ws_md_exception.
-        lcx_exception=>raise( 'error serializing WEBI' ).
+        zcx_abapgit_exception=>raise( 'error serializing WEBI' ).
     ENDTRY.
 
     LOOP AT ls_webi-pvepheader ASSIGNING <ls_header>.
@@ -35781,11 +35761,11 @@ CLASS lcl_object_webi IMPLEMENTATION.
     IF ls_endpoint-endpointtype = 'BAPI'.
 * it looks like some special handling is needed when calling
 * set_data, and looking at the cluster data LS_ENDPOINT-CLUSTD
-      lcx_exception=>raise( 'todo, WEBI BAPI' ).
+      zcx_abapgit_exception=>raise( 'todo, WEBI BAPI' ).
     ENDIF.
 
     IF lines( is_webi-pvepfunction ) <> 1.
-      lcx_exception=>raise( 'todo, WEBI, function name' ).
+      zcx_abapgit_exception=>raise( 'todo, WEBI, function name' ).
     ENDIF.
 
 * field ls_endpoint-endpointname does not exist in 702
@@ -36010,7 +35990,7 @@ CLASS lcl_object_webi IMPLEMENTATION.
           CATCH cx_ws_md_exception ##no_handler.
         ENDTRY.
         lv_text = lx_root->if_message~get_text( ).
-        lcx_exception=>raise( 'error deserializing WEBI' ).
+        zcx_abapgit_exception=>raise( 'error deserializing WEBI' ).
     ENDTRY.
 
     lcl_objects_activation=>add_item( ms_item ).
@@ -36029,7 +36009,7 @@ CLASS lcl_object_webi IMPLEMENTATION.
     TRY.
         lo_vif->if_ws_md_vif_root~delete_virtual_interface( lv_name ).
       CATCH cx_ws_md_exception.
-        lcx_exception=>raise( 'error deleting WEBI' ).
+        zcx_abapgit_exception=>raise( 'error deleting WEBI' ).
     ENDTRY.
 
   ENDMETHOD.                    "lif_object~delete
@@ -36091,7 +36071,7 @@ CLASS lcl_object_xslt DEFINITION INHERITING FROM lcl_objects_super FINAL.
     METHODS:
       get
         RETURNING VALUE(ro_xslt) TYPE REF TO cl_o2_api_xsltdesc
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_object_xslt DEFINITION
 
@@ -36127,7 +36107,7 @@ CLASS lcl_object_xslt IMPLEMENTATION.
         permission_failure = 2
         OTHERS             = 3 ).
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from cl_o2_api_xsltdesc=>load' ).
+      zcx_abapgit_exception=>raise( 'error from cl_o2_api_xsltdesc=>load' ).
     ENDIF.
 
   ENDMETHOD.
@@ -36200,7 +36180,7 @@ CLASS lcl_object_xslt IMPLEMENTATION.
         undefined_name          = 5
         OTHERS                  = 6 ).
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from cl_o2_api_xsltdesc=>create_new_from_string' ).
+      zcx_abapgit_exception=>raise( 'error from cl_o2_api_xsltdesc=>create_new_from_string' ).
     ENDIF.
 
     lo_xslt->activate( ).
@@ -36233,7 +36213,7 @@ CLASS lcl_object_xslt IMPLEMENTATION.
         version_not_found  = 4
         OTHERS             = 5 ).
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from cl_o2_api_xsltdesc=>load' ).
+      zcx_abapgit_exception=>raise( 'error from cl_o2_api_xsltdesc=>load' ).
     ENDIF.
 
     lo_xslt->set_changeable( abap_true ).
@@ -36426,7 +36406,7 @@ CLASS lcl_repo_online IMPLEMENTATION.
   METHOD deserialize.
 
     IF ms_data-write_protect = abap_true.
-      lcx_exception=>raise( 'Cannot deserialize. Local code is write-protected by repo config' ).
+      zcx_abapgit_exception=>raise( 'Cannot deserialize. Local code is write-protected by repo config' ).
     ENDIF.
 
     initialize( ).
@@ -36447,7 +36427,7 @@ CLASS lcl_repo_online IMPLEMENTATION.
 
   METHOD refresh.
 
-    DATA: lx_exception TYPE REF TO lcx_exception.
+    DATA: lx_exception TYPE REF TO zcx_abapgit_exception.
 
     super->refresh( iv_drop_cache ).
     reset_status( ).
@@ -36464,7 +36444,7 @@ CLASS lcl_repo_online IMPLEMENTATION.
                                            et_objects = mt_objects
                                            ev_branch  = mv_branch ).
 
-      CATCH lcx_exception INTO lx_exception.
+      CATCH zcx_abapgit_exception INTO lx_exception.
 
         delete_initial_online_repo( abap_true ).
 
@@ -36529,7 +36509,7 @@ CLASS lcl_repo_online IMPLEMENTATION.
   METHOD set_url.
 
     IF ms_data-write_protect = abap_true.
-      lcx_exception=>raise( 'Cannot change URL. Local code is write-protected by repo config' ).
+      zcx_abapgit_exception=>raise( 'Cannot change URL. Local code is write-protected by repo config' ).
     ENDIF.
 
     mv_initialized = abap_false.
@@ -36540,7 +36520,7 @@ CLASS lcl_repo_online IMPLEMENTATION.
   METHOD set_branch_name.
 
     IF ms_data-write_protect = abap_true.
-      lcx_exception=>raise( 'Cannot switch branch. Local code is write-protected by repo config' ).
+      zcx_abapgit_exception=>raise( 'Cannot switch branch. Local code is write-protected by repo config' ).
     ENDIF.
 
     mv_initialized = abap_false.
@@ -36551,7 +36531,7 @@ CLASS lcl_repo_online IMPLEMENTATION.
   METHOD set_new_remote.
 
     IF ms_data-write_protect = abap_true.
-      lcx_exception=>raise( 'Cannot change remote. Local code is write-protected by repo config' ).
+      zcx_abapgit_exception=>raise( 'Cannot change remote. Local code is write-protected by repo config' ).
     ENDIF.
 
     mv_initialized = abap_false.
@@ -36942,7 +36922,7 @@ CLASS lcl_repo IMPLEMENTATION.
 
 
     IF get_dot_abapgit( )->get_master_language( ) <> sy-langu.
-      lcx_exception=>raise( 'Current login language does not match master language' ).
+      zcx_abapgit_exception=>raise( 'Current login language does not match master language' ).
     ENDIF.
 
     lo_dot_abapgit = find_remote_dot_abapgit( ).
@@ -37220,7 +37200,7 @@ CLASS lcl_repo_srv IMPLEMENTATION.
       ENDIF.
     ENDLOOP.
 
-    lcx_exception=>raise( 'repo not found, get' ).
+    zcx_abapgit_exception=>raise( 'repo not found, get' ).
 
   ENDMETHOD.                    "get
 
@@ -37271,7 +37251,7 @@ CLASS lcl_repo_srv IMPLEMENTATION.
     TRY.
         ls_repo = mo_persistence->read( lv_key ).
       CATCH lcx_not_found.
-        lcx_exception=>raise( 'new_online not found' ).
+        zcx_abapgit_exception=>raise( 'new_online not found' ).
     ENDTRY.
 
     CREATE OBJECT ro_repo
@@ -37300,7 +37280,7 @@ CLASS lcl_repo_srv IMPLEMENTATION.
     TRY.
         ls_repo = mo_persistence->read( lv_key ).
       CATCH lcx_not_found.
-        lcx_exception=>raise( 'new_offline not found' ).
+        zcx_abapgit_exception=>raise( 'new_offline not found' ).
     ENDTRY.
 
     CREATE OBJECT ro_repo
@@ -37321,7 +37301,7 @@ CLASS lcl_repo_srv IMPLEMENTATION.
         IF lo_repo = io_repo.
           RETURN.
         ENDIF.
-        lcx_exception=>raise( 'identical keys' ).
+        zcx_abapgit_exception=>raise( 'identical keys' ).
       ENDIF.
     ENDLOOP.
 
@@ -37336,11 +37316,11 @@ CLASS lcl_repo_srv IMPLEMENTATION.
 
 
     IF iv_package IS INITIAL.
-      lcx_exception=>raise( 'add, package empty' ).
+      zcx_abapgit_exception=>raise( 'add, package empty' ).
     ENDIF.
 
     IF iv_package = '$TMP'.
-      lcx_exception=>raise( 'not possible to use $TMP, create new (local) package' ).
+      zcx_abapgit_exception=>raise( 'not possible to use $TMP, create new (local) package' ).
     ENDIF.
 
     IF lcl_exit=>get_instance( )->allow_sap_objects( ) = abap_true.
@@ -37352,14 +37332,14 @@ CLASS lcl_repo_srv IMPLEMENTATION.
         AND as4user <> 'SAP'.                           "#EC CI_GENBUFF
     ENDIF.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'package not found or not allowed' ).
+      zcx_abapgit_exception=>raise( 'package not found or not allowed' ).
     ENDIF.
 
     " make sure its not already in use for a different repository
     lt_repos = mo_persistence->list( ).
     READ TABLE lt_repos WITH KEY package = iv_package TRANSPORTING NO FIELDS.
     IF sy-subrc = 0.
-      lcx_exception=>raise( 'Package already in use' ).
+      zcx_abapgit_exception=>raise( 'Package already in use' ).
     ENDIF.
 
   ENDMETHOD.                    "validate_package
@@ -37397,7 +37377,7 @@ CLASS lcl_repo_srv IMPLEMENTATION.
       IF iv_target_package IS NOT INITIAL AND iv_target_package <> lv_package.
         lv_err = |Installation to package { lv_package } detected. |
               && |Cancelling installation|.
-        lcx_exception=>raise( lv_err ).
+        zcx_abapgit_exception=>raise( lv_err ).
       ENDIF.
 
       rv_installed = abap_true.
@@ -37451,7 +37431,7 @@ CLASS lcl_background DEFINITION FINAL.
   PUBLIC SECTION.
     CLASS-METHODS:
       run
-        RAISING lcx_exception.
+        RAISING zcx_abapgit_exception.
 
   PRIVATE SECTION.
     CLASS-METHODS:
@@ -37461,14 +37441,14 @@ CLASS lcl_background DEFINITION FINAL.
       push
         IMPORTING io_repo     TYPE REF TO lcl_repo_online
                   is_settings TYPE lcl_persist_background=>ty_background
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       push_fixed
         IMPORTING io_repo     TYPE REF TO lcl_repo_online
                   is_settings TYPE lcl_persist_background=>ty_background
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       push_auto
         IMPORTING io_repo TYPE REF TO lcl_repo_online
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
 ENDCLASS.
 
@@ -37488,7 +37468,7 @@ CLASS lcl_background IMPLEMENTATION.
       WHEN lcl_persist_background=>c_amethod-auto.
         push_auto( io_repo ).
       WHEN OTHERS.
-        lcx_exception=>raise( 'unknown push method' ).
+        zcx_abapgit_exception=>raise( 'unknown push method' ).
     ENDCASE.
 
   ENDMETHOD.
@@ -37677,7 +37657,7 @@ CLASS lcl_background IMPLEMENTATION.
           push( io_repo     = lo_repo
                 is_settings = <ls_list> ).
         WHEN OTHERS.
-          lcx_exception=>raise( 'background, unknown mode' ).
+          zcx_abapgit_exception=>raise( 'background, unknown mode' ).
       ENDCASE.
     ENDLOOP.
 
@@ -37704,24 +37684,24 @@ CLASS lcl_transport DEFINITION FINAL.
 
   PUBLIC SECTION.
     CLASS-METHODS:
-      zip RAISING lcx_exception,
+      zip RAISING zcx_abapgit_exception,
       to_tadir IMPORTING it_transport_headers TYPE trwbo_request_headers
                RETURNING VALUE(rt_tadir)      TYPE scts_tadir
-               RAISING   lcx_exception.
+               RAISING   zcx_abapgit_exception.
 
   PRIVATE SECTION.
     CLASS-METHODS:
       read_requests
         IMPORTING it_trkorr          TYPE trwbo_request_headers
         RETURNING VALUE(rt_requests) TYPE trwbo_requests
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       find_top_package
         IMPORTING it_tadir          TYPE scts_tadir
         RETURNING VALUE(rv_package) TYPE devclass,
       resolve
         IMPORTING it_requests     TYPE trwbo_requests
         RETURNING VALUE(rt_tadir) TYPE scts_tadir
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
 ENDCLASS.
 
@@ -37744,12 +37724,12 @@ CLASS lcl_transport IMPLEMENTATION.
     lt_requests = read_requests( lt_trkorr ).
     lt_tadir = resolve( lt_requests ).
     IF lines( lt_tadir ) = 0.
-      lcx_exception=>raise( 'empty transport' ).
+      zcx_abapgit_exception=>raise( 'empty transport' ).
     ENDIF.
 
     lv_package = find_top_package( lt_tadir ).
     IF lv_package IS INITIAL.
-      lcx_exception=>raise( 'error finding super package' ).
+      zcx_abapgit_exception=>raise( 'error finding super package' ).
     ENDIF.
 
     ls_data-key         = 'TZIP'.
@@ -37822,7 +37802,7 @@ CLASS lcl_transport IMPLEMENTATION.
           invalid_input = 1
           OTHERS        = 2.
       IF sy-subrc <> 0.
-        lcx_exception=>raise( 'error from TR_READ_REQUEST_WITH_TASKS' ).
+        zcx_abapgit_exception=>raise( 'error from TR_READ_REQUEST_WITH_TASKS' ).
       ENDIF.
 
       APPEND LINES OF lt_requests TO rt_requests.
@@ -37853,7 +37833,7 @@ CLASS lcl_transport IMPLEMENTATION.
               no_mapping     = 1
               OTHERS         = 2.
           IF sy-subrc <> 0.
-            lcx_exception=>raise( 'error from GET_R3TR_OBJECT_FROM_LIMU_OBJ' ).
+            zcx_abapgit_exception=>raise( 'error from GET_R3TR_OBJECT_FROM_LIMU_OBJ' ).
           ENDIF.
           lv_obj_name = lv_trobj_name.
         ELSE.
@@ -37887,7 +37867,7 @@ CLASS lcl_transport_objects DEFINITION.
         is_stage_objects   TYPE lif_defs=>ty_stage_files
         it_object_statuses TYPE lif_defs=>ty_results_tt
       RAISING
-        lcx_exception.
+        zcx_abapgit_exception.
   PRIVATE SECTION.
     DATA mt_transport_objects TYPE scts_tadir.
 ENDCLASS.
@@ -37911,7 +37891,7 @@ CLASS lcl_transport_objects IMPLEMENTATION.
         CASE ls_object_status-lstate.
           WHEN lif_defs=>gc_state-added OR lif_defs=>gc_state-modified.
             IF ls_transport_object-delflag = abap_true.
-              lcx_exception=>raise( |Object { ls_transport_object-obj_name
+              zcx_abapgit_exception=>raise( |Object { ls_transport_object-obj_name
               } should be added/modified, but has deletion flag in transport| ).
             ENDIF.
 
@@ -37921,7 +37901,7 @@ CLASS lcl_transport_objects IMPLEMENTATION.
                        item-obj_type = ls_transport_object-object
                        file-filename = ls_object_status-filename.
             IF sy-subrc <> 0.
-              lcx_exception=>raise( |Object { ls_transport_object-obj_name
+              zcx_abapgit_exception=>raise( |Object { ls_transport_object-obj_name
               } not found in the local repository files| ).
             ENDIF.
 
@@ -37931,7 +37911,7 @@ CLASS lcl_transport_objects IMPLEMENTATION.
               iv_data     = ls_local_file-file-data ).
           WHEN lif_defs=>gc_state-deleted.
             IF ls_transport_object-delflag = abap_false.
-              lcx_exception=>raise( |Object { ls_transport_object-obj_name
+              zcx_abapgit_exception=>raise( |Object { ls_transport_object-obj_name
               } should be removed, but has NO deletion flag in transport| ).
             ENDIF.
             io_stage->rm(
@@ -37942,7 +37922,7 @@ CLASS lcl_transport_objects IMPLEMENTATION.
         ENDCASE.
       ENDLOOP.
       IF sy-subrc <> 0.
-        lcx_exception=>raise( |Object { ls_transport_object-obj_name
+        zcx_abapgit_exception=>raise( |Object { ls_transport_object-obj_name
         } not found in the local repository files| ).
       ENDIF.
     ENDLOOP.
@@ -37957,7 +37937,7 @@ CLASS lcl_transport_2_branch DEFINITION.
         IMPORTING io_repository          TYPE REF TO lcl_repo_online
                   is_transport_to_branch TYPE lif_defs=>ty_transport_to_branch
                   it_transport_objects   TYPE scts_tadir
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
   PRIVATE SECTION.
 
     METHODS create_new_branch
@@ -37965,7 +37945,7 @@ CLASS lcl_transport_2_branch DEFINITION.
         io_repository  TYPE REF TO lcl_repo_online
         iv_branch_name TYPE string
       RAISING
-        lcx_exception.
+        zcx_abapgit_exception.
     METHODS generate_commit_message
       IMPORTING
         is_transport_to_branch TYPE lif_defs=>ty_transport_to_branch
@@ -37978,7 +37958,7 @@ CLASS lcl_transport_2_branch DEFINITION.
         is_stage_objects     TYPE lif_defs=>ty_stage_files
         it_object_statuses   TYPE lif_defs=>ty_results_tt
       RAISING
-        lcx_exception.
+        zcx_abapgit_exception.
 ENDCLASS.
 
 CLASS lcl_transport_2_branch IMPLEMENTATION.
@@ -38028,8 +38008,8 @@ CLASS lcl_transport_2_branch IMPLEMENTATION.
           iv_from = io_repository->get_sha1_local( ) ).
 
         io_repository->set_branch_name( iv_branch_name ).
-      CATCH lcx_exception.
-        lcx_exception=>raise( 'Error when creating new branch').
+      CATCH zcx_abapgit_exception.
+        zcx_abapgit_exception=>raise( 'Error when creating new branch').
     ENDTRY.
   ENDMETHOD.
 
@@ -38083,29 +38063,29 @@ CLASS lcl_services_git DEFINITION FINAL.
 
     CLASS-METHODS pull
       IMPORTING iv_key TYPE lcl_persistence_repo=>ty_repo-key
-      RAISING   lcx_exception lcx_cancel.
+      RAISING   zcx_abapgit_exception lcx_cancel.
 
     CLASS-METHODS reset
       IMPORTING iv_key TYPE lcl_persistence_repo=>ty_repo-key
-      RAISING   lcx_exception lcx_cancel.
+      RAISING   zcx_abapgit_exception lcx_cancel.
 
     CLASS-METHODS create_branch
       IMPORTING iv_key TYPE lcl_persistence_repo=>ty_repo-key
-      RAISING   lcx_exception lcx_cancel.
+      RAISING   zcx_abapgit_exception lcx_cancel.
 
     CLASS-METHODS switch_branch
       IMPORTING iv_key TYPE lcl_persistence_repo=>ty_repo-key
-      RAISING   lcx_exception lcx_cancel.
+      RAISING   zcx_abapgit_exception lcx_cancel.
 
     CLASS-METHODS delete_branch
       IMPORTING iv_key TYPE lcl_persistence_repo=>ty_repo-key
-      RAISING   lcx_exception lcx_cancel.
+      RAISING   zcx_abapgit_exception lcx_cancel.
 
     CLASS-METHODS commit
       IMPORTING io_repo   TYPE REF TO lcl_repo_online
                 is_commit TYPE ty_commit_fields
                 io_stage  TYPE REF TO lcl_stage
-      RAISING   lcx_exception lcx_cancel.
+      RAISING   zcx_abapgit_exception lcx_cancel.
 
 ENDCLASS. " lcl_services_git
 
@@ -38120,7 +38100,7 @@ CLASS lcl_services_git IMPLEMENTATION.
     lo_repo ?= lcl_app=>repo_srv( )->get( iv_key ).
 
     IF lo_repo->is_write_protected( ) = abap_true.
-      lcx_exception=>raise( 'Cannot reset. Local code is write-protected by repo config' ).
+      zcx_abapgit_exception=>raise( 'Cannot reset. Local code is write-protected by repo config' ).
     ENDIF.
 
     lv_answer = lcl_popups=>popup_to_confirm(
@@ -38199,7 +38179,7 @@ CLASS lcl_services_git IMPLEMENTATION.
     lo_repo ?= lcl_app=>repo_srv( )->get( iv_key ).
 
     IF lo_repo->is_write_protected( ) = abap_true.
-      lcx_exception=>raise( 'Cannot pull. Local code is write-protected by repo config' ).
+      zcx_abapgit_exception=>raise( 'Cannot pull. Local code is write-protected by repo config' ).
     ENDIF.
 
     lo_repo->refresh( ).
@@ -38252,9 +38232,9 @@ CLASS lcl_services_git IMPLEMENTATION.
     ENDIF.
 
     IF ls_branch-name = 'HEAD'.
-      lcx_exception=>raise( 'Cannot delete HEAD' ).
+      zcx_abapgit_exception=>raise( 'Cannot delete HEAD' ).
     ELSEIF ls_branch-name = lo_repo->get_branch_name( ).
-      lcx_exception=>raise( 'Switch branch before deleting current' ).
+      zcx_abapgit_exception=>raise( 'Switch branch before deleting current' ).
     ENDIF.
 
     lcl_git_porcelain=>delete_branch(
@@ -38277,13 +38257,13 @@ CLASS lcl_services_git IMPLEMENTATION.
                                       iv_email   = is_commit-committer_email ).
 
     IF is_commit-committer_name IS INITIAL.
-      lcx_exception=>raise( 'Commit: Committer name empty' ).
+      zcx_abapgit_exception=>raise( 'Commit: Committer name empty' ).
     ELSEIF is_commit-committer_email IS INITIAL.
-      lcx_exception=>raise( 'Commit: Committer email empty' ).
+      zcx_abapgit_exception=>raise( 'Commit: Committer email empty' ).
     ELSEIF is_commit-author_email IS NOT INITIAL AND is_commit-author_name IS INITIAL.
-      lcx_exception=>raise( 'Commit: Author email empty' ). " Opposite should be OK ?
+      zcx_abapgit_exception=>raise( 'Commit: Author email empty' ). " Opposite should be OK ?
     ELSEIF is_commit-comment IS INITIAL.
-      lcx_exception=>raise( 'Commit: empty comment' ).
+      zcx_abapgit_exception=>raise( 'Commit: empty comment' ).
     ENDIF.
 
     ls_comment-committer-name  = is_commit-committer_name.
@@ -38318,50 +38298,50 @@ CLASS lcl_services_repo DEFINITION FINAL.
   PUBLIC SECTION.
     CLASS-METHODS clone
       IMPORTING iv_url TYPE string
-      RAISING   lcx_exception lcx_cancel.
+      RAISING   zcx_abapgit_exception lcx_cancel.
 
     CLASS-METHODS refresh
       IMPORTING iv_key TYPE lcl_persistence_repo=>ty_repo-key
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS remove
       IMPORTING iv_key TYPE lcl_persistence_repo=>ty_repo-key
-      RAISING   lcx_exception lcx_cancel.
+      RAISING   zcx_abapgit_exception lcx_cancel.
 
     CLASS-METHODS purge
       IMPORTING iv_key TYPE lcl_persistence_repo=>ty_repo-key
-      RAISING   lcx_exception lcx_cancel.
+      RAISING   zcx_abapgit_exception lcx_cancel.
 
     CLASS-METHODS new_offline
-      RAISING lcx_exception lcx_cancel.
+      RAISING zcx_abapgit_exception lcx_cancel.
 
     CLASS-METHODS remote_attach
       IMPORTING iv_key TYPE lcl_persistence_repo=>ty_repo-key
-      RAISING   lcx_exception lcx_cancel.
+      RAISING   zcx_abapgit_exception lcx_cancel.
 
     CLASS-METHODS remote_detach
       IMPORTING iv_key TYPE lcl_persistence_repo=>ty_repo-key
-      RAISING   lcx_exception lcx_cancel.
+      RAISING   zcx_abapgit_exception lcx_cancel.
 
     CLASS-METHODS remote_change
       IMPORTING iv_key TYPE lcl_persistence_repo=>ty_repo-key
-      RAISING   lcx_exception lcx_cancel.
+      RAISING   zcx_abapgit_exception lcx_cancel.
 
     CLASS-METHODS refresh_local_checksums
       IMPORTING iv_key TYPE lcl_persistence_repo=>ty_repo-key
-      RAISING   lcx_exception lcx_cancel.
+      RAISING   zcx_abapgit_exception lcx_cancel.
 
     CLASS-METHODS toggle_favorite
       IMPORTING iv_key TYPE lcl_persistence_repo=>ty_repo-key
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS open_se80
       IMPORTING iv_package TYPE devclass
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS transport_to_branch
       IMPORTING iv_repository_key TYPE lcl_persistence_db=>ty_value
-      RAISING   lcx_exception lcx_cancel.
+      RAISING   zcx_abapgit_exception lcx_cancel.
 
 ENDCLASS. "lcl_services_repo
 
@@ -38445,7 +38425,7 @@ CLASS lcl_services_repo IMPLEMENTATION.
     lo_repo = lcl_app=>repo_srv( )->get( iv_key ).
 
     IF lo_repo->is_write_protected( ) = abap_true.
-      lcx_exception=>raise( 'Cannot purge. Local code is write-protected by repo config' ).
+      zcx_abapgit_exception=>raise( 'Cannot purge. Local code is write-protected by repo config' ).
     ENDIF.
 
     lv_package = lo_repo->get_package( ).
@@ -38643,7 +38623,7 @@ CLASS lcl_services_repo IMPLEMENTATION.
     lt_transport_headers = lcl_popups=>popup_to_select_transports( ).
     lt_transport_objects = lcl_transport=>to_tadir( lt_transport_headers ).
     IF lt_transport_objects IS INITIAL.
-      lcx_exception=>raise( 'Canceled or List of objects is empty ' ).
+      zcx_abapgit_exception=>raise( 'Canceled or List of objects is empty ' ).
     ENDIF.
 
     ls_transport_to_branch = lcl_popups=>popup_to_create_transp_branch(
@@ -38683,16 +38663,16 @@ CLASS lcl_services_abapgit DEFINITION FINAL.
       VALUE 'https://github.com/larshp/abapGit-plugins.git'.
 
     CLASS-METHODS open_abapgit_homepage
-      RAISING lcx_exception.
+      RAISING zcx_abapgit_exception.
 
     CLASS-METHODS open_abapgit_wikipage
-      RAISING lcx_exception.
+      RAISING zcx_abapgit_exception.
 
     CLASS-METHODS install_abapgit
-      RAISING lcx_exception lcx_cancel.
+      RAISING zcx_abapgit_exception lcx_cancel.
 
     CLASS-METHODS install_abapgit_pi
-      RAISING lcx_exception lcx_cancel.
+      RAISING zcx_abapgit_exception lcx_cancel.
 
     CLASS-METHODS is_installed
       RETURNING VALUE(rv_installed) TYPE abap_bool.
@@ -38707,7 +38687,7 @@ CLASS lcl_services_abapgit DEFINITION FINAL.
                 iv_text    TYPE c
                 iv_url     TYPE string
                 iv_package TYPE devclass
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
 ENDCLASS. "lcl_services_abapgit
 
@@ -38719,7 +38699,7 @@ CLASS lcl_services_abapgit IMPLEMENTATION.
       EXPORTING document = c_abapgit_homepage
       EXCEPTIONS OTHERS = 1 ).
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'Opening page in external browser failed.' ).
+      zcx_abapgit_exception=>raise( 'Opening page in external browser failed.' ).
     ENDIF.
 
   ENDMETHOD.  "open_abapgit_homepage
@@ -38730,7 +38710,7 @@ CLASS lcl_services_abapgit IMPLEMENTATION.
       EXPORTING document = c_abapgit_wikipage
       EXCEPTIONS OTHERS = 1 ).
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'Opening page in external browser failed.' ).
+      zcx_abapgit_exception=>raise( 'Opening page in external browser failed.' ).
     ENDIF.
 
   ENDMETHOD.  "open_abapgit_wikipage
@@ -38823,7 +38803,7 @@ CLASS lcl_services_abapgit IMPLEMENTATION.
     TRY.
         rv_installed = lcl_app=>repo_srv( )->is_repo_installed( c_abapgit_url ).
         " TODO, alternative checks for presence in the system
-      CATCH lcx_exception.
+      CATCH zcx_abapgit_exception.
         " cannot be installed anyway in this case, e.g. no connection
         rv_installed = abap_false.
     ENDTRY.
@@ -38835,7 +38815,7 @@ CLASS lcl_services_abapgit IMPLEMENTATION.
     TRY.
         rv_installed = lcl_app=>repo_srv( )->is_repo_installed( c_plugins_url ).
         " TODO, alternative checks for presence in the system
-      CATCH lcx_exception.
+      CATCH zcx_abapgit_exception.
         " cannot be installed anyway in this case, e.g. no connection
         rv_installed = abap_false.
     ENDTRY.
@@ -38857,11 +38837,11 @@ CLASS lcl_services_db DEFINITION FINAL.
 
     CLASS-METHODS delete
       IMPORTING is_key TYPE lcl_persistence_db=>ty_content
-      RAISING   lcx_exception lcx_cancel.
+      RAISING   zcx_abapgit_exception lcx_cancel.
 
     CLASS-METHODS update
       IMPORTING is_content TYPE lcl_persistence_db=>ty_content
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
 ENDCLASS. "lcl_services_db
 
@@ -38925,7 +38905,7 @@ CLASS lcl_services_bkg DEFINITION FINAL.
 
     CLASS-METHODS update_task
       IMPORTING is_bg_task TYPE lcl_persist_background=>ty_background
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
 ENDCLASS. "lcl_services_background
 
@@ -38967,7 +38947,7 @@ CLASS lcl_gui_asset_manager DEFINITION FINAL CREATE PRIVATE FRIENDS lcl_gui.
     METHODS get_asset
       IMPORTING iv_asset_name  TYPE string
       RETURNING VALUE(rv_data) TYPE xstring
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS get_images
       RETURNING VALUE(rt_images) TYPE lif_defs=>tt_web_assets.
@@ -38980,12 +38960,12 @@ CLASS lcl_gui_asset_manager DEFINITION FINAL CREATE PRIVATE FRIENDS lcl_gui.
     METHODS get_inline_asset
       IMPORTING iv_asset_name  TYPE string
       RETURNING VALUE(rv_data) TYPE xstring
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS get_mime_asset
       IMPORTING iv_asset_name  TYPE c
       RETURNING VALUE(rv_data) TYPE xstring
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS get_inline_images
       RETURNING VALUE(rt_images) TYPE lif_defs=>tt_web_assets.
@@ -39007,7 +38987,7 @@ CLASS lcl_gui_asset_manager IMPLEMENTATION.
       WHEN 'JS_COMMON'.
         lv_mime_name = 'ZABAPGIT_JS_COMMON'.
       WHEN OTHERS.
-        lcx_exception=>raise( |Improper resource name: { iv_asset_name }| ).
+        zcx_abapgit_exception=>raise( |Improper resource name: { iv_asset_name }| ).
     ENDCASE.
 
     " Inline is default (for older AG snapshots to work)
@@ -39017,7 +38997,7 @@ CLASS lcl_gui_asset_manager IMPLEMENTATION.
     ENDIF.
 
     IF rv_data IS INITIAL.
-      lcx_exception=>raise( |Failed to get GUI resource: { iv_asset_name }| ).
+      zcx_abapgit_exception=>raise( |Failed to get GUI resource: { iv_asset_name }| ).
     ENDIF.
 
   ENDMETHOD.  " get_asset.
@@ -40442,7 +40422,7 @@ CLASS lcl_gui_asset_manager IMPLEMENTATION.
         _inline '  div.style.display = (div.style.display)?'''':''none'';  '.
         _inline '}'.
       WHEN OTHERS.
-        lcx_exception=>raise( |No inline resource: { iv_asset_name }| ).
+        zcx_abapgit_exception=>raise( |No inline resource: { iv_asset_name }| ).
     ENDCASE.
 
     CONCATENATE LINES OF lt_data INTO lv_str SEPARATED BY lif_defs=>gc_newline.
@@ -40582,7 +40562,7 @@ CLASS lcl_gui_chunk_lib DEFINITION FINAL.
   PUBLIC SECTION.
 
     CLASS-METHODS render_error
-        IMPORTING ix_error            TYPE REF TO lcx_exception OPTIONAL
+        IMPORTING ix_error            TYPE REF TO zcx_abapgit_exception OPTIONAL
                   iv_error            TYPE string OPTIONAL
         RETURNING VALUE(ro_html)      TYPE REF TO lcl_html.
 
@@ -40594,7 +40574,7 @@ CLASS lcl_gui_chunk_lib DEFINITION FINAL.
                 iv_branch             TYPE string OPTIONAL
                 io_news               TYPE REF TO lcl_news OPTIONAL
       RETURNING VALUE(ro_html)        TYPE REF TO lcl_html
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS render_item_state
         IMPORTING iv1                 TYPE char1
@@ -40606,17 +40586,17 @@ CLASS lcl_gui_chunk_lib DEFINITION FINAL.
                 io_repo               TYPE REF TO lcl_repo_online
                 iv_interactive        TYPE abap_bool
       RETURNING VALUE(ro_html)        TYPE REF TO lcl_html
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS render_js_error_banner
       RETURNING VALUE(ro_html)        TYPE REF TO lcl_html
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS render_news
       IMPORTING
                 io_news               TYPE REF TO lcl_news
       RETURNING VALUE(ro_html)        TYPE REF TO lcl_html
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
 ENDCLASS. "lcl_gui_chunk_lib
 
@@ -40798,7 +40778,7 @@ CLASS lcl_gui_chunk_lib IMPLEMENTATION.
     CREATE OBJECT ro_html.
 
     IF ix_error IS BOUND.
-      lv_error = ix_error->mv_text.
+      lv_error = ix_error->text.
     ELSE.
       lv_error = iv_error.
     ENDIF.
@@ -40900,11 +40880,11 @@ INTERFACE lif_gui_page.
               it_postdata  TYPE cnht_post_data_tab OPTIONAL
     EXPORTING ei_page      TYPE REF TO lif_gui_page
               ev_state     TYPE i
-    RAISING   lcx_exception lcx_cancel.
+    RAISING   zcx_abapgit_exception lcx_cancel.
 
   METHODS render
     RETURNING VALUE(ro_html) TYPE REF TO lcl_html
-    RAISING   lcx_exception.
+    RAISING   zcx_abapgit_exception.
 
 ENDINTERFACE.
 
@@ -40924,11 +40904,11 @@ CLASS lcl_gui_page DEFINITION ABSTRACT.
 
     METHODS render_content ABSTRACT
       RETURNING VALUE(ro_html) TYPE REF TO lcl_html
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS scripts
       RETURNING VALUE(ro_html) TYPE REF TO lcl_html
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
   PRIVATE SECTION.
 
@@ -41118,7 +41098,7 @@ CLASS lcl_html_action_utils DEFINITION FINAL.
       IMPORTING iv_string   TYPE clike
       EXPORTING ev_obj_type TYPE tadir-object
                 ev_obj_name TYPE tadir-obj_name
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS dir_encode
       IMPORTING iv_path          TYPE string
@@ -41127,7 +41107,7 @@ CLASS lcl_html_action_utils DEFINITION FINAL.
     CLASS-METHODS dir_decode
       IMPORTING iv_string      TYPE clike
       RETURNING VALUE(rv_path) TYPE string
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS file_encode
       IMPORTING iv_key           TYPE lcl_persistence_repo=>ty_repo-key
@@ -41144,7 +41124,7 @@ CLASS lcl_html_action_utils DEFINITION FINAL.
       EXPORTING ev_key    TYPE lcl_persistence_repo=>ty_repo-key
                 eg_file   TYPE any "assuming ty_file
                 eg_object TYPE any "assuming ty_item
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS dbkey_encode
       IMPORTING is_key           TYPE lcl_persistence_db=>ty_content
@@ -41170,7 +41150,7 @@ CLASS lcl_html_action_utils DEFINITION FINAL.
       IMPORTING iv_getdata TYPE clike
       EXPORTING ev_key     TYPE lcl_persistence_repo=>ty_repo-key
                 ev_seed    TYPE string
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
   PRIVATE SECTION.
     CLASS-METHODS unescape
@@ -41520,7 +41500,7 @@ CLASS lcl_repo_content_list DEFINITION FINAL.
                 iv_by_folders        TYPE abap_bool
                 iv_changes_only      TYPE abap_bool
       RETURNING VALUE(rt_repo_items) TYPE tt_repo_items
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS get_log
       RETURNING VALUE(ro_log) TYPE REF TO lcl_log.
@@ -41531,16 +41511,16 @@ CLASS lcl_repo_content_list DEFINITION FINAL.
 
     METHODS build_repo_items_offline
       RETURNING VALUE(rt_repo_items) TYPE tt_repo_items
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS build_repo_items_online
       RETURNING VALUE(rt_repo_items) TYPE tt_repo_items
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS build_folders
       IMPORTING iv_cur_dir    TYPE string
       CHANGING  ct_repo_items TYPE tt_repo_items
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS filter_changes
       CHANGING ct_repo_items TYPE tt_repo_items.
@@ -43010,7 +42990,7 @@ CLASS lcl_gui_view_repo DEFINITION FINAL.
 
     METHODS constructor
       IMPORTING iv_key TYPE lcl_persistence_repo=>ty_repo-key
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
   PRIVATE SECTION.
 
@@ -43027,19 +43007,19 @@ CLASS lcl_gui_view_repo DEFINITION FINAL.
         IMPORTING iv_lstate      TYPE char1
                   iv_rstate      TYPE char1
         RETURNING VALUE(ro_html) TYPE REF TO lcl_html
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       build_head_menu
         IMPORTING iv_lstate         TYPE char1
                   iv_rstate         TYPE char1
         RETURNING VALUE(ro_toolbar) TYPE REF TO lcl_html_toolbar
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       build_grid_menu
         RETURNING VALUE(ro_toolbar) TYPE REF TO lcl_html_toolbar
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       render_item
         IMPORTING is_item        TYPE lcl_repo_content_list=>ty_repo_item
         RETURNING VALUE(ro_html) TYPE REF TO lcl_html
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       render_item_files
         IMPORTING is_item        TYPE lcl_repo_content_list=>ty_repo_item
         RETURNING VALUE(ro_html) TYPE REF TO lcl_html,
@@ -43056,7 +43036,7 @@ CLASS lcl_gui_view_repo DEFINITION FINAL.
         RETURNING VALUE(rv_html) TYPE string,
       render_parent_dir
         RETURNING VALUE(ro_html) TYPE REF TO lcl_html
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
     METHODS:
       build_obj_jump_link
@@ -43118,7 +43098,7 @@ CLASS lcl_gui_view_repo IMPLEMENTATION.
 
     DATA: lt_repo_items TYPE lcl_repo_content_list=>tt_repo_items,
           lo_browser    TYPE REF TO lcl_repo_content_list,
-          lx_error      TYPE REF TO lcx_exception,
+          lx_error      TYPE REF TO zcx_abapgit_exception,
           lv_lstate     TYPE char1,
           lv_rstate     TYPE char1,
           lv_max        TYPE abap_bool,
@@ -43201,7 +43181,7 @@ CLASS lcl_gui_view_repo IMPLEMENTATION.
 
         ro_html->add( '</div>' ).
 
-      CATCH lcx_exception INTO lx_error.
+      CATCH zcx_abapgit_exception INTO lx_error.
         ro_html->add( render_head_line( iv_lstate = lv_lstate iv_rstate = lv_rstate ) ).
         ro_html->add( lcl_gui_chunk_lib=>render_error( ix_error = lx_error ) ).
     ENDTRY.
@@ -43341,7 +43321,7 @@ CLASS lcl_gui_view_repo IMPLEMENTATION.
                              iv_act = |{ lif_defs=>gc_action-go_diff }?key={ lv_key }|
                              iv_opt = lif_defs=>gc_html_opt-strong ).
           ENDIF.
-        CATCH lcx_exception ##NO_HANDLER.
+        CATCH zcx_abapgit_exception ##NO_HANDLER.
           " authorization error or repository does not exist
           " ignore error
       ENDTRY.
@@ -43686,7 +43666,7 @@ CLASS lcl_gui_page_commit DEFINITION FINAL INHERITING FROM lcl_gui_page.
       constructor
         IMPORTING io_repo  TYPE REF TO lcl_repo_online
                   io_stage TYPE REF TO lcl_stage
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       lif_gui_page~on_event REDEFINITION.
 
   PROTECTED SECTION.
@@ -43703,10 +43683,10 @@ CLASS lcl_gui_page_commit DEFINITION FINAL INHERITING FROM lcl_gui_page.
         RETURNING VALUE(ro_html) TYPE REF TO lcl_html,
       render_stage
         RETURNING VALUE(ro_html) TYPE REF TO lcl_html
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       render_form
         RETURNING VALUE(ro_html) TYPE REF TO lcl_html
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       render_text_input
         IMPORTING iv_name       TYPE string
                   iv_label      TYPE string
@@ -43971,7 +43951,7 @@ CLASS lcl_merge DEFINITION FINAL.
                   iv_source       TYPE string
                   iv_target       TYPE string
         RETURNING VALUE(rs_merge) TYPE ty_merge
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
   PRIVATE SECTION.
     CLASS-DATA: gs_merge   TYPE ty_merge,
@@ -43983,20 +43963,20 @@ CLASS lcl_merge DEFINITION FINAL.
       all_files
         RETURNING VALUE(rt_files) TYPE lcl_git_porcelain=>ty_expanded_tt,
       calculate_result
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       find_ancestors
         IMPORTING iv_commit           TYPE lif_defs=>ty_sha1
         RETURNING VALUE(rt_ancestors) TYPE ty_ancestor_tt
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       find_first_common
         IMPORTING it_list1         TYPE ty_ancestor_tt
                   it_list2         TYPE ty_ancestor_tt
         RETURNING VALUE(rs_common) TYPE ty_ancestor
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       fetch_git
         IMPORTING iv_source TYPE string
                   iv_target TYPE string
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
 ENDCLASS.
 
@@ -44009,7 +43989,7 @@ CLASS lcl_merge IMPLEMENTATION.
 
 
     IF iv_source = iv_target.
-      lcx_exception=>raise( 'source = target' ).
+      zcx_abapgit_exception=>raise( 'source = target' ).
     ENDIF.
 
     CLEAR gs_merge.
@@ -44184,7 +44164,7 @@ CLASS lcl_merge IMPLEMENTATION.
       ENDLOOP.
     ENDLOOP.
 
-    lcx_exception=>raise( 'error finding common ancestor' ).
+    zcx_abapgit_exception=>raise( 'error finding common ancestor' ).
 
   ENDMETHOD.
 
@@ -44263,7 +44243,7 @@ CLASS lcl_gui_page_merge DEFINITION FINAL INHERITING FROM lcl_gui_page.
         IMPORTING io_repo   TYPE REF TO lcl_repo_online
                   iv_source TYPE string
                   iv_target TYPE string
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       lif_gui_page~on_event REDEFINITION.
 
   PROTECTED SECTION.
@@ -44305,7 +44285,7 @@ CLASS lcl_gui_page_merge IMPLEMENTATION.
     CASE iv_action.
       WHEN c_actions-merge.
         IF ms_merge-stage->count( ) = 0.
-          lcx_exception=>raise( 'nothing to merge' ).
+          zcx_abapgit_exception=>raise( 'nothing to merge' ).
         ENDIF.
 
         CREATE OBJECT ei_page TYPE lcl_gui_page_commit
@@ -44458,7 +44438,7 @@ CLASS lcl_gui_page_bkg_run IMPLEMENTATION.
 
   METHOD run.
 
-    DATA: lx_error TYPE REF TO lcx_exception,
+    DATA: lx_error TYPE REF TO zcx_abapgit_exception,
           lv_text  TYPE string,
           lv_line  TYPE i VALUE 1.
 
@@ -44474,8 +44454,8 @@ CLASS lcl_gui_page_bkg_run IMPLEMENTATION.
           APPEND lv_text TO mt_text.
           lv_line = lv_line + 1.
         ENDDO.
-      CATCH lcx_exception INTO lx_error.
-        APPEND lx_error->mv_text TO mt_text.
+      CATCH zcx_abapgit_exception INTO lx_error.
+        APPEND lx_error->text TO mt_text.
     ENDTRY.
 
   ENDMETHOD.
@@ -44518,7 +44498,7 @@ CLASS lcl_gui_page_bkg DEFINITION FINAL
         RETURNING VALUE(ro_menu) TYPE REF TO lcl_html_toolbar,
       render_data
         RETURNING VALUE(ro_html) TYPE REF TO lcl_html
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
 ENDCLASS.
 
@@ -44709,12 +44689,12 @@ CLASS lcl_branch_overview DEFINITION FINAL.
     CLASS-METHODS: run
       IMPORTING io_repo           TYPE REF TO lcl_repo_online
       RETURNING VALUE(rt_commits) TYPE ty_commit_tt
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS: compress
       IMPORTING it_commits        TYPE ty_commit_tt
       RETURNING VALUE(rt_commits) TYPE ty_commit_tt
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS: get_branches
       RETURNING VALUE(rt_branches) TYPE lcl_git_branch_list=>ty_git_branch_list_tt.
@@ -44724,17 +44704,17 @@ CLASS lcl_branch_overview DEFINITION FINAL.
     CLASS-METHODS:
       parse_commits
         IMPORTING it_objects TYPE lif_defs=>ty_objects_tt
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       determine_branch
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       determine_merges
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       fixes
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       get_git_objects
         IMPORTING io_repo           TYPE REF TO lcl_repo_online
         RETURNING VALUE(rt_objects) TYPE lif_defs=>ty_objects_tt
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
     CLASS-DATA:
       gt_branches TYPE lcl_git_branch_list=>ty_git_branch_list_tt,
@@ -44988,7 +44968,7 @@ CLASS lcl_gui_page_boverview DEFINITION FINAL INHERITING FROM lcl_gui_page.
     METHODS:
       constructor
         IMPORTING io_repo TYPE REF TO lcl_repo_online
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       lif_gui_page~on_event REDEFINITION.
 
   PROTECTED SECTION.
@@ -45013,20 +44993,20 @@ CLASS lcl_gui_page_boverview DEFINITION FINAL INHERITING FROM lcl_gui_page.
 
     METHODS:
       refresh
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       body
         RETURNING VALUE(ro_html) TYPE REF TO lcl_html
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       form_select
         IMPORTING iv_name        TYPE string
         RETURNING VALUE(ro_html) TYPE REF TO lcl_html,
       render_merge
         RETURNING VALUE(ro_html) TYPE REF TO lcl_html
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       decode_merge
         IMPORTING it_postdata     TYPE cnht_post_data_tab
         RETURNING VALUE(rs_merge) TYPE ty_merge
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       build_menu
         RETURNING VALUE(ro_menu) TYPE REF TO lcl_html_toolbar,
       escape_branch
@@ -45442,7 +45422,7 @@ CLASS lcl_gui_page_db DEFINITION FINAL INHERITING FROM lcl_gui_page.
     METHODS explain_content
       IMPORTING is_data TYPE lcl_persistence_db=>ty_content
       RETURNING VALUE(rv_text) TYPE string
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
 ENDCLASS.
 
@@ -45597,7 +45577,7 @@ CLASS lcl_gui_page_diff DEFINITION FINAL INHERITING FROM lcl_gui_page.
                   is_file          TYPE lif_defs=>ty_file OPTIONAL
                   is_object        TYPE lif_defs=>ty_item OPTIONAL
                   iv_supress_stage TYPE abap_bool DEFAULT abap_false
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       lif_gui_page~on_event REDEFINITION.
 
   PROTECTED SECTION.
@@ -45642,7 +45622,7 @@ CLASS lcl_gui_page_diff DEFINITION FINAL INHERITING FROM lcl_gui_page.
       IMPORTING it_remote TYPE lif_defs=>ty_files_tt
                 it_local  TYPE lif_defs=>ty_files_item_tt
                 is_status TYPE lif_defs=>ty_result
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
     METHODS build_menu
       IMPORTING iv_supress_stage TYPE abap_bool
       RETURNING VALUE(ro_menu)   TYPE REF TO lcl_html_toolbar.
@@ -45711,7 +45691,7 @@ CLASS lcl_gui_page_diff IMPLEMENTATION.
     ENDIF.
 
     IF lines( mt_diff_files ) = 0.
-      lcx_exception=>raise( 'PAGE_DIFF ERROR: No diff files found' ).
+      zcx_abapgit_exception=>raise( 'PAGE_DIFF ERROR: No diff files found' ).
     ENDIF.
 
     ms_control-page_menu  = build_menu( iv_supress_stage ).
@@ -45745,7 +45725,7 @@ CLASS lcl_gui_page_diff IMPLEMENTATION.
     ENDIF.
 
     IF <ls_local> IS INITIAL AND <ls_remote> IS INITIAL.
-      lcx_exception=>raise( |DIFF: file not found { is_status-filename }| ).
+      zcx_abapgit_exception=>raise( |DIFF: file not found { is_status-filename }| ).
     ENDIF.
 
     APPEND INITIAL LINE TO mt_diff_files ASSIGNING <ls_diff>.
@@ -46257,7 +46237,7 @@ CLASS lcl_gui_page_main DEFINITION FINAL INHERITING FROM lcl_gui_page.
   PUBLIC SECTION.
     METHODS:
       constructor
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       lif_gui_page~on_event   REDEFINITION.
 
   PROTECTED SECTION.
@@ -46274,19 +46254,19 @@ CLASS lcl_gui_page_main DEFINITION FINAL INHERITING FROM lcl_gui_page.
 
     METHODS:
       test_changed_by
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       retrieve_active_repo
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       render_toc
         IMPORTING it_repo_list   TYPE lcl_repo_srv=>ty_repo_tt
         RETURNING VALUE(ro_html) TYPE REF TO lcl_html
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       build_main_menu
         RETURNING VALUE(ro_menu) TYPE REF TO lcl_html_toolbar,
       render_repo
         IMPORTING io_repo        TYPE REF TO lcl_repo
         RETURNING VALUE(ro_html) TYPE REF TO lcl_html
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
 ENDCLASS.
 
@@ -46327,7 +46307,7 @@ CLASS lcl_gui_page_main IMPLEMENTATION.
         lcl_app=>user( )->set_repo_show( lv_key ).
         TRY.
             lcl_app=>repo_srv( )->get( lv_key )->refresh( ).
-          CATCH lcx_exception ##NO_HANDLER.
+          CATCH zcx_abapgit_exception ##NO_HANDLER.
         ENDTRY.
 
         ev_state = lif_defs=>gc_event_state-re_render.
@@ -46362,7 +46342,7 @@ CLASS lcl_gui_page_main IMPLEMENTATION.
   METHOD render_content.
 
     DATA: lt_repos    TYPE lcl_repo_srv=>ty_repo_tt,
-          lx_error    TYPE REF TO lcx_exception,
+          lx_error    TYPE REF TO zcx_abapgit_exception,
           lo_tutorial TYPE REF TO lcl_gui_view_tutorial,
           lo_repo     LIKE LINE OF lt_repos.
 
@@ -46372,7 +46352,7 @@ CLASS lcl_gui_page_main IMPLEMENTATION.
 
     TRY.
         lt_repos = lcl_app=>repo_srv( )->list( ).
-      CATCH lcx_exception INTO lx_error.
+      CATCH zcx_abapgit_exception INTO lx_error.
         ro_html->add( lcl_gui_chunk_lib=>render_error( ix_error = lx_error ) ).
         RETURN.
     ENDTRY.
@@ -46395,7 +46375,7 @@ CLASS lcl_gui_page_main IMPLEMENTATION.
 
     TRY.
         lcl_app=>repo_srv( )->list( ).
-      CATCH lcx_exception.
+      CATCH zcx_abapgit_exception.
         RETURN.
     ENDTRY.
 
@@ -46405,7 +46385,7 @@ CLASS lcl_gui_page_main IMPLEMENTATION.
     IF mv_show IS NOT INITIAL.
       TRY. " verify the key exists
           lcl_app=>repo_srv( )->get( mv_show ).
-        CATCH lcx_exception.
+        CATCH zcx_abapgit_exception.
           CLEAR mv_show.
           lcl_app=>user( )->set_repo_show( mv_show ).
       ENDTRY.
@@ -46591,7 +46571,7 @@ CLASS lcl_gui_page_stage DEFINITION FINAL INHERITING FROM lcl_gui_page.
         IMPORTING
                   io_repo TYPE REF TO lcl_repo_online
                   iv_seed TYPE string OPTIONAL
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
       lif_gui_page~on_event REDEFINITION.
 
   PROTECTED SECTION.
@@ -46624,7 +46604,7 @@ CLASS lcl_gui_page_stage DEFINITION FINAL INHERITING FROM lcl_gui_page.
       process_stage_list
         IMPORTING it_postdata TYPE cnht_post_data_tab
                   io_stage    TYPE REF TO lcl_stage
-        RAISING   lcx_exception,
+        RAISING   zcx_abapgit_exception,
 
       build_menu
         RETURNING VALUE(ro_menu) TYPE REF TO lcl_html_toolbar.
@@ -46710,7 +46690,7 @@ CLASS lcl_gui_page_stage IMPLEMENTATION.
     lt_fields = lcl_html_action_utils=>parse_fields( lv_string ).
 
     IF lines( lt_fields ) = 0.
-      lcx_exception=>raise( 'process_stage_list: empty list' ).
+      zcx_abapgit_exception=>raise( 'process_stage_list: empty list' ).
     ENDIF.
 
     LOOP AT lt_fields ASSIGNING <ls_item>.
@@ -46736,7 +46716,7 @@ CLASS lcl_gui_page_stage IMPLEMENTATION.
         WHEN lcl_stage=>c_method-skip.
           " Do nothing
         WHEN OTHERS.
-          lcx_exception=>raise( |process_stage_list: unknown method { <ls_item>-value }| ).
+          zcx_abapgit_exception=>raise( |process_stage_list: unknown method { <ls_item>-value }| ).
       ENDCASE.
     ENDLOOP.
 
@@ -46921,7 +46901,7 @@ CLASS lcl_gui_page_stage IMPLEMENTATION.
         IF sy-subrc = 0.
           rv_user = lcl_objects=>changed_by( ls_local_file-item ).
         ENDIF.
-      CATCH lcx_exception.
+      CATCH zcx_abapgit_exception.
         CLEAR rv_user. "Should not raise errors if user last changed by was not found
     ENDTRY.
 
@@ -46950,7 +46930,7 @@ CLASS lcl_gui_page_debuginfo DEFINITION FINAL INHERITING FROM lcl_gui_page.
   PRIVATE SECTION.
     METHODS render_debug_info
       RETURNING VALUE(ro_html) TYPE REF TO lcl_html
-      RAISING lcx_exception.
+      RAISING zcx_abapgit_exception.
     METHODS render_supported_object_types
       RETURNING VALUE(rv_html) TYPE string.
 
@@ -46994,7 +46974,7 @@ CLASS lcl_gui_page_debuginfo IMPLEMENTATION.
     ro_html->add( |<p>abapGit version: { lif_defs=>gc_abap_version }</p>| ).
     ro_html->add( |<p>XML version:     { lif_defs=>gc_xml_version }</p>| ).
     ro_html->add( |<p>GUI version:     { lv_gui_version }</p>| ).
-    ro_html->add( |<p>LCL_TIME:        { lcl_time=>get( ) }</p>| ).
+    ro_html->add( |<p>LCL_TIME:        { zcl_abapgit_time=>get( ) }</p>| ).
     ro_html->add( |<p>SY time:         { sy-datum } { sy-uzeit } { sy-tzone }</p>| ).
 
   ENDMETHOD. "render_debug_info
@@ -47092,7 +47072,7 @@ CLASS lcl_gui_page_settings DEFINITION FINAL INHERITING FROM lcl_gui_page.
         VALUE(rt_post_fields) TYPE tihttpnvp.
     METHODS persist_settings
       RAISING
-        lcx_exception.
+        zcx_abapgit_exception.
     METHODS read_settings.
 
 ENDCLASS.
@@ -47513,45 +47493,45 @@ CLASS lcl_gui_router DEFINITION FINAL.
                 it_postdata  TYPE cnht_post_data_tab OPTIONAL
       EXPORTING ei_page      TYPE REF TO lif_gui_page
                 ev_state     TYPE i
-      RAISING   lcx_exception lcx_cancel.
+      RAISING   zcx_abapgit_exception lcx_cancel.
 
   PRIVATE SECTION.
 
     METHODS get_page_by_name
       IMPORTING iv_name        TYPE clike
       RETURNING VALUE(ri_page) TYPE REF TO lif_gui_page
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS get_page_diff
       IMPORTING iv_getdata     TYPE clike
                 iv_prev_page   TYPE clike
       RETURNING VALUE(ri_page) TYPE REF TO lif_gui_page
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS get_page_branch_overview
       IMPORTING iv_getdata     TYPE clike
       RETURNING VALUE(ri_page) TYPE REF TO lif_gui_page
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS get_page_stage
       IMPORTING iv_getdata     TYPE clike
       RETURNING VALUE(ri_page) TYPE REF TO lif_gui_page
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS get_page_db_by_name
       IMPORTING iv_name        TYPE clike
                 iv_getdata     TYPE clike
       RETURNING VALUE(ri_page) TYPE REF TO lif_gui_page
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS get_page_background
       IMPORTING iv_key         TYPE lcl_persistence_repo=>ty_repo-key
       RETURNING VALUE(ri_page) TYPE REF TO lif_gui_page
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS get_page_playground
       RETURNING VALUE(ri_page) TYPE REF TO lif_gui_page
-      RAISING   lcx_exception lcx_cancel.
+      RAISING   zcx_abapgit_exception lcx_cancel.
 
 ENDCLASS.
 
@@ -47749,7 +47729,7 @@ CLASS lcl_gui_router IMPLEMENTATION.
     TRY.
         CREATE OBJECT ri_page TYPE (lv_page_class).
       CATCH cx_sy_create_object_error.
-        lcx_exception=>raise( |Cannot create page class { lv_page_class }| ).
+        zcx_abapgit_exception=>raise( |Cannot create page class { lv_page_class }| ).
     ENDTRY.
 
   ENDMETHOD.        " get_page_by_name
@@ -47770,7 +47750,7 @@ CLASS lcl_gui_router IMPLEMENTATION.
 
       CATCH cx_sy_create_object_error.
         lv_message = |Cannot create page class { lv_page_class }|.
-        lcx_exception=>raise( lv_message ).
+        zcx_abapgit_exception=>raise( lv_message ).
     ENDTRY.
 
   ENDMETHOD.        " get_page_db_by_name
@@ -47870,7 +47850,7 @@ CLASS lcl_gui_router IMPLEMENTATION.
     TRY.
         CREATE OBJECT ri_page TYPE (lv_class_name).
       CATCH cx_sy_create_object_error.
-        lcx_exception=>raise( |Cannot create page class { lv_class_name }| ).
+        zcx_abapgit_exception=>raise( |Cannot create page class { lv_class_name }| ).
     ENDTRY.
 
   ENDMETHOD.  "get_page_playground
@@ -47893,12 +47873,12 @@ CLASS lcl_gui DEFINITION FINAL CREATE PRIVATE FRIENDS lcl_app.
   PUBLIC SECTION.
 
     METHODS go_home
-      RAISING lcx_exception.
+      RAISING zcx_abapgit_exception.
 
     METHODS back
       IMPORTING iv_to_bookmark TYPE abap_bool DEFAULT abap_false
       RETURNING VALUE(rv_exit) TYPE xfeld
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS on_event FOR EVENT sapevent OF cl_gui_html_viewer
       IMPORTING action frame getdata postdata query_table.  "#EC NEEDED
@@ -47917,10 +47897,10 @@ CLASS lcl_gui DEFINITION FINAL CREATE PRIVATE FRIENDS lcl_app.
           mo_html_viewer TYPE REF TO cl_gui_html_viewer.
 
     METHODS constructor
-      RAISING lcx_exception.
+      RAISING zcx_abapgit_exception.
 
     METHODS startup
-      RAISING lcx_exception.
+      RAISING zcx_abapgit_exception.
 
     METHODS cache_html
       IMPORTING iv_text       TYPE string
@@ -47935,7 +47915,7 @@ CLASS lcl_gui DEFINITION FINAL CREATE PRIVATE FRIENDS lcl_app.
       RETURNING VALUE(rv_url) TYPE w3url.
 
     METHODS render
-      RAISING lcx_exception.
+      RAISING zcx_abapgit_exception.
 
     METHODS get_current_page_name
       RETURNING VALUE(rv_page_name) TYPE string.
@@ -47944,7 +47924,7 @@ CLASS lcl_gui DEFINITION FINAL CREATE PRIVATE FRIENDS lcl_app.
       IMPORTING ii_page          TYPE REF TO lif_gui_page
                 iv_with_bookmark TYPE abap_bool DEFAULT abap_false
                 iv_replacing     TYPE abap_bool DEFAULT abap_false
-      RAISING   lcx_exception.
+      RAISING   zcx_abapgit_exception.
 
     METHODS handle_action
       IMPORTING action      TYPE c
@@ -47968,7 +47948,7 @@ CLASS lcl_gui IMPLEMENTATION.
 
   METHOD handle_action.
 
-    DATA: lx_exception TYPE REF TO lcx_exception,
+    DATA: lx_exception TYPE REF TO zcx_abapgit_exception,
           li_page      TYPE REF TO lif_gui_page,
           lv_state     TYPE i.
 
@@ -48013,12 +47993,12 @@ CLASS lcl_gui IMPLEMENTATION.
           WHEN lif_defs=>gc_event_state-no_more_act.
             " Do nothing, handling completed
           WHEN OTHERS.
-            lcx_exception=>raise( |Unknown action: { action }| ).
+            zcx_abapgit_exception=>raise( |Unknown action: { action }| ).
         ENDCASE.
 
-      CATCH lcx_exception INTO lx_exception.
+      CATCH zcx_abapgit_exception INTO lx_exception.
         ROLLBACK WORK.
-        MESSAGE lx_exception->mv_text TYPE 'S' DISPLAY LIKE 'E'.
+        MESSAGE lx_exception->text TYPE 'S' DISPLAY LIKE 'E'.
       CATCH lcx_cancel ##NO_HANDLER.
         " Do nothing = gc_event_state-no_more_act
     ENDTRY.
@@ -48332,7 +48312,7 @@ END-OF-DEFINITION.
 CLASS ltcl_convert DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINAL.
 
   PRIVATE SECTION.
-    METHODS convert_int FOR TESTING RAISING lcx_exception.
+    METHODS convert_int FOR TESTING RAISING zcx_abapgit_exception.
     METHODS split_string FOR TESTING.
 
 ENDCLASS.                    "ltcl_convert DEFINITION
@@ -48431,7 +48411,7 @@ CLASS ltcl_dangerous DEFINITION FOR TESTING RISK LEVEL CRITICAL DURATION LONG FI
 
     METHODS:
       run FOR TESTING
-        RAISING lcx_exception.
+        RAISING zcx_abapgit_exception.
 
     CONSTANTS: c_package TYPE devclass VALUE '$ABAPGIT_UNIT_TEST'.
 
@@ -48693,7 +48673,7 @@ CLASS ltcl_dot_abapgit DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT
   PRIVATE SECTION.
     METHODS:
       identity FOR TESTING
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       ignore FOR TESTING.
 
 ENDCLASS.
@@ -48762,17 +48742,17 @@ CLASS ltcl_git_porcelain DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHO
         IMPORTING iv_path TYPE string
                   iv_name TYPE string,
       single_file FOR TESTING
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       two_files_same_path FOR TESTING
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       root_empty FOR TESTING
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       namespaces FOR TESTING
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       more_sub FOR TESTING
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       sub FOR TESTING
-        RAISING lcx_exception.
+        RAISING zcx_abapgit_exception.
 
     DATA: mt_expanded TYPE lcl_git_porcelain=>ty_expanded_tt,
           mt_trees    TYPE lcl_git_porcelain=>ty_trees_tt.
@@ -48948,11 +48928,11 @@ CLASS ltcl_xml DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINAL.
   PUBLIC SECTION.
     METHODS:
       up FOR TESTING
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       empty FOR TESTING
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       down FOR TESTING
-        RAISING lcx_exception.
+        RAISING zcx_abapgit_exception.
 
     TYPES: BEGIN OF st_old,
              foo TYPE i,
@@ -49080,9 +49060,9 @@ CLASS ltcl_url DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINAL.
   PRIVATE SECTION.
 
     METHODS:
-      repo_host FOR TESTING RAISING lcx_exception,
-      repo_name1 FOR TESTING RAISING lcx_exception,
-      repo_name2 FOR TESTING RAISING lcx_exception,
+      repo_host FOR TESTING RAISING zcx_abapgit_exception,
+      repo_name1 FOR TESTING RAISING zcx_abapgit_exception,
+      repo_name2 FOR TESTING RAISING zcx_abapgit_exception,
       repo_error FOR TESTING.
 
 ENDCLASS.                    "ltcl_url DEFINITION
@@ -49099,7 +49079,7 @@ CLASS ltcl_url IMPLEMENTATION.
     TRY.
         lcl_url=>host( 'not a real url' ).                  "#EC NOTEXT
         cl_abap_unit_assert=>fail( ).
-      CATCH lcx_exception.                              "#EC NO_HANDLER
+      CATCH zcx_abapgit_exception.                              "#EC NO_HANDLER
     ENDTRY.
 
   ENDMETHOD.                    "repo_error
@@ -49152,7 +49132,7 @@ CLASS ltcl_object_types DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHOR
   PRIVATE SECTION.
     METHODS:
       is_supported FOR TESTING,
-      not_exist FOR TESTING RAISING lcx_exception.
+      not_exist FOR TESTING RAISING zcx_abapgit_exception.
 
 ENDCLASS.                    "ltcl_object_types DEFINITION
 
@@ -49223,11 +49203,11 @@ CLASS ltcl_git_pack_decode_commit DEFINITION FOR TESTING
   PUBLIC SECTION.
     METHODS:
       decode1 FOR TESTING
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       decode2 FOR TESTING
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       decode3 FOR TESTING
-        RAISING lcx_exception.
+        RAISING zcx_abapgit_exception.
 
   PRIVATE SECTION.
     DATA: ms_raw TYPE lcl_git_pack=>ty_commit,
@@ -49236,7 +49216,7 @@ CLASS ltcl_git_pack_decode_commit DEFINITION FOR TESTING
     METHODS:
       setup,
       decode
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       add
         IMPORTING iv_string TYPE string.
 
@@ -49374,29 +49354,29 @@ CLASS ltcl_git_pack DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FI
 
     METHODS:
       tree FOR TESTING
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       commit FOR TESTING
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       commit_newline FOR TESTING
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       pack_short FOR TESTING
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       pack_long FOR TESTING
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       pack_multiple FOR TESTING
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       sort_tree1 FOR TESTING,
       sort_tree2 FOR TESTING,
       type_and_length01 FOR TESTING
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       type_and_length02 FOR TESTING
-        RAISING lcx_exception.
+        RAISING zcx_abapgit_exception.
 
     METHODS:
       object_blob
         IMPORTING iv_data          TYPE xstring
         RETURNING VALUE(rs_object) TYPE lif_defs=>ty_object
-        RAISING   lcx_exception.
+        RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "test DEFINITION
 
@@ -49688,11 +49668,11 @@ CLASS ltcl_html DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINAL.
     DATA: mo_html TYPE REF TO lcl_html.
 
     METHODS:
-      indent1 FOR TESTING RAISING lcx_exception,
-      indent2 FOR TESTING RAISING lcx_exception,
-      indent3 FOR TESTING RAISING lcx_exception,
-      indent4 FOR TESTING RAISING lcx_exception,
-      style1  FOR TESTING RAISING lcx_exception.
+      indent1 FOR TESTING RAISING zcx_abapgit_exception,
+      indent2 FOR TESTING RAISING zcx_abapgit_exception,
+      indent3 FOR TESTING RAISING zcx_abapgit_exception,
+      indent4 FOR TESTING RAISING zcx_abapgit_exception,
+      style1  FOR TESTING RAISING zcx_abapgit_exception.
 
     METHODS:
       setup.
@@ -49816,20 +49796,20 @@ CLASS ltcl_serialize DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT F
     METHODS:
       check
         IMPORTING is_item TYPE lif_defs=>ty_item
-        RAISING   lcx_exception,
-      serialize_tabl FOR TESTING RAISING lcx_exception,
-      serialize_enqu FOR TESTING RAISING lcx_exception,
-      serialize_shlp FOR TESTING RAISING lcx_exception,
-      serialize_view FOR TESTING RAISING lcx_exception,
-      serialize_auth FOR TESTING RAISING lcx_exception,
-      serialize_clas FOR TESTING RAISING lcx_exception,
-      serialize_doma FOR TESTING RAISING lcx_exception,
-      serialize_dtel FOR TESTING RAISING lcx_exception,
-      serialize_fugr FOR TESTING RAISING lcx_exception,
-      serialize_msag FOR TESTING RAISING lcx_exception,
-      serialize_prog FOR TESTING RAISING lcx_exception,
-      serialize_tran FOR TESTING RAISING lcx_exception,
-      serialize_ttyp FOR TESTING RAISING lcx_exception.
+        RAISING   zcx_abapgit_exception,
+      serialize_tabl FOR TESTING RAISING zcx_abapgit_exception,
+      serialize_enqu FOR TESTING RAISING zcx_abapgit_exception,
+      serialize_shlp FOR TESTING RAISING zcx_abapgit_exception,
+      serialize_view FOR TESTING RAISING zcx_abapgit_exception,
+      serialize_auth FOR TESTING RAISING zcx_abapgit_exception,
+      serialize_clas FOR TESTING RAISING zcx_abapgit_exception,
+      serialize_doma FOR TESTING RAISING zcx_abapgit_exception,
+      serialize_dtel FOR TESTING RAISING zcx_abapgit_exception,
+      serialize_fugr FOR TESTING RAISING zcx_abapgit_exception,
+      serialize_msag FOR TESTING RAISING zcx_abapgit_exception,
+      serialize_prog FOR TESTING RAISING zcx_abapgit_exception,
+      serialize_tran FOR TESTING RAISING zcx_abapgit_exception,
+      serialize_ttyp FOR TESTING RAISING zcx_abapgit_exception.
 
 ENDCLASS.                    "ltcl_serialize DEFINITION
 
@@ -50019,9 +49999,9 @@ CLASS ltcl_login_manager DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHO
       setup,
       teardown,
       encoding FOR TESTING
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       same_server FOR TESTING
-        RAISING lcx_exception.
+        RAISING zcx_abapgit_exception.
 
 ENDCLASS.
 
@@ -50492,7 +50472,7 @@ CLASS ltcl_file_status DEFINITION FOR TESTING RISK LEVEL HARMLESS
 
   PUBLIC SECTION.
     METHODS calculate_status FOR TESTING
-      RAISING lcx_exception.
+      RAISING zcx_abapgit_exception.
 
 ENDCLASS.   "ltcl_file_status
 
@@ -50593,7 +50573,7 @@ CLASS ltcl_file_status2 DEFINITION FOR TESTING RISK LEVEL HARMLESS
   INHERITING FROM cl_aunit_assert.
 
   PUBLIC SECTION.
-    METHODS check FOR TESTING RAISING lcx_exception.
+    METHODS check FOR TESTING RAISING zcx_abapgit_exception.
 
 ENDCLASS.   "ltcl_sap_package
 
@@ -51106,13 +51086,13 @@ CLASS ltc_oo_test DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
       ms_item                    TYPE lif_defs=>ty_item.
     METHODS: when_deserializing
       RAISING
-        lcx_exception,
+        zcx_abapgit_exception,
       then_should_deserialize_source,
       given_the_descriptions
         IMPORTING
           it_descriptions TYPE lif_defs=>ty_seocompotx_tt
         RAISING
-          lcx_exception,
+          zcx_abapgit_exception,
       then_shuld_update_descriptions
         IMPORTING
           it_descriptions TYPE lif_defs=>ty_seocompotx_tt,
@@ -51121,7 +51101,7 @@ CLASS ltc_oo_test DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
         IMPORTING
           it_lines TYPE tlinetab
         RAISING
-          lcx_exception,
+          zcx_abapgit_exception,
       then_docu_should_be_created
         IMPORTING
           it_lines TYPE tlinetab,
@@ -51207,7 +51187,7 @@ INHERITING FROM ltc_oo_test.
       setup,
       given_a_class_properties
         RAISING
-          lcx_exception,
+          zcx_abapgit_exception,
       then_should_create_class,
       then_it_should_generate_locals,
       should_create_class        FOR TESTING RAISING cx_static_check,
@@ -51415,7 +51395,7 @@ INHERITING FROM ltc_oo_test.
       setup,
       given_an_interface_properties
         RAISING
-          lcx_exception,
+          zcx_abapgit_exception,
       then_should_create_interface,
       create_interface    FOR TESTING RAISING cx_static_check,
       update_descriptions FOR TESTING RAISING cx_static_check,
@@ -52245,7 +52225,7 @@ CLASS ltcl_transport_objects DEFINITION FOR TESTING.
                   iv_data              TYPE string
         RETURNING VALUE(rs_local_file) TYPE lif_defs=>ty_file_item,
       when_staging
-        RAISING lcx_exception,
+        RAISING zcx_abapgit_exception,
       then_file_should_be_added
         IMPORTING
           is_local_file TYPE lif_defs=>ty_file_item,
@@ -52544,13 +52524,13 @@ CLASS ltcl_transport_objects IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD then_it_should_raise_exception.
-    DATA: lo_exception TYPE REF TO lcx_exception.
+    DATA: lo_exception TYPE REF TO zcx_abapgit_exception.
     TRY.
         when_staging( ).
         cl_abap_unit_assert=>fail( 'Should have raised exception').
-      CATCH lcx_exception INTO lo_exception.
+      CATCH zcx_abapgit_exception INTO lo_exception.
         cl_abap_unit_assert=>assert_equals(
-          act = lo_exception->mv_text
+          act = lo_exception->text
           exp = with_text ).
     ENDTRY.
   ENDMETHOD.
@@ -52583,13 +52563,13 @@ CLASS lcl_migrations DEFINITION FINAL.
 
   PUBLIC SECTION.
     CLASS-METHODS run
-      RAISING lcx_exception.
+      RAISING zcx_abapgit_exception.
 
   PRIVATE SECTION.
     CLASS-METHODS rebuild_local_checksums_161112
-      RAISING lcx_exception.
+      RAISING zcx_abapgit_exception.
     CLASS-METHODS local_dot_abapgit
-      RAISING lcx_exception.
+      RAISING zcx_abapgit_exception.
 
 ENDCLASS. "lcl_migrations
 
@@ -52614,7 +52594,7 @@ CLASS lcl_migrations IMPLEMENTATION.
           lv_msg         TYPE string,
           lv_shown       TYPE abap_bool,
           lo_dot_abapgit TYPE REF TO lcl_dot_abapgit,
-          lx_exception   TYPE REF TO lcx_exception.
+          lx_exception   TYPE REF TO zcx_abapgit_exception.
 
     FIELD-SYMBOLS: <lo_repo> LIKE LINE OF lt_repos.
 
@@ -52641,12 +52621,12 @@ CLASS lcl_migrations IMPLEMENTATION.
           " everybody to fetch their repos.
           TRY.
               <lo_repo>->refresh( ).
-            CATCH lcx_exception INTO lx_exception.
+            CATCH zcx_abapgit_exception INTO lx_exception.
               lv_msg = |Please do not use the "{ <lo_repo>->get_name( ) }" repository until migrated|.
               CALL FUNCTION 'POPUP_TO_INFORM'
                 EXPORTING
                   titel = 'Migration has failed'
-                  txt1  = lx_exception->mv_text
+                  txt1  = lx_exception->text
                   txt2  = lv_msg
                   txt3  = 'You will be prompted to migrate the repository every time you run abapGit.'
                   txt4  = 'You can safely remove the repository in its ''Advanced -> Remove'' menu.'.
@@ -52747,7 +52727,7 @@ ENDCLASS. "lcl_migrations
 *&---------------------------------------------------------------------*
 FORM run.
 
-  DATA: lx_exception TYPE REF TO lcx_exception,
+  DATA: lx_exception TYPE REF TO zcx_abapgit_exception,
         lv_ind       TYPE t000-ccnocliind.
 
 
@@ -52763,13 +52743,13 @@ FORM run.
   TRY.
       lcl_migrations=>run( ).
       PERFORM open_gui.
-    CATCH lcx_exception INTO lx_exception.
-      MESSAGE lx_exception->mv_text TYPE 'E'.
+    CATCH zcx_abapgit_exception INTO lx_exception.
+      MESSAGE lx_exception->text TYPE 'E'.
   ENDTRY.
 
 ENDFORM.                    "run
 
-FORM open_gui RAISING lcx_exception.
+FORM open_gui RAISING zcx_abapgit_exception.
 
   IF sy-batch = abap_true.
     lcl_background=>run( ).
@@ -52790,7 +52770,7 @@ ENDFORM.
 *      -->CS_ERROR       text
 *      -->CV_SHOW_POPUP  text
 *      -->RAISING        text
-*      -->LCX_EXCEPTION  text
+*      -->zcx_abapgit_exception  text
 *      -->##CALLED       text
 *      -->##NEEDED       text
 *----------------------------------------------------------------------*
@@ -52798,11 +52778,11 @@ FORM branch_popup TABLES   tt_fields TYPE lif_defs=>ty_sval_tt
                   USING    pv_code TYPE clike
                   CHANGING cs_error TYPE svale
                            cv_show_popup TYPE c
-                  RAISING lcx_exception ##called ##needed.
+                  RAISING zcx_abapgit_exception ##called ##needed.
 * called dynamically from function module POPUP_GET_VALUES_USER_BUTTONS
 
   DATA: lv_url          TYPE string,
-        lx_error        TYPE REF TO lcx_exception,
+        lx_error        TYPE REF TO zcx_abapgit_exception,
         ls_package_data TYPE scompkdtln,
         ls_branch       TYPE lcl_git_branch_list=>ty_git_branch,
         lv_create       TYPE boolean.
@@ -52825,7 +52805,7 @@ FORM branch_popup TABLES   tt_fields TYPE lif_defs=>ty_sval_tt
 
     TRY.
         ls_branch = lcl_popups=>branch_list_popup( lv_url ).
-      CATCH lcx_exception INTO lx_error.
+      CATCH zcx_abapgit_exception INTO lx_error.
         MESSAGE lx_error TYPE 'S' DISPLAY LIKE 'E'.
         RETURN.
     ENDTRY.
@@ -52860,7 +52840,7 @@ FORM package_popup TABLES   tt_fields TYPE lif_defs=>ty_sval_tt
                    USING    pv_code TYPE clike
                    CHANGING cs_error TYPE svale
                             cv_show_popup TYPE c
-                   RAISING  lcx_exception ##called ##needed.
+                   RAISING  zcx_abapgit_exception ##called ##needed.
 * called dynamically from function module POPUP_GET_VALUES_USER_BUTTONS
 
   DATA: ls_package_data TYPE scompkdtln,
@@ -52901,7 +52881,7 @@ FORM output.
       p_exclude = lt_ucomm.
 ENDFORM.
 
-FORM exit RAISING lcx_exception.
+FORM exit RAISING zcx_abapgit_exception.
   CASE sy-ucomm.
     WHEN 'CBAC'.  "Back
       IF lcl_app=>gui( )->back( ) IS INITIAL.
@@ -52937,5 +52917,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-10-01T09:54:32.836Z
+* abapmerge - 2017-10-01T10:34:34.461Z
 ****************************************************
