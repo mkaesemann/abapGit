@@ -27082,7 +27082,7 @@ CLASS lcl_object_prog IMPLEMENTATION.
         reject_deletion    = 4
         OTHERS             = 5.
     IF sy-subrc <> 0.
-      lcx_exception=>raise( 'error from RS_DELETE_PROGRAM' ).
+      lcx_exception=>raise( |Error from RS_DELETE_PROGRAM: { sy-subrc }| ).
     ENDIF.
 
   ENDMETHOD.                    "delete
@@ -52937,5 +52937,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-10-01T09:00:25.509Z
+* abapmerge - 2017-10-01T09:06:23.561Z
 ****************************************************
