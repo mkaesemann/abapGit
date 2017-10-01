@@ -54,7 +54,7 @@ ENDCLASS.
 CLASS ZCX_ABAPGIT_EXCEPTION IMPLEMENTATION.
 
 
-  method CONSTRUCTOR.
+  method CONSTRUCTOR ##ADT_SUPPRESS_GENERATION.
 CALL METHOD SUPER->CONSTRUCTOR
 EXPORTING
 TEXTID = TEXTID
@@ -53079,5 +53079,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-10-01T10:42:28.557Z
+* abapmerge - 2017-10-01T10:48:32.885Z
 ****************************************************
