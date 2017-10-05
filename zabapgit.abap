@@ -37099,7 +37099,7 @@ CLASS lcl_skip_objects IMPLEMENTATION.
       LOOP AT rt_tadir INTO ls_tadir_class
        WHERE object = 'CLAS' AND obj_name CS ls_tadir-obj_name.
 
-        IF has_sadl_superclass( ls_tadir_class ).
+        IF has_sadl_superclass( ls_tadir_class ) = abap_true.
           APPEND ls_tadir_class TO lt_lines_to_delete.
         ENDIF.
       ENDLOOP.
@@ -53776,5 +53776,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-10-05T15:15:36.323Z
+* abapmerge - 2017-10-05T17:00:39.638Z
 ****************************************************
