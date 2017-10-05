@@ -2059,6 +2059,54 @@ ENDCLASS. "lcl_html_toolbar IMPLEMENTATION
 *&  Include           ZABAPGIT_UTIL
 *&---------------------------------------------------------------------*
 
+*----------------------------------------------------------------------*
+*       CLASS lcl_language DEFINITION
+*----------------------------------------------------------------------*
+* This helper class is used to set and restore the current language.
+* As some of the SAP functions used rely on SY-LANGU containing the
+* master language, this class is used to temporarily change and then
+* restore the value of SY-LANGU.
+*----------------------------------------------------------------------*
+CLASS lcl_language DEFINITION.
+
+  PUBLIC SECTION.
+
+    CLASS-DATA:
+      current_language TYPE langu READ-ONLY,
+      login_language   TYPE langu READ-ONLY.
+
+    CLASS-METHODS:
+      class_constructor,
+      restore_login_language,
+      set_current_language
+        IMPORTING
+          iv_language TYPE langu.
+
+ENDCLASS.
+
+*----------------------------------------------------------------------*
+*       CLASS lcl_language IMPLEMENTATION
+*----------------------------------------------------------------------*
+*
+*----------------------------------------------------------------------*
+CLASS lcl_language IMPLEMENTATION.
+
+  METHOD class_constructor.
+    DATA lv_dummy TYPE string.
+
+    GET LOCALE LANGUAGE login_language COUNTRY lv_dummy MODIFIER lv_dummy.
+  ENDMETHOD.
+
+  METHOD restore_login_language.
+    SET LOCALE LANGUAGE login_language.
+  ENDMETHOD.
+
+  METHOD set_current_language.
+    SET LOCALE LANGUAGE iv_language.
+  ENDMETHOD.
+
+ENDCLASS.
+
 CLASS lcl_state DEFINITION.
 
   PUBLIC SECTION.
@@ -6683,7 +6731,9 @@ CLASS lcl_sap_package IMPLEMENTATION.
         no_access                  = 4
         object_locked_and_modified = 5 ).
     IF sy-subrc = 0.
-      RETURN. "Package already exists. We assume this is fine
+      " Package already exists. We assume this is fine. Its properties might be changed later at
+      " DEVC deserialization.
+      RETURN.
     ENDIF.
 
     ls_package = is_package.
@@ -6826,19 +6876,20 @@ CLASS lcl_folder_logic DEFINITION.
     CLASS-METHODS:
       package_to_path
         IMPORTING
-          iv_top         TYPE devclass
-          io_dot         TYPE REF TO lcl_dot_abapgit
-          iv_package     TYPE devclass
-        RETURNING
-          VALUE(rv_path) TYPE string
+                  iv_top         TYPE devclass
+                  io_dot         TYPE REF TO lcl_dot_abapgit
+                  iv_package     TYPE devclass
+        RETURNING VALUE(rv_path) TYPE string
         RAISING zcx_abapgit_exception,
       path_to_package
         IMPORTING
-          iv_top            TYPE devclass
-          io_dot            TYPE REF TO lcl_dot_abapgit
-          iv_path           TYPE string
+          iv_top                  TYPE devclass
+          io_dot                  TYPE REF TO lcl_dot_abapgit
+          iv_path                 TYPE string
+          iv_create_if_not_exists TYPE abap_bool DEFAULT abap_true
+          iv_local_path           TYPE abap_bool DEFAULT abap_true
         RETURNING
-          VALUE(rv_package) TYPE devclass
+          VALUE(rv_package)       TYPE devclass
         RAISING
           zcx_abapgit_exception.
 
@@ -6851,16 +6902,18 @@ CLASS lcl_folder_logic IMPLEMENTATION.
     DATA: lv_length TYPE i,
           lv_parent TYPE devclass,
           lv_new    TYPE string,
-          lv_path   TYPE string.
+          lv_path   TYPE string,
+          lv_top    TYPE devclass.
 
+    lv_top = iv_top.
 
     lv_length  = strlen( io_dot->get_starting_folder( ) ).
     IF lv_length > strlen( iv_path ).
       zcx_abapgit_exception=>raise( 'unexpected folder structure' ).
     ENDIF.
     lv_path    = iv_path+lv_length.
-    lv_parent  = iv_top.
-    rv_package = iv_top.
+    lv_parent  = lv_top.
+    rv_package = lv_top.
 
     WHILE lv_path CA '/'.
       SPLIT lv_path AT '/' INTO lv_new lv_path.
@@ -6880,13 +6933,14 @@ CLASS lcl_folder_logic IMPLEMENTATION.
 
       TRANSLATE rv_package TO UPPER CASE.
 
-      IF lcl_sap_package=>get( rv_package )->exists( ) = abap_false.
+      IF lcl_sap_package=>get( rv_package )->exists( ) = abap_false AND
+          iv_create_if_not_exists = abap_true.
+
         lcl_sap_package=>get( lv_parent )->create_child( rv_package ).
       ENDIF.
 
       lv_parent = rv_package.
     ENDWHILE.
-
 
   ENDMETHOD.
 
@@ -6896,7 +6950,6 @@ CLASS lcl_folder_logic IMPLEMENTATION.
           lv_path     TYPE string,
           lv_message  TYPE string,
           lv_parentcl TYPE tdevc-parentcl.
-
 
     IF iv_top = iv_package.
       rv_path = io_dot->get_starting_folder( ).
@@ -6955,13 +7008,13 @@ CLASS ltcl_folder_logic_helper DEFINITION FOR TESTING FINAL.
 
   PUBLIC SECTION.
     CLASS-METHODS: test
-            IMPORTING
-              iv_starting TYPE string
-              iv_top      TYPE devclass
-              iv_logic    TYPE string
-              iv_package  TYPE devclass
-              iv_path     TYPE string
-            RAISING zcx_abapgit_exception.
+      IMPORTING
+                iv_starting TYPE string
+                iv_top      TYPE devclass
+                iv_logic    TYPE string
+                iv_package  TYPE devclass
+                iv_path     TYPE string
+      RAISING   zcx_abapgit_exception.
 
 ENDCLASS.
 
@@ -12220,7 +12273,8 @@ CLASS lcl_objects_files DEFINITION.
   PUBLIC SECTION.
     METHODS:
       constructor
-        IMPORTING is_item TYPE lif_defs=>ty_item,
+        IMPORTING is_item TYPE lif_defs=>ty_item
+                  iv_path TYPE string OPTIONAL,
       add_string
         IMPORTING iv_extra  TYPE clike OPTIONAL
                   iv_ext    TYPE string
@@ -12278,7 +12332,8 @@ CLASS lcl_objects_files DEFINITION.
   PRIVATE SECTION.
     DATA: ms_item           TYPE lif_defs=>ty_item,
           mt_accessed_files TYPE lif_defs=>ty_file_signatures_tt,
-          mt_files          TYPE lif_defs=>ty_files_tt.
+          mt_files          TYPE lif_defs=>ty_files_tt,
+          mv_path           TYPE string.
 
     METHODS:
       read_file
@@ -12368,6 +12423,7 @@ CLASS lcl_objects_files IMPLEMENTATION.
 
   METHOD constructor.
     ms_item = is_item.
+    mv_path = iv_path.
   ENDMETHOD.                    "constructor
 
   METHOD add.
@@ -12510,6 +12566,12 @@ CLASS lcl_objects_files IMPLEMENTATION.
 
     lv_obj_name = ms_item-obj_name.
 
+    IF ms_item-obj_type = 'DEVC'.
+      " Packages have a fixed filename so that the repository can be installed to a different
+      " package(-hierarchy) on the client and not show up as a different package in the repo.
+      lv_obj_name = 'package'.
+    ENDIF.
+
     IF iv_extra IS INITIAL.
       CONCATENATE lv_obj_name '.' ms_item-obj_type '.' iv_ext
         INTO rv_filename.                                   "#EC NOTEXT
@@ -12546,7 +12608,13 @@ CLASS lcl_objects_files IMPLEMENTATION.
                    <ls_accessed> LIKE LINE OF mt_accessed_files.
 
     CLEAR ev_data.
-    READ TABLE mt_files ASSIGNING <ls_file> WITH KEY filename = iv_filename.
+
+    IF mv_path IS NOT INITIAL.
+      READ TABLE mt_files ASSIGNING <ls_file> WITH KEY path     = mv_path
+                                                       filename = iv_filename.
+    ELSE.
+      READ TABLE mt_files ASSIGNING <ls_file> WITH KEY filename = iv_filename.
+    ENDIF.
 
     IF sy-subrc <> 0.
       IF iv_error = abap_true.
@@ -13048,6 +13116,8 @@ CLASS lcl_objects_program IMPLEMENTATION.
       lv_program_name = iv_program.
     ENDIF.
 
+    lcl_language=>set_current_language( mv_language ).
+
     CALL FUNCTION 'RPY_PROGRAM_READ'
       EXPORTING
         program_name     = lv_program_name
@@ -13060,11 +13130,16 @@ CLASS lcl_objects_program IMPLEMENTATION.
         not_found        = 2
         permission_error = 3
         OTHERS           = 4.
+
     IF sy-subrc = 2.
+      lcl_language=>restore_login_language( ).
       RETURN.
     ELSEIF sy-subrc <> 0.
+      lcl_language=>restore_login_language( ).
       zcx_abapgit_exception=>raise( 'Error reading program' ).
     ENDIF.
+
+    lcl_language=>restore_login_language( ).
 
     ls_progdir = read_progdir( lv_program_name ).
 
@@ -13157,6 +13232,8 @@ CLASS lcl_objects_program IMPLEMENTATION.
     ENDIF.
 
     IF lv_exists = abap_true.
+      lcl_language=>set_current_language( mv_language ).
+
       CALL FUNCTION 'RPY_PROGRAM_UPDATE'
         EXPORTING
           program_name     = is_progdir-name
@@ -13169,13 +13246,18 @@ CLASS lcl_objects_program IMPLEMENTATION.
           permission_error = 2
           not_found        = 3
           OTHERS           = 4.
+
       IF sy-subrc <> 0.
+        lcl_language=>restore_login_language( ).
+
         IF sy-msgid = 'EU' AND sy-msgno = '510'.
           zcx_abapgit_exception=>raise( 'User is currently editing program' ).
         ELSE.
           zcx_abapgit_exception=>raise( 'PROG, error updating' ).
         ENDIF.
       ENDIF.
+
+      lcl_language=>restore_login_language( ).
     ELSE.
 * function module RPY_PROGRAM_INSERT cannot handle function group includes
 
@@ -13202,17 +13284,16 @@ CLASS lcl_objects_program IMPLEMENTATION.
           zcx_abapgit_exception=>raise( 'error from INSERT REPORT' ).
         ENDIF.
       ENDIF.
+    ENDIF.
 
-      IF NOT it_tpool[] IS INITIAL.
-        INSERT TEXTPOOL is_progdir-name
-          FROM it_tpool
-          LANGUAGE mv_language
-          STATE 'I'.
-        IF sy-subrc <> 0.
-          zcx_abapgit_exception=>raise( 'error from INSERT TEXTPOOL' ).
-        ENDIF.
+    IF NOT it_tpool[] IS INITIAL.
+      INSERT TEXTPOOL is_progdir-name
+        FROM it_tpool
+        LANGUAGE mv_language
+        STATE 'I'.
+      IF sy-subrc <> 0.
+        zcx_abapgit_exception=>raise( 'error from INSERT TEXTPOOL' ).
       ENDIF.
-
     ENDIF.
 
     CALL FUNCTION 'READ_PROGDIR'
@@ -14582,6 +14663,7 @@ CLASS lcl_tadir IMPLEMENTATION.
     LOOP AT it_tadir ASSIGNING <ls_tadir>.
       ls_item-obj_type = <ls_tadir>-object.
       ls_item-obj_name = <ls_tadir>-obj_name.
+      ls_item-devclass = <ls_tadir>-devclass.
 
       IF lcl_objects=>is_supported( ls_item ) = abap_true.
         lv_exists = lcl_objects=>exists( ls_item ).
@@ -14614,21 +14696,30 @@ CLASS lcl_tadir IMPLEMENTATION.
     DATA: lt_tadir        TYPE lif_defs=>ty_tadir_tt,
           lt_tdevc        TYPE STANDARD TABLE OF tdevc,
           lv_path         TYPE string,
-          lo_skip_objects TYPE REF TO lcl_skip_objects.
+          lo_skip_objects TYPE REF TO lcl_skip_objects,
+          lt_excludes     TYPE RANGE OF trobjtype,
+          ls_exclude      LIKE LINE OF lt_excludes.
 
     FIELD-SYMBOLS: <ls_tdevc> LIKE LINE OF lt_tdevc,
                    <ls_tadir> LIKE LINE OF rt_tadir.
 
+    ls_exclude-sign = 'I'.
+    ls_exclude-option = 'EQ'.
+
+    ls_exclude-low = 'SOTR'.
+    APPEND ls_exclude TO lt_excludes.
+    ls_exclude-low = 'SFB1'.
+    APPEND ls_exclude TO lt_excludes.
+    ls_exclude-low = 'SFB2'.
+    APPEND ls_exclude TO lt_excludes.
+    ls_exclude-low = 'STOB'. " auto generated by core data services
+    APPEND ls_exclude TO lt_excludes.
 
     SELECT * FROM tadir
       INTO CORRESPONDING FIELDS OF TABLE rt_tadir
       WHERE devclass = iv_package
       AND pgmid = 'R3TR'
-      AND object <> 'DEVC'
-      AND object <> 'SOTR'
-      AND object <> 'SFB1'
-      AND object <> 'SFB2'
-      AND object <> 'STOB' " auto generated by core data services
+      AND object NOT IN lt_excludes
       AND delflag = abap_false
       ORDER BY PRIMARY KEY.               "#EC CI_GENBUFF "#EC CI_SUBRC
 
@@ -14636,6 +14727,15 @@ CLASS lcl_tadir IMPLEMENTATION.
     rt_tadir = lo_skip_objects->skip_sadl_generated_objects(
       it_tadir = rt_tadir
       io_log   = io_log ).
+
+    " Local packages are not in TADIR, only in TDEVC, act as if they were
+    IF iv_package CP '$*'. " OR iv_package CP 'T*' ).
+      APPEND INITIAL LINE TO rt_tadir ASSIGNING <ls_tadir>.
+      <ls_tadir>-pgmid    = 'R3TR'.
+      <ls_tadir>-object   = 'DEVC'.
+      <ls_tadir>-obj_name = iv_package.
+      <ls_tadir>-devclass = iv_package.
+    ENDIF.
 
     IF NOT io_dot IS INITIAL.
       lv_path = lcl_folder_logic=>package_to_path(
@@ -14703,6 +14803,7 @@ CLASS lcl_file_status DEFINITION FINAL
     CLASS-METHODS:
       calculate_status
         IMPORTING iv_devclass       TYPE devclass
+                  io_dot            TYPE REF TO lcl_dot_abapgit
                   it_local          TYPE lif_defs=>ty_files_item_tt
                   it_remote         TYPE lif_defs=>ty_files_tt
                   it_cur_state      TYPE lif_defs=>ty_file_signatures_tt
@@ -14724,14 +14825,20 @@ CLASS lcl_file_status DEFINITION FINAL
         RETURNING VALUE(rs_result) TYPE lif_defs=>ty_result,
       build_new_remote
         IMPORTING iv_devclass      TYPE devclass
+                  io_dot           TYPE REF TO lcl_dot_abapgit
                   is_remote        TYPE lif_defs=>ty_file
                   it_items         TYPE lif_defs=>ty_items_ts
                   it_state         TYPE lif_defs=>ty_file_signatures_ts
-        RETURNING VALUE(rs_result) TYPE lif_defs=>ty_result,
+        RETURNING VALUE(rs_result) TYPE lif_defs=>ty_result
+        RAISING   zcx_abapgit_exception,
       identify_object
         IMPORTING iv_filename TYPE string
+                  iv_path     TYPE string
+                  iv_devclass TYPE devclass
+                  io_dot      TYPE REF TO lcl_dot_abapgit
         EXPORTING es_item     TYPE lif_defs=>ty_item
-                  ev_is_xml   TYPE abap_bool.
+                  ev_is_xml   TYPE abap_bool
+        RAISING   zcx_abapgit_exception.
 
 ENDCLASS.                    "lcl_file_status DEFINITION
 
@@ -14773,7 +14880,7 @@ CLASS lcl_file_status IMPLEMENTATION.
 
     " Check files for one object is in the same folder
 
-    LOOP AT it_results ASSIGNING <ls_res1> WHERE NOT obj_type IS INITIAL.
+    LOOP AT it_results ASSIGNING <ls_res1> WHERE NOT obj_type IS INITIAL AND obj_type <> 'DEVC'.
       READ TABLE lt_item_idx ASSIGNING <ls_res2>
         WITH KEY obj_type = <ls_res1>-obj_type obj_name = <ls_res1>-obj_name
         BINARY SEARCH. " Sorted above
@@ -14803,7 +14910,7 @@ CLASS lcl_file_status IMPLEMENTATION.
     " Check for multiple files with same filename
     SORT lt_res_sort BY filename ASCENDING.
 
-    LOOP AT lt_res_sort ASSIGNING <ls_res1>.
+    LOOP AT lt_res_sort ASSIGNING <ls_res1> WHERE obj_type <> 'DEVC'.
       IF <ls_res1>-filename IS NOT INITIAL AND <ls_res1>-filename = ls_file-filename.
         io_log->add( iv_msg  = |Multiple files with same filename, { <ls_res1>-filename }|
                      iv_type = 'W'
@@ -14831,6 +14938,7 @@ CLASS lcl_file_status IMPLEMENTATION.
 
     rt_results = calculate_status(
       iv_devclass  = io_repo->get_package( )
+      io_dot       = io_repo->get_dot_abapgit( )
       it_local     = io_repo->get_files_local( io_log = io_log )
       it_remote    = io_repo->get_files_remote( )
       it_cur_state = io_repo->get_local_checksums_per_file( ) ).
@@ -14845,6 +14953,7 @@ CLASS lcl_file_status IMPLEMENTATION.
           iv_path     = <ls_result>-path
           iv_filename = <ls_result>-filename ) = abap_true.
         DELETE rt_results INDEX lv_index.
+        CONTINUE.
       ENDIF.
     ENDLOOP.
 
@@ -14899,6 +15008,9 @@ CLASS lcl_file_status IMPLEMENTATION.
     " Complete item index for unmarked remote files
     LOOP AT lt_remote ASSIGNING <ls_remote> WHERE sha1 IS NOT INITIAL.
       identify_object( EXPORTING iv_filename = <ls_remote>-filename
+                                 iv_path     = <ls_remote>-path
+                                 io_dot      = io_dot
+                                 iv_devclass = iv_devclass
                        IMPORTING es_item     = ls_item
                                  ev_is_xml   = lv_is_xml ).
 
@@ -14918,6 +15030,7 @@ CLASS lcl_file_status IMPLEMENTATION.
     LOOP AT lt_remote ASSIGNING <ls_remote> WHERE sha1 IS NOT INITIAL.
       APPEND INITIAL LINE TO rt_results ASSIGNING <ls_result>.
       <ls_result> = build_new_remote( iv_devclass = iv_devclass
+                                      io_dot      = io_dot
                                       is_remote   = <ls_remote>
                                       it_items    = lt_items_idx
                                       it_state    = lt_state_idx ).
@@ -14943,6 +15056,14 @@ CLASS lcl_file_status IMPLEMENTATION.
     REPLACE ALL OCCURRENCES OF '#' IN lv_name WITH '/'.
     REPLACE ALL OCCURRENCES OF '#' IN lv_type WITH '/'.
     REPLACE ALL OCCURRENCES OF '#' IN lv_ext WITH '/'.
+
+    " Try to get a unique package name for DEVC by using the path
+    IF lv_type = 'DEVC'.
+      ASSERT lv_name = 'PACKAGE'.
+      lv_name = lcl_folder_logic=>path_to_package( iv_top  = iv_devclass
+                                                   io_dot  = io_dot
+                                                   iv_path = iv_path ).
+    ENDIF.
 
     CLEAR es_item.
     es_item-obj_type = lv_type.
@@ -15022,6 +15143,9 @@ CLASS lcl_file_status IMPLEMENTATION.
     rs_result-rstate   = lif_defs=>gc_state-added.
 
     identify_object( EXPORTING iv_filename = is_remote-filename
+                               iv_path     = is_remote-path
+                               iv_devclass = iv_devclass
+                               io_dot      = io_dot
                      IMPORTING es_item     = ls_item ).
 
     " Check if in item index + get package
@@ -15821,8 +15945,8 @@ CLASS lcl_popups IMPLEMENTATION.
                                 CHANGING t_table = lt_popup_list ).
 
         GET REFERENCE OF lt_popup_list INTO mtr_select_list.
-        mo_select_list_popup->set_screen_status( pfstatus = 'ST850'
-                                                 report = 'SAPLKKBL' ).
+        mo_select_list_popup->set_screen_status( pfstatus = '102'
+                                                 report = 'SAPMSVIM' ).
 
         mo_select_list_popup->set_screen_popup( start_column = 1
                                                 end_column = 65
@@ -15880,11 +16004,31 @@ CLASS lcl_popups IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD on_select_list_function_click.
+    DATA:
+          lsr_line TYPE REF TO t_popup_select_list.
+
     CASE e_salv_function.
-      WHEN 'GOON'.
+      WHEN 'O.K.'.
         mo_select_list_popup->close_screen( ).
+
       WHEN 'ABR'.
         "Canceled: clear list to overwrite nothing
+        CLEAR mtr_select_list->*.
+        mo_select_list_popup->close_screen( ).
+
+      WHEN 'SALL'.
+        LOOP AT mtr_select_list->* REFERENCE INTO lsr_line.
+          lsr_line->selected = abap_true.
+        ENDLOOP.
+        mo_select_list_popup->refresh( ).
+
+      WHEN 'DSEL'.
+        LOOP AT mtr_select_list->* REFERENCE INTO lsr_line.
+          lsr_line->selected = abap_false.
+        ENDLOOP.
+        mo_select_list_popup->refresh( ).
+
+      WHEN OTHERS.
         CLEAR mtr_select_list->*.
         mo_select_list_popup->close_screen( ).
     ENDCASE.
@@ -16980,10 +17124,16 @@ CLASS lcl_objects IMPLEMENTATION.
       APPEND <ls_result> TO rt_results.
     ENDLOOP.
 
+* PINF has to be handled before DEVC for package interface usage
+    LOOP AT it_results ASSIGNING <ls_result> WHERE obj_type = 'PINF'.
+      APPEND <ls_result> TO rt_results.
+    ENDLOOP.
+
     LOOP AT it_results ASSIGNING <ls_result>
         WHERE obj_type <> 'IASP'
         AND obj_type <> 'PROG'
-        AND obj_type <> 'XSLT'.
+        AND obj_type <> 'XSLT'
+        AND obj_type <> 'PINF'.
       APPEND <ls_result> TO rt_results.
     ENDLOOP.
 
@@ -17001,7 +17151,8 @@ CLASS lcl_objects IMPLEMENTATION.
           lt_results TYPE lif_defs=>ty_results_tt,
           lt_ddic    TYPE TABLE OF ty_deserialization,
           lt_rest    TYPE TABLE OF ty_deserialization,
-          lt_late    TYPE TABLE OF ty_deserialization.
+          lt_late    TYPE TABLE OF ty_deserialization,
+          lv_path    TYPE string.
 
     FIELD-SYMBOLS: <ls_result> TYPE lif_defs=>ty_result,
                    <ls_deser>  LIKE LINE OF lt_late.
@@ -17044,9 +17195,16 @@ CLASS lcl_objects IMPLEMENTATION.
         zcx_abapgit_exception=>raise( 'cancelled' ).
       ENDIF.
 
+      IF ls_item-obj_type = 'DEVC'.
+        " Packages have the same filename across different folders. The path needs to be supplied
+        " to find the correct file.
+        lv_path = <ls_result>-path.
+      ENDIF.
+
       CREATE OBJECT lo_files
         EXPORTING
-          is_item = ls_item.
+          is_item = ls_item
+          iv_path = lv_path.
       lo_files->set_files( lt_remote ).
 
 * Analyze XML in order to instantiate the proper serializer
@@ -17075,6 +17233,7 @@ CLASS lcl_objects IMPLEMENTATION.
       <ls_deser>-xml     = lo_xml.
       <ls_deser>-package = lv_package.
 
+      CLEAR: lv_path, lv_package.
     ENDLOOP.
 
     deserialize_objects( EXPORTING it_objects = lt_ddic
@@ -18389,10 +18548,22 @@ CLASS lcl_object_clas IMPLEMENTATION.
           lt_sotr         TYPE lif_defs=>ty_sotr_tt,
           lt_lines        TYPE tlinetab.
 
-
     ls_clskey-clsname = ms_item-obj_name.
 
-    ls_vseoclass = mo_object_oriented_object_fct->get_class_properties( is_class_key = ls_clskey ).
+    "If class was deserialized with a previous versions of abapGit and current language was different
+    "from master language at this time, this call would return SY-LANGU as master language. To fix
+    "these objects, set SY-LANGU to master language temporarily.
+    lcl_language=>set_current_language( mv_language ).
+
+    TRY.
+        ls_vseoclass = mo_object_oriented_object_fct->get_class_properties( is_class_key = ls_clskey ).
+
+      CLEANUP.
+        lcl_language=>restore_login_language( ).
+
+    ENDTRY.
+
+    lcl_language=>restore_login_language( ).
 
     CLEAR: ls_vseoclass-uuid,
            ls_vseoclass-author,
@@ -20001,6 +20172,516 @@ CLASS lcl_object_ddls IMPLEMENTATION.
   ENDMETHOD.                    "open_adt_stob
 
 ENDCLASS.                    "lcl_object_view IMPLEMENTATION
+
+
+****************************************************
+* abapmerge - ZABAPGIT_OBJECT_DEVC
+****************************************************
+*&---------------------------------------------------------------------*
+*&  Include  zabapgit_object_devc
+*&---------------------------------------------------------------------*
+
+CLASS lcl_object_devc DEFINITION
+  INHERITING FROM lcl_objects_super
+  FINAL.
+
+  PUBLIC SECTION.
+    INTERFACES:
+      lif_object.
+    ALIASES:
+      mo_files FOR lif_object~mo_files.
+    METHODS:
+      constructor IMPORTING is_item     TYPE lif_defs=>ty_item
+                            iv_language TYPE spras.
+  PROTECTED SECTION.
+  PRIVATE SECTION.
+    METHODS:
+      get_package RETURNING VALUE(ri_package) TYPE REF TO if_package
+                  RAISING   zcx_abapgit_exception,
+      update_pinf_usages IMPORTING ii_package    TYPE REF TO if_package
+                                   it_usage_data TYPE scomppdata
+                         RAISING   zcx_abapgit_exception,
+      set_lock IMPORTING ii_package TYPE REF TO if_package
+                         iv_lock    TYPE abap_bool
+               RAISING   zcx_abapgit_exception.
+    DATA:
+      mv_local_devclass TYPE devclass.
+ENDCLASS.
+
+CLASS lcl_object_devc IMPLEMENTATION.
+  METHOD constructor.
+    super->constructor( is_item     = is_item
+                        iv_language = iv_language ).
+    mv_local_devclass = is_item-devclass.
+  ENDMETHOD.
+
+  METHOD get_package.
+    IF me->lif_object~exists( ) = abap_true.
+      cl_package_factory=>load_package(
+        EXPORTING
+          i_package_name             = mv_local_devclass
+          i_force_reload             = abap_true
+        IMPORTING
+          e_package                  = ri_package
+        EXCEPTIONS
+          object_not_existing        = 1
+          unexpected_error           = 2
+          intern_err                 = 3
+          no_access                  = 4
+          object_locked_and_modified = 5
+          OTHERS                     = 6 ).
+      IF sy-subrc = 1.
+        RETURN.
+      ELSEIF sy-subrc <> 0.
+        zcx_abapgit_exception=>raise( |Error from CL_PACKAGE_FACTORY=>LOAD_PACKAGE { sy-subrc }| ).
+      ENDIF.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD lif_object~changed_by.
+    rv_user = get_package( )->changed_by.
+  ENDMETHOD.
+
+  METHOD lif_object~compare_to_remote_version.
+    CREATE OBJECT ro_comparison_result TYPE lcl_comparison_null.
+  ENDMETHOD.
+
+  METHOD lif_object~delete.
+    " Package deletion is a bit tricky. A package can only be deleted if there are no objects
+    " contained in it. This includes subpackages, so first the leaf packages need to be deleted.
+    " Unfortunately deleted objects that are still contained in an unreleased transport request
+    " also count towards the contained objects counter.
+    " -> Package deletion is currently not supported by abapGit
+  ENDMETHOD.
+
+  METHOD lif_object~deserialize.
+    DATA: li_package         TYPE REF TO if_package,
+          ls_package_data    TYPE scompkdtln,
+          ls_data_sign       TYPE scompksign,
+          lv_changeable      TYPE abap_bool,
+          lt_usage_data      TYPE scomppdata,
+          lt_permissions     TYPE tpak_permission_to_use_list,
+          li_usage           TYPE REF TO if_package_permission_to_use,
+          ls_usage_data_sign TYPE scomppsign,
+          ls_save_sign       TYPE paksavsign.
+    FIELD-SYMBOLS: <ls_usage_data> TYPE scomppdtln.
+
+    mv_local_devclass = iv_package.
+
+    io_xml->read(
+      EXPORTING
+        iv_name = 'DEVC'
+      CHANGING
+        cg_data = ls_package_data ).
+
+    li_package = get_package( ).
+
+    " Swap out repository package name with the local installation package name
+    ls_package_data-devclass = mv_local_devclass.
+
+    " Parent package is not changed. Assume the folder logic already created the package and set
+    " the hierarchy before.
+    CLEAR ls_package_data-parentcl.
+
+    ls_data_sign-ctext            = abap_true.
+*    ls_data_sign-korrflag         = abap_true.
+    ls_data_sign-as4user          = abap_true.
+    ls_data_sign-pdevclass        = abap_true.
+*    ls_data_sign-dlvunit          = abap_true.
+    ls_data_sign-comp_posid       = abap_true.
+    ls_data_sign-component        = abap_true.
+*    ls_data_sign-parentcl         = abap_true. " No parent package change here
+    ls_data_sign-perminher        = abap_true.
+    ls_data_sign-intfprefx        = abap_true.
+    ls_data_sign-packtype         = abap_true.
+    ls_data_sign-restricted       = abap_true.
+    ls_data_sign-mainpack         = abap_true.
+    ls_data_sign-srv_check        = abap_true.
+    ls_data_sign-cli_check        = abap_true.
+    ls_data_sign-ext_alias        = abap_true.
+    ls_data_sign-project_guid     = abap_true.
+    ls_data_sign-project_id       = abap_true.
+    ls_data_sign-project_passdown = abap_true.
+
+    IF ls_package_data-ctext IS INITIAL.
+      ls_package_data-ctext = mv_local_devclass.
+    ENDIF.
+    IF ls_package_data-dlvunit IS INITIAL.
+      ls_package_data-dlvunit = 'HOME'.
+    ENDIF.
+
+    ls_package_data-as4user = cl_abap_syst=>get_user_name( ).
+
+    IF li_package IS BOUND.
+      " Package already exists, change it
+      set_lock( ii_package = li_package iv_lock = abap_true ).
+
+      li_package->set_all_attributes(
+        EXPORTING
+          i_package_data             = ls_package_data
+          i_data_sign                = ls_data_sign
+        EXCEPTIONS
+          object_not_changeable      = 1
+          object_deleted             = 2
+          object_invalid             = 3
+          short_text_missing         = 4
+          author_not_existing        = 5
+          local_package              = 6
+          software_component_invalid = 7
+          layer_invalid              = 8
+          korrflag_invalid           = 9
+          component_not_existing     = 10
+          component_missing          = 11
+          authorize_failure          = 12
+          prefix_in_use              = 13
+          unexpected_error           = 14
+          intern_err                 = 15
+          wrong_mainpack_value       = 16
+          superpackage_invalid       = 17
+          OTHERS                     = 18 ).
+      IF sy-subrc <> 0.
+        zcx_abapgit_exception=>raise( |Error from IF_PACKAGE->SET_ALL_ATTRIBUTES { sy-subrc }| ).
+      ENDIF.
+
+*      " If the application component was cleared SET_ALL_ATTRIBUTES doesn't change it
+*      IF ls_package_data-component IS INITIAL AND li_package->application_component IS NOT INITIAL.
+*
+*      ENDIF.
+
+    ELSE.
+      " Package does not exist yet, create it
+      " This shouldn't really happen, because the folder logic initially creates the packages.
+      cl_package_factory=>create_new_package(
+        IMPORTING
+          e_package                  = li_package
+        CHANGING
+          c_package_data             = ls_package_data
+        EXCEPTIONS
+          object_already_existing    = 1
+          object_just_created        = 2
+          not_authorized             = 3
+          wrong_name_prefix          = 4
+          undefined_name             = 5
+          reserved_local_name        = 6
+          invalid_package_name       = 7
+          short_text_missing         = 8
+          software_component_invalid = 9
+          layer_invalid              = 10
+          author_not_existing        = 11
+          component_not_existing     = 12
+          component_missing          = 13
+          prefix_in_use              = 14
+          unexpected_error           = 15
+          intern_err                 = 16
+          no_access                  = 17
+          invalid_translation_depth  = 18
+          wrong_mainpack_value       = 19
+          superpackage_invalid       = 20
+          error_in_cts_checks        = 21
+          OTHERS                     = 22 ).
+      IF sy-subrc <> 0.
+        zcx_abapgit_exception=>raise( |Error from CL_PACKAGE_FACTORY=>CREATE_NEW_PACKAGE { sy-subrc }| ).
+      ENDIF.
+    ENDIF.
+
+    " Load package interface usages
+    TRY.
+        io_xml->read(
+          EXPORTING
+            iv_name = 'PERMISSION'
+          CHANGING
+            cg_data = lt_usage_data ).
+      CATCH zcx_abapgit_exception ##NO_HANDLER.
+        " No permissions saved
+    ENDTRY.
+
+    LOOP AT lt_usage_data ASSIGNING <ls_usage_data>.
+      <ls_usage_data>-client_pak = mv_local_devclass.
+    ENDLOOP.
+
+    update_pinf_usages( ii_package    = li_package
+                        it_usage_data = lt_usage_data ).
+
+    ls_save_sign-pack = ls_save_sign-permis = ls_save_sign-elems = ls_save_sign-interf = abap_true.
+    li_package->save_generic(
+      EXPORTING
+        i_save_sign           = ls_save_sign
+      EXCEPTIONS
+        cancelled_in_corr     = 1
+        permission_failure    = 2
+        object_not_changeable = 3
+        object_invalid        = 4
+        OTHERS                = 5 ).
+    IF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise( |Error from IF_PACKAGE->SAVE_GENERIC { sy-subrc }| ).
+    ENDIF.
+
+    set_lock( ii_package = li_package iv_lock = abap_false ).
+  ENDMETHOD.
+
+  METHOD lif_object~exists.
+    DATA: lv_check_devclass TYPE devclass.
+
+    " Check remote package if deserialize has not been called before this
+    IF mv_local_devclass IS INITIAL.
+      rv_bool = abap_false.
+    ELSE.
+      cl_package_helper=>check_package_existence(
+        EXPORTING
+          i_package_name          = mv_local_devclass
+        IMPORTING
+          e_package_exists        = rv_bool
+        EXCEPTIONS
+          intern_err              = 1
+          package_hierarchy_error = 2
+          OTHERS                  = 3 ).
+      IF sy-subrc <> 0.
+        zcx_abapgit_exception=>raise( |Error from CL_PACKAGE_HELPER=>CHECK_PACKAGE_EXISTENCE { sy-subrc }| ).
+      ENDIF.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD lif_object~get_metadata.
+    rs_metadata = get_metadata( ).
+  ENDMETHOD.
+
+  METHOD lif_object~has_changed_since.
+    rv_changed = abap_true.
+  ENDMETHOD.
+
+  METHOD lif_object~jump.
+    CALL FUNCTION 'RS_TOOL_ACCESS'
+      EXPORTING
+        operation           = 'SHOW'
+        object_name         = ms_item-obj_name
+        object_type         = 'DEVC'
+        in_new_window       = abap_true
+      EXCEPTIONS
+        not_executed        = 1
+        invalid_object_type = 2
+        OTHERS              = 3.
+    IF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise( |Error from RS_TOOL_ACCESS, DEVC| ).
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD lif_object~serialize.
+    DATA: ls_package_data TYPE scompkdtln,
+          li_package      TYPE REF TO if_package,
+          lt_intf_usages  TYPE tpak_permission_to_use_list,
+          lt_usage_data   TYPE scomppdata,
+          ls_usage_data   TYPE scomppdtln,
+          li_usage        TYPE REF TO if_package_permission_to_use.
+
+    li_package = get_package( ).
+    IF li_package IS NOT BOUND.
+      zcx_abapgit_exception=>raise( |Could not find package to serialize.| ).
+    ENDIF.
+
+    li_package->get_all_attributes(
+      IMPORTING
+        e_package_data  = ls_package_data
+      EXCEPTIONS
+        object_invalid  = 1
+        package_deleted = 2
+        intern_err      = 3
+        OTHERS          = 4 ).
+    IF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise( |Error from IF_PACKAGE->GET_ALL_ATTRIBUTES { sy-subrc }| ).
+    ENDIF.
+
+    CLEAR: ls_package_data-devclass,
+           ls_package_data-parentcl.
+
+    " Clear administrative data to prevent diffs
+    CLEAR: ls_package_data-created_by,
+           ls_package_data-created_on,
+           ls_package_data-changed_by,
+           ls_package_data-changed_on,
+           ls_package_data-as4user.
+
+    " Clear text descriptions that might be localized
+    CLEAR: ls_package_data-comp_text,
+           ls_package_data-dlvu_text.
+
+    " Clear things related to local installation package
+    CLEAR: ls_package_data-namespace,
+           ls_package_data-dlvunit.
+
+    CLEAR: ls_package_data-korrflag.
+
+    io_xml->add( iv_name = 'DEVC' ig_data = ls_package_data ).
+
+    " Save package interface usages
+    li_package->get_permissions_to_use(
+      IMPORTING
+        e_permissions    = lt_intf_usages
+      EXCEPTIONS
+        object_invalid   = 1
+        unexpected_error = 2
+        OTHERS           = 3 ).
+    IF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise( |Error from IF_PACKAGE->GET_PERMISSION_TO_USE { sy-subrc }| ).
+    ENDIF.
+
+    LOOP AT lt_intf_usages INTO li_usage.
+      li_usage->get_all_attributes(
+        IMPORTING
+          e_permission_data = ls_usage_data
+        EXCEPTIONS
+          object_invalid    = 1
+          intern_err        = 2
+          OTHERS            = 3 ).
+      IF sy-subrc <> 0.
+        zcx_abapgit_exception=>raise(
+          |Error from IF_PACKAGE_PERMISSION_TO_USE->GET_ALL_ATTRIBUTES { sy-subrc }| ).
+      ENDIF.
+
+      CLEAR: ls_usage_data-pack_name, ls_usage_data-client_pak.
+
+      APPEND ls_usage_data TO lt_usage_data.
+    ENDLOOP.
+
+    IF lt_usage_data IS NOT INITIAL.
+      io_xml->add( iv_name = 'PERMISSION' ig_data = lt_usage_data ).
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD update_pinf_usages.
+    DATA: lt_current_permissions TYPE tpak_permission_to_use_list,
+          li_usage               TYPE REF TO if_package_permission_to_use,
+          ls_data_sign           TYPE scomppsign,
+          ls_add_permission_data TYPE pkgpermdat,
+          lt_handled             TYPE SORTED TABLE OF i WITH UNIQUE KEY table_line.
+    FIELD-SYMBOLS: <ls_usage_data> LIKE LINE OF it_usage_data.
+
+    " Get the current permissions
+    ii_package->get_permissions_to_use(
+      IMPORTING
+        e_permissions    = lt_current_permissions
+      EXCEPTIONS
+        object_invalid   = 1
+        unexpected_error = 2
+        OTHERS           = 3 ).
+    IF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise( |Error from IF_PACKAGE=>GET_PERMISSIONS_TO_USE { sy-subrc }| ).
+    ENDIF.
+
+    ls_data_sign-err_sever = abap_true.
+
+    " New permissions
+    LOOP AT it_usage_data ASSIGNING <ls_usage_data>.
+      READ TABLE lt_current_permissions
+           WITH KEY table_line->package_interface_name = <ls_usage_data>-intf_name
+           INTO li_usage.
+
+      IF sy-subrc = 0 AND li_usage IS BOUND.
+        INSERT sy-tabix INTO TABLE lt_handled.
+
+        " Permission already exists, update attributes
+        li_usage->set_all_attributes(
+          EXPORTING
+            i_permission_data     = <ls_usage_data>
+            i_data_sign           = ls_data_sign
+          EXCEPTIONS
+            object_not_changeable = 1
+            object_invalid        = 2
+            intern_err            = 3
+            OTHERS                = 4 ).
+        IF sy-subrc <> 0.
+          zcx_abapgit_exception=>raise(
+            |Error from IF_PACKAGE_PERMISSION_TO_USE->SET_ALL_ATTRIBUTES { sy-subrc }| ).
+        ENDIF.
+
+      ELSE.
+        " Permission does not exist yet, add it
+        MOVE-CORRESPONDING <ls_usage_data> TO ls_add_permission_data.
+        ii_package->add_permission_to_use(
+          EXPORTING
+            i_pkg_permission_data   = ls_add_permission_data
+          EXCEPTIONS
+            object_not_changeable   = 1
+            object_access_error     = 2
+            object_already_existing = 3
+            object_invalid          = 4
+            unexpected_error        = 5
+            OTHERS                  = 6 ).
+        IF sy-subrc <> 0.
+          zcx_abapgit_exception=>raise( |Error from IF_PACKAGE->ADD_PERMISSION_TO_USE { sy-subrc }| ).
+        ENDIF.
+
+      ENDIF.
+
+      FREE li_usage.
+    ENDLOOP.
+
+    " Delete missing usages
+    LOOP AT lt_current_permissions INTO li_usage.
+      READ TABLE lt_handled WITH TABLE KEY table_line = sy-tabix TRANSPORTING NO FIELDS.
+      IF sy-subrc = 0.
+        CONTINUE.
+      ENDIF.
+
+      li_usage->delete(
+        EXCEPTIONS
+          object_not_changeable = 1
+          object_invalid        = 2
+          deletion_not_allowed  = 3
+          intern_err            = 4
+          OTHERS                = 5 ).
+      IF sy-subrc <> 0.
+        zcx_abapgit_exception=>raise( |Error from IF_PACKAGE->DELETE { sy-subrc }| ).
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD set_lock.
+    DATA: lv_changeable TYPE abap_bool.
+
+    ii_package->get_changeable( IMPORTING e_changeable = lv_changeable ).
+    IF lv_changeable <> iv_lock.
+      ii_package->set_changeable(
+        EXPORTING
+          i_changeable                = iv_lock
+        EXCEPTIONS
+          object_locked_by_other_user = 1
+          permission_failure          = 2
+          object_already_changeable   = 3
+          object_already_unlocked     = 4
+          object_just_created         = 5
+          object_deleted              = 6
+          object_modified             = 7
+          object_not_existing         = 8
+          object_invalid              = 9
+          unexpected_error            = 10
+          OTHERS                      = 11 ).
+      IF sy-subrc <> 0.
+        zcx_abapgit_exception=>raise( |Error from IF_PACKAGE->SET_CHANGEABLE { sy-subrc }| ).
+      ENDIF.
+    ENDIF.
+
+    ii_package->set_permissions_changeable(
+      EXPORTING
+        i_changeable                = iv_lock
+        i_suppress_dialog           = abap_true
+      EXCEPTIONS
+        object_already_changeable   = 1
+        object_already_unlocked     = 2
+        object_locked_by_other_user = 3
+        object_modified             = 4
+        object_just_created         = 5
+        object_deleted              = 6
+        permission_failure          = 7
+        object_invalid              = 8
+        unexpected_error            = 9
+        OTHERS                      = 10 ).
+    IF ( sy-subrc = 1 AND iv_lock = abap_true ) OR ( sy-subrc = 2 AND iv_lock = abap_false ).
+      " There's no getter to find out beforehand...
+    ELSEIF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise( |Error from IF_PACKAGE->SET_PERMISSIONS_CHANGEABLE { sy-subrc }| ).
+    ENDIF.
+  ENDMETHOD.
+ENDCLASS.
 
 
 ****************************************************
@@ -50656,7 +51337,8 @@ CLASS ltcl_file_status IMPLEMENTATION.
           lt_remote      TYPE lif_defs=>ty_files_tt,
           lt_state       TYPE lif_defs=>ty_file_signatures_tt,
           lt_results     TYPE lif_defs=>ty_results_tt,
-          lt_results_exp TYPE lif_defs=>ty_results_tt.
+          lt_results_exp TYPE lif_defs=>ty_results_tt,
+          lo_dot         TYPE REF TO lcl_dot_abapgit.
 
     FIELD-SYMBOLS: <local>  LIKE LINE OF lt_local,
                    <remote> LIKE LINE OF lt_remote,
@@ -50728,8 +51410,13 @@ CLASS ltcl_file_status IMPLEMENTATION.
     _append_result 'DOMA' 'XFELD'     'X'   ' '   ' '  'SUTI' '/'  'xfeld.doma.xml'.
     lt_results_exp = lt_results.
 
+    lo_dot = lcl_dot_abapgit=>build_default( ).
+*    lo_dot->set_starting_folder( 'SRC' ).
+*    lo_dot->set_folder_logic( lcl_dot_abapgit=>c_folder_logic-prefix ).
+
     lt_results = lcl_file_status=>calculate_status(
       iv_devclass        = '$Z$'
+      io_dot             = lo_dot
       it_local           = lt_local
       it_remote          = lt_remote
       it_cur_state       = lt_state ).
@@ -53089,5 +53776,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-10-02T16:43:34.173Z
+* abapmerge - 2017-10-05T15:04:50.127Z
 ****************************************************
