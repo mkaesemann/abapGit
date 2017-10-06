@@ -20519,11 +20519,19 @@ CLASS lcl_object_devc IMPLEMENTATION.
 
     " Clear text descriptions that might be localized
     CLEAR: ls_package_data-comp_text,
-           ls_package_data-dlvu_text.
+           ls_package_data-dlvu_text,
+           ls_package_data-translation_depth_text,
+           ls_package_data-translation_graph_depth_text,
+           ls_package_data-layer_text.
 
     " Clear things related to local installation package
     CLEAR: ls_package_data-namespace,
-           ls_package_data-dlvunit.
+           ls_package_data-dlvunit,
+           ls_package_data-pdevclass.
+
+    " Not usable on customer systems
+    CLEAR: ls_package_data-translation_depth,
+           ls_package_data-translation_graph_depth.
 
     CLEAR: ls_package_data-korrflag.
 
@@ -53793,5 +53801,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-10-06T04:03:45.802Z
+* abapmerge - 2017-10-06T04:04:38.616Z
 ****************************************************
