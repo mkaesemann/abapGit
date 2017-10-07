@@ -47011,7 +47011,7 @@ CLASS lcl_gui_page_explore DEFINITION FINAL INHERITING FROM lcl_gui_page.
   PUBLIC SECTION.
 
     CONSTANTS c_explore_url TYPE string
-      VALUE 'http://larshp.github.io/abapGit/explore.html'.
+      VALUE 'https://dotabap.github.io/explore.html'.
 
     METHODS constructor.
 
@@ -53801,5 +53801,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-10-06T04:07:56.533Z
+* abapmerge - 2017-10-07T08:21:03.410Z
 ****************************************************
