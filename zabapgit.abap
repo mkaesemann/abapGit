@@ -13262,23 +13262,30 @@ CLASS lcl_objects_program IMPLEMENTATION.
     ENDIF.
 
     READ TABLE it_tpool WITH KEY id = 'R' TRANSPORTING NO FIELDS.
-    IF ( sy-subrc = 0 AND lines( it_tpool ) = 1 ) OR lines( it_tpool ) = 0.
-      RETURN. " no action for includes
+    IF ( sy-subrc = 0 AND lines( it_tpool ) = 1 AND lv_language = mv_language ) OR lines( it_tpool ) = 0.
+      RETURN. " no action for includes unless there is a translation of the program description
     ENDIF.
 
-    INSERT TEXTPOOL iv_program
-      FROM it_tpool
-      LANGUAGE lv_language
-      STATE 'I'.
-    IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'error from INSERT TEXTPOOL' ).
-    ENDIF.
+    IF lv_language = mv_language. "Textpool in master language needs to be activated
+      INSERT TEXTPOOL iv_program
+        FROM it_tpool
+        LANGUAGE lv_language
+        STATE 'I'.
+      IF sy-subrc <> 0.
+        zcx_abapgit_exception=>raise( 'error from INSERT TEXTPOOL' ).
+      ENDIF.
 
-    IF lv_language = mv_language. " Add just once
       lcl_objects_activation=>add( iv_type = 'REPT'
                                    iv_name = iv_program ).
+    ELSE. "Translations are always active
+      INSERT TEXTPOOL iv_program
+        FROM it_tpool
+        LANGUAGE lv_language
+        STATE 'A'.
+      IF sy-subrc <> 0.
+        zcx_abapgit_exception=>raise( 'error from INSERT TEXTPOOL' ).
+      ENDIF.
     ENDIF.
-
   ENDMETHOD.                    "deserialize_textpool
 
   METHOD deserialize_cua.
@@ -53405,5 +53412,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-10-10T15:34:39.826Z
+* abapmerge - 2017-10-10T16:09:36.099Z
 ****************************************************
