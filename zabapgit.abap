@@ -228,7 +228,7 @@ INTERFACE zif_abapgit_definitions
     END OF ty_transport_to_branch .
 
   CONSTANTS gc_xml_version TYPE string VALUE 'v1.0.0' ##NO_TEXT.
-  CONSTANTS gc_abap_version TYPE string VALUE 'v1.43.1' ##NO_TEXT.
+  CONSTANTS gc_abap_version TYPE string VALUE 'v1.44.0' ##NO_TEXT.
   CONSTANTS:
     BEGIN OF gc_type,
       commit TYPE zif_abapgit_definitions=>ty_type VALUE 'commit', "#EC NOTEXT
@@ -53433,5 +53433,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-10-10T16:11:34.564Z
+* abapmerge - 2017-10-10T16:14:11.060Z
 ****************************************************
