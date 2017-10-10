@@ -17561,16 +17561,34 @@ CLASS lcl_oo_base IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD deserialize_abap_source_new.
-    DATA: lo_factory TYPE REF TO object,
-          lo_source  TYPE REF TO object.
+    DATA: lo_factory  TYPE REF TO object,
+          lo_source   TYPE REF TO object,
+          lo_settings TYPE REF TO object,
+          lr_settings TYPE REF TO data.
+
+    FIELD-SYMBOLS <lo_settings> TYPE any.
 
     CALL METHOD ('CL_OO_FACTORY')=>('CREATE_INSTANCE')
       RECEIVING
         result = lo_factory.
 
+    "Enable modification mode to avoid exception CX_OO_ACCESS_PERMISSON when
+    "dealing with objects in foreign namespaces (namespace role = C)
+    CALL METHOD lo_factory->('CREATE_SETTINGS')
+      EXPORTING
+        modification_mode_enabled = abap_true
+      RECEIVING
+        result                    = lo_settings.
+
+    CREATE DATA lr_settings TYPE REF TO ('IF_OO_CLIF_SOURCE_SETTINGS').
+    ASSIGN lr_settings->* to <lo_settings>.
+
+    <lo_settings> ?= lo_settings.
+
     CALL METHOD lo_factory->('CREATE_CLIF_SOURCE')
       EXPORTING
         clif_name = is_clskey-clsname
+        settings  = <lo_settings>
       RECEIVING
         result    = lo_source.
 
@@ -53212,5 +53230,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-10-09T18:00:13.840Z
+* abapmerge - 2017-10-10T15:24:22.253Z
 ****************************************************
