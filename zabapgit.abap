@@ -7997,6 +7997,8 @@ CLASS lcl_repo_online DEFINITION INHERITING FROM lcl_repo FINAL.
         RETURNING VALUE(rt_results) TYPE zif_abapgit_definitions=>ty_results_tt
         RAISING   zcx_abapgit_exception,
       reset_status,
+      initialize
+        RAISING zcx_abapgit_exception,
       rebuild_local_checksums REDEFINITION,
       push
         IMPORTING is_comment TYPE zif_abapgit_definitions=>ty_comment
@@ -8018,8 +8020,6 @@ CLASS lcl_repo_online DEFINITION INHERITING FROM lcl_repo FINAL.
       handle_stage_ignore
         IMPORTING io_stage TYPE REF TO lcl_stage
         RAISING   zcx_abapgit_exception,
-      initialize
-        RAISING zcx_abapgit_exception,
       actualize_head_branch
         RAISING zcx_abapgit_exception,
       delete_initial_online_repo
@@ -39327,6 +39327,7 @@ CLASS lcl_services_repo IMPLEMENTATION.
 
     toggle_favorite( lo_repo->get_key( ) ).
 
+    lo_repo->initialize( ).
     lo_repo->find_remote_dot_abapgit( ).
     lo_repo->status( ). " check for errors
     lo_repo->deserialize( ).
@@ -39751,6 +39752,7 @@ CLASS lcl_services_abapgit IMPLEMENTATION.
         iv_branch_name = 'refs/heads/master'
         iv_package     = iv_package ) ##NO_TEXT.
 
+      lo_repo->initialize( ).
       lo_repo->find_remote_dot_abapgit( ).
       lo_repo->status( ). " check for errors
       lo_repo->deserialize( ).
@@ -54133,5 +54135,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-10-14T08:14:14.068Z
+* abapmerge - 2017-10-14T08:34:20.747Z
 ****************************************************
