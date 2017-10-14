@@ -80,6 +80,8 @@ CLASS zcl_abapgit_zlib_convert DEFINITION DEFERRED.
 INTERFACE zif_abapgit_definitions
   .
 
+  CONSTANTS gc_xml_version TYPE string VALUE 'v1.0.0' ##NO_TEXT.
+  CONSTANTS gc_abap_version TYPE string VALUE 'v1.45.0' ##NO_TEXT.
 
   TYPES:
     ty_type    TYPE c LENGTH 6 .
@@ -227,8 +229,6 @@ INTERFACE zif_abapgit_definitions
       commit_text TYPE string,
     END OF ty_transport_to_branch .
 
-  CONSTANTS gc_xml_version TYPE string VALUE 'v1.0.0' ##NO_TEXT.
-  CONSTANTS gc_abap_version TYPE string VALUE 'v1.44.0' ##NO_TEXT.
   CONSTANTS:
     BEGIN OF gc_type,
       commit TYPE zif_abapgit_definitions=>ty_type VALUE 'commit', "#EC NOTEXT
@@ -54162,5 +54162,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-10-14T08:48:57.047Z
+* abapmerge - 2017-10-14T08:51:40.436Z
 ****************************************************
