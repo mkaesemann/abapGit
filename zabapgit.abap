@@ -17459,6 +17459,11 @@ CLASS lcl_oo_serializer DEFINITION.
       IMPORTING is_clskey        TYPE seoclskey
       RETURNING VALUE(rt_source) TYPE zif_abapgit_definitions=>ty_string_tt
       RAISING   zcx_abapgit_exception.
+    METHODS calculate_skip_testclass
+      IMPORTING
+        it_source                TYPE zif_abapgit_definitions=>ty_string_tt
+      RETURNING
+        VALUE(rv_skip_testclass) TYPE abap_bool.
   PRIVATE SECTION.
     DATA mv_skip_testclass TYPE abap_bool.
     METHODS serialize_abap_old
@@ -17631,39 +17636,10 @@ CLASS lcl_oo_serializer IMPLEMENTATION.
 
   METHOD serialize_testclasses.
 
-    DATA: lv_line1 LIKE LINE OF rt_source,
-          lv_line2 LIKE LINE OF rt_source.
-
-
     rt_source = read_include( is_clskey = is_clskey
                               iv_type = seop_ext_class_testclasses ).
 
-* when creating classes in Eclipse it automatically generates the
-* testclass include, but it is not needed, so skip to avoid
-* creating an extra file in the repository.
-* Also remove it if the content is manually removed, but
-* the class still thinks it contains tests
-    "@TODO: Put under test
-    mv_skip_testclass = abap_false.
-    IF lines( rt_source ) = 2.
-      READ TABLE rt_source INDEX 1 INTO lv_line1.
-      ASSERT sy-subrc = 0.
-      READ TABLE rt_source INDEX 2 INTO lv_line2.
-      ASSERT sy-subrc = 0.
-      IF lv_line1(3) = '*"*' AND lv_line2 IS INITIAL.
-        mv_skip_testclass = abap_true.
-      ENDIF.
-    ELSEIF lines( rt_source ) = 1.
-      READ TABLE rt_source INDEX 1 INTO lv_line1.
-      ASSERT sy-subrc = 0.
-      IF lv_line1 IS INITIAL
-          OR ( strlen( lv_line1 ) >= 3 AND lv_line1(3) = '*"*' )
-          OR ( strlen( lv_line1 ) = 1 AND lv_line1(1) = '*' ).
-        mv_skip_testclass = abap_true.
-      ENDIF.
-    ELSEIF lines( rt_source ) = 0.
-      mv_skip_testclass = abap_true.
-    ENDIF.
+    mv_skip_testclass = calculate_skip_testclass( rt_source ).
 
   ENDMETHOD.                    "serialize_test
 
@@ -17675,8 +17651,44 @@ CLASS lcl_oo_serializer IMPLEMENTATION.
     reduce( CHANGING ct_source = rt_source ).
 
   ENDMETHOD.                    "serialize_macro
+
   METHOD are_test_classes_skipped.
     rv_return = mv_skip_testclass.
+  ENDMETHOD.
+
+
+  METHOD calculate_skip_testclass.
+
+    DATA: lv_line1 LIKE LINE OF it_source,
+          lv_line2 LIKE LINE OF it_source.
+
+* when creating classes in Eclipse it automatically generates the
+* testclass include, but it is not needed, so skip to avoid
+* creating an extra file in the repository.
+* Also remove it if the content is manually removed, but
+* the class still thinks it contains tests
+
+    rv_skip_testclass = abap_false.
+    IF lines( it_source ) = 2.
+      READ TABLE it_source INDEX 1 INTO lv_line1.
+      ASSERT sy-subrc = 0.
+      READ TABLE it_source INDEX 2 INTO lv_line2.
+      ASSERT sy-subrc = 0.
+      IF strlen( lv_line1 ) >= 3 AND lv_line1(3) = '*"*' AND lv_line2 IS INITIAL.
+        rv_skip_testclass = abap_true.
+      ENDIF.
+    ELSEIF lines( it_source ) = 1.
+      READ TABLE it_source INDEX 1 INTO lv_line1.
+      ASSERT sy-subrc = 0.
+      IF lv_line1 IS INITIAL
+          OR ( strlen( lv_line1 ) >= 3 AND lv_line1(3) = '*"*' )
+          OR ( strlen( lv_line1 ) = 1 AND lv_line1(1) = '*' ).
+        rv_skip_testclass = abap_true.
+      ENDIF.
+    ELSEIF lines( it_source ) = 0.
+      rv_skip_testclass = abap_true.
+    ENDIF.
+
   ENDMETHOD.
 
 ENDCLASS.
@@ -49770,7 +49782,7 @@ CLASS ltcl_url IMPLEMENTATION.
     TRY.
         lcl_url=>host( 'not a real url' ).                  "#EC NOTEXT
         cl_abap_unit_assert=>fail( ).
-      CATCH zcx_abapgit_exception.                              "#EC NO_HANDLER
+      CATCH zcx_abapgit_exception.                      "#EC NO_HANDLER
     ENDTRY.
 
   ENDMETHOD.                    "repo_error
@@ -51550,6 +51562,177 @@ CLASS ltcl_persistence_settings IMPLEMENTATION.
       CATCH cx_static_check ##NO_HANDLER.
         "If entry didn't exist, that's okay
     ENDTRY.
+
+  ENDMETHOD.
+
+ENDCLASS.
+
+CLASS ltcl_oo_serialize DEFINITION FINAL FOR TESTING
+  DURATION SHORT
+  RISK LEVEL HARMLESS.
+
+  PRIVATE SECTION.
+    METHODS:
+      setup,
+      empty_include FOR TESTING RAISING cx_static_check,
+      one_line_include FOR TESTING RAISING cx_static_check,
+      one_line_include_2 FOR TESTING RAISING cx_static_check,
+      one_line_include_3 FOR TESTING RAISING cx_static_check,
+      two_line_include FOR TESTING RAISING cx_static_check,
+      two_line_include_2 FOR TESTING RAISING cx_static_check,
+      two_line_include_3 FOR TESTING RAISING cx_static_check,
+      more_than_two_lines FOR TESTING RAISING cx_static_check,
+
+      _given_source_is
+        IMPORTING
+          i_source TYPE LINE OF zif_abapgit_definitions=>ty_string_tt,
+      _given_empty_test_include,
+      _when_skip_is_calculated,
+      _then_should_be_skipped,
+      _then_should_not_be_skipped.
+
+    DATA: mo_oo_serializer  TYPE REF TO lcl_oo_serializer,
+          mt_source         TYPE zif_abapgit_definitions=>ty_string_tt,
+          mv_skip_testclass TYPE abap_bool.
+
+ENDCLASS.
+
+
+CLASS ltcl_oo_serialize IMPLEMENTATION.
+
+  METHOD setup.
+
+    CREATE OBJECT mo_oo_serializer.
+
+  ENDMETHOD.
+
+  METHOD empty_include.
+
+    _given_empty_test_include( ).
+
+    _when_skip_is_calculated( ).
+
+    _then_should_be_skipped( ).
+
+  ENDMETHOD.
+
+  METHOD one_line_include.
+
+    _given_source_is( `*"* use this source file for your ABAP unit test classes` ).
+
+    _when_skip_is_calculated( ).
+
+    _then_should_be_skipped( ).
+
+  ENDMETHOD.
+
+  METHOD one_line_include_2.
+
+    _given_source_is( `*` ).
+
+    _when_skip_is_calculated( ).
+
+    _then_should_be_skipped( ).
+
+  ENDMETHOD.
+
+  METHOD one_line_include_3.
+
+    _given_source_is( `write: 'This is ABAP'.` ).
+
+    _when_skip_is_calculated( ).
+
+    _then_should_not_be_skipped( ).
+
+  ENDMETHOD.
+
+  METHOD two_line_include.
+
+    _given_source_is( `*"* use this source file for your ABAP unit test classes` ).
+    _given_source_is( ``                                                         ).
+
+    _when_skip_is_calculated( ).
+
+    _then_should_be_skipped( ).
+
+  ENDMETHOD.
+
+  METHOD two_line_include_2.
+
+    _given_source_is( `*"* use this source file for your ABAP unit test classes` ).
+    _given_source_is( `write: 'This is ABAP'.`                                   ).
+
+    _when_skip_is_calculated( ).
+
+    _then_should_not_be_skipped( ).
+
+  ENDMETHOD.
+
+  METHOD two_line_include_3.
+
+    _given_source_is( ` `                                                        ).
+    _given_source_is( `*"* use this source file for your ABAP unit test classes` ).
+
+    _when_skip_is_calculated( ).
+
+    _then_should_not_be_skipped( ).
+
+  ENDMETHOD.
+
+  METHOD more_than_two_lines.
+
+    _given_source_is( `*"* use this source file for your ABAP unit test classes` ).
+    _given_source_is( `CLASS ltcl_test DEFINITION FINAL FOR TESTING`             ).
+    _given_source_is( `  DURATION SHORT`                                         ).
+    _given_source_is( `  RISK LEVEL HARMLESS.`                                   ).
+    _given_source_is( ` `                                                        ).
+    _given_source_is( `  PRIVATE SECTION.`                                       ).
+    _given_source_is( `    METHODS:`                                             ).
+    _given_source_is( `      first_test FOR TESTING RAISING cx_static_check.`    ).
+    _given_source_is( `ENDCLASS.`                                                ).
+    _given_source_is( ` `                                                        ).
+    _given_source_is( `CLASS ltcl_test IMPLEMENTATION.`                          ).
+    _given_source_is( ` `                                                        ).
+    _given_source_is( `  METHOD first_test.`                                     ).
+    _given_source_is( `    cl_abap_unit_assert=>fail( 'This is a real test' ).`  ).
+    _given_source_is( `  ENDMETHOD.`                                             ).
+    _given_source_is( ` `                                                        ).
+    _given_source_is( `ENDCLASS.`                                                ).
+
+    _when_skip_is_calculated( ).
+
+    _then_should_not_be_skipped( ).
+
+  ENDMETHOD.
+
+  METHOD _given_source_is.
+
+    INSERT i_source INTO TABLE mt_source.
+
+  ENDMETHOD.
+
+  METHOD _given_empty_test_include.
+
+  ENDMETHOD.
+
+  METHOD _when_skip_is_calculated.
+
+    mv_skip_testclass = mo_oo_serializer->calculate_skip_testclass( mt_source ).
+
+  ENDMETHOD.
+
+  METHOD _then_should_be_skipped.
+
+    cl_abap_unit_assert=>assert_true( act = mv_skip_testclass
+                                      msg = |Testclass should be skipped| ).
+
+  ENDMETHOD.
+
+
+  METHOD _then_should_not_be_skipped.
+
+    cl_abap_unit_assert=>assert_false( act = mv_skip_testclass
+                                       msg = |Testclass should not be skipped| ).
 
   ENDMETHOD.
 
@@ -53616,5 +53799,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-10-11T16:08:52.797Z
+* abapmerge - 2017-10-14T06:49:20.001Z
 ****************************************************
