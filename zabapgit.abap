@@ -3937,8 +3937,9 @@ CLASS lcl_xml_input IMPLEMENTATION.
 
     FIELD-SYMBOLS: <ls_rtab> LIKE LINE OF lt_rtab.
 
-
     ASSERT NOT iv_name IS INITIAL.
+
+    CLEAR cg_data. "Initialize result to avoid problems with empty values
 
     APPEND INITIAL LINE TO lt_rtab ASSIGNING <ls_rtab>.
     <ls_rtab>-name = iv_name.
@@ -11819,8 +11820,9 @@ CLASS lcl_objects_activation DEFINITION FINAL.
 
   PUBLIC SECTION.
     CLASS-METHODS add
-      IMPORTING iv_type TYPE trobjtype
-                iv_name TYPE clike
+      IMPORTING iv_type   TYPE trobjtype
+                iv_name   TYPE clike
+                iv_delete TYPE abap_bool DEFAULT abap_false
       RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS add_item
@@ -11948,11 +11950,16 @@ CLASS lcl_objects_activation IMPLEMENTATION.
                              CHANGING ct_objects = lt_objects ).
         ENDIF.
 
+        LOOP AT lt_objects ASSIGNING <ls_object>.
+          <ls_object>-delet_flag = iv_delete.
+        ENDLOOP.
+
         APPEND LINES OF lt_objects TO gt_objects.
       WHEN OTHERS.
         APPEND INITIAL LINE TO gt_objects ASSIGNING <ls_object>.
-        <ls_object>-object   = iv_type.
-        <ls_object>-obj_name = lv_obj_name.
+        <ls_object>-object     = iv_type.
+        <ls_object>-obj_name   = lv_obj_name.
+        <ls_object>-delet_flag = iv_delete.
     ENDCASE.
 
   ENDMETHOD.                    "activate
@@ -12709,9 +12716,10 @@ CLASS lcl_objects_program DEFINITION INHERITING FROM lcl_objects_super.
       RAISING   zcx_abapgit_exception.
 
     METHODS deserialize_textpool
-      IMPORTING iv_program  TYPE programm
-                it_tpool    TYPE textpool_table
-                iv_language TYPE langu OPTIONAL
+      IMPORTING iv_program    TYPE programm
+                it_tpool      TYPE textpool_table
+                iv_language   TYPE langu OPTIONAL
+                iv_is_include TYPE abap_bool DEFAULT abap_false
       RAISING   zcx_abapgit_exception.
 
     METHODS deserialize_cua
@@ -13261,6 +13269,8 @@ CLASS lcl_objects_program IMPLEMENTATION.
   METHOD deserialize_textpool.
 
     DATA lv_language TYPE langu.
+    DATA lv_state    TYPE c.
+    DATA lv_delete   TYPE abap_bool.
 
     IF iv_language IS INITIAL.
       lv_language = mv_language.
@@ -13268,30 +13278,46 @@ CLASS lcl_objects_program IMPLEMENTATION.
       lv_language = iv_language.
     ENDIF.
 
-    READ TABLE it_tpool WITH KEY id = 'R' TRANSPORTING NO FIELDS.
-    IF ( sy-subrc = 0 AND lines( it_tpool ) = 1 AND lv_language = mv_language ) OR lines( it_tpool ) = 0.
-      RETURN. " no action for includes unless there is a translation of the program description
+    IF lv_language = mv_language.
+      lv_state = 'I'. "Textpool in master language needs to be activated
+    ELSE.
+      lv_state = 'A'. "Translations are always active
     ENDIF.
 
-    IF lv_language = mv_language. "Textpool in master language needs to be activated
-      INSERT TEXTPOOL iv_program
-        FROM it_tpool
-        LANGUAGE lv_language
-        STATE 'I'.
-      IF sy-subrc <> 0.
-        zcx_abapgit_exception=>raise( 'error from INSERT TEXTPOOL' ).
+    IF it_tpool IS INITIAL.
+      IF iv_is_include = abap_false OR lv_state = 'A'.
+        DELETE TEXTPOOL iv_program "Remove initial description from textpool if
+          LANGUAGE iv_program      "original program does not have a textpool
+          STATE lv_state.
+
+        lv_delete = abap_true.
+      ELSE.
+        INSERT TEXTPOOL iv_program "In case of includes: Deletion of textpool in
+          FROM it_tpool            "master language cannot be activated because
+          LANGUAGE lv_language     "this woul activate the deletion of the textpool
+          STATE lv_state.          "of the mail program -> insert empty textpool
+      ENDIF.
+    ELSE.
+      IF lines( it_tpool ) = 1 AND lv_language = mv_language.
+        READ TABLE it_tpool WITH KEY id = 'R' TRANSPORTING NO FIELDS.
+        IF sy-subrc = 0.
+          RETURN. "No action because description in master language is already there
+        ENDIF.
       ENDIF.
 
-      lcl_objects_activation=>add( iv_type = 'REPT'
-                                   iv_name = iv_program ).
-    ELSE. "Translations are always active
       INSERT TEXTPOOL iv_program
         FROM it_tpool
         LANGUAGE lv_language
-        STATE 'A'.
+        STATE lv_state.
       IF sy-subrc <> 0.
         zcx_abapgit_exception=>raise( 'error from INSERT TEXTPOOL' ).
       ENDIF.
+    ENDIF.
+
+    IF lv_state = 'I'. "Textpool in master language needs to be activated
+      lcl_objects_activation=>add( iv_type   = 'REPT'
+                                   iv_name   = iv_program
+                                   iv_delete = lv_delete ).
     ENDIF.
   ENDMETHOD.                    "deserialize_textpool
 
@@ -24410,8 +24436,9 @@ CLASS lcl_object_fugr IMPLEMENTATION.
                            it_tpool   = lt_tpool
                            iv_package = iv_package ).
 
-      deserialize_textpool( iv_program = <lv_include>
-                            it_tpool   = lt_tpool ).
+      deserialize_textpool( iv_program    = <lv_include>
+                            it_tpool      = lt_tpool
+                            iv_is_include = abap_true ).
 
     ENDLOOP.
 
@@ -54135,5 +54162,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-10-14T08:34:20.747Z
+* abapmerge - 2017-10-14T08:48:57.047Z
 ****************************************************
