@@ -17770,6 +17770,14 @@ CLASS lcl_oo_base IMPLEMENTATION.
 
     FIELD-SYMBOLS <lo_settings> TYPE any.
 
+    "Buffer needs to be refreshed,
+    "otherwise standard SAP CLIF_SOURCE reorder methods alphabetically
+    CALL FUNCTION 'SEO_BUFFER_INIT'.
+    CALL FUNCTION 'SEO_BUFFER_REFRESH'
+      EXPORTING
+        cifkey  = is_clskey
+        version = seoc_version_inactive.
+
     CALL METHOD ('CL_OO_FACTORY')=>('CREATE_INSTANCE')
       RECEIVING
         result = lo_factory.
@@ -18716,7 +18724,23 @@ CLASS lcl_oo_class_new DEFINITION INHERITING FROM lcl_oo_class.
           it_source         TYPE zif_abapgit_definitions=>ty_string_tt
           iv_name           TYPE seoclsname
         RETURNING
-          VALUE(ro_scanner) TYPE REF TO cl_oo_source_scanner_class.
+          VALUE(ro_scanner) TYPE REF TO cl_oo_source_scanner_class,
+      update_full_class_include
+        IMPORTING
+          iv_classname TYPE seoclsname
+          it_source    TYPE string_table
+          it_methods   TYPE cl_oo_source_scanner_class=>type_method_implementations,
+      create_report
+        IMPORTING
+          iv_program      TYPE programm
+          it_source       TYPE string_table
+          iv_extension    TYPE sychar02
+          iv_program_type TYPE sychar01
+          iv_version      TYPE r3state,
+      update_cs_number_of_methods
+        IMPORTING
+          iv_classname              TYPE seoclsname
+          iv_number_of_impl_methods TYPE i.
 
 ENDCLASS.
 
@@ -18994,6 +19018,40 @@ CLASS lcl_oo_class_new IMPLEMENTATION.
         it_source  = lt_source ).
     ENDLOOP.
 
+* full class include
+    update_full_class_include( iv_classname = is_key-clsname
+                               it_source    = it_source
+                               it_methods   = lt_methods ).
+
+  ENDMETHOD.
+
+  METHOD update_full_class_include.
+    CONSTANTS c_class_source_extension TYPE sychar02 VALUE 'CS'.
+    CONSTANTS c_include_program_type TYPE sychar01 VALUE 'I'.
+    CONSTANTS c_active_version TYPE r3state VALUE 'A'.
+
+    create_report( iv_program      = cl_oo_classname_service=>get_cs_name( iv_classname )
+                   it_source       = it_source
+                   iv_extension    = c_class_source_extension
+                   iv_program_type = c_include_program_type
+                   iv_version      = c_active_version ).
+
+    " Assuming that all methods that were scanned are implemented
+    update_cs_number_of_methods( iv_classname              = iv_classname
+                                 iv_number_of_impl_methods = lines( it_methods ) ).
+
+  ENDMETHOD.
+
+  METHOD create_report.
+    INSERT REPORT iv_program FROM it_source EXTENSION TYPE iv_extension STATE iv_version PROGRAM TYPE iv_program_type.
+    ASSERT sy-subrc = 0.
+  ENDMETHOD.
+
+  METHOD update_cs_number_of_methods.
+    DATA cs_cache_entry TYPE seo_cs_cache.
+    cs_cache_entry-clsname            = iv_classname.
+    cs_cache_entry-no_of_method_impls = iv_number_of_impl_methods.
+    MODIFY seo_cs_cache FROM cs_cache_entry.
   ENDMETHOD.
 
 ENDCLASS.
@@ -53799,5 +53857,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-10-14T06:49:20.001Z
+* abapmerge - 2017-10-14T06:51:55.240Z
 ****************************************************
