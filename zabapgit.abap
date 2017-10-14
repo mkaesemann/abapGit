@@ -37720,6 +37720,7 @@ CLASS lcl_repo IMPLEMENTATION.
       filename = zif_abapgit_definitions=>gc_dot_abapgit.
     IF sy-subrc = 0.
       ro_dot = lcl_dot_abapgit=>deserialize( <ls_remote>-data ).
+      set_dot_abapgit( ro_dot ).
     ENDIF.
 
   ENDMETHOD.
@@ -37875,23 +37876,19 @@ CLASS lcl_repo IMPLEMENTATION.
   METHOD deserialize.
 
     DATA: lt_updated_files TYPE zif_abapgit_definitions=>ty_file_signatures_tt,
-          lo_dot_abapgit   TYPE REF TO lcl_dot_abapgit,
           lt_requirements  TYPE STANDARD TABLE OF lcl_dot_abapgit=>ty_requirement.
 
+
+    find_remote_dot_abapgit( ).
 
     IF get_dot_abapgit( )->get_master_language( ) <> sy-langu.
       zcx_abapgit_exception=>raise( 'Current login language does not match master language' ).
     ENDIF.
 
-    lo_dot_abapgit = find_remote_dot_abapgit( ).
-    IF lo_dot_abapgit IS BOUND.
-      set_dot_abapgit( lo_dot_abapgit ).
-
-      lt_requirements = lo_dot_abapgit->get_data( )-requirements.
-      IF lt_requirements IS NOT INITIAL.
-        lcl_requirement_helper=>check_requirements( it_requirements = lt_requirements
-                                                    iv_show_popup   = abap_true ).
-      ENDIF.
+    lt_requirements = get_dot_abapgit( )->get_data( )-requirements.
+    IF lt_requirements IS NOT INITIAL.
+      lcl_requirement_helper=>check_requirements( it_requirements = lt_requirements
+                                                  iv_show_popup   = abap_true ).
     ENDIF.
 
     lt_updated_files = lcl_objects=>deserialize( me ).
@@ -39330,6 +39327,7 @@ CLASS lcl_services_repo IMPLEMENTATION.
 
     toggle_favorite( lo_repo->get_key( ) ).
 
+    lo_repo->find_remote_dot_abapgit( ).
     lo_repo->status( ). " check for errors
     lo_repo->deserialize( ).
 
@@ -39753,6 +39751,7 @@ CLASS lcl_services_abapgit IMPLEMENTATION.
         iv_branch_name = 'refs/heads/master'
         iv_package     = iv_package ) ##NO_TEXT.
 
+      lo_repo->find_remote_dot_abapgit( ).
       lo_repo->status( ). " check for errors
       lo_repo->deserialize( ).
       lcl_services_repo=>toggle_favorite( lo_repo->get_key( ) ).
@@ -54134,5 +54133,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-10-14T07:05:11.683Z
+* abapmerge - 2017-10-14T08:14:14.068Z
 ****************************************************
