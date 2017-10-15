@@ -8107,6 +8107,10 @@ CLASS lcl_repo_srv DEFINITION FINAL CREATE PRIVATE FRIENDS lcl_app.
       IMPORTING iv_package TYPE devclass
       RAISING   zcx_abapgit_exception.
 
+    METHODS is_sap_object_allowed
+      RETURNING
+        value(r_is_sap_object_allowed) TYPE abap_bool.
+
 ENDCLASS.                    "lcl_repo_srv DEFINITION
 
 
@@ -38902,9 +38906,8 @@ CLASS lcl_repo_srv IMPLEMENTATION.
 
   METHOD validate_package.
 
-    DATA: lv_devclass TYPE tdevc-devclass,
+    DATA: ls_devclass TYPE tdevc,
           lt_repos    TYPE lcl_persistence_repo=>tt_repo.
-
 
     IF iv_package IS INITIAL.
       zcx_abapgit_exception=>raise( 'add, package empty' ).
@@ -38914,23 +38917,24 @@ CLASS lcl_repo_srv IMPLEMENTATION.
       zcx_abapgit_exception=>raise( 'not possible to use $TMP, create new (local) package' ).
     ENDIF.
 
-    IF lcl_exit=>get_instance( )->allow_sap_objects( ) = abap_true.
-      SELECT SINGLE devclass FROM tdevc INTO lv_devclass
-        WHERE devclass = iv_package.                    "#EC CI_GENBUFF
-    ELSE.
-      SELECT SINGLE devclass FROM tdevc INTO lv_devclass
-        WHERE devclass = iv_package
-        AND as4user <> 'SAP'.                           "#EC CI_GENBUFF
-    ENDIF.
+    SELECT SINGLE *
+           FROM tdevc
+           INTO ls_devclass
+           WHERE devclass = iv_package.                 "#EC CI_GENBUFF
+
     IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'package not found or not allowed' ).
+      zcx_abapgit_exception=>raise( |Package { iv_package } not found| ).
+    ENDIF.
+
+    IF is_sap_object_allowed( ) = abap_false AND ls_devclass-as4user = 'SAP'.
+      zcx_abapgit_exception=>raise( |Package { iv_package } not allowed| ).
     ENDIF.
 
     " make sure its not already in use for a different repository
     lt_repos = mo_persistence->list( ).
     READ TABLE lt_repos WITH KEY package = iv_package TRANSPORTING NO FIELDS.
     IF sy-subrc = 0.
-      zcx_abapgit_exception=>raise( 'Package already in use' ).
+      zcx_abapgit_exception=>raise( |Package { iv_package } already in use| ).
     ENDIF.
 
   ENDMETHOD.                    "validate_package
@@ -39006,6 +39010,13 @@ CLASS lcl_repo_srv IMPLEMENTATION.
     ENDIF.
 
   ENDMETHOD.  "switch_repo_type
+
+
+  METHOD is_sap_object_allowed.
+
+    r_is_sap_object_allowed = lcl_exit=>get_instance( )->allow_sap_objects( ).
+
+  ENDMETHOD.
 
 ENDCLASS.                    "lcl_repo_srv IMPLEMENTATION
 
@@ -54770,5 +54781,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-10-15T10:20:08.139Z
+* abapmerge - 2017-10-15T10:23:26.381Z
 ****************************************************
