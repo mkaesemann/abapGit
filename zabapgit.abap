@@ -24126,7 +24126,6 @@ CLASS lcl_object_fugr DEFINITION INHERITING FROM lcl_objects_program FINAL.
 
     TYPES: BEGIN OF ty_function,
              funcname          TYPE rs38l_fnam,
-             include           TYPE progname,
              global_flag       TYPE rs38l-global,
              remote_call       TYPE rs38l-remote,
              update_task       TYPE rs38l-utask,
@@ -54781,5 +54780,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-10-15T10:35:32.659Z
+* abapmerge - 2017-10-16T17:23:48.606Z
 ****************************************************
