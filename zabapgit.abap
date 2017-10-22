@@ -41662,7 +41662,8 @@ CLASS lcl_gui_asset_manager IMPLEMENTATION.
         _inline '  };'.
         _inline '  '.
         _inline '  // Table columns (autodetection)'.
-        _inline '  this.col = this.detectColumns();'.
+        _inline '  this.colIndex      = this.detectColumns();'.
+        _inline '  this.filterTargets = ["name", "user"];'.
         _inline ''.
         _inline '  // Constants'.
         _inline '  this.HIGHLIGHT_STYLE = "highlight";'.
@@ -41696,13 +41697,13 @@ CLASS lcl_gui_asset_manager IMPLEMENTATION.
         _inline '// Detect column index'.
         _inline 'StageHelper.prototype.detectColumns = function() {'.
         _inline '  var dataRow  = this.dom.stageTab.tBodies[0].rows[0];'.
-        _inline '  var cols     = {};'.
+        _inline '  var colIndex = {};'.
         _inline ''.
         _inline '  for (var i = dataRow.cells.length - 1; i >= 0; i--) {'.
-        _inline '    if (dataRow.cells[i].className) cols[dataRow.cells[i].className] = i;'.
+        _inline '    if (dataRow.cells[i].className) colIndex[dataRow.cells[i].className] = i;'.
         _inline '  }'.
         _inline ''.
-        _inline '  return cols;'.
+        _inline '  return colIndex;'.
         _inline '}'.
         _inline ''.
         _inline '// Store table state on leaving the page'.
@@ -41718,7 +41719,7 @@ CLASS lcl_gui_asset_manager IMPLEMENTATION.
         _inline '  var data = window.sessionStorage && JSON.parse(window.sessionStorage.getItem(this.pageSeed));'.
         _inline ''.
         _inline '  this.iterateStageTab(true, function (row) {'.
-        _inline '    var status = data && data[row.cells[this.col.name].innerText];'.
+        _inline '    var status = data && data[row.cells[this.colIndex["name"]].innerText];'.
         _inline '    this.updateRow(row, status || this.STATUS.reset);'.
         _inline '  });'.
         _inline ''.
@@ -41773,22 +41774,33 @@ CLASS lcl_gui_asset_manager IMPLEMENTATION.
         _inline ''.
         _inline '// Apply filter to a single stage line - hide or show'.
         _inline 'StageHelper.prototype.applyFilterToRow = function (row, filter) {'.
-        _inline '  var td      = row.cells[this.col.name];'.
-        _inline '  var origTxt = td.innerText; // without tags'.
-        _inline '  var newTxt  = "";'.
+        _inline '  // Collect data cells'.
+        _inline '  var targets = this.filterTargets.map(function(attr) {'.
+        _inline '    var elem = row.cells[this.colIndex[attr]];'.
+        _inline '    if (elem.firstChild && elem.firstChild.tagName === "A") elem = elem.firstChild;'.
+        _inline '    return {'.
+        _inline '      elem:      elem,'.
+        _inline '      plainText: elem.innerText, // without tags'.
+        _inline '      curHtml:   elem.innerHTML'.
+        _inline '    };'.
+        _inline '  }, this);'.
         _inline ''.
-        _inline '  if (filter) {'.
-        _inline '    newTxt = origTxt.replace(filter, "<mark>"+filter+"</mark>");'.
-        _inline '    row.style.display = (newTxt !== origTxt) ? "" : "none";'.
-        _inline '  } else { // No filter -> just reset the value'.
-        _inline '    newTxt            = origTxt;'.
-        _inline '    row.style.display = ""; // default, visible'.
+        _inline '  var isVisible = false; '.
+        _inline ''.
+        _inline '  // Apply filter to cells, mark filtered text'.
+        _inline '  for (var i = targets.length - 1; i >= 0; i--) {'.
+        _inline '    var target = targets[i];'.
+        _inline '    target.newHtml = (filter)'.
+        _inline '      ? target.plainText.replace(filter, "<mark>"+filter+"</mark>")'.
+        _inline '      : target.plainText;'.
+        _inline '    target.isChanged = target.newHtml !== target.curHtml;'.
+        _inline '    isVisible        = isVisible || !filter || target.newHtml !== target.plainText;'.
         _inline '  }'.
         _inline ''.
-        _inline '  if (td.firstChild.tagName === "A") {'.
-        _inline '    td.firstChild.innerHTML = newTxt;'.
-        _inline '  } else {'.
-        _inline '    td.innerHTML = newTxt;'.
+        _inline '  // Update DOM'.
+        _inline '  row.style.display = isVisible ? "" : "none";'.
+        _inline '  for (var i = targets.length - 1; i >= 0; i--) {'.
+        _inline '    if (targets[i].isChanged) targets[i].elem.innerHTML = targets[i].newHtml;'.
         _inline '  }'.
         _inline '}'.
         _inline ''.
@@ -41805,12 +41817,12 @@ CLASS lcl_gui_asset_manager IMPLEMENTATION.
         _inline ''.
         _inline '// Update table line'.
         _inline 'StageHelper.prototype.updateRow = function (row, newStatus) {'.
-        _inline '  var oldStatus = row.cells[this.col.status].innerText;'.
+        _inline '  var oldStatus = row.cells[this.colIndex["status"]].innerText;'.
         _inline ''.
         _inline '  if (oldStatus !== newStatus) {'.
         _inline '    this.updateRowStatus(row, newStatus);'.
         _inline '    this.updateRowCommand(row, newStatus);'.
-        _inline '  } else if (!row.cells[this.col.cmd].children.length) {'.
+        _inline '  } else if (!row.cells[this.colIndex["cmd"]].children.length) {'.
         _inline '    this.updateRowCommand(row, newStatus); // For initial run'.
         _inline '  }'.
         _inline ''.
@@ -41819,17 +41831,17 @@ CLASS lcl_gui_asset_manager IMPLEMENTATION.
         _inline ''.
         _inline '// Update Status cell (render set of commands)'.
         _inline 'StageHelper.prototype.updateRowStatus = function (row, status) {'.
-        _inline '  row.cells[this.col.status].innerText = status;'.
+        _inline '  row.cells[this.colIndex["status"]].innerText = status;'.
         _inline '  if (status === this.STATUS.reset) {'.
-        _inline '    row.cells[this.col.status].classList.remove(this.HIGHLIGHT_STYLE);'.
+        _inline '    row.cells[this.colIndex["status"]].classList.remove(this.HIGHLIGHT_STYLE);'.
         _inline '  } else {'.
-        _inline '    row.cells[this.col.status].classList.add(this.HIGHLIGHT_STYLE);'.
+        _inline '    row.cells[this.colIndex["status"]].classList.add(this.HIGHLIGHT_STYLE);'.
         _inline '  }'.
         _inline '}'.
         _inline ''.
         _inline '// Update Command cell (render set of commands)'.
         _inline 'StageHelper.prototype.updateRowCommand = function (row, status) {'.
-        _inline '  var cell = row.cells[this.col.cmd];'.
+        _inline '  var cell = row.cells[this.colIndex["cmd"]];'.
         _inline '  if (status === this.STATUS.reset) {'.
         _inline '    cell.innerHTML = (row.className == "local") '.
         _inline '      ? this.TEMPLATES.cmdLocal '.
@@ -41841,7 +41853,7 @@ CLASS lcl_gui_asset_manager IMPLEMENTATION.
         _inline ''.
         _inline '// Update menu items visibility'.
         _inline 'StageHelper.prototype.updateMenu = function () {'.
-        _inline '  this.dom.commitBtn.style.display    = (this.choiseCount > 0) ? "" : "none";'.
+        _inline '  this.dom.commitBtn.style.display    = (this.choiseCount > 0) ? ""     : "none";'.
         _inline '  this.dom.commitAllBtn.style.display = (this.choiseCount > 0) ? "none" : "";'.
         _inline '  this.dom.fileCounter.innerHTML      = this.choiseCount.toString();'.
         _inline '}'.
@@ -41855,22 +41867,19 @@ CLASS lcl_gui_asset_manager IMPLEMENTATION.
         _inline 'StageHelper.prototype.collectData = function () {'.
         _inline '  var data  = {};'.
         _inline '  this.iterateStageTab(false, function (row) {'.
-        _inline '    data[row.cells[this.col.name].innerText] = row.cells[this.col.status].innerText;'.
+        _inline '    data[row.cells[this.colIndex["name"]].innerText] = row.cells[this.colIndex["status"]].innerText;'.
         _inline '  });'.
         _inline '  return data;'.
         _inline '}'.
         _inline ''.
         _inline '// Table iteration helper'.
-        _inline 'StageHelper.prototype.iterateStageTab = function (changeMode, cb /*, ...*/) {'.
-        _inline '  '.
+        _inline 'StageHelper.prototype.iterateStageTab = function (changeMode, cb /*, ...*/) {  '.
         _inline '  var restArgs = Array.prototype.slice.call(arguments, 2);'.
         _inline '  var table    = this.dom.stageTab;'.
         _inline ''.
         _inline '  if (changeMode) {'.
         _inline '    var scrollOffset = window.pageYOffset;'.
         _inline '    this.dom.stageTab.style.display = "none";'.
-        _inline '    // var stageTabParent = this.dom.stageTab.parentNode;'.
-        _inline '    // table = stageTabParent.removeChild(this.dom.stageTab);'.
         _inline '  }'.
         _inline ''.
         _inline '  for (var b = 0, bN = table.tBodies.length; b < bN; b++) {'.
@@ -41883,7 +41892,6 @@ CLASS lcl_gui_asset_manager IMPLEMENTATION.
         _inline ''.
         _inline '  if (changeMode) {'.
         _inline '    this.dom.stageTab.style.display = "";'.
-        _inline '    // stageTabParent.appendChild(table);'.
         _inline '    window.scrollTo(0, scrollOffset);'.
         _inline '  }'.
         _inline '}'.
@@ -54780,5 +54788,5 @@ AT SELECTION-SCREEN.
   ENDIF.
 
 ****************************************************
-* abapmerge - 2017-10-22T07:32:59.157Z
+* abapmerge - 2017-10-22T07:38:48.919Z
 ****************************************************
