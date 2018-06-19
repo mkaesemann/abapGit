@@ -471,7 +471,9 @@ CLASS ZCL_ABAPGIT_OBJECT_FUGR IMPLEMENTATION.
 * skip SAP standard includes and also make sure the include exists
       READ TABLE lt_reposrc INTO ls_reposrc
         WITH KEY progname = <lv_include> BINARY SEARCH.
-      IF sy-subrc <> 0 OR ls_reposrc-cnam = 'SAP'.
+      IF sy-subrc <> 0 OR
+         ( zcl_abapgit_sap=>get_namespace( <lv_include> ) IS INITIAL AND ls_reposrc-cnam = 'SAP' ) OR
+         ( zcl_abapgit_sap=>get_namespace( <lv_include> ) IS NOT INITIAL AND zcl_abapgit_sap=>is_sap_namespace( <lv_include> ) ).
         DELETE rt_includes INDEX lv_tabix.
       ENDIF.
 
