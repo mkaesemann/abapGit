@@ -103,7 +103,6 @@ CLASS zcl_abapgit_repo DEFINITION
       RAISING
         zcx_abapgit_exception .
 
-
   PROTECTED SECTION.
 
     DATA mt_local TYPE zif_abapgit_definitions=>ty_files_item_tt .
@@ -112,19 +111,18 @@ CLASS zcl_abapgit_repo DEFINITION
     DATA mv_last_serialization TYPE timestamp .
     DATA ms_data TYPE zif_abapgit_persistence=>ty_repo .
 
-    METHODS set
-      IMPORTING
-        !iv_sha1           TYPE zif_abapgit_definitions=>ty_sha1 OPTIONAL
-        !it_checksums      TYPE zif_abapgit_persistence=>ty_local_checksum_tt OPTIONAL
-        !iv_url            TYPE zif_abapgit_persistence=>ty_repo-url OPTIONAL
-        !iv_branch_name    TYPE zif_abapgit_persistence=>ty_repo-branch_name OPTIONAL
-        !iv_head_branch    TYPE zif_abapgit_persistence=>ty_repo-head_branch OPTIONAL
-        !iv_offline        TYPE zif_abapgit_persistence=>ty_repo-offline OPTIONAL
-        !is_dot_abapgit    TYPE zif_abapgit_persistence=>ty_repo-dot_abapgit OPTIONAL
-        !is_local_settings TYPE zif_abapgit_persistence=>ty_repo-local_settings OPTIONAL
-      RAISING
-        zcx_abapgit_exception .
-
+  	METHODS SET
+    	IMPORTING
+	      !IV_SHA1 type ZIF_ABAPGIT_DEFINITIONS=>TY_SHA1 optional
+	      !IT_CHECKSUMS type ZIF_ABAPGIT_PERSISTENCE=>TY_LOCAL_CHECKSUM_TT optional
+	      !IV_URL type ZIF_ABAPGIT_PERSISTENCE=>TY_REPO-URL optional
+	      !IV_BRANCH_NAME type ZIF_ABAPGIT_PERSISTENCE=>TY_REPO-BRANCH_NAME optional
+	      !IV_HEAD_BRANCH type ZIF_ABAPGIT_PERSISTENCE=>TY_REPO-HEAD_BRANCH optional
+	      !IV_OFFLINE type ZIF_ABAPGIT_PERSISTENCE=>TY_REPO-OFFLINE optional
+	      !IS_DOT_ABAPGIT type ZIF_ABAPGIT_PERSISTENCE=>TY_REPO-DOT_ABAPGIT optional
+	      !IS_LOCAL_SETTINGS type ZIF_ABAPGIT_PERSISTENCE=>TY_REPO-LOCAL_SETTINGS optional
+	    RAISING
+	      ZCX_ABAPGIT_EXCEPTION .
 ENDCLASS.
 
 
@@ -261,6 +259,8 @@ CLASS zcl_abapgit_repo IMPLEMENTATION.
                    <ls_cache>  LIKE LINE OF lt_cache,
                    <ls_tadir>  LIKE LINE OF lt_tadir.
 
+    SET RUN TIME CLOCK RESOLUTION HIGH.
+    GET RUN TIME FIELD DATA(rti_start).
 
     " Serialization happened before and no refresh request
     IF mv_last_serialization IS NOT INITIAL AND mv_do_local_refresh = abap_false.
@@ -275,6 +275,8 @@ CLASS zcl_abapgit_repo IMPLEMENTATION.
     <ls_return>-file-sha1     = zcl_abapgit_hash=>sha1( iv_type = zif_abapgit_definitions=>gc_type-blob
                                                         iv_data = <ls_return>-file-data ).
 
+    GET RUN TIME FIELD DATA(rti_header).
+
     lt_cache = mt_local.
     lt_tadir = zcl_abapgit_factory=>get_tadir( )->read(
       iv_package            = get_package( )
@@ -283,66 +285,106 @@ CLASS zcl_abapgit_repo IMPLEMENTATION.
       io_dot                = get_dot_abapgit( )
       io_log                = io_log ).
 
-    lt_filter = it_filter.
-    lv_filter_exist = boolc( lines( lt_filter ) > 0 ).
+    GET RUN TIME FIELD DATA(rti_tadir).
 
-    CREATE OBJECT lo_progress
-      EXPORTING
-        iv_total = lines( lt_tadir ).
+    zcl_abapgit_sap_package=>refresh_package_buffer( ).
 
-    LOOP AT lt_tadir ASSIGNING <ls_tadir>.
-      IF lv_filter_exist = abap_true.
-        READ TABLE lt_filter TRANSPORTING NO FIELDS WITH KEY object = <ls_tadir>-object
-                                                             obj_name = <ls_tadir>-obj_name
-                                                    BINARY SEARCH.
-        IF sy-subrc <> 0.
-          CONTINUE.
+    IF sy-uname = 'MKAESEMANN'.
+
+      GET RUN TIME FIELD DATA(rti_refresh).
+
+      rt_files = zcl_abapgit_serialize=>serialize_objects(
+                   i_last_serialization = mv_last_serialization
+                   i_master_language    = get_dot_abapgit( )->get_master_language( )
+                   io_log               = io_log
+                   it_tadir             = lt_tadir
+                   it_filter            = it_filter
+                   it_files             = rt_files ).
+
+    ELSE.
+
+      lt_filter = it_filter.
+      lv_filter_exist = boolc( lines( lt_filter ) > 0 ).
+
+      CREATE OBJECT lo_progress
+        EXPORTING
+          iv_total = lines( lt_tadir ).
+
+      GET RUN TIME FIELD rti_refresh.
+
+      LOOP AT lt_tadir ASSIGNING <ls_tadir>.
+        IF lv_filter_exist = abap_true.
+          READ TABLE lt_filter TRANSPORTING NO FIELDS WITH KEY object = <ls_tadir>-object
+                                                               obj_name = <ls_tadir>-obj_name
+                                                      BINARY SEARCH.
+          IF sy-subrc <> 0.
+            CONTINUE.
+          ENDIF.
         ENDIF.
-      ENDIF.
 
-      lo_progress->show(
-        iv_current = sy-tabix
-        iv_text    = |Serialize { <ls_tadir>-obj_name }| ) ##NO_TEXT.
+        lo_progress->show(
+          iv_current = sy-tabix
+          iv_text    = |Serialize { <ls_tadir>-obj_name }| ) ##NO_TEXT.
 
-      ls_item-obj_type = <ls_tadir>-object.
-      ls_item-obj_name = <ls_tadir>-obj_name.
-      ls_item-devclass = <ls_tadir>-devclass.
+        ls_item-obj_type = <ls_tadir>-object.
+        ls_item-obj_name = <ls_tadir>-obj_name.
+        ls_item-devclass = <ls_tadir>-devclass.
 
-      IF mv_last_serialization IS NOT INITIAL. " Try to fetch from cache
-        READ TABLE lt_cache TRANSPORTING NO FIELDS
-          WITH KEY item = ls_item. " type+name+package key
-        " There is something in cache and the object is unchanged
-        IF sy-subrc = 0
-            AND abap_false = zcl_abapgit_objects=>has_changed_since(
-            is_item      = ls_item
-            iv_timestamp = mv_last_serialization ).
-          LOOP AT lt_cache ASSIGNING <ls_cache> WHERE item = ls_item.
-            APPEND <ls_cache> TO rt_files.
-          ENDLOOP.
+        IF mv_last_serialization IS NOT INITIAL. " Try to fetch from cache
+          READ TABLE lt_cache TRANSPORTING NO FIELDS
+            WITH KEY item = ls_item. " type+name+package key
+          " There is something in cache and the object is unchanged
+          IF sy-subrc = 0
+              AND abap_false = zcl_abapgit_objects=>has_changed_since(
+              is_item      = ls_item
+              iv_timestamp = mv_last_serialization ).
+            LOOP AT lt_cache ASSIGNING <ls_cache> WHERE item = ls_item.
+              APPEND <ls_cache> TO rt_files.
+            ENDLOOP.
 
-          CONTINUE.
+            CONTINUE.
+          ENDIF.
         ENDIF.
-      ENDIF.
 
-      lt_files = zcl_abapgit_objects=>serialize(
-        is_item     = ls_item
-        iv_language = get_dot_abapgit( )->get_master_language( )
-        io_log      = io_log ).
-      LOOP AT lt_files ASSIGNING <ls_file>.
-        <ls_file>-path = <ls_tadir>-path.
-        <ls_file>-sha1 = zcl_abapgit_hash=>sha1(
-          iv_type = zif_abapgit_definitions=>gc_type-blob
-          iv_data = <ls_file>-data ).
+        lt_files = zcl_abapgit_objects=>serialize(
+          is_item     = ls_item
+          iv_language = get_dot_abapgit( )->get_master_language( )
+          io_log      = io_log ).
+        LOOP AT lt_files ASSIGNING <ls_file>.
+          <ls_file>-path = <ls_tadir>-path.
+          <ls_file>-sha1 = zcl_abapgit_hash=>sha1(
+            iv_type = zif_abapgit_definitions=>gc_type-blob
+            iv_data = <ls_file>-data ).
 
-        APPEND INITIAL LINE TO rt_files ASSIGNING <ls_return>.
-        <ls_return>-file = <ls_file>.
-        <ls_return>-item = ls_item.
+          APPEND INITIAL LINE TO rt_files ASSIGNING <ls_return>.
+          <ls_return>-file = <ls_file>.
+          <ls_return>-item = ls_item.
+        ENDLOOP.
       ENDLOOP.
-    ENDLOOP.
+
+    ENDIF.
+
+    GET RUN TIME FIELD DATA(rti_serial).
 
     GET TIME STAMP FIELD mv_last_serialization.
     mt_local            = rt_files.
     mv_do_local_refresh = abap_false. " Fulfill refresh
+
+    GET RUN TIME FIELD DATA(rti_end).
+
+    IF sy-uname = 'MKAESEMANN'.
+
+      DATA: lt_rti TYPE STANDARD TABLE OF /lot/ca_descr60.
+
+      APPEND |Total          : { rti_end - rti_start }| TO lt_rti.
+      APPEND || TO lt_rti.
+      APPEND |Header         : { rti_header - rti_start }| TO lt_rti.
+      APPEND |Build TADir    : { rti_tadir - rti_header }| TO lt_rti.
+      APPEND |Package Refresh: { rti_refresh - rti_tadir }| TO lt_rti.
+      APPEND |Serialize      : { rti_serial - rti_refresh }| TO lt_rti.
+      APPEND || TO lt_rti.
+
+    ENDIF.
 
   ENDMETHOD.
 
@@ -623,7 +665,5 @@ CLASS zcl_abapgit_repo IMPLEMENTATION.
     set( it_checksums = lt_checksums ).
 
   ENDMETHOD.  " update_local_checksums
-
-
 
 ENDCLASS.
