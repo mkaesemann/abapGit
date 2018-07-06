@@ -235,7 +235,10 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
 
       WHILE mv_finished_tasks < helper_tasks.
 
-        WAIT UP TO 2 SECONDS.
+        data(async_helpers) = helper_tasks + 1.
+        WAIT FOR ASYNCHRONOUS TASKS
+          UNTIL mv_finished_tasks >= async_helpers
+          up to '0.5' SECONDS.
 
         mo_progress->show(
           iv_current = mv_finished_tasks
