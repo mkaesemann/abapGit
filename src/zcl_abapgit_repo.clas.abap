@@ -289,7 +289,7 @@ CLASS zcl_abapgit_repo IMPLEMENTATION.
 
     zcl_abapgit_sap_package=>refresh_package_buffer( ).
 
-    IF sy-uname = 'MKAESEMANN'.
+**    IF sy-uname = 'MKAESEMANN'.
 
       GET RUN TIME FIELD DATA(rti_refresh).
 
@@ -301,68 +301,68 @@ CLASS zcl_abapgit_repo IMPLEMENTATION.
                    it_filter            = it_filter
                    it_files             = rt_files ).
 
-    ELSE.
-
-      lt_filter = it_filter.
-      lv_filter_exist = boolc( lines( lt_filter ) > 0 ).
-
-      CREATE OBJECT lo_progress
-        EXPORTING
-          iv_total = lines( lt_tadir ).
-
-      GET RUN TIME FIELD rti_refresh.
-
-      LOOP AT lt_tadir ASSIGNING <ls_tadir>.
-        IF lv_filter_exist = abap_true.
-          READ TABLE lt_filter TRANSPORTING NO FIELDS WITH KEY object = <ls_tadir>-object
-                                                               obj_name = <ls_tadir>-obj_name
-                                                      BINARY SEARCH.
-          IF sy-subrc <> 0.
-            CONTINUE.
-          ENDIF.
-        ENDIF.
-
-        lo_progress->show(
-          iv_current = sy-tabix
-          iv_text    = |Serialize { <ls_tadir>-obj_name }| ) ##NO_TEXT.
-
-        ls_item-obj_type = <ls_tadir>-object.
-        ls_item-obj_name = <ls_tadir>-obj_name.
-        ls_item-devclass = <ls_tadir>-devclass.
-
-        IF mv_last_serialization IS NOT INITIAL. " Try to fetch from cache
-          READ TABLE lt_cache TRANSPORTING NO FIELDS
-            WITH KEY item = ls_item. " type+name+package key
-          " There is something in cache and the object is unchanged
-          IF sy-subrc = 0
-              AND abap_false = zcl_abapgit_objects=>has_changed_since(
-              is_item      = ls_item
-              iv_timestamp = mv_last_serialization ).
-            LOOP AT lt_cache ASSIGNING <ls_cache> WHERE item = ls_item.
-              APPEND <ls_cache> TO rt_files.
-            ENDLOOP.
-
-            CONTINUE.
-          ENDIF.
-        ENDIF.
-
-        lt_files = zcl_abapgit_objects=>serialize(
-          is_item     = ls_item
-          iv_language = get_dot_abapgit( )->get_master_language( )
-          io_log      = io_log ).
-        LOOP AT lt_files ASSIGNING <ls_file>.
-          <ls_file>-path = <ls_tadir>-path.
-          <ls_file>-sha1 = zcl_abapgit_hash=>sha1(
-            iv_type = zif_abapgit_definitions=>gc_type-blob
-            iv_data = <ls_file>-data ).
-
-          APPEND INITIAL LINE TO rt_files ASSIGNING <ls_return>.
-          <ls_return>-file = <ls_file>.
-          <ls_return>-item = ls_item.
-        ENDLOOP.
-      ENDLOOP.
-
-    ENDIF.
+**    ELSE.
+**
+**      lt_filter = it_filter.
+**      lv_filter_exist = boolc( lines( lt_filter ) > 0 ).
+**
+**      CREATE OBJECT lo_progress
+**        EXPORTING
+**          iv_total = lines( lt_tadir ).
+**
+**      GET RUN TIME FIELD rti_refresh.
+**
+**      LOOP AT lt_tadir ASSIGNING <ls_tadir>.
+**        IF lv_filter_exist = abap_true.
+**          READ TABLE lt_filter TRANSPORTING NO FIELDS WITH KEY object = <ls_tadir>-object
+**                                                               obj_name = <ls_tadir>-obj_name
+**                                                      BINARY SEARCH.
+**          IF sy-subrc <> 0.
+**            CONTINUE.
+**          ENDIF.
+**        ENDIF.
+**
+**        lo_progress->show(
+**          iv_current = sy-tabix
+**          iv_text    = |Serialize { <ls_tadir>-obj_name }| ) ##NO_TEXT.
+**
+**        ls_item-obj_type = <ls_tadir>-object.
+**        ls_item-obj_name = <ls_tadir>-obj_name.
+**        ls_item-devclass = <ls_tadir>-devclass.
+**
+**        IF mv_last_serialization IS NOT INITIAL. " Try to fetch from cache
+**          READ TABLE lt_cache TRANSPORTING NO FIELDS
+**            WITH KEY item = ls_item. " type+name+package key
+**          " There is something in cache and the object is unchanged
+**          IF sy-subrc = 0
+**              AND abap_false = zcl_abapgit_objects=>has_changed_since(
+**              is_item      = ls_item
+**              iv_timestamp = mv_last_serialization ).
+**            LOOP AT lt_cache ASSIGNING <ls_cache> WHERE item = ls_item.
+**              APPEND <ls_cache> TO rt_files.
+**            ENDLOOP.
+**
+**            CONTINUE.
+**          ENDIF.
+**        ENDIF.
+**
+**        lt_files = zcl_abapgit_objects=>serialize(
+**          is_item     = ls_item
+**          iv_language = get_dot_abapgit( )->get_master_language( )
+**          io_log      = io_log ).
+**        LOOP AT lt_files ASSIGNING <ls_file>.
+**          <ls_file>-path = <ls_tadir>-path.
+**          <ls_file>-sha1 = zcl_abapgit_hash=>sha1(
+**            iv_type = zif_abapgit_definitions=>gc_type-blob
+**            iv_data = <ls_file>-data ).
+**
+**          APPEND INITIAL LINE TO rt_files ASSIGNING <ls_return>.
+**          <ls_return>-file = <ls_file>.
+**          <ls_return>-item = ls_item.
+**        ENDLOOP.
+**      ENDLOOP.
+**
+**    ENDIF.
 
     GET RUN TIME FIELD DATA(rti_serial).
 
