@@ -95,6 +95,8 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
 
   METHOD serialize_objects.
 
+    CONSTANTs: c_reserved_wps type i value 1. "2.
+
     DATA: lt_tadir_block TYPE zpp_abapgit_t_tadir,
           lt_files_info  TYPE zpp_abapgit_t_file_item.
 
@@ -119,8 +121,8 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
       ADD 1 TO free_wp.
     ENDLOOP.
     "Leave some WPs for other users
-    free_wp = COND #( WHEN free_wp <= 2 THEN 0
-                      ELSE free_wp - 2 ).
+    free_wp = COND #( WHEN free_wp <= c_reserved_wps THEN 0
+                      ELSE free_wp - c_reserved_wps ).
     "Limit to max. no. of allowed WPs
     free_wp = COND #( WHEN free_wp > get_max_modes( ) THEN get_max_modes( )
                         ELSE free_wp ).
