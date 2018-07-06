@@ -659,10 +659,6 @@ CLASS ZCL_ABAPGIT_GIT_PORCELAIN IMPLEMENTATION.
       iv_pack        = lv_pack ).
 
 * update objects in repo, we know what has been pushed
-*    data(lt_repo_objects) = io_repo->get_objects( ).
-*    loop at lt_repo_objects ASSIGNING FIELD-SYMBOL(<st_repo_object>).
-*      insert <st_repo_object> into table lt_objects.
-*    ENDLOOP.
     append lines of io_repo->get_objects( ) to lt_objects.
     io_repo->set_objects( lt_objects ).
     walk( EXPORTING it_objects = lt_objects
