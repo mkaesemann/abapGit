@@ -195,7 +195,7 @@ CLASS ZCL_ABAPGIT_GIT_PACK IMPLEMENTATION.
 
     DO lv_objects TIMES.
 
-      data(uindex) = sy-index.
+      DATA(uindex) = sy-index.
 
       lv_x = lv_data(1).
       lv_type = get_type( lv_x ).

@@ -176,6 +176,10 @@ INTERFACE zif_abapgit_definitions PUBLIC.
       WITH non-UNIQUE sorted key sha COMPONENTS sha1 type index
       with non-UNIQUE sorted key type COMPONENTS type sha1 index.
   TYPES:
+    tt_devc_buffer TYPE SORTED TABLE OF tdevc
+      WITH UNIQUE KEY devclass
+      WITH NON-UNIQUE SORTED KEY parent COMPONENTS parentcl.
+  TYPES:
     BEGIN OF ty_tadir,
       pgmid    TYPE tadir-pgmid,
       object   TYPE tadir-object,

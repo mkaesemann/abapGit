@@ -8,18 +8,16 @@ public section.
 
   interfaces ZIF_ABAPGIT_SAP_PACKAGE .
 
-  class-methods REFRESH_PACKAGE_BUFFER .
   methods CONSTRUCTOR
     importing
       !IV_PACKAGE type DEVCLASS .
 private section.
 
   data MV_PACKAGE type DEVCLASS .
-  class-data:
+  data:
     mt_devc_buffer TYPE SORTED TABLE OF tdevc
          WITH UNIQUE KEY devclass
          WITH NON-UNIQUE SORTED KEY parent COMPONENTS parentcl .
-  class-data M_BUFFERED type ABAP_BOOL value ABAP_TRUE ##NO_TEXT.
 ENDCLASS.
 
 
@@ -29,17 +27,6 @@ CLASS ZCL_ABAPGIT_SAP_PACKAGE IMPLEMENTATION.
 
   METHOD constructor.
     mv_package = iv_package.
-  ENDMETHOD.
-
-
-  METHOD refresh_package_buffer.
-
-    IF m_buffered = abap_true.
-      SELECT devclass, parentcl
-        FROM tdevc
-        INTO CORRESPONDING FIELDS OF TABLE @mt_devc_buffer.
-    ENDIF.
-
   ENDMETHOD.
 
 
@@ -283,18 +270,14 @@ CLASS ZCL_ABAPGIT_SAP_PACKAGE IMPLEMENTATION.
     DATA: lt_list     LIKE rt_list,
           lv_devclass LIKE LINE OF rt_list.
 
-    IF mt_devc_buffer IS INITIAL.
-      refresh_package_buffer( ).
-    ENDIF.
+    IF it_devc_info is SUPPLIED.
 
-    IF m_buffered = abap_true.
-
-      LOOP AT mt_devc_buffer ASSIGNING FIELD-SYMBOL(<st_devc>)
+      LOOP AT it_devc_info ASSIGNING FIELD-SYMBOL(<st_devc>)
         USING KEY parent
         WHERE parentcl = mv_package.
 
 * note the recursion, since packages are added to the list
-        lt_list = zcl_abapgit_factory=>get_sap_package( <st_devc>-devclass )->list_subpackages( ).
+        lt_list = zcl_abapgit_factory=>get_sap_package( <st_devc>-devclass )->list_subpackages( it_devc_info ).
         APPEND LINES OF lt_list TO rt_list.
 
       ENDLOOP.
@@ -319,20 +302,17 @@ CLASS ZCL_ABAPGIT_SAP_PACKAGE IMPLEMENTATION.
 
     DATA: lt_list   LIKE rt_list,
           lv_parent TYPE tdevc-parentcl.
+    FIELD-SYMBOLS: <st_devc> LIKE LINE OF mt_devc_buffer.
 
     APPEND mv_package TO rt_list.
 
-    IF mt_devc_buffer IS INITIAL.
-      refresh_package_buffer( ).
-    ENDIF.
+    IF it_devc_info is SUPPLIED.
 
-    IF m_buffered = abap_true.
-
-      READ TABLE mt_devc_buffer ASSIGNING FIELD-SYMBOL(<st_devc>)
+      READ TABLE it_devc_info ASSIGNING <st_devc>
         WITH TABLE KEY devclass = mv_package.
       IF sy-subrc = 0 AND NOT <st_devc>-parentcl IS INITIAL.
         APPEND <st_devc>-parentcl TO rt_list.
-        lt_list = zcl_abapgit_factory=>get_sap_package( <st_devc>-parentcl )->list_superpackages( ).
+        lt_list = zcl_abapgit_factory=>get_sap_package( <st_devc>-parentcl )->list_superpackages( it_devc_info ).
         APPEND LINES OF lt_list TO rt_list.
       ENDIF.
 
@@ -354,13 +334,11 @@ CLASS ZCL_ABAPGIT_SAP_PACKAGE IMPLEMENTATION.
 
   METHOD zif_abapgit_sap_package~read_parent.
 
-    IF mt_devc_buffer IS INITIAL.
-      refresh_package_buffer( ).
-    ENDIF.
+    FIELD-SYMBOLS: <st_devc> LIKE LINE OF mt_devc_buffer.
 
-    IF m_buffered = abap_true.
+    IF it_devc_info is SUPPLIED.
 
-      READ TABLE mt_devc_buffer ASSIGNING FIELD-SYMBOL(<st_devc>)
+      READ TABLE it_devc_info ASSIGNING <st_devc>
         WITH TABLE KEY devclass = mv_package.
       ASSERT sy-subrc = 0.
 
