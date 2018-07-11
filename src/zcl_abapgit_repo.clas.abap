@@ -287,8 +287,6 @@ CLASS zcl_abapgit_repo IMPLEMENTATION.
 
     GET RUN TIME FIELD DATA(rti_tadir).
 
-    zcl_abapgit_sap_package=>refresh_package_buffer( ).
-
 **    IF sy-uname = 'MKAESEMANN'.
 
       GET RUN TIME FIELD DATA(rti_refresh).
