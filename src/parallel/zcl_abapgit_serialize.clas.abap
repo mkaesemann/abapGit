@@ -95,7 +95,7 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
 
   METHOD serialize_objects.
 
-    CONSTANTs: c_reserved_wps type i value 1. "2.
+    CONSTANTS: c_reserved_wps TYPE i VALUE 2.
 
     DATA: lt_tadir_block TYPE zpp_abapgit_t_tadir,
           lt_files_info  TYPE zpp_abapgit_t_file_item.
@@ -123,9 +123,9 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
     "Leave some WPs for other users
     free_wp = COND #( WHEN free_wp <= c_reserved_wps THEN 0
                       ELSE free_wp - c_reserved_wps ).
-    "Limit to max. no. of allowed WPs
-    free_wp = COND #( WHEN free_wp > get_max_modes( ) THEN get_max_modes( )
-                        ELSE free_wp ).
+*    "Limit to max. no. of allowed WPs
+**    free_wp = COND #( WHEN free_wp > get_max_modes( ) THEN get_max_modes( )
+**                        ELSE free_wp ).
 
     "We determine how many WPs we use based on the number of objects
     " we want to process. If enough objects exist, we use all free WPs
@@ -237,10 +237,10 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
 
       WHILE mv_finished_tasks < helper_tasks.
 
-        data(async_helpers) = helper_tasks + 1.
+        DATA(async_helpers) = helper_tasks + 1.
         WAIT FOR ASYNCHRONOUS TASKS
           UNTIL mv_finished_tasks >= async_helpers
-          up to '0.5' SECONDS.
+          UP TO '0.5' SECONDS.
 
         mo_progress->show(
           iv_current = mv_finished_tasks
