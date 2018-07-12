@@ -344,14 +344,15 @@ CLASS ZCL_ABAPGIT_GIT_PACK IMPLEMENTATION.
     LOOP AT ct_objects INTO ls_object
       USING KEY type
       WHERE type = zif_abapgit_definitions=>gc_type-ref_d.
-      DELETE ct_objects
-        INDEX sy-tabix
-        USING KEY type.
       INSERT ls_object INTO TABLE lt_deltas.
     ENDLOOP.
 
+    DELETE ct_objects
+      USING KEY type
+      WHERE type = zif_abapgit_definitions=>gc_type-ref_d.
+
     "Restore correct Delta Order
-    sort lt_deltas by index.
+    SORT lt_deltas BY index.
 
     CREATE OBJECT lo_progress
       EXPORTING
