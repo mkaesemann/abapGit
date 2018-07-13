@@ -473,7 +473,7 @@ CLASS ZCL_ABAPGIT_OBJECTS IMPLEMENTATION.
           lt_late     TYPE TABLE OF ty_deserialization,
           lo_progress TYPE REF TO zcl_abapgit_progress,
           lv_path     TYPE string,
-          lt_items    TYPE zif_abapgit_definitions=>ty_items_tt
+          lt_items    TYPE zif_abapgit_definitions=>ty_items_tt.
     DATA: lo_folder_logic TYPE REF TO zcl_abapgit_folder_logic.
 
     FIELD-SYMBOLS: <ls_result> TYPE zif_abapgit_definitions=>ty_result,
