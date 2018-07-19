@@ -1,33 +1,31 @@
-CLASS zcl_abapgit_folder_logic DEFINITION
-  PUBLIC
-  CREATE PUBLIC .
+class ZCL_ABAPGIT_FOLDER_LOGIC definition
+  public
+  create public .
 
-  PUBLIC SECTION.
+public section.
 
-    METHODS package_to_path
-      IMPORTING
-        !iv_top        TYPE devclass
-        !io_dot        TYPE REF TO zcl_abapgit_dot_abapgit
-        !iv_package    TYPE devclass
-      RETURNING
-        VALUE(rv_path) TYPE string
-      RAISING
-        zcx_abapgit_exception .
-    METHODS path_to_package
-      IMPORTING
-        !iv_top                  TYPE devclass
-        !io_dot                  TYPE REF TO zcl_abapgit_dot_abapgit
-        !iv_path                 TYPE string
-        !iv_create_if_not_exists TYPE abap_bool DEFAULT abap_true
-      RETURNING
-        VALUE(rv_package)        TYPE devclass
-      RAISING
-        zcx_abapgit_exception .
-    CLASS-METHODS get_instance
-      IMPORTING
-        !iv_buffered       TYPE abap_bool DEFAULT abap_false
-      RETURNING
-        VALUE(ro_instance) TYPE REF TO zcl_abapgit_folder_logic .
+  methods PACKAGE_TO_PATH
+    importing
+      !IV_TOP type DEVCLASS
+      !IO_DOT type ref to ZCL_ABAPGIT_DOT_ABAPGIT
+      !IV_PACKAGE type DEVCLASS
+    returning
+      value(RV_PATH) type STRING
+    raising
+      ZCX_ABAPGIT_EXCEPTION .
+  methods PATH_TO_PACKAGE
+    importing
+      !IV_TOP type DEVCLASS
+      !IO_DOT type ref to ZCL_ABAPGIT_DOT_ABAPGIT
+      !IV_PATH type STRING
+      !IV_CREATE_IF_NOT_EXISTS type ABAP_BOOL default ABAP_TRUE
+    returning
+      value(RV_PACKAGE) type DEVCLASS
+    raising
+      ZCX_ABAPGIT_EXCEPTION .
+  class-methods GET_INSTANCE
+    returning
+      value(RO_INSTANCE) type ref to ZCL_ABAPGIT_FOLDER_LOGIC .
   PROTECTED SECTION.
   PRIVATE SECTION.
 
