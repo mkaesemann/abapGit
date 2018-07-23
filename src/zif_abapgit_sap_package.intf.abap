@@ -4,6 +4,16 @@ interface ZIF_ABAPGIT_SAP_PACKAGE
 
   types:
     ty_devclass_tt TYPE STANDARD TABLE OF devclass WITH DEFAULT KEY .
+  types:
+    BEGIN OF ty_devclass_info,
+      DEVCLASS  TYPE DEVCLASS,
+      NAMESPACE TYPE NAMESPACE,
+      PARENTCL  TYPE PARENTCL,
+    END OF ty_devclass_info .
+  types:
+    ty_devclass_info_tt TYPE SORTED TABLE OF ty_devclass_info
+      WITH UNIQUE KEY devclass
+      WITH NON-UNIQUE SORTED KEY parent COMPONENTS parentcl .
 
   methods CREATE
     importing
@@ -15,17 +25,13 @@ interface ZIF_ABAPGIT_SAP_PACKAGE
       ZCX_ABAPGIT_EXCEPTION .
   methods LIST_SUBPACKAGES
     importing
-      !IT_DEVC_INFO type ZIF_ABAPGIT_DEFINITIONS=>TT_DEVC_BUFFER optional
+      !IV_BUFFERED type ABAP_BOOL default ABAP_FALSE
     returning
       value(RT_LIST) type TY_DEVCLASS_TT .
   methods LIST_SUPERPACKAGES
-    importing
-      !IT_DEVC_INFO type ZIF_ABAPGIT_DEFINITIONS=>TT_DEVC_BUFFER optional
     returning
       value(RT_LIST) type TY_DEVCLASS_TT .
   methods READ_PARENT
-    importing
-      !IT_DEVC_INFO type ZIF_ABAPGIT_DEFINITIONS=>TT_DEVC_BUFFER optional
     returning
       value(RV_PARENTCL) type TDEVC-PARENTCL .
   methods CREATE_CHILD
