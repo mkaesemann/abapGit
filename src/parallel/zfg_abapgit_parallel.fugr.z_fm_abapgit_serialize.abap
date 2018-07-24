@@ -7,6 +7,7 @@ FUNCTION z_fm_abapgit_serialize.
 *"     VALUE(I_MASTER_LANGUAGE) TYPE  SPRAS
 *"  EXPORTING
 *"     VALUE(RT_FILES) TYPE  ZPP_ABAPGIT_T_FILE_ITEM
+*"     VALUE(RT_ERRORS) TYPE  ZPP_ABAPGIT_T_SERIAL_ERROR
 *"  TABLES
 *"      IT_FILTER STRUCTURE  TADIR
 *"  EXCEPTIONS
@@ -71,25 +72,32 @@ FUNCTION z_fm_abapgit_serialize.
 **        CONTINUE.
 **      ENDIF.
 **    ENDIF.
+        TRY.
+            lt_files = zcl_abapgit_objects=>serialize(
+              is_item     = ls_item
+              iv_language = i_master_language
+              io_log      = lo_log ).
+            LOOP AT lt_files ASSIGNING FIELD-SYMBOL(<ls_file>).
+              <ls_file>-path = <ls_tadir>-path.
+              <ls_file>-sha1 = zcl_abapgit_hash=>sha1(
+                iv_type = zif_abapgit_definitions=>gc_type-blob
+                iv_data = <ls_file>-data ).
 
-        lt_files = zcl_abapgit_objects=>serialize(
-          is_item     = ls_item
-          iv_language = i_master_language
-          io_log      = lo_log ).
-        LOOP AT lt_files ASSIGNING FIELD-SYMBOL(<ls_file>).
-          <ls_file>-path = <ls_tadir>-path.
-          <ls_file>-sha1 = zcl_abapgit_hash=>sha1(
-            iv_type = zif_abapgit_definitions=>gc_type-blob
-            iv_data = <ls_file>-data ).
-
-          APPEND INITIAL LINE TO rt_files[] ASSIGNING FIELD-SYMBOL(<ls_return>).
-          <ls_return>-file = <ls_file>.
-          <ls_return>-item = ls_item.
-        ENDLOOP.
+              APPEND INITIAL LINE TO rt_files[] ASSIGNING FIELD-SYMBOL(<ls_return>).
+              <ls_return>-file = <ls_file>.
+              <ls_return>-item = ls_item.
+            ENDLOOP.
+          CATCH zcx_abapgit_exception INTO DATA(ox_exception).
+            "Encountered a serialization error: Log and continue
+            INSERT VALUE #( item = ls_item
+                            type = 'E'
+                            msg  = ox_exception->get_text( ) )
+              INTO TABLE rt_errors.
+        ENDTRY.
 
       ENDLOOP.
 
-    CATCH zcx_abapgit_exception into data(ox_exception).
+    CATCH zcx_abapgit_exception INTO ox_exception.
       RAISE abapgit_exception.
   ENDTRY.
 

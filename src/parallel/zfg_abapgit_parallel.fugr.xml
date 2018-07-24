@@ -31,6 +31,10 @@
        <PARAMETER>RT_FILES</PARAMETER>
        <TYP>ZPP_ABAPGIT_T_FILE_ITEM</TYP>
       </RSEXP>
+      <RSEXP>
+       <PARAMETER>RT_ERRORS</PARAMETER>
+       <TYP>ZPP_ABAPGIT_T_SERIAL_ERROR</TYP>
+      </RSEXP>
      </EXPORT>
      <TABLES>
       <RSTBL>
@@ -69,15 +73,21 @@
        <INDEX> 004</INDEX>
       </RSFDO>
       <RSFDO>
+       <PARAMETER>RT_ERRORS</PARAMETER>
+       <KIND>P</KIND>
+       <STEXT>Serialization Error</STEXT>
+       <INDEX> 005</INDEX>
+      </RSFDO>
+      <RSFDO>
        <PARAMETER>IT_FILTER</PARAMETER>
        <KIND>P</KIND>
        <STEXT>Directory of Repository Objects</STEXT>
-       <INDEX> 005</INDEX>
+       <INDEX> 006</INDEX>
       </RSFDO>
       <RSFDO>
        <PARAMETER>ABAPGIT_EXCEPTION</PARAMETER>
        <KIND>X</KIND>
-       <INDEX> 006</INDEX>
+       <INDEX> 007</INDEX>
       </RSFDO>
      </DOCUMENTATION>
     </item>
