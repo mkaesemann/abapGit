@@ -1,0 +1,39 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_CLAS" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values>
+   <VSEOCLASS>
+    <CLSNAME>ZCL_ABAPGIT_PARALLEL_BASE</CLSNAME>
+    <VERSION>1</VERSION>
+    <LANGU>E</LANGU>
+    <DESCRIPT>Parallel Processing base</DESCRIPT>
+    <EXPOSURE>2</EXPOSURE>
+    <STATE>1</STATE>
+    <CLSABSTRCT>X</CLSABSTRCT>
+    <CLSCCINCL>X</CLSCCINCL>
+    <FIXPT>X</FIXPT>
+    <UNICODE>X</UNICODE>
+   </VSEOCLASS>
+   <DESCRIPTIONS>
+    <SEOCOMPOTX>
+     <CLSNAME>ZCL_ABAPGIT_PARALLEL_BASE</CLSNAME>
+     <CMPNAME>GET_FREE_WORK_PROCESSES</CMPNAME>
+     <LANGU>E</LANGU>
+     <DESCRIPT>Get Number of Free Work Processes</DESCRIPT>
+    </SEOCOMPOTX>
+    <SEOCOMPOTX>
+     <CLSNAME>ZCL_ABAPGIT_PARALLEL_BASE</CLSNAME>
+     <CMPNAME>GET_MAX_MODES</CMPNAME>
+     <LANGU>E</LANGU>
+     <DESCRIPT>Determine Max.No. of Modes</DESCRIPT>
+    </SEOCOMPOTX>
+    <SEOCOMPOTX>
+     <CLSNAME>ZCL_ABAPGIT_PARALLEL_BASE</CLSNAME>
+     <CMPNAME>MO_PROGRESS</CMPNAME>
+     <LANGU>E</LANGU>
+     <DESCRIPT>Progress</DESCRIPT>
+    </SEOCOMPOTX>
+   </DESCRIPTIONS>
+  </asx:values>
+ </asx:abap>
+</abapGit>
