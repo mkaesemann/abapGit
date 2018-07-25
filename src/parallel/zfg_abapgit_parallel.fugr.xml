@@ -9,6 +9,57 @@
    </INCLUDES>
    <FUNCTIONS>
     <item>
+     <FUNCNAME>Z_FM_ABAPGIT_CHECK_EXISTS</FUNCNAME>
+     <REMOTE_CALL>R</REMOTE_CALL>
+     <SHORT_TEXT>Parallel Processing: Objects Existence Checks</SHORT_TEXT>
+     <IMPORT>
+      <RSIMP>
+       <PARAMETER>IT_TADIR</PARAMETER>
+       <TYP>ZPP_ABAPGIT_T_TADIR</TYP>
+      </RSIMP>
+     </IMPORT>
+     <EXPORT>
+      <RSEXP>
+       <PARAMETER>RT_TADIR_EXISTING</PARAMETER>
+       <TYP>ZPP_ABAPGIT_T_TADIR</TYP>
+      </RSEXP>
+      <RSEXP>
+       <PARAMETER>RT_ERRORS</PARAMETER>
+       <TYP>ZPP_ABAPGIT_T_SERIAL_ERROR</TYP>
+      </RSEXP>
+     </EXPORT>
+     <EXCEPTION>
+      <RSEXC>
+       <EXCEPTION>ABAPGIT_EXCEPTION</EXCEPTION>
+      </RSEXC>
+     </EXCEPTION>
+     <DOCUMENTATION>
+      <RSFDO>
+       <PARAMETER>IT_TADIR</PARAMETER>
+       <KIND>P</KIND>
+       <STEXT>Object Description</STEXT>
+       <INDEX> 001</INDEX>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>RT_TADIR_EXISTING</PARAMETER>
+       <KIND>P</KIND>
+       <STEXT>Object Descriptions</STEXT>
+       <INDEX> 002</INDEX>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>RT_ERRORS</PARAMETER>
+       <KIND>P</KIND>
+       <STEXT>Serialization Error</STEXT>
+       <INDEX> 003</INDEX>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>ABAPGIT_EXCEPTION</PARAMETER>
+       <KIND>X</KIND>
+       <INDEX> 004</INDEX>
+      </RSFDO>
+     </DOCUMENTATION>
+    </item>
+    <item>
      <FUNCNAME>Z_FM_ABAPGIT_SERIALIZE</FUNCNAME>
      <REMOTE_CALL>R</REMOTE_CALL>
      <SHORT_TEXT>Parallel Processing: Serialize Objects</SHORT_TEXT>

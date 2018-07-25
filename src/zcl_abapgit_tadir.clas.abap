@@ -248,7 +248,9 @@ CLASS ZCL_ABAPGIT_TADIR IMPLEMENTATION.
       CHANGING
         ct_tadir   = rt_tadir ).
 
-    rt_tadir = check_exists( rt_tadir ).
+    rt_tadir = zcl_abapgit_parallel_check=>check_exists(
+                          it_tadir = rt_tadir
+                          io_log   = io_log ).
 
   ENDMETHOD.
 
