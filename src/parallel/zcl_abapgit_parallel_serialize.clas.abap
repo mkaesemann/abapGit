@@ -1,15 +1,11 @@
 class ZCL_ABAPGIT_PARALLEL_SERIALIZE definition
   public
+  inheriting from ZCL_ABAPGIT_PARALLEL_BASE
   final
   create private .
 
 public section.
 
-  class-methods GET_FREE_WORK_PROCESSES
-    importing
-      !I_RESERVED type I default 1
-    returning
-      value(R_FREE) type I .
   class-methods SERIALIZE_OBJECTS
     importing
       !I_LAST_SERIALIZATION type TIMESTAMP
@@ -39,7 +35,6 @@ protected section.
            WITH UNIQUE KEY task
            WITH NON-UNIQUE SORTED KEY status COMPONENTS started done .
 
-  class-data MO_PROGRESS type ref to ZCL_ABAPGIT_PROGRESS .
   class-data MT_SERIALIZE_BLOCKS type TTY_SERIALIZE_BLOCK .
   class-data:
     BEGIN OF ms_block_info,
@@ -48,9 +43,6 @@ protected section.
                 total    type i,
               END OF ms_block_info .
 
-  class-methods GET_MAX_MODES
-    returning
-      value(R_MAX_MODES) type I .
   class-methods PROCESS_SERIALIZE_BLOCK
     importing
       !P_TASK type CLIKE
@@ -62,60 +54,6 @@ ENDCLASS.
 
 
 CLASS ZCL_ABAPGIT_PARALLEL_SERIALIZE IMPLEMENTATION.
-
-
-  METHOD GET_FREE_WORK_PROCESSES.
-
-    DATA: lt_wpinfo TYPE STANDARD TABLE OF wpinfo
-            WITH DEFAULT KEY.
-
-    r_free = 0.
-
-    "Get Work process Info
-    CALL FUNCTION 'TH_WPINFO'
-      TABLES
-        wplist = lt_wpinfo
-      EXCEPTIONS
-        OTHERS = 0.
-
-    "Get Number of unused Dialog Work Processes
-    LOOP AT lt_wpinfo TRANSPORTING NO FIELDS
-      WHERE wp_typ     = 'DIA' "Dialog
-        AND wp_istatus = 2.    "Waiting
-      ADD 1 TO r_free.
-    ENDLOOP.
-
-    "Leave some WPs for other users
-    r_free = COND #( WHEN r_free <= i_reserved THEN 0
-                     ELSE r_free - i_reserved ).
-
-*    "Limit to max. no. of allowed WPs
-**    r_free = COND #( WHEN r_free > get_max_modes( ) THEN get_max_modes( )
-**                        ELSE r_free ).
-
-  ENDMETHOD.
-
-
-  METHOD GET_MAX_MODES.
-
-    DATA: cvalue TYPE pfepvalue.
-
-    CALL FUNCTION 'RSAN_SYSTEM_PARAMETER_READ'
-      EXPORTING
-        i_name     = 'rdisp/max_alt_modes'
-      IMPORTING
-        e_value    = cvalue
-      EXCEPTIONS
-        read_error = 1
-        OTHERS     = 2.
-    IF sy-subrc <> 0.
-      "Return System Default
-      r_max_modes = 6.
-    ELSE.
-      r_max_modes = cvalue.
-    ENDIF.
-
-  ENDMETHOD.
 
 
   METHOD PROCESS_SERIALIZE_BLOCK.
@@ -153,7 +91,7 @@ CLASS ZCL_ABAPGIT_PARALLEL_SERIALIZE IMPLEMENTATION.
         OTHERS                = 4.
 
     IF sy-subrc = 0.
-      "If the serialization task fails we can not process results
+      "If the serialization task fails we cannot process results
       process_serialize_block(
         EXPORTING
           p_task    = p_task
