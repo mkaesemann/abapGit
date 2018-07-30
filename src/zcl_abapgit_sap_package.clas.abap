@@ -1,31 +1,31 @@
 class ZCL_ABAPGIT_SAP_PACKAGE definition
-  public
-  create private
+  PUBLIC
+  CREATE PRIVATE
 
   global friends ZCL_ABAPGIT_FACTORY .
 
-public section.
+  PUBLIC SECTION.
 
-  interfaces ZIF_ABAPGIT_SAP_PACKAGE .
+    INTERFACES ZIF_ABAPGIT_SAP_PACKAGE .
 
-  methods CONSTRUCTOR
-    importing
-      !IV_PACKAGE type DEVCLASS .
-protected section.
-private section.
+    METHODS CONSTRUCTOR
+      IMPORTING
+        !IV_PACKAGE TYPE DEVCLASS .
+  PROTECTED SECTION.
+  PRIVATE SECTION.
 
-  data MV_BUFFERED type ABAP_BOOL value abap_false ##NO_TEXT.
-  data MV_PACKAGE type DEVCLASS .
-  data MT_BUFFER type ZIF_ABAPGIT_SAP_PACKAGE=>TY_DEVCLASS_INFO_TT .
+    DATA MV_BUFFERED TYPE ABAP_BOOL VALUE ABAP_FALSE ##NO_TEXT.
+    DATA MV_PACKAGE TYPE DEVCLASS .
+    DATA MT_BUFFER TYPE ZIF_ABAPGIT_SAP_PACKAGE=>TY_DEVCLASS_INFO_TT .
 
-  methods GET_PACKAGE_INFO
-    importing
-      !I_NO_SAP_PACKAGES type ABAP_BOOL default ABAP_TRUE
-    returning
-      value(RT_PACKAGES_IN_SYSTEM) type ZIF_ABAPGIT_SAP_PACKAGE=>TY_DEVCLASS_INFO_TT .
-  methods SET_BUFFER
-    importing
-      !IT_BUFFER type ZIF_ABAPGIT_SAP_PACKAGE=>TY_DEVCLASS_INFO_TT optional .
+    METHODS GET_PACKAGE_INFO
+      IMPORTING
+        !I_NO_SAP_PACKAGES TYPE ABAP_BOOL DEFAULT ABAP_TRUE
+      RETURNING
+        VALUE(RT_PACKAGES_IN_SYSTEM) TYPE ZIF_ABAPGIT_SAP_PACKAGE=>TY_DEVCLASS_INFO_TT .
+    METHODS SET_BUFFER
+      IMPORTING
+        !IT_BUFFER TYPE ZIF_ABAPGIT_SAP_PACKAGE=>TY_DEVCLASS_INFO_TT optional .
 ENDCLASS.
 
 
@@ -256,7 +256,7 @@ CLASS ZCL_ABAPGIT_SAP_PACKAGE IMPLEMENTATION.
     ls_package-dlvunit   = 'LOCAL'.
     ls_package-as4user   = sy-uname.
 
-    zif_abapgit_sap_package~create( ls_package ).
+    create( ls_package ).
 
   ENDMETHOD.                    "create
 
@@ -377,7 +377,6 @@ CLASS ZCL_ABAPGIT_SAP_PACKAGE IMPLEMENTATION.
     lv_parent = zif_abapgit_sap_package~read_parent( ).
 
     IF sy-subrc = 0 AND NOT lv_parent IS INITIAL.
-      APPEND lv_parent TO rt_list.
       lt_list = zcl_abapgit_factory=>get_sap_package( lv_parent )->list_superpackages( ).
       APPEND LINES OF lt_list TO rt_list.
     ENDIF.

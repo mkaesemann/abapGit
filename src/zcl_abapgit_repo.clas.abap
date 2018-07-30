@@ -63,7 +63,7 @@ CLASS zcl_abapgit_repo DEFINITION
         zcx_abapgit_exception .
     METHODS deserialize
       IMPORTING
-        VALUE(is_checks) TYPE zif_abapgit_definitions=>ty_deserialize_checks
+        is_checks TYPE zif_abapgit_definitions=>ty_deserialize_checks
       RAISING
         zcx_abapgit_exception .
     METHODS refresh
@@ -102,27 +102,40 @@ CLASS zcl_abapgit_repo DEFINITION
         is_settings TYPE zif_abapgit_persistence=>ty_repo-local_settings
       RAISING
         zcx_abapgit_exception .
+    METHODS run_code_inspector
+      RETURNING
+        value(rt_list) TYPE scit_alvlist
+      RAISING
+        zcx_abapgit_exception .
 
   PROTECTED SECTION.
-
     DATA mt_local TYPE zif_abapgit_definitions=>ty_files_item_tt .
     DATA mt_remote TYPE zif_abapgit_definitions=>ty_files_tt .
     DATA mv_do_local_refresh TYPE abap_bool .
     DATA mv_last_serialization TYPE timestamp .
     DATA ms_data TYPE zif_abapgit_persistence=>ty_repo .
+    DATA mv_code_inspector_successful TYPE abap_bool .
 
-  	METHODS SET
-    	IMPORTING
-	      !IV_SHA1 type ZIF_ABAPGIT_DEFINITIONS=>TY_SHA1 optional
-	      !IT_CHECKSUMS type ZIF_ABAPGIT_PERSISTENCE=>TY_LOCAL_CHECKSUM_TT optional
-	      !IV_URL type ZIF_ABAPGIT_PERSISTENCE=>TY_REPO-URL optional
-	      !IV_BRANCH_NAME type ZIF_ABAPGIT_PERSISTENCE=>TY_REPO-BRANCH_NAME optional
-	      !IV_HEAD_BRANCH type ZIF_ABAPGIT_PERSISTENCE=>TY_REPO-HEAD_BRANCH optional
-	      !IV_OFFLINE type ZIF_ABAPGIT_PERSISTENCE=>TY_REPO-OFFLINE optional
-	      !IS_DOT_ABAPGIT type ZIF_ABAPGIT_PERSISTENCE=>TY_REPO-DOT_ABAPGIT optional
-	      !IS_LOCAL_SETTINGS type ZIF_ABAPGIT_PERSISTENCE=>TY_REPO-LOCAL_SETTINGS optional
-	    RAISING
-	      ZCX_ABAPGIT_EXCEPTION .
+    METHODS set
+      IMPORTING
+        !it_checksums       TYPE zif_abapgit_persistence=>ty_local_checksum_tt OPTIONAL
+        !iv_url             TYPE zif_abapgit_persistence=>ty_repo-url OPTIONAL
+        !iv_branch_name     TYPE zif_abapgit_persistence=>ty_repo-branch_name OPTIONAL
+        !iv_head_branch     TYPE zif_abapgit_persistence=>ty_repo-head_branch OPTIONAL
+        !iv_offline         TYPE zif_abapgit_persistence=>ty_repo-offline OPTIONAL
+        !is_dot_abapgit     TYPE zif_abapgit_persistence=>ty_repo-dot_abapgit OPTIONAL
+        !is_local_settings  TYPE zif_abapgit_persistence=>ty_repo-local_settings OPTIONAL
+        !iv_deserialized_at TYPE zif_abapgit_persistence=>ty_repo-deserialized_at OPTIONAL
+        !iv_deserialized_by TYPE zif_abapgit_persistence=>ty_repo-deserialized_by OPTIONAL
+      RAISING
+        zcx_abapgit_exception .
+
+  PRIVATE SECTION.
+    METHODS:
+      update_last_deserialize
+        RAISING
+          zcx_abapgit_exception.
+
 ENDCLASS.
 
 
@@ -192,6 +205,7 @@ CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
     CLEAR: mt_local, mv_last_serialization.
 
     update_local_checksums( lt_updated_files ).
+    update_last_deserialize( ).
 
   ENDMETHOD.
 
@@ -491,6 +505,33 @@ CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
   ENDMETHOD.                    "refresh
 
 
+  METHOD run_code_inspector.
+
+    DATA: li_code_inspector TYPE REF TO zif_abapgit_code_inspector,
+          lv_check_variant  TYPE string.
+
+    lv_check_variant = get_local_settings( )-code_inspector_check_variant.
+
+    IF lv_check_variant IS INITIAL.
+      zcx_abapgit_exception=>raise( |No check variant maintained in repo settings.| ).
+    ENDIF.
+
+    li_code_inspector = zcl_abapgit_factory=>get_code_inspector(
+                                  iv_package            = get_package( )
+                                  iv_check_variant_name = |{ lv_check_variant }| ).
+
+    rt_list = li_code_inspector->run( ).
+
+    DELETE rt_list WHERE kind = 'N'.
+
+    READ TABLE rt_list TRANSPORTING NO FIELDS
+                       WITH KEY kind = 'E'.
+
+    mv_code_inspector_successful = boolc( sy-subrc <> 0 ).
+
+  ENDMETHOD.
+
+
   METHOD set.
 
 * TODO: refactor
@@ -498,23 +539,17 @@ CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
     DATA: lo_persistence TYPE REF TO zcl_abapgit_persistence_repo.
 
 
-    ASSERT iv_sha1 IS SUPPLIED
-      OR it_checksums IS SUPPLIED
+    ASSERT it_checksums IS SUPPLIED
       OR iv_url IS SUPPLIED
       OR iv_branch_name IS SUPPLIED
       OR iv_head_branch IS SUPPLIED
       OR iv_offline IS SUPPLIED
       OR is_dot_abapgit IS SUPPLIED
-      OR is_local_settings IS SUPPLIED.
+      OR is_local_settings IS SUPPLIED
+      OR iv_deserialized_by IS SUPPLIED
+      OR iv_deserialized_at IS SUPPLIED.
 
     CREATE OBJECT lo_persistence.
-
-    IF iv_sha1 IS SUPPLIED.
-      lo_persistence->update_sha1(
-        iv_key         = ms_data-key
-        iv_branch_sha1 = iv_sha1 ).
-      ms_data-sha1 = iv_sha1.
-    ENDIF.
 
     IF it_checksums IS SUPPLIED.
       lo_persistence->update_local_checksums(
@@ -565,6 +600,15 @@ CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
       ms_data-local_settings = is_local_settings.
     ENDIF.
 
+    IF iv_deserialized_at IS SUPPLIED
+    OR iv_deserialized_by IS SUPPLIED.
+      lo_persistence->update_deserialized(
+        iv_key             = ms_data-key
+        iv_deserialized_at = iv_deserialized_at
+        iv_deserialized_by = iv_deserialized_by ).
+      ms_data-deserialized_at = iv_deserialized_at.
+    ENDIF.
+
   ENDMETHOD.
 
 
@@ -583,6 +627,20 @@ CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
   METHOD set_local_settings.
 
     set( is_local_settings = is_settings ).
+
+  ENDMETHOD.
+
+
+  METHOD update_last_deserialize.
+
+    DATA: lv_deserialized_at TYPE zif_abapgit_persistence=>ty_repo-deserialized_at,
+          lv_deserialized_by TYPE zif_abapgit_persistence=>ty_repo-deserialized_by.
+
+    GET TIME STAMP FIELD lv_deserialized_at.
+    lv_deserialized_by = sy-uname.
+
+    set( iv_deserialized_at = lv_deserialized_at
+         iv_deserialized_by = lv_deserialized_by ).
 
   ENDMETHOD.
 

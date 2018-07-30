@@ -99,11 +99,15 @@ CLASS zcl_abapgit_object_fugr DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
         zcx_abapgit_exception .
     METHODS get_abap_version
       IMPORTING
-        !io_xml                TYPE REF TO zcl_abapgit_xml_input
+        io_xml                 TYPE REF TO zcl_abapgit_xml_input
       RETURNING
         VALUE(rv_abap_version) TYPE progdir-uccheck
       RAISING
         zcx_abapgit_exception .
+    METHODS update_func_group_short_text
+      IMPORTING
+        iv_group      TYPE rs38l-area
+        iv_short_text TYPE tftit-stext.
 ENDCLASS.
 
 
@@ -232,7 +236,7 @@ CLASS ZCL_ABAPGIT_OBJECT_FUGR IMPLEMENTATION.
       INSERT REPORT lv_include FROM lt_source.
     ENDLOOP.
 
-  ENDMETHOD.                    "deserialize_functions
+  ENDMETHOD.
 
 
   METHOD deserialize_includes.
@@ -276,7 +280,7 @@ CLASS ZCL_ABAPGIT_OBJECT_FUGR IMPLEMENTATION.
 
     ENDLOOP.
 
-  ENDMETHOD.                    "deserialize_includes
+  ENDMETHOD.
 
 
   METHOD deserialize_xml.
@@ -338,12 +342,19 @@ CLASS ZCL_ABAPGIT_OBJECT_FUGR IMPLEMENTATION.
         canceled_in_corr        = 10
         undefined_error         = 11
         OTHERS                  = 12.
-    IF sy-subrc <> 0 AND sy-subrc <> 1 AND sy-subrc <> 3.
-* todo, change description
-      zcx_abapgit_exception=>raise( 'error from RS_FUNCTION_POOL_INSERT' ).
-    ENDIF.
 
-  ENDMETHOD.                    "deserialize_xml
+    CASE sy-subrc.
+      WHEN 0.
+        " Everything is ok
+      WHEN 1 OR 3.
+        " If the function group exists we need to manually update the short text
+        update_func_group_short_text( iv_group      = lv_group
+                                      iv_short_text = lv_stext ).
+      WHEN OTHERS.
+        zcx_abapgit_exception=>raise( |error from RS_FUNCTION_POOL_INSERT, code: { sy-subrc }| ).
+    ENDCASE.
+
+  ENDMETHOD.
 
 
   METHOD functions.
@@ -368,7 +379,7 @@ CLASS ZCL_ABAPGIT_OBJECT_FUGR IMPLEMENTATION.
     SORT rt_functab BY funcname ASCENDING.
     DELETE ADJACENT DUPLICATES FROM rt_functab COMPARING funcname.
 
-  ENDMETHOD.                    "functions
+  ENDMETHOD.
 
 
   METHOD get_abap_version.
@@ -389,11 +400,14 @@ CLASS ZCL_ABAPGIT_OBJECT_FUGR IMPLEMENTATION.
       lo_xml->read( EXPORTING iv_name = 'PROGDIR'
                     CHANGING cg_data = ls_progdir ).
 
-      IF rv_abap_version IS INITIAL.
+      IF ls_progdir-uccheck IS INITIAL.
+        CONTINUE.
+      ELSEIF rv_abap_version IS INITIAL.
         rv_abap_version = ls_progdir-uccheck.
+        CONTINUE.
       ELSEIF rv_abap_version NE ls_progdir-uccheck.
 *** All includes need to have the same ABAP language version
-*        zcx_abapgit_exception=>raise( 'different ABAP Language Versions' ).
+        zcx_abapgit_exception=>raise( 'different ABAP Language Versions' ).
       ENDIF.
     ENDLOOP.
 
@@ -509,7 +523,7 @@ CLASS ZCL_ABAPGIT_OBJECT_FUGR IMPLEMENTATION.
 
     APPEND lv_program TO rt_includes.
 
-  ENDMETHOD.                    "includes
+  ENDMETHOD.
 
 
   METHOD is_any_function_module_locked.
@@ -563,7 +577,7 @@ CLASS ZCL_ABAPGIT_OBJECT_FUGR IMPLEMENTATION.
 
   METHOD is_function_group_locked.
 
-    DATA: lv_object TYPE eqegraarg .
+    DATA: lv_object TYPE eqegraarg.
 
     lv_object = |FG{ ms_item-obj_name }|.
     OVERLAY lv_object WITH '                                          '.
@@ -609,7 +623,7 @@ CLASS ZCL_ABAPGIT_OBJECT_FUGR IMPLEMENTATION.
 
     CONCATENATE lv_namespace 'SAPL' lv_group INTO rv_program.
 
-  ENDMETHOD.                    "main_name
+  ENDMETHOD.
 
 
   METHOD serialize_functions.
@@ -678,7 +692,7 @@ CLASS ZCL_ABAPGIT_OBJECT_FUGR IMPLEMENTATION.
 
     ENDLOOP.
 
-  ENDMETHOD.                    "serialize_functions
+  ENDMETHOD.
 
 
   METHOD serialize_includes.
@@ -700,7 +714,7 @@ CLASS ZCL_ABAPGIT_OBJECT_FUGR IMPLEMENTATION.
 
     ENDLOOP.
 
-  ENDMETHOD.                    "serialize_includes
+  ENDMETHOD.
 
 
   METHOD serialize_xml.
@@ -721,7 +735,21 @@ CLASS ZCL_ABAPGIT_OBJECT_FUGR IMPLEMENTATION.
     io_xml->add( iv_name = 'INCLUDES'
                  ig_data = lt_includes ).
 
-  ENDMETHOD.                    "serialize_xml
+  ENDMETHOD.
+
+
+  METHOD update_func_group_short_text.
+
+    " We update the short text directly.
+    " SE80 does the same in
+    "   Program SAPLSEUF / LSEUFF07
+    "   FORM GROUP_CHANGE
+
+    UPDATE tlibt SET areat = iv_short_text
+                 WHERE spras = sy-langu
+                 AND   area  = iv_group.
+
+  ENDMETHOD.
 
 
   METHOD update_where_used.
@@ -852,7 +880,7 @@ CLASS ZCL_ABAPGIT_OBJECT_FUGR IMPLEMENTATION.
 
     update_where_used( lt_includes ).
 
-  ENDMETHOD.                    "delete
+  ENDMETHOD.
 
 
   METHOD zif_abapgit_object~deserialize.
@@ -886,7 +914,7 @@ CLASS ZCL_ABAPGIT_OBJECT_FUGR IMPLEMENTATION.
     deserialize_cua( iv_program_name = lv_program_name
                      is_cua = ls_cua ).
 
-  ENDMETHOD.                    "deserialize
+  ENDMETHOD.
 
 
   METHOD zif_abapgit_object~exists.
@@ -902,12 +930,12 @@ CLASS ZCL_ABAPGIT_OBJECT_FUGR IMPLEMENTATION.
         pool_not_exists = 1.
     rv_bool = boolc( sy-subrc <> 1 ).
 
-  ENDMETHOD.                    "zif_abapgit_object~exists
+  ENDMETHOD.
 
 
   METHOD zif_abapgit_object~get_metadata.
     rs_metadata = get_metadata( ).
-  ENDMETHOD.                    "zif_abapgit_object~get_metadata
+  ENDMETHOD.
 
 
   METHOD zif_abapgit_object~has_changed_since.
@@ -941,7 +969,7 @@ CLASS ZCL_ABAPGIT_OBJECT_FUGR IMPLEMENTATION.
       ENDIF.
     ENDLOOP.
 
-  ENDMETHOD.  "zif_abapgit_object~has_changed_since
+  ENDMETHOD.
 
 
   METHOD zif_abapgit_object~is_locked.
@@ -973,7 +1001,7 @@ CLASS ZCL_ABAPGIT_OBJECT_FUGR IMPLEMENTATION.
         object_type   = 'FUGR'
         in_new_window = abap_true.
 
-  ENDMETHOD.                    "jump
+  ENDMETHOD.
 
 
   METHOD zif_abapgit_object~serialize.
@@ -1013,5 +1041,5 @@ CLASS ZCL_ABAPGIT_OBJECT_FUGR IMPLEMENTATION.
                    ig_data = ls_cua ).
     ENDIF.
 
-  ENDMETHOD.                    "serialize
+  ENDMETHOD.
 ENDCLASS.

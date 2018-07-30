@@ -42,10 +42,13 @@ CLASS zcl_abapgit_objects_super DEFINITION PUBLIC ABSTRACT.
                   iv_field TYPE string
         RAISING   zcx_abapgit_exception,
       exists_a_lock_entry_for
-        IMPORTING iv_lock_object                 TYPE string
-                  iv_argument                    TYPE seqg3-garg OPTIONAL
+        IMPORTING iv_lock_object                TYPE string
+                  iv_argument                   TYPE seqg3-garg OPTIONAL
         RETURNING VALUE(rv_exists_a_lock_entry) TYPE abap_bool
-        RAISING   zcx_abapgit_exception.
+        RAISING   zcx_abapgit_exception,
+      set_default_package
+        IMPORTING
+          iv_package TYPE devclass.
 
   PRIVATE SECTION.
 
@@ -61,6 +64,22 @@ ENDCLASS.
 
 
 CLASS zcl_abapgit_objects_super IMPLEMENTATION.
+
+  METHOD set_default_package.
+
+    " In certain cases we need to set the package package via ABAP memory
+    " because we can't supply it via the APIs.
+    "
+    " Set default package, see function module RS_CORR_INSERT FORM get_current_devclass.
+    "
+    " We use ABAP memory instead the SET parameter because it is
+    " more reliable. SET parameter doesn't work when multiple objects
+    " are deserialized which uses the ABAP memory mechanism.
+    " We don't need to reset the memory as it is done in above mentioned form routine.
+
+    EXPORT current_devclass FROM iv_package TO MEMORY ID 'EUK'.
+
+  ENDMETHOD.
 
 
   METHOD check_timestamp.
@@ -89,7 +108,7 @@ CLASS zcl_abapgit_objects_super IMPLEMENTATION.
     ASSERT NOT ms_item IS INITIAL.
     mv_language = iv_language.
     ASSERT NOT mv_language IS INITIAL.
-  ENDMETHOD.                    "constructor
+  ENDMETHOD.
 
 
   METHOD corr_insert.
@@ -118,7 +137,7 @@ CLASS zcl_abapgit_objects_super IMPLEMENTATION.
       zcx_abapgit_exception=>raise( 'error from RS_CORR_INSERT' ).
     ENDIF.
 
-  ENDMETHOD.                    "corr_insert
+  ENDMETHOD.
 
 
   METHOD exists_a_lock_entry_for.
@@ -160,7 +179,7 @@ CLASS zcl_abapgit_objects_super IMPLEMENTATION.
     rs_metadata-class = lv_class.
     rs_metadata-version = 'v1.0.0' ##no_text.
 
-  ENDMETHOD.                    "get_metadata
+  ENDMETHOD.
 
 
   METHOD is_adt_jump_possible.
@@ -312,7 +331,7 @@ CLASS zcl_abapgit_objects_super IMPLEMENTATION.
         OTHERS                = 4
         ##fm_subrc_ok.                                                   "#EC CI_SUBRC
 
-  ENDMETHOD.                                                "jump_se11
+  ENDMETHOD.
 
 
   METHOD tadir_insert.

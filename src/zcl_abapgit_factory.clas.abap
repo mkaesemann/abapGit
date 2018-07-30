@@ -31,6 +31,14 @@ CLASS zcl_abapgit_factory DEFINITION
         RETURNING
           VALUE(ri_syntax_check) TYPE REF TO zif_abapgit_code_inspector
         RAISING
+          zcx_abapgit_exception,
+
+      get_branch_overview
+        IMPORTING
+          io_repo                   TYPE REF TO zcl_abapgit_repo_online
+        RETURNING
+          VALUE(ri_branch_overview) TYPE REF TO zif_abapgit_branch_overview
+        RAISING
           zcx_abapgit_exception.
 
 
@@ -55,13 +63,21 @@ CLASS zcl_abapgit_factory DEFINITION
         instance TYPE REF TO zif_abapgit_code_inspector,
       END OF ty_syntax_check,
       tty_syntax_check TYPE HASHED TABLE OF ty_syntax_check
-                       WITH UNIQUE KEY package.
+                       WITH UNIQUE KEY package,
+
+      BEGIN OF ty_branch_overview,
+        repo_key TYPE zif_abapgit_persistence=>ty_value,
+        instance TYPE REF TO zif_abapgit_branch_overview,
+      END OF ty_branch_overview,
+      tty_branch_overview TYPE HASHED TABLE OF ty_branch_overview
+                         WITH UNIQUE KEY repo_key.
 
     CLASS-DATA:
-      gi_tadir          TYPE REF TO zif_abapgit_tadir,
-      gt_sap_package    TYPE tty_sap_package,
-      gt_code_inspector TYPE tty_code_inspector,
-      gt_syntax_check   TYPE tty_syntax_check.
+      gi_tadir           TYPE REF TO zif_abapgit_tadir,
+      gt_sap_package     TYPE tty_sap_package,
+      gt_code_inspector  TYPE tty_code_inspector,
+      gt_syntax_check    TYPE tty_syntax_check,
+      gi_branch_overview TYPE REF TO zif_abapgit_branch_overview.
 
 ENDCLASS.
 
@@ -147,14 +163,14 @@ CLASS ZCL_ABAPGIT_FACTORY IMPLEMENTATION.
 
   ENDMETHOD.
 
+  METHOD get_branch_overview.
 
-  METHOD get_tadir.
+    CREATE OBJECT ri_branch_overview
+      TYPE zcl_abapgit_branch_overview
+      EXPORTING
+        io_repo = io_repo.
 
-    IF gi_tadir IS INITIAL.
-      CREATE OBJECT gi_tadir TYPE zcl_abapgit_tadir.
-    ENDIF.
-
-    ri_tadir = gi_tadir.
 
   ENDMETHOD.
+
 ENDCLASS.

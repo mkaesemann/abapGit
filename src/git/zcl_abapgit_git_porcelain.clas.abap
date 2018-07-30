@@ -6,11 +6,12 @@ CLASS zcl_abapgit_git_porcelain DEFINITION
   PUBLIC SECTION.
     CLASS-METHODS pull
       IMPORTING
-        !io_repo    TYPE REF TO zcl_abapgit_repo_online
+        !io_repo        TYPE REF TO zcl_abapgit_repo_online
       EXPORTING
-        !et_files   TYPE zif_abapgit_definitions=>ty_files_tt
-        !et_objects TYPE zif_abapgit_definitions=>ty_objects_tt
-        !ev_branch  TYPE zif_abapgit_definitions=>ty_sha1
+        !et_files       TYPE zif_abapgit_definitions=>ty_files_tt
+        !et_objects     TYPE zif_abapgit_definitions=>ty_objects_tt
+        !ev_branch      TYPE zif_abapgit_definitions=>ty_sha1
+        !eo_branch_list TYPE REF TO zcl_abapgit_git_branch_list
       RAISING
         zcx_abapgit_exception .
     CLASS-METHODS push
@@ -27,7 +28,7 @@ CLASS zcl_abapgit_git_porcelain DEFINITION
       IMPORTING
         !io_repo TYPE REF TO zcl_abapgit_repo_online
         !iv_name TYPE string
-        !iv_from TYPE zif_abapgit_definitions=>ty_sha1
+        iv_from  TYPE zif_abapgit_definitions=>ty_sha1
       RAISING
         zcx_abapgit_exception .
     CLASS-METHODS create_tag
@@ -207,8 +208,6 @@ CLASS ZCL_ABAPGIT_GIT_PORCELAIN IMPLEMENTATION.
 
     IF iv_name CS ` `.
       zcx_abapgit_exception=>raise( 'Branch name cannot contain blank spaces' ).
-    ELSEIF iv_from = ''.
-      zcx_abapgit_exception=>raise( 'New branch, "from" SHA1 empty' ).
     ENDIF.
 
 * "client MUST send an empty packfile"
@@ -384,6 +383,7 @@ CLASS ZCL_ABAPGIT_GIT_PORCELAIN IMPLEMENTATION.
     CLEAR et_files.
     CLEAR et_objects.
     CLEAR ev_branch.
+    CLEAR eo_branch_list.
 
     zcl_abapgit_git_transport=>upload_pack(
       EXPORTING
@@ -391,7 +391,8 @@ CLASS ZCL_ABAPGIT_GIT_PORCELAIN IMPLEMENTATION.
         iv_branch_name = io_repo->get_branch_name( )
       IMPORTING
         et_objects     = et_objects
-        ev_branch      = ev_branch ).
+        ev_branch      = ev_branch
+        eo_branch_list = eo_branch_list ).
 
     READ TABLE et_objects INTO ls_object
       WITH KEY type COMPONENTS
@@ -761,4 +762,32 @@ CLASS ZCL_ABAPGIT_GIT_PORCELAIN IMPLEMENTATION.
     ENDLOOP.
 
   ENDMETHOD.
+
+  METHOD create_annotated_tag.
+
+    receive_pack_create_tag(
+        is_tag  = is_tag
+        io_repo = io_repo ).
+
+  ENDMETHOD.
+
+
+  METHOD create_lightweight_tag.
+
+    DATA: lt_objects TYPE zif_abapgit_definitions=>ty_objects_tt,
+          lv_pack    TYPE xstring.
+
+* "client MUST send an empty packfile"
+* https://github.com/git/git/blob/master/Documentation/technical/pack-protocol.txt#L514
+    lv_pack = zcl_abapgit_git_pack=>encode( lt_objects ).
+
+    zcl_abapgit_git_transport=>receive_pack(
+      iv_url         = io_repo->get_url( )
+      iv_old         = c_zero
+      iv_new         = is_tag-sha1
+      iv_branch_name = is_tag-name
+      iv_pack        = lv_pack ).
+
+  ENDMETHOD.
+
 ENDCLASS.

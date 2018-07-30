@@ -7,33 +7,33 @@ CLASS zcl_abapgit_tadir DEFINITION
   PUBLIC SECTION.
     INTERFACES zif_abapgit_tadir .
 
-private section.
+  PRIVATE SECTION.
 
-  methods EXISTS
-    importing
-      !IS_ITEM type ZIF_ABAPGIT_DEFINITIONS=>TY_ITEM
-    returning
-      value(RV_EXISTS) type ABAP_BOOL .
-  methods CHECK_EXISTS
-    importing
-      !IT_TADIR type ZIF_ABAPGIT_DEFINITIONS=>TY_TADIR_TT
-    returning
-      value(RT_TADIR) type ZIF_ABAPGIT_DEFINITIONS=>TY_TADIR_TT
-    raising
-      ZCX_ABAPGIT_EXCEPTION .
-  methods BUILD
-    importing
-      !IV_PACKAGE type TADIR-DEVCLASS
-      !IV_TOP type TADIR-DEVCLASS
-      !IO_DOT type ref to ZCL_ABAPGIT_DOT_ABAPGIT
-      !IV_IGNORE_SUBPACKAGES type ABAP_BOOL default ABAP_FALSE
-      !IV_ONLY_LOCAL_OBJECTS type ABAP_BOOL
-      !IO_LOG type ref to ZCL_ABAPGIT_LOG optional
-      !IO_FOLDER_LOGIC type ref to ZCL_ABAPGIT_FOLDER_LOGIC optional
-    returning
-      value(RT_TADIR) type ZIF_ABAPGIT_DEFINITIONS=>TY_TADIR_TT
-    raising
-      ZCX_ABAPGIT_EXCEPTION .
+    METHODS EXISTS
+      IMPORTING
+        !IS_ITEM TYPE ZIF_ABAPGIT_DEFINITIONS=>TY_ITEM
+      RETURNING
+        VALUE(RV_EXISTS) TYPE ABAP_BOOL .
+    METHODS CHECK_EXISTS
+      IMPORTING
+        !IT_TADIR TYPE ZIF_ABAPGIT_DEFINITIONS=>TY_TADIR_TT
+      RETURNING
+        VALUE(RT_TADIR) TYPE ZIF_ABAPGIT_DEFINITIONS=>TY_TADIR_TT
+      RAISING
+        ZCX_ABAPGIT_EXCEPTION .
+    METHODS BUILD
+      IMPORTING
+        !IV_PACKAGE TYPE TADIR-DEVCLASS
+        !IV_TOP TYPE TADIR-DEVCLASS
+        !IO_DOT TYPE REF TO ZCL_ABAPGIT_DOT_ABAPGIT
+        !IV_IGNORE_SUBPACKAGES TYPE ABAP_BOOL DEFAULT ABAP_FALSE
+        !IV_ONLY_LOCAL_OBJECTS TYPE ABAP_BOOL
+        !IO_LOG TYPE REF TO ZCL_ABAPGIT_LOG OPTIONAL
+        !IO_FOLDER_LOGIC TYPE REF TO ZCL_ABAPGIT_FOLDER_LOGIC OPTIONAL
+      RETURNING
+        VALUE(RT_TADIR) TYPE ZIF_ABAPGIT_DEFINITIONS=>TY_TADIR_TT
+      RAISING
+        ZCX_ABAPGIT_EXCEPTION .
 ENDCLASS.
 
 
@@ -52,6 +52,7 @@ CLASS ZCL_ABAPGIT_TADIR IMPLEMENTATION.
           ls_srcsystem    LIKE LINE OF lt_srcsystem,
           ls_exclude      LIKE LINE OF lt_excludes.
     DATA: lo_folder_logic TYPE REF TO zcl_abapgit_folder_logic.
+    DATA: last_package TYPE devclass VALUE cl_abap_char_utilities=>horizontal_tab.
 
     FIELD-SYMBOLS: <ls_tdevc> LIKE LINE OF lt_tdevc,
                    <ls_tadir> LIKE LINE OF rt_tadir.
@@ -117,8 +118,6 @@ CLASS ZCL_ABAPGIT_TADIR IMPLEMENTATION.
     ENDLOOP.
 
     "Supplement Package Info
-    DATA: last_package TYPE devclass VALUE cl_abap_char_utilities=>horizontal_tab.
-
     lo_folder_logic = io_folder_logic.
     LOOP AT rt_tadir ASSIGNING <ls_tadir>.
 

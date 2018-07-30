@@ -20,7 +20,8 @@ CLASS zcl_abapgit_git_pack DEFINITION
         author    TYPE string,
         committer TYPE string,
         body      TYPE string,
-      END OF ty_commit,
+      END OF ty_commit .
+    TYPES:
       BEGIN OF ty_tag,
         object       TYPE string,
         type         TYPE string,
@@ -30,11 +31,6 @@ CLASS zcl_abapgit_git_pack DEFINITION
         message      TYPE string,
         body         TYPE string,
       END OF ty_tag .
-    TYPES:
-      BEGIN OF ty_adler32,
-        sha1 TYPE zif_abapgit_definitions=>ty_sha1,
-        type TYPE zif_abapgit_definitions=>ty_type,
-      END OF ty_adler32 .
 
     CLASS-METHODS decode
       IMPORTING
@@ -78,16 +74,16 @@ CLASS zcl_abapgit_git_pack DEFINITION
         VALUE(rv_data) TYPE xstring .
     CLASS-METHODS encode_commit
       IMPORTING
-        is_commit      TYPE ty_commit
+        !is_commit     TYPE ty_commit
       RETURNING
         VALUE(rv_data) TYPE xstring .
     CLASS-METHODS encode_tag
       IMPORTING
-        is_tag         TYPE zcl_abapgit_git_pack=>ty_tag
+        !is_tag        TYPE zcl_abapgit_git_pack=>ty_tag
       RETURNING
         VALUE(rv_data) TYPE xstring
       RAISING
-        zcx_abapgit_exception.
+        zcx_abapgit_exception .
   PRIVATE SECTION.
 
     CONSTANTS:
