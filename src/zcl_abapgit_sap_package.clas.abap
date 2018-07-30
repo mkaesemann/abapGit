@@ -256,7 +256,7 @@ CLASS ZCL_ABAPGIT_SAP_PACKAGE IMPLEMENTATION.
     ls_package-dlvunit   = 'LOCAL'.
     ls_package-as4user   = sy-uname.
 
-    create( ls_package ).
+    zif_abapgit_sap_package~create( ls_package ).
 
   ENDMETHOD.                    "create
 
