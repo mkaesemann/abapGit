@@ -592,7 +592,7 @@ CLASS ZCL_ABAPGIT_GIT_PORCELAIN IMPLEMENTATION.
       using key type
       where type = ls_object-type
         and sha1 = ls_object-sha1.
-      add 1 to uindex.
+      uindex = uindex + 1.
     endloop.
     ls_object-index = uindex + 1.
     INSERT ls_object INTO TABLE lt_objects.
