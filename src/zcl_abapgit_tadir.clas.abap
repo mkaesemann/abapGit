@@ -107,7 +107,7 @@ CLASS ZCL_ABAPGIT_TADIR IMPLEMENTATION.
     "Supplement Local Packages
     LOOP AT lt_packages ASSIGNING FIELD-SYMBOL(<package>).
       " Local packages are not in TADIR, only in TDEVC, act as if they were
-      IF iv_package CP '$*'. " OR <package> CP 'T*' ).
+      IF <package> CP '$*'. " OR <package> CP 'T*' ).
         APPEND INITIAL LINE TO rt_tadir ASSIGNING <ls_tadir>.
         <ls_tadir>-pgmid    = 'R3TR'.
         <ls_tadir>-object   = 'DEVC'.
