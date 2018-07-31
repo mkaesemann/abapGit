@@ -29,7 +29,6 @@ CLASS zcl_abapgit_tadir DEFINITION
         !IV_IGNORE_SUBPACKAGES TYPE ABAP_BOOL DEFAULT ABAP_FALSE
         !IV_ONLY_LOCAL_OBJECTS TYPE ABAP_BOOL
         !IO_LOG TYPE REF TO ZCL_ABAPGIT_LOG OPTIONAL
-        !IO_FOLDER_LOGIC TYPE REF TO ZCL_ABAPGIT_FOLDER_LOGIC OPTIONAL
       RETURNING
         VALUE(RT_TADIR) TYPE ZIF_ABAPGIT_DEFINITIONS=>TY_TADIR_TT
       RAISING
@@ -118,7 +117,6 @@ CLASS ZCL_ABAPGIT_TADIR IMPLEMENTATION.
     ENDLOOP.
 
     "Supplement Package Info
-    lo_folder_logic = io_folder_logic.
     LOOP AT rt_tadir ASSIGNING <ls_tadir>.
 
       IF last_package <> <ls_tadir>-devclass.
