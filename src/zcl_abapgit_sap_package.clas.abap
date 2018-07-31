@@ -13,19 +13,12 @@ class ZCL_ABAPGIT_SAP_PACKAGE definition
         !IV_PACKAGE TYPE DEVCLASS .
   PROTECTED SECTION.
   PRIVATE SECTION.
+    DATA: mv_package TYPE devclass.
 
-    DATA MV_BUFFERED TYPE ABAP_BOOL VALUE ABAP_FALSE ##NO_TEXT.
-    DATA MV_PACKAGE TYPE DEVCLASS .
-    DATA MT_BUFFER TYPE ZIF_ABAPGIT_SAP_PACKAGE=>TY_DEVCLASS_INFO_TT .
+    ALIASES:
+      create FOR zif_abapgit_sap_package~create,
+      create_local FOR zif_abapgit_sap_package~create_local.
 
-    METHODS GET_PACKAGE_INFO
-      IMPORTING
-        !I_NO_SAP_PACKAGES TYPE ABAP_BOOL DEFAULT ABAP_TRUE
-      RETURNING
-        VALUE(RT_PACKAGES_IN_SYSTEM) TYPE ZIF_ABAPGIT_SAP_PACKAGE=>TY_DEVCLASS_INFO_TT .
-    METHODS SET_BUFFER
-      IMPORTING
-        !IT_BUFFER TYPE ZIF_ABAPGIT_SAP_PACKAGE=>TY_DEVCLASS_INFO_TT optional .
 ENDCLASS.
 
 
@@ -35,50 +28,6 @@ CLASS ZCL_ABAPGIT_SAP_PACKAGE IMPLEMENTATION.
 
   METHOD constructor.
     mv_package = iv_package.
-  ENDMETHOD.
-
-
-  METHOD GET_PACKAGE_INFO.
-
-    IF i_no_sap_packages = abap_true.
-
-      "According to SAP Note 84282 we only need to evaluate packages
-      "with a local namespace ($), a customer namespace (Y*,Z*) or a partner namespace (/*/)
-      "All other namespaces belong to SAP
-      SELECT devclass namespace parentcl
-      FROM tdevc
-      INTO CORRESPONDING FIELDS OF TABLE rt_packages_in_system
-      WHERE ( devclass LIKE '$%'
-              OR devclass LIKE 'Y%'
-              OR devclass LIKE 'Z%'
-              OR devclass LIKE '/%' )
-        and AS4USER <> 'SAP'.
-
-    ELSE.
-
-      SELECT devclass namespace parentcl
-        FROM tdevc
-        INTO CORRESPONDING FIELDS OF TABLE rt_packages_in_system.
-
-    ENDIF.
-
-  ENDMETHOD.
-
-
-  METHOD set_buffer.
-
-    IF it_buffer IS NOT SUPPLIED.
-      mt_buffer = get_package_info( ).
-      mv_buffered = abap_true.
-    ELSE.
-      mt_buffer = it_buffer.
-      IF it_buffer IS INITIAL.
-        mv_buffered = abap_false.
-      ELSE.
-        mv_buffered = abap_true.
-      ENDIF.
-    ENDIF.
-
   ENDMETHOD.
 
 
@@ -319,48 +268,22 @@ CLASS ZCL_ABAPGIT_SAP_PACKAGE IMPLEMENTATION.
 
   METHOD zif_abapgit_sap_package~list_subpackages.
 
-    DATA: lt_list     LIKE rt_list,
-          lv_devclass LIKE LINE OF rt_list.
-    DATA: lv_children TYPE i.
-    FIELD-SYMBOLS: <st_devc> TYPE zif_abapgit_sap_package=>ty_devclass_info.
+    DATA: lt_list     LIKE rt_list.
 
-    DATA: o_package TYPE REF TO zcl_abapgit_sap_package.
+    SELECT devclass FROM tdevc
+      INTO TABLE lt_list
+      WHERE parentcl = mv_package.
 
-    IF iv_buffered = abap_true.
-
-      IF mv_buffered = abap_false.
-        set_buffer( ).
-      ENDIF.
-
-      LOOP AT mt_buffer ASSIGNING <st_devc>
-        USING KEY parent
-        WHERE parentcl = mv_package.
-
-        INSERT <st_devc>-devclass INTO TABLE rt_list.
-
-        CREATE OBJECT o_package
-          EXPORTING
-            iv_package = <st_devc>-devclass.
-        o_package->set_buffer( mt_buffer ).
-        lt_list = o_package->zif_abapgit_sap_package~list_subpackages( abap_true ).
-        APPEND LINES OF lt_list TO rt_list.
-
-      ENDLOOP.
-
-    ELSE.
+    rt_list = lt_list.
+    WHILE lines( lt_list ) > 0.
 
       SELECT devclass FROM tdevc
-        INTO TABLE rt_list
-        WHERE parentcl = mv_package.      "#EC CI_GENBUFF "#EC CI_SUBRC
-      lv_children = sy-dbcnt.
+        INTO TABLE lt_list
+        FOR ALL ENTRIES IN lt_list
+        WHERE parentcl = lt_list-table_line.
+      APPEND LINES OF lt_list TO rt_list.
 
-      LOOP AT rt_list INTO lv_devclass FROM 1 TO lv_children.
-        "Get Children of Child
-        lt_list = zcl_abapgit_factory=>get_sap_package( lv_devclass )->list_subpackages( ).
-        APPEND LINES OF lt_list TO rt_list.
-      ENDLOOP.
-
-    ENDIF.
+    ENDWHILE.
 
   ENDMETHOD.
 
@@ -369,7 +292,6 @@ CLASS ZCL_ABAPGIT_SAP_PACKAGE IMPLEMENTATION.
 
     DATA: lt_list   LIKE rt_list,
           lv_parent TYPE tdevc-parentcl.
-    FIELD-SYMBOLS: <st_devc> TYPE zif_abapgit_sap_package=>ty_devclass_info.
 
     APPEND mv_package TO rt_list.
 
@@ -386,6 +308,8 @@ CLASS ZCL_ABAPGIT_SAP_PACKAGE IMPLEMENTATION.
 
   METHOD zif_abapgit_sap_package~read_parent.
     SELECT SINGLE parentcl FROM tdevc INTO rv_parentcl
-      WHERE devclass = mv_package.      "#EC CI_SUBRC "#EC CI_GENBUFF
+      WHERE devclass = mv_package.        "#EC CI_SUBRC "#EC CI_GENBUFF
+    ASSERT sy-subrc = 0.
+
   ENDMETHOD.
 ENDCLASS.
