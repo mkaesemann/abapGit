@@ -257,9 +257,7 @@ CLASS ZCL_ABAPGIT_BRANCH_OVERVIEW IMPLEMENTATION.
       IMPORTING
         et_objects     = rt_objects ).
 
-    DELETE rt_objects
-*      USING KEY type
-      WHERE type = zif_abapgit_definitions=>gc_type-blob.
+    DELETE rt_objects WHERE type = zif_abapgit_definitions=>gc_type-blob.
 
   ENDMETHOD.
 
@@ -271,9 +269,7 @@ CLASS ZCL_ABAPGIT_BRANCH_OVERVIEW IMPLEMENTATION.
     FIELD-SYMBOLS: <ls_object> LIKE LINE OF it_objects,
                    <ls_tag>    LIKE LINE OF mt_tags.
 
-    LOOP AT it_objects ASSIGNING <ls_object>
-*      USING KEY type
-      WHERE type = zif_abapgit_definitions=>gc_type-tag.
+    LOOP AT it_objects ASSIGNING <ls_object> WHERE type = zif_abapgit_definitions=>gc_type-tag.
 
       ls_raw = zcl_abapgit_git_pack=>decode_tag( <ls_object>-data ).
 
@@ -305,9 +301,7 @@ CLASS ZCL_ABAPGIT_BRANCH_OVERVIEW IMPLEMENTATION.
     FIELD-SYMBOLS: <ls_object> LIKE LINE OF it_objects.
 
 
-    LOOP AT it_objects ASSIGNING <ls_object>
-*      using key type
-      WHERE type = zif_abapgit_definitions=>gc_type-commit.
+    LOOP AT it_objects ASSIGNING <ls_object> WHERE type = zif_abapgit_definitions=>gc_type-commit.
       ls_raw = zcl_abapgit_git_pack=>decode_commit( <ls_object>-data ).
 
       CLEAR ls_commit.

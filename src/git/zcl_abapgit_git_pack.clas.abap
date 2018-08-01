@@ -167,7 +167,7 @@ CLASS ZCL_ABAPGIT_GIT_PACK IMPLEMENTATION.
           lv_xstring        TYPE xstring,
           lv_expected       TYPE i,
           ls_object         LIKE LINE OF rt_objects.
-	DATA: uindex type sy-index.
+    DATA: uindex            TYPE sy-index.
 
     lv_data = iv_data.
 
@@ -265,7 +265,7 @@ CLASS ZCL_ABAPGIT_GIT_PACK IMPLEMENTATION.
       ls_object-type = lv_type.
       ls_object-data = lv_decompressed.
       ls_object-index = uindex.
-      INSERT ls_object INTO TABLE rt_objects.
+      APPEND ls_object TO rt_objects.
     ENDDO.
 
 * check SHA1 at end of pack
@@ -509,8 +509,7 @@ CLASS ZCL_ABAPGIT_GIT_PACK IMPLEMENTATION.
 
 * find base
     READ TABLE ct_objects ASSIGNING <ls_object>
-      WITH KEY sha COMPONENTS
-        sha1 = is_object-sha1.
+      WITH KEY sha COMPONENTS sha1 = is_object-sha1.
     IF sy-subrc <> 0.
       zcx_abapgit_exception=>raise( |Base not found, { is_object-sha1 }| ).
     ELSEIF <ls_object>-type = zif_abapgit_definitions=>gc_type-ref_d.

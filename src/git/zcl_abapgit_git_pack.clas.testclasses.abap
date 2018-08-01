@@ -270,7 +270,7 @@ CLASS ltcl_pack IMPLEMENTATION.
     ls_object-type = zif_abapgit_definitions=>gc_type-blob.
     ls_object-data = lv_data.
     ls_object-adler32 = zcl_abapgit_hash=>adler32( lv_data ).
-    insert ls_object into table lt_objects.
+    APPEND ls_object TO lt_objects.
 
 * commit
     CLEAR ls_commit.
@@ -285,7 +285,7 @@ CLASS ltcl_pack IMPLEMENTATION.
     ls_object-type = zif_abapgit_definitions=>gc_type-commit.
     ls_object-data = lv_data.
     ls_object-adler32 = zcl_abapgit_hash=>adler32( lv_data ).
-    insert ls_object into table lt_objects.
+    APPEND ls_object TO lt_objects.
 
 * tree
     CLEAR ls_node.
@@ -299,7 +299,7 @@ CLASS ltcl_pack IMPLEMENTATION.
     ls_object-type = zif_abapgit_definitions=>gc_type-tree.
     ls_object-data = lv_data.
     ls_object-adler32 = zcl_abapgit_hash=>adler32( lv_data ).
-    insert ls_object into table lt_objects.
+    APPEND ls_object TO lt_objects.
 
 
     CLEAR lv_data.
@@ -364,7 +364,7 @@ CLASS ltcl_pack IMPLEMENTATION.
     ENDDO.
 
     ls_object = object_blob( lv_data ).
-    insert ls_object into table lt_objects.
+    APPEND ls_object TO lt_objects.
 
     CLEAR lv_data.
     lv_data = zcl_abapgit_git_pack=>encode( lt_objects ).

@@ -132,7 +132,7 @@ ENDCLASS.
 
 
 
-CLASS zcl_abapgit_git_porcelain IMPLEMENTATION.
+CLASS ZCL_ABAPGIT_GIT_PORCELAIN IMPLEMENTATION.
 
 
   METHOD build_trees.
@@ -192,6 +192,15 @@ CLASS zcl_abapgit_git_porcelain IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD create_annotated_tag.
+
+    receive_pack_create_tag(
+        is_tag  = is_tag
+        io_repo = io_repo ).
+
+  ENDMETHOD.
+
+
   METHOD create_branch.
 
     DATA: lt_objects TYPE zif_abapgit_definitions=>ty_objects_tt,
@@ -210,6 +219,25 @@ CLASS zcl_abapgit_git_porcelain IMPLEMENTATION.
       iv_old         = c_zero
       iv_new         = iv_from
       iv_branch_name = iv_name
+      iv_pack        = lv_pack ).
+
+  ENDMETHOD.
+
+
+  METHOD create_lightweight_tag.
+
+    DATA: lt_objects TYPE zif_abapgit_definitions=>ty_objects_tt,
+          lv_pack    TYPE xstring.
+
+* "client MUST send an empty packfile"
+* https://github.com/git/git/blob/master/Documentation/technical/pack-protocol.txt#L514
+    lv_pack = zcl_abapgit_git_pack=>encode( lt_objects ).
+
+    zcl_abapgit_git_transport=>receive_pack(
+      iv_url         = io_repo->get_url( )
+      iv_old         = c_zero
+      iv_new         = is_tag-sha1
+      iv_branch_name = is_tag-name
       iv_pack        = lv_pack ).
 
   ENDMETHOD.
@@ -506,7 +534,7 @@ CLASS zcl_abapgit_git_porcelain IMPLEMENTATION.
     ls_object-type = zif_abapgit_definitions=>gc_type-tag.
     ls_object-data = lv_tag.
     ls_object-index = 1.
-    INSERT ls_object INTO TABLE lt_objects.
+    APPEND ls_object TO lt_objects.
 
     lv_pack = zcl_abapgit_git_pack=>encode( lt_objects ).
 
@@ -529,6 +557,7 @@ CLASS zcl_abapgit_git_porcelain IMPLEMENTATION.
           lt_files   TYPE zif_abapgit_definitions=>ty_files_tt,
           ls_object  LIKE LINE OF lt_objects,
           ls_commit  TYPE zcl_abapgit_git_pack=>ty_commit.
+    DATA: uindex     TYPE sy-index.
 
     FIELD-SYMBOLS: <ls_tree> LIKE LINE OF it_trees,
                    <ls_blob> LIKE LINE OF it_blobs.
@@ -559,20 +588,9 @@ CLASS zcl_abapgit_git_porcelain IMPLEMENTATION.
     ls_object-sha1 = zcl_abapgit_hash=>sha1( iv_type = zif_abapgit_definitions=>gc_type-commit iv_data = lv_commit ).
     ls_object-type = zif_abapgit_definitions=>gc_type-commit.
     ls_object-data = lv_commit.
-    data(uindex) = 0.
-    loop at lt_objects TRANSPORTING NO FIELDS
-      using key type
-      where type = ls_object-type
-        and sha1 = ls_object-sha1.
-      add 1 to uindex.
-    endloop.
-    ls_object-index = uindex + 1.
-    INSERT ls_object INTO TABLE lt_objects.
+    APPEND ls_object TO lt_objects.
 
     LOOP AT it_trees ASSIGNING <ls_tree>.
-
-      data(tindex) = sy-tabix.
-
       CLEAR ls_object.
       ls_object-sha1 = <ls_tree>-sha1.
 
@@ -588,14 +606,12 @@ CLASS zcl_abapgit_git_porcelain IMPLEMENTATION.
 
       ls_object-type = zif_abapgit_definitions=>gc_type-tree.
       ls_object-data = <ls_tree>-data.
-      ls_object-index = tindex.
-      INSERT ls_object INTO TABLE lt_objects.
+      uindex = uindex + 1.
+      ls_object-index = uindex.
+      APPEND ls_object TO lt_objects.
     ENDLOOP.
 
     LOOP AT it_blobs ASSIGNING <ls_blob>.
-
-      data(bindex) = sy-tabix.
-
       CLEAR ls_object.
       ls_object-sha1 = zcl_abapgit_hash=>sha1(
         iv_type = zif_abapgit_definitions=>gc_type-blob
@@ -614,8 +630,9 @@ CLASS zcl_abapgit_git_porcelain IMPLEMENTATION.
       ls_object-type = zif_abapgit_definitions=>gc_type-blob.
       ASSERT NOT <ls_blob>-data IS INITIAL.
       ls_object-data = <ls_blob>-data.
-      ls_object-index = bindex.
-      INSERT ls_object INTO TABLE lt_objects.
+      uindex = uindex + 1.
+      ls_object-index = uindex.
+      APPEND ls_object TO lt_objects.
     ENDLOOP.
 
     lv_pack = zcl_abapgit_git_pack=>encode( lt_objects ).
@@ -734,32 +751,4 @@ CLASS zcl_abapgit_git_porcelain IMPLEMENTATION.
     ENDLOOP.
 
   ENDMETHOD.
-
-  METHOD create_annotated_tag.
-
-    receive_pack_create_tag(
-        is_tag  = is_tag
-        io_repo = io_repo ).
-
-  ENDMETHOD.
-
-
-  METHOD create_lightweight_tag.
-
-    DATA: lt_objects TYPE zif_abapgit_definitions=>ty_objects_tt,
-          lv_pack    TYPE xstring.
-
-* "client MUST send an empty packfile"
-* https://github.com/git/git/blob/master/Documentation/technical/pack-protocol.txt#L514
-    lv_pack = zcl_abapgit_git_pack=>encode( lt_objects ).
-
-    zcl_abapgit_git_transport=>receive_pack(
-      iv_url         = io_repo->get_url( )
-      iv_old         = c_zero
-      iv_new         = is_tag-sha1
-      iv_branch_name = is_tag-name
-      iv_pack        = lv_pack ).
-
-  ENDMETHOD.
-
 ENDCLASS.
