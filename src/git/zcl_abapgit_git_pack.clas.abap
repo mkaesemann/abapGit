@@ -167,7 +167,7 @@ CLASS ZCL_ABAPGIT_GIT_PACK IMPLEMENTATION.
           lv_xstring        TYPE xstring,
           lv_expected       TYPE i,
           ls_object         LIKE LINE OF rt_objects.
-
+	DATA: uindex type sy-index.
 
     lv_data = iv_data.
 
@@ -191,7 +191,7 @@ CLASS ZCL_ABAPGIT_GIT_PACK IMPLEMENTATION.
 
     DO lv_objects TIMES.
 
-      DATA(uindex) = sy-index.
+      uindex = sy-index.
 
       lv_x = lv_data(1).
       lv_type = get_type( lv_x ).
