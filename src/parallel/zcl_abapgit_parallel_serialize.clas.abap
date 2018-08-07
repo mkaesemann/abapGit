@@ -1,54 +1,54 @@
-class ZCL_ABAPGIT_PARALLEL_SERIALIZE definition
-  public
-  inheriting from ZCL_ABAPGIT_PARALLEL_BASE
-  final
-  create private .
+CLASS zcl_abapgit_parallel_serialize DEFINITION
+  PUBLIC
+  INHERITING FROM zcl_abapgit_parallel_base
+  FINAL
+  CREATE PRIVATE .
 
-public section.
+  PUBLIC SECTION.
 
-  class-methods SERIALIZE_OBJECTS
-    importing
-      !I_LAST_SERIALIZATION type TIMESTAMP
-      !I_MASTER_LANGUAGE type SPRAS
-      !IO_LOG type ref to ZCL_ABAPGIT_LOG optional
-      !IT_TADIR type ZIF_ABAPGIT_DEFINITIONS=>TY_TADIR_TT
-      !IT_FILTER type SCTS_TADIR optional
-      !IT_FILES type ZIF_ABAPGIT_DEFINITIONS=>TY_FILES_ITEM_TT optional
-    returning
-      value(RT_FILES) type ZIF_ABAPGIT_DEFINITIONS=>TY_FILES_ITEM_TT .
-  class-methods SERIALIZE_FINISHED
-    importing
-      !P_TASK type CLIKE .
-protected section.
+    CLASS-METHODS serialize_objects
+      IMPORTING
+        !i_last_serialization TYPE timestamp
+        !i_master_language    TYPE spras
+        !io_log               TYPE REF TO zcl_abapgit_log OPTIONAL
+        !it_tadir             TYPE zif_abapgit_definitions=>ty_tadir_tt
+        !it_filter            TYPE zif_abapgit_definitions=>ty_tadir_tt OPTIONAL
+        !it_files             TYPE zif_abapgit_definitions=>ty_files_item_tt OPTIONAL
+      RETURNING
+        VALUE(rt_files)       TYPE zif_abapgit_definitions=>ty_files_item_tt .
+    CLASS-METHODS serialize_finished
+      IMPORTING
+        !p_task TYPE clike .
+  PROTECTED SECTION.
 
-  types:
-    BEGIN OF ty_serialize_block,
-      task    TYPE string,
-      started TYPE abap_bool,
-      done    TYPE abap_bool,
-      block   TYPE zpp_abapgit_t_tadir,
-      files   TYPE zif_abapgit_definitions=>ty_files_item_tt,
-      errors  TYPE zpp_abapgit_t_serial_error,
-    END OF ty_serialize_block .
-  types:
-    tty_serialize_block TYPE SORTED TABLE OF ty_serialize_block
-           WITH UNIQUE KEY task
-           WITH NON-UNIQUE SORTED KEY status COMPONENTS started done .
+    TYPES:
+      BEGIN OF ty_serialize_block,
+        task    TYPE string,
+        started TYPE abap_bool,
+        done    TYPE abap_bool,
+        block   TYPE zpp_abapgit_t_tadir,
+        files   TYPE zif_abapgit_definitions=>ty_files_item_tt,
+        errors  TYPE zpp_abapgit_t_serial_error,
+      END OF ty_serialize_block .
+    TYPES:
+      tty_serialize_block TYPE SORTED TABLE OF ty_serialize_block
+             WITH UNIQUE KEY task
+             WITH NON-UNIQUE SORTED KEY status COMPONENTS started done .
 
-  class-data MT_SERIALIZE_BLOCKS type TTY_SERIALIZE_BLOCK .
-  class-data:
-    BEGIN OF ms_block_info,
-                started  type i,
-                finished TYPE i,
-                total    type i,
-              END OF ms_block_info .
+    CLASS-DATA mt_serialize_blocks TYPE tty_serialize_block .
+    CLASS-DATA:
+      BEGIN OF ms_block_info,
+        started  TYPE i,
+        finished TYPE i,
+        total    TYPE i,
+      END OF ms_block_info .
 
-  class-methods PROCESS_SERIALIZE_BLOCK
-    importing
-      !P_TASK type CLIKE
-      !IT_FILES type ZPP_ABAPGIT_T_FILE_ITEM
-      !IT_ERRORS type ZPP_ABAPGIT_T_SERIAL_ERROR optional .
-private section.
+    CLASS-METHODS process_serialize_block
+      IMPORTING
+        !p_task    TYPE clike
+        !it_files  TYPE zpp_abapgit_t_file_item
+        !it_errors TYPE zpp_abapgit_t_serial_error OPTIONAL .
+  PRIVATE SECTION.
 ENDCLASS.
 
 
@@ -56,7 +56,7 @@ ENDCLASS.
 CLASS ZCL_ABAPGIT_PARALLEL_SERIALIZE IMPLEMENTATION.
 
 
-  METHOD PROCESS_SERIALIZE_BLOCK.
+  METHOD process_serialize_block.
 
     DATA: lt_files TYPE zif_abapgit_definitions=>ty_files_item_tt.
 
@@ -75,7 +75,7 @@ CLASS ZCL_ABAPGIT_PARALLEL_SERIALIZE IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD SERIALIZE_FINISHED.
+  METHOD serialize_finished.
 
     DATA: lt_files  TYPE zpp_abapgit_t_file_item.
     DATA: lt_errors TYPE zpp_abapgit_t_serial_error.
@@ -105,7 +105,7 @@ CLASS ZCL_ABAPGIT_PARALLEL_SERIALIZE IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD SERIALIZE_OBJECTS.
+  METHOD serialize_objects.
 
     DATA: lt_files_info  TYPE zpp_abapgit_t_file_item.
     DATA: st_serialize_block TYPE ty_serialize_block.
@@ -114,15 +114,24 @@ CLASS ZCL_ABAPGIT_PARALLEL_SERIALIZE IMPLEMENTATION.
 
     DATA: lt_files  TYPE zpp_abapgit_t_file_item.
     DATA: lt_errors TYPE zpp_abapgit_t_serial_error.
+    DATA: lt_filter TYPE STANDARD TABLE OF tadir
+            WITH DEFAULT KEY.
+    FIELD-SYMBOLS: <st_filter>      LIKE LINE OF it_filter[],
+                   <st_filter_line> LIKE LINE OF lt_filter.
 
     CONSTANTS: lc_block_size TYPE i VALUE 50.
 
     DATA(lv_objects_to_process) = lines( it_tadir ).
 
     "**********************************
-    " Setup Buffer Space
+    " Setup Buffer Space & Remap Filter
     "**********************************
     CLEAR: mt_serialize_blocks.
+
+    LOOP AT it_filter ASSIGNING <st_filter>.
+      APPEND INITIAL LINE TO lt_filter ASSIGNING <st_filter_line>.
+      MOVE-CORRESPONDING <st_filter> TO <st_filter_line>.
+    ENDLOOP.
 
     "**********************************
     " Partition Objects
@@ -215,7 +224,7 @@ CLASS ZCL_ABAPGIT_PARALLEL_SERIALIZE IMPLEMENTATION.
               rt_files             = lt_files
               rt_errors            = lt_errors
             TABLES
-              it_filter            = it_filter[]
+              it_filter            = lt_filter
             EXCEPTIONS
               OTHERS               = 0.
 
@@ -236,7 +245,7 @@ CLASS ZCL_ABAPGIT_PARALLEL_SERIALIZE IMPLEMENTATION.
               i_last_serialization  = i_last_serialization
               i_master_language     = i_master_language
             TABLES
-              it_filter             = it_filter[]
+              it_filter             = lt_filter
             EXCEPTIONS
               system_failure        = 1
               communication_failure = 2
