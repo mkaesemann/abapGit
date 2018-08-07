@@ -278,7 +278,7 @@ CLASS ZCL_ABAPGIT_GIT_PACK IMPLEMENTATION.
 
     decode_deltas( CHANGING ct_objects = rt_objects ).
 
-  ENDMETHOD.                    "decode
+  ENDMETHOD.
 
 
   METHOD decode_commit.
@@ -328,7 +328,7 @@ CLASS ZCL_ABAPGIT_GIT_PACK IMPLEMENTATION.
       zcx_abapgit_exception=>raise( 'multiple parents? not supported' ).
     ENDIF.
 
-  ENDMETHOD.                    "decode_commit
+  ENDMETHOD.
 
 
   METHOD decode_deltas.
@@ -336,6 +336,7 @@ CLASS ZCL_ABAPGIT_GIT_PACK IMPLEMENTATION.
     DATA: ls_object   LIKE LINE OF ct_objects,
           lo_progress TYPE REF TO zcl_abapgit_progress,
           lt_deltas   LIKE ct_objects.
+
 
     LOOP AT ct_objects INTO ls_object
       USING KEY type
@@ -362,7 +363,7 @@ CLASS ZCL_ABAPGIT_GIT_PACK IMPLEMENTATION.
              CHANGING ct_objects = ct_objects ).
     ENDLOOP.
 
-  ENDMETHOD.                    "decode_deltas
+  ENDMETHOD.
 
 
   METHOD decode_tag.
@@ -473,7 +474,7 @@ CLASS ZCL_ABAPGIT_GIT_PACK IMPLEMENTATION.
       lv_cursor = lv_match + 1 + lc_sha_length.
     ENDDO.
 
-  ENDMETHOD.                    "decode_tree
+  ENDMETHOD.
 
 
   METHOD delta.
@@ -583,10 +584,10 @@ CLASS ZCL_ABAPGIT_GIT_PACK IMPLEMENTATION.
     ls_object-sha1 = lv_sha1.
     ls_object-type = <ls_object>-type.
     ls_object-data = lv_result.
-    ls_object-index = <ls_object>-index.
-    INSERT ls_object INTO TABLE ct_objects.
+    ls_object-index = <ls_object>-index. "Retain sort index
+    APPEND ls_object TO ct_objects.
 
-  ENDMETHOD.                    "delta
+  ENDMETHOD.
 
 
   METHOD delta_header.
@@ -608,7 +609,7 @@ CLASS ZCL_ABAPGIT_GIT_PACK IMPLEMENTATION.
     ENDDO.
     ev_header = zcl_abapgit_convert=>bitbyte_to_int( lv_bits ).
 
-  ENDMETHOD.                    "delta_header
+  ENDMETHOD.
 
 
   METHOD encode.
@@ -668,7 +669,7 @@ CLASS ZCL_ABAPGIT_GIT_PACK IMPLEMENTATION.
     lv_sha1 = to_upper( zcl_abapgit_hash=>sha1_raw( rv_data ) ).
     CONCATENATE rv_data lv_sha1 INTO rv_data IN BYTE MODE.
 
-  ENDMETHOD.                    "encode
+  ENDMETHOD.
 
 
   METHOD encode_commit.
@@ -717,7 +718,7 @@ CLASS ZCL_ABAPGIT_GIT_PACK IMPLEMENTATION.
 
     rv_data = zcl_abapgit_convert=>string_to_xstring_utf8( lv_string ).
 
-  ENDMETHOD.                    "encode_commit
+  ENDMETHOD.
 
 
   METHOD encode_tag.
@@ -767,7 +768,7 @@ CLASS ZCL_ABAPGIT_GIT_PACK IMPLEMENTATION.
       CONCATENATE rv_data lv_xstring lc_null lv_hex20 INTO rv_data IN BYTE MODE.
     ENDLOOP.
 
-  ENDMETHOD.                    "encode_tree
+  ENDMETHOD.
 
 
   METHOD get_length.
@@ -792,7 +793,7 @@ CLASS ZCL_ABAPGIT_GIT_PACK IMPLEMENTATION.
 
     ev_length = zcl_abapgit_convert=>bitbyte_to_int( lv_length_bits ).
 
-  ENDMETHOD.                    "get_length
+  ENDMETHOD.
 
 
   METHOD get_type.
@@ -803,16 +804,21 @@ CLASS ZCL_ABAPGIT_GIT_PACK IMPLEMENTATION.
     xtype = iv_x BIT-AND c_mask.
 
     CASE xtype.
-      WHEN 16. rv_type = zif_abapgit_definitions=>gc_type-commit.
-      WHEN 32. rv_type = zif_abapgit_definitions=>gc_type-tree.
-      WHEN 48. rv_type = zif_abapgit_definitions=>gc_type-blob.
-      WHEN 64. rv_type = zif_abapgit_definitions=>gc_type-tag.
-      WHEN 112. rv_type = zif_abapgit_definitions=>gc_type-ref_d.
+      WHEN 16.
+        rv_type = zif_abapgit_definitions=>gc_type-commit.
+      WHEN 32.
+        rv_type = zif_abapgit_definitions=>gc_type-tree.
+      WHEN 48.
+        rv_type = zif_abapgit_definitions=>gc_type-blob.
+      WHEN 64.
+        rv_type = zif_abapgit_definitions=>gc_type-tag.
+      WHEN 112.
+        rv_type = zif_abapgit_definitions=>gc_type-ref_d.
       WHEN OTHERS.
         zcx_abapgit_exception=>raise( 'Todo, unknown type' ).
     ENDCASE.
 
-  ENDMETHOD.                    "get_type
+  ENDMETHOD.
 
 
   METHOD sort_tree.
@@ -874,50 +880,28 @@ CLASS ZCL_ABAPGIT_GIT_PACK IMPLEMENTATION.
 
     lv_length = iv_length.
 
-    IF lv_length <= 15.
-      lv_hex = 0 + lv_type + lv_length MOD 16.
-      rv_xstring = lv_hex.
-      lv_length = lv_length DIV 16.
+* first byte
+    IF lv_length > 15.
+      lv_hex = 128.
+    ENDIF.
+    lv_hex = lv_hex + lv_type + lv_length MOD 16.
+    rv_xstring = lv_hex.
+    lv_length = lv_length DIV 16.
 
-    ELSEIF lv_length <= 2047.
-      lv_hex = 128 + lv_type + lv_length MOD 16.
-      rv_xstring = lv_hex.
-      lv_length = lv_length DIV 16.
-
-      lv_hex = lv_length.
-      CONCATENATE rv_xstring lv_hex INTO rv_xstring IN BYTE MODE.
-    ELSEIF lv_length <= 262143.
-      lv_hex = 128 + lv_type + lv_length MOD 16.
-      rv_xstring = lv_hex.
-      lv_length = lv_length DIV 16.
-
+* subsequent bytes
+    WHILE lv_length >= 128.
       lv_hex = 128 + lv_length MOD 128.
       CONCATENATE rv_xstring lv_hex INTO rv_xstring IN BYTE MODE.
       lv_length = lv_length DIV 128.
+    ENDWHILE.
 
+* last byte
+    IF lv_length > 0.
       lv_hex = lv_length.
       CONCATENATE rv_xstring lv_hex INTO rv_xstring IN BYTE MODE.
-    ELSEIF lv_length <= 33554431.
-      lv_hex = 128 + lv_type + lv_length MOD 16.
-      rv_xstring = lv_hex.
-      lv_length = lv_length DIV 16.
-
-      lv_hex = 128 + lv_length MOD 128.
-      CONCATENATE rv_xstring lv_hex INTO rv_xstring IN BYTE MODE.
-      lv_length = lv_length DIV 128.
-
-      lv_hex = 128 + lv_length MOD 128.
-      CONCATENATE rv_xstring lv_hex INTO rv_xstring IN BYTE MODE.
-      lv_length = lv_length DIV 128.
-
-      lv_hex = lv_length.
-      CONCATENATE rv_xstring lv_hex INTO rv_xstring IN BYTE MODE.
-    ELSE.
-* this IF can be refactored, use shifting?
-      zcx_abapgit_exception=>raise( 'Todo, encoding length' ).
     ENDIF.
 
-  ENDMETHOD.                    "type_and_length
+  ENDMETHOD.
 
 
   METHOD zlib_decompress.

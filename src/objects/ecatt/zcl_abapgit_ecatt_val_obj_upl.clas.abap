@@ -29,17 +29,6 @@ CLASS zcl_abapgit_ecatt_val_obj_upl DEFINITION
           cx_ecatt_apl.
 
   PRIVATE SECTION.
-    TYPES:
-      etvo_invert_validation TYPE c LENGTH 1,
-      etvo_error_prio        TYPE n LENGTH 1,
-      etvo_bus_msg_tabtype   TYPE STANDARD TABLE OF ecvo_bus_msg,
-      BEGIN OF etvoimpl_det,
-        impl_name    TYPE etvo_impl_name,
-        impl_type    TYPE etvo_impl_type,
-        impl_subtype TYPE etvo_impl_subtype,
-        impl_package TYPE etvo_package,
-      END OF etvoimpl_det.
-
     DATA:
       mv_external_xml TYPE xstring.
 
@@ -47,7 +36,7 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_ECATT_VAL_OBJ_UPL IMPLEMENTATION.
+CLASS zcl_abapgit_ecatt_val_obj_upl IMPLEMENTATION.
 
 
   METHOD get_business_msgs_from_dom.
@@ -55,7 +44,7 @@ CLASS ZCL_ABAPGIT_ECATT_VAL_OBJ_UPL IMPLEMENTATION.
     " downport from CL_APL_ECATT_VO_UPLOAD
 
     DATA: li_section            TYPE REF TO if_ixml_element,
-          lt_buss_msg_ref       TYPE etvo_bus_msg_tabtype,
+          lt_buss_msg_ref       TYPE zif_abapgit_ecatt=>etvo_bus_msg_tabtype,
           lv_exception_occurred TYPE etonoff,
           lo_ecatt_vo           TYPE REF TO object.
 
@@ -102,7 +91,7 @@ CLASS ZCL_ABAPGIT_ECATT_VAL_OBJ_UPL IMPLEMENTATION.
     " downport from CL_APL_ECATT_VO_UPLOAD
 
     DATA: li_section            TYPE REF TO if_ixml_element,
-          ls_impl_details       TYPE etvoimpl_det,
+          ls_impl_details       TYPE zif_abapgit_ecatt=>etvoimpl_det,
           lv_exception_occurred TYPE etonoff,
           lo_ecatt_vo           TYPE REF TO object.
 
@@ -149,8 +138,8 @@ CLASS ZCL_ABAPGIT_ECATT_VAL_OBJ_UPL IMPLEMENTATION.
     " downport from CL_APL_ECATT_VO_UPLOAD
 
     DATA: li_section            TYPE REF TO if_ixml_element,
-          lv_error_prio         TYPE etvo_error_prio,
-          lv_invert_validation  TYPE etvo_invert_validation,
+          lv_error_prio         TYPE zif_abapgit_ecatt=>etvo_error_prio,
+          lv_invert_validation  TYPE zif_abapgit_ecatt=>etvo_invert_validation,
           lv_exception_occurred TYPE etonoff,
           lo_ecatt_vo           TYPE REF TO object.
 
@@ -224,8 +213,6 @@ CLASS ZCL_ABAPGIT_ECATT_VAL_OBJ_UPL IMPLEMENTATION.
 
     " downport from CL_APL_ECATT_VO_UPLOAD
 
-    "26.03.2013
-
     DATA: lx_ex       TYPE REF TO cx_ecatt_apl,
           lv_exists   TYPE etonoff,
           lv_exc_occ  TYPE etonoff,
@@ -234,11 +221,21 @@ CLASS ZCL_ABAPGIT_ECATT_VAL_OBJ_UPL IMPLEMENTATION.
           lo_params   TYPE REF TO cl_apl_ecatt_params.
 
     FIELD-SYMBOLS: <lg_ecatt_vo> TYPE any,
-                   <lg_params>   TYPE data.
+                   <lg_params>   TYPE data,
+                   <lv_d_akh>    TYPE data,
+                   <lv_i_akh>    TYPE data.
 
     TRY.
         ch_object-i_devclass = ch_object-d_devclass.
-        ch_object-i_akh      = ch_object-d_akh.
+
+        ASSIGN COMPONENT 'D_AKH' OF STRUCTURE ch_object
+               TO <lv_d_akh>. " doesn't exist in 702
+        ASSIGN COMPONENT 'I_AKH' OF STRUCTURE ch_object
+               TO <lv_i_akh>. " doesn't exist in 702
+        IF  <lv_d_akh> IS ASSIGNED
+        AND <lv_i_akh> IS ASSIGNED.
+          <lv_i_akh> = <lv_d_akh>.
+        ENDIF.
 
         super->upload(
           CHANGING
@@ -254,7 +251,9 @@ CLASS ZCL_ABAPGIT_ECATT_VAL_OBJ_UPL IMPLEMENTATION.
     ENDTRY.
 
     TRY.
-        get_attributes_from_dom_new( CHANGING ch_object = ch_object ).
+        CALL METHOD ('GET_ATTRIBUTES_FROM_DOM_NEW') " doesn't exit in 702
+          CHANGING
+            ch_object = ch_object.
       CATCH cx_ecatt_apl INTO lx_ex.
         lv_exc_occ = 'X'.
     ENDTRY.

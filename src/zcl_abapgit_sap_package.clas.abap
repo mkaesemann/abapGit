@@ -1,17 +1,14 @@
-class ZCL_ABAPGIT_SAP_PACKAGE definition
-  PUBLIC
-  CREATE PRIVATE
-
-  global friends ZCL_ABAPGIT_FACTORY .
+CLASS zcl_abapgit_sap_package DEFINITION
+    PUBLIC CREATE PRIVATE
+    GLOBAL FRIENDS zcl_abapgit_factory.
 
   PUBLIC SECTION.
+    METHODS:
+      constructor
+        IMPORTING iv_package TYPE devclass.
 
     INTERFACES ZIF_ABAPGIT_SAP_PACKAGE .
 
-    METHODS CONSTRUCTOR
-      IMPORTING
-        !IV_PACKAGE TYPE DEVCLASS .
-  PROTECTED SECTION.
   PRIVATE SECTION.
     DATA: mv_package TYPE devclass.
 
@@ -309,6 +306,7 @@ CLASS ZCL_ABAPGIT_SAP_PACKAGE IMPLEMENTATION.
 
 
   METHOD zif_abapgit_sap_package~read_parent.
+
     SELECT SINGLE parentcl FROM tdevc INTO rv_parentcl
       WHERE devclass = mv_package.        "#EC CI_SUBRC "#EC CI_GENBUFF
     ASSERT sy-subrc = 0.

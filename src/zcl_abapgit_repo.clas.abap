@@ -31,7 +31,7 @@ CLASS zcl_abapgit_repo DEFINITION
     METHODS get_files_local
       IMPORTING
         !io_log         TYPE REF TO zcl_abapgit_log OPTIONAL
-        !it_filter      TYPE scts_tadir OPTIONAL
+        !it_filter      TYPE zif_abapgit_definitions=>ty_tadir_tt OPTIONAL
       RETURNING
         VALUE(rt_files) TYPE zif_abapgit_definitions=>ty_files_item_tt
       RAISING
@@ -63,7 +63,7 @@ CLASS zcl_abapgit_repo DEFINITION
         zcx_abapgit_exception .
     METHODS deserialize
       IMPORTING
-        is_checks TYPE zif_abapgit_definitions=>ty_deserialize_checks
+        !is_checks TYPE zif_abapgit_definitions=>ty_deserialize_checks
       RAISING
         zcx_abapgit_exception .
     METHODS refresh
@@ -99,15 +99,14 @@ CLASS zcl_abapgit_repo DEFINITION
         VALUE(rs_settings) TYPE zif_abapgit_persistence=>ty_repo-local_settings .
     METHODS set_local_settings
       IMPORTING
-        is_settings TYPE zif_abapgit_persistence=>ty_repo-local_settings
+        !is_settings TYPE zif_abapgit_persistence=>ty_repo-local_settings
       RAISING
         zcx_abapgit_exception .
     METHODS run_code_inspector
       RETURNING
-        value(rt_list) TYPE scit_alvlist
+        VALUE(rt_list) TYPE scit_alvlist
       RAISING
         zcx_abapgit_exception .
-
   PROTECTED SECTION.
     DATA mt_local TYPE zif_abapgit_definitions=>ty_files_item_tt .
     DATA mt_remote TYPE zif_abapgit_definitions=>ty_files_tt .
@@ -264,7 +263,7 @@ CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
           lt_cache    TYPE SORTED TABLE OF zif_abapgit_definitions=>ty_file_item
                    WITH NON-UNIQUE KEY item.
 
-    DATA: lt_filter       TYPE SORTED TABLE OF tadir
+    DATA: lt_filter       TYPE SORTED TABLE OF zif_abapgit_definitions=>ty_tadir
                           WITH NON-UNIQUE KEY object obj_name,
           lv_filter_exist TYPE abap_bool.
 
@@ -273,8 +272,6 @@ CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
                    <ls_cache>  LIKE LINE OF lt_cache,
                    <ls_tadir>  LIKE LINE OF lt_tadir.
 
-    SET RUN TIME CLOCK RESOLUTION HIGH.
-    GET RUN TIME FIELD DATA(rti_start).
 
     " Serialization happened before and no refresh request
     IF mv_last_serialization IS NOT INITIAL AND mv_do_local_refresh = abap_false.
@@ -289,8 +286,6 @@ CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
     <ls_return>-file-sha1     = zcl_abapgit_hash=>sha1( iv_type = zif_abapgit_definitions=>gc_type-blob
                                                         iv_data = <ls_return>-file-data ).
 
-    GET RUN TIME FIELD DATA(rti_header).
-
     lt_cache = mt_local.
     lt_tadir = zcl_abapgit_factory=>get_tadir( )->read(
       iv_package            = get_package( )
@@ -299,12 +294,9 @@ CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
       io_dot                = get_dot_abapgit( )
       io_log                = io_log ).
 
-    GET RUN TIME FIELD DATA(rti_tadir).
 
     data(use_parallel) = abap_true.
     IF use_parallel = abap_true.
-
-      GET RUN TIME FIELD DATA(rti_refresh).
 
       rt_files = zcl_abapgit_parallel_serialize=>serialize_objects(
                    i_last_serialization = mv_last_serialization
@@ -322,8 +314,6 @@ CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
       CREATE OBJECT lo_progress
         EXPORTING
           iv_total = lines( lt_tadir ).
-
-      GET RUN TIME FIELD rti_refresh.
 
       LOOP AT lt_tadir ASSIGNING <ls_tadir>.
         IF lv_filter_exist = abap_true.
@@ -377,27 +367,9 @@ CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
 
     ENDIF.
 
-    GET RUN TIME FIELD DATA(rti_serial).
-
     GET TIME STAMP FIELD mv_last_serialization.
     mt_local            = rt_files.
     mv_do_local_refresh = abap_false. " Fulfill refresh
-
-    GET RUN TIME FIELD DATA(rti_end).
-
-    IF sy-uname = 'MKAESEMANN'.
-
-      DATA: lt_rti TYPE STANDARD TABLE OF /lot/ca_descr60.
-
-      APPEND |Total          : { rti_end - rti_start }| TO lt_rti.
-      APPEND || TO lt_rti.
-      APPEND |Header         : { rti_header - rti_start }| TO lt_rti.
-      APPEND |Build TADir    : { rti_tadir - rti_header }| TO lt_rti.
-      APPEND |Package Refresh: { rti_refresh - rti_tadir }| TO lt_rti.
-      APPEND |Serialize      : { rti_serial - rti_refresh }| TO lt_rti.
-      APPEND || TO lt_rti.
-
-    ENDIF.
 
   ENDMETHOD.
 

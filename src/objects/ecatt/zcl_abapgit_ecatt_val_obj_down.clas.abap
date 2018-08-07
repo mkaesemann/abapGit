@@ -23,18 +23,6 @@ CLASS zcl_abapgit_ecatt_val_obj_down DEFINITION
       download_data REDEFINITION.
 
   PRIVATE SECTION.
-    " downport missing types
-    TYPES:
-      etvo_bus_msg_tabtype   TYPE STANDARD TABLE OF ecvo_bus_msg,
-      etvo_invert_validation TYPE c LENGTH 1,
-      etvo_error_prio        TYPE n LENGTH 1,
-      BEGIN OF etvoimpl_det,
-        impl_name    TYPE etvo_impl_name,
-        impl_type    TYPE etvo_impl_type,
-        impl_subtype TYPE etvo_impl_subtype,
-        impl_package TYPE etvo_package,
-      END OF etvoimpl_det.
-
     DATA:
       mv_xml_stream      TYPE xstring,
       mv_xml_stream_size TYPE int4.
@@ -48,7 +36,7 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_ECATT_VAL_OBJ_DOWN IMPLEMENTATION.
+CLASS zcl_abapgit_ecatt_val_obj_down IMPLEMENTATION.
 
 
   METHOD download.
@@ -58,7 +46,11 @@ CLASS ZCL_ABAPGIT_ECATT_VAL_OBJ_DOWN IMPLEMENTATION.
 
     " Downport
 
-    DATA: lv_partyp TYPE string.
+    DATA: lv_partyp   TYPE string,
+          lo_ecatt_vo TYPE REF TO object.
+
+    FIELD-SYMBOLS: <lg_ecatt_vo> TYPE any,
+                   <lt_params>   TYPE REF TO cl_apl_ecatt_params.
 
     load_help = im_load_help.
     typ = im_object_type.
@@ -77,23 +69,33 @@ CLASS ZCL_ABAPGIT_ECATT_VAL_OBJ_DOWN IMPLEMENTATION.
 
     lv_partyp = cl_apl_ecatt_const=>params_type_par.
 
+
+    ASSIGN ('ECATT_OBJECT') TO <lg_ecatt_vo>.
+    ASSERT sy-subrc = 0.
+
+    lo_ecatt_vo = <lg_ecatt_vo>.
+
     set_attributes_to_template( ).
-    ecatt_vo ?= ecatt_object.
     set_ecatt_impl_detail( ).
     set_ecatt_flags( ).
     set_business_msgs( ).
-    get_general_params_data( im_params = ecatt_vo->params
+
+    ASSIGN lo_ecatt_vo->('PARAMS')
+           TO <lt_params>.
+    ASSERT sy-subrc = 0.
+
+    get_general_params_data( im_params = <lt_params>
                              im_ptyp   = lv_partyp ).
     LOOP AT parm INTO wa_parm.
       set_general_params_data_to_dom( ).
       IF NOT wa_parm-val_type IS INITIAL.
-        set_deep_stru_to_dom( ecatt_vo->params ).
-        set_deep_data_to_dom( im_params = ecatt_vo->params
+        set_deep_stru_to_dom( <lt_params> ).
+        set_deep_data_to_dom( im_params = <lt_params>
                               im_pindex = wa_parm-pindex ).
       ENDIF.
     ENDLOOP.
 
-    set_variants_to_dom( ecatt_vo->params ).
+    set_variants_to_dom( <lt_params> ).
 
     download_data( ).
 
@@ -131,17 +133,25 @@ CLASS ZCL_ABAPGIT_ECATT_VAL_OBJ_DOWN IMPLEMENTATION.
   METHOD set_business_msgs.
 
     DATA:
-      lt_buss_msg_ref   TYPE etvo_bus_msg_tabtype,
+      lt_buss_msg_ref   TYPE zif_abapgit_ecatt=>etvo_bus_msg_tabtype,
       li_element        TYPE REF TO if_ixml_element,
-      li_insert_objects TYPE REF TO if_ixml_element.
+      li_insert_objects TYPE REF TO if_ixml_element,
+      lo_ecatt_vo       TYPE REF TO object.
+
+    FIELD-SYMBOLS: <lg_ecatt_vo> TYPE any.
+
+    ASSIGN ('ECATT_OBJECT') TO <lg_ecatt_vo>.
+    ASSERT sy-subrc = 0.
+
+    lo_ecatt_vo = <lg_ecatt_vo>.
 
     li_objects_node = template_over_all->create_simple_element(
                                            name   = 'BUSINESS_MESSAGES'
                                            parent = root_node ).
 
-    ecatt_vo->get_bussiness_msg(
+    CALL METHOD lo_ecatt_vo->('GET_BUSSINESS_MSG')
       IMPORTING
-        ex_buss_msg_ref = lt_buss_msg_ref ).
+        ex_buss_msg_ref = lt_buss_msg_ref.
 
     CALL FUNCTION 'SDIXML_DATA_TO_DOM'
       EXPORTING
@@ -159,7 +169,7 @@ CLASS ZCL_ABAPGIT_ECATT_VAL_OBJ_DOWN IMPLEMENTATION.
               WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
     ENDIF.
 
-    li_insert_objects = template_over_all->find_from_name( 'BUSINESS_MESSAGES' ).
+    li_insert_objects ?= template_over_all->find_from_name( 'BUSINESS_MESSAGES' ).
 
     li_insert_objects->append_child( new_child = li_element ).
 
@@ -169,16 +179,26 @@ CLASS ZCL_ABAPGIT_ECATT_VAL_OBJ_DOWN IMPLEMENTATION.
   METHOD set_ecatt_flags.
 
     DATA:
-      lv_invert_validation TYPE etvo_invert_validation,
-      lv_error_prio        TYPE etvo_error_prio,
+      lv_invert_validation TYPE zif_abapgit_ecatt=>etvo_invert_validation,
+      lv_error_prio        TYPE zif_abapgit_ecatt=>etvo_error_prio,
       li_element           TYPE REF TO if_ixml_element,
-      li_insert_objects    TYPE REF TO if_ixml_element.
+      li_insert_objects    TYPE REF TO if_ixml_element,
+      lo_ecatt_vo          TYPE REF TO object.
+
+    FIELD-SYMBOLS: <lg_ecatt_vo> TYPE any.
 
     li_objects_node = template_over_all->create_simple_element(
                                            name   = 'VO_FLAGS'
                                            parent = root_node ).
 
-    lv_invert_validation = ecatt_vo->get_invert_validation_flag( ).
+    ASSIGN ('ECATT_OBJECT') TO <lg_ecatt_vo>.
+    ASSERT sy-subrc = 0.
+
+    lo_ecatt_vo = <lg_ecatt_vo>.
+
+    CALL METHOD lo_ecatt_vo->('GET_INVERT_VALIDATION_FLAG')
+      RECEIVING
+        re_invert_validation = lv_invert_validation.
 
     CALL FUNCTION 'SDIXML_DATA_TO_DOM'
       EXPORTING
@@ -196,11 +216,13 @@ CLASS ZCL_ABAPGIT_ECATT_VAL_OBJ_DOWN IMPLEMENTATION.
               WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
     ENDIF.
 
-    li_insert_objects = template_over_all->find_from_name( 'VO_FLAGS' ).
+    li_insert_objects ?= template_over_all->find_from_name( 'VO_FLAGS' ).
 
     li_insert_objects->append_child( new_child = li_element ).
 
-    lv_error_prio = ecatt_vo->get_error_priority( ).
+    CALL METHOD lo_ecatt_vo->('GET_ERROR_PRIORITY')
+      RECEIVING
+        re_error_prio = lv_error_prio.
 
     CALL FUNCTION 'SDIXML_DATA_TO_DOM'
       EXPORTING
@@ -228,15 +250,25 @@ CLASS ZCL_ABAPGIT_ECATT_VAL_OBJ_DOWN IMPLEMENTATION.
   METHOD set_ecatt_impl_detail.
 
     DATA:
-      ls_impl_details   TYPE etvoimpl_det,
+      ls_impl_details   TYPE zif_abapgit_ecatt=>etvoimpl_det,
       li_element        TYPE REF TO if_ixml_element,
-      li_insert_objects TYPE REF TO if_ixml_element.
+      li_insert_objects TYPE REF TO if_ixml_element,
+      lo_ecatt_vo       TYPE REF TO object.
+
+    FIELD-SYMBOLS: <lg_ecatt_vo> TYPE any.
 
     li_objects_node = template_over_all->create_simple_element(
                                            name   = 'IMPL_DETAILS'
                                            parent = root_node ).
 
-    ls_impl_details = ecatt_vo->get_impl_details( ).
+    ASSIGN ('ECATT_OBJECT') TO <lg_ecatt_vo>.
+    ASSERT sy-subrc = 0.
+
+    lo_ecatt_vo = <lg_ecatt_vo>.
+
+    CALL METHOD lo_ecatt_vo->('GET_IMPL_DETAILS')
+      RECEIVING
+        re_impl_details = ls_impl_details.
 
     CALL FUNCTION 'SDIXML_DATA_TO_DOM'
       EXPORTING

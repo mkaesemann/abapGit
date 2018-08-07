@@ -172,12 +172,12 @@ INTERFACE zif_abapgit_definitions PUBLIC.
       type    TYPE zif_abapgit_definitions=>ty_type,
       data    TYPE xstring,
       adler32 TYPE ty_adler32,
-      index   type i,
+      index   TYPE i,
     END OF ty_object .
   TYPES:
-    ty_objects_tt TYPE STANDARD TABLE OF ty_object with DEFAULT KEY
-      WITH non-UNIQUE sorted key sha COMPONENTS sha1 type index
-      with non-UNIQUE sorted key type COMPONENTS type sha1 index.
+    ty_objects_tt TYPE STANDARD TABLE OF ty_object WITH DEFAULT KEY
+      WITH NON-UNIQUE SORTED KEY sha COMPONENTS sha1
+      WITH NON-UNIQUE SORTED KEY type COMPONENTS type sha1.
   TYPES:
     BEGIN OF ty_tadir,
       pgmid    TYPE tadir-pgmid,
@@ -185,6 +185,7 @@ INTERFACE zif_abapgit_definitions PUBLIC.
       obj_name TYPE tadir-obj_name,
       devclass TYPE tadir-devclass,
       korrnum  TYPE tadir-korrnum,
+      delflag  TYPE tadir-delflag,
       path     TYPE string,
     END OF ty_tadir .
   TYPES:
@@ -327,9 +328,12 @@ INTERFACE zif_abapgit_definitions PUBLIC.
   TYPES tt_repo_items TYPE STANDARD TABLE OF ty_repo_item WITH DEFAULT KEY.
 
   TYPES: BEGIN OF ty_s_user_settings,
-           max_lines         TYPE i,
-           adt_jump_enabled  TYPE abap_bool,
-           show_default_repo TYPE abap_bool,
+           max_lines                  TYPE i,
+           adt_jump_enabled           TYPE abap_bool,
+           show_default_repo          TYPE abap_bool,
+           link_hints_enabled         TYPE abap_bool,
+           link_hint_key              TYPE char01,
+           link_hint_background_color TYPE string,
          END OF ty_s_user_settings.
 
   CONSTANTS:
@@ -403,7 +407,6 @@ INTERFACE zif_abapgit_definitions PUBLIC.
       repo_code_inspector      TYPE string VALUE 'repo_code_inspector',
 
       abapgit_home             TYPE string VALUE 'abapgit_home',
-      abapgit_wiki             TYPE string VALUE 'abapgit_wiki',
       abapgit_install          TYPE string VALUE 'abapgit_install',
 
       zip_import               TYPE string VALUE 'zip_import',

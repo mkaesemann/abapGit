@@ -23,12 +23,12 @@ CLASS zcl_abapgit_tadir DEFINITION
         ZCX_ABAPGIT_EXCEPTION .
     METHODS BUILD
       IMPORTING
-        !IV_PACKAGE TYPE TADIR-DEVCLASS
-        !IV_TOP TYPE TADIR-DEVCLASS
-        !IO_DOT TYPE REF TO ZCL_ABAPGIT_DOT_ABAPGIT
-        !IV_IGNORE_SUBPACKAGES TYPE ABAP_BOOL DEFAULT ABAP_FALSE
-        !IV_ONLY_LOCAL_OBJECTS TYPE ABAP_BOOL
-        !IO_LOG TYPE REF TO ZCL_ABAPGIT_LOG OPTIONAL
+        !iv_package            TYPE tadir-devclass
+        !iv_top                TYPE tadir-devclass
+        !io_dot                TYPE REF TO zcl_abapgit_dot_abapgit
+        !iv_ignore_subpackages TYPE abap_bool DEFAULT abap_false
+        !iv_only_local_objects TYPE abap_bool
+        !io_log                TYPE REF TO zcl_abapgit_log OPTIONAL
       RETURNING
         VALUE(RT_TADIR) TYPE ZIF_ABAPGIT_DEFINITIONS=>TY_TADIR_TT
       RAISING
@@ -51,19 +51,18 @@ CLASS ZCL_ABAPGIT_TADIR IMPLEMENTATION.
           ls_srcsystem    LIKE LINE OF lt_srcsystem,
           ls_exclude      LIKE LINE OF lt_excludes.
     DATA: lo_folder_logic TYPE REF TO zcl_abapgit_folder_logic.
-    DATA: last_package TYPE devclass VALUE cl_abap_char_utilities=>horizontal_tab.
+    DATA: last_package    TYPE devclass VALUE cl_abap_char_utilities=>horizontal_tab.
 
     FIELD-SYMBOLS: <ls_tdevc> LIKE LINE OF lt_tdevc,
-                   <ls_tadir> LIKE LINE OF rt_tadir.
+                   <ls_tadir> LIKE LINE OF rt_tadir,
+                   <lv_package>  TYPE devclass.
 
     "Determine Packages to Read
     DATA: lt_packages TYPE zif_abapgit_sap_package=>ty_devclass_tt.
-    IF iv_ignore_subpackages = abap_true.
-      INSERT iv_package INTO TABLE lt_packages.
-    ELSE.
+    IF iv_ignore_subpackages = abap_false.
       lt_packages = zcl_abapgit_factory=>get_sap_package( iv_package )->list_subpackages( ).
-      INSERT iv_package INTO lt_packages INDEX 1.
     ENDIF.
+    INSERT iv_package INTO lt_packages INDEX 1.
 
     "Select TADIR Info
     ls_exclude-sign = 'I'.
@@ -93,7 +92,8 @@ CLASS ZCL_ABAPGIT_TADIR IMPLEMENTATION.
         AND pgmid = 'R3TR'
         AND object NOT IN lt_excludes
         AND delflag = abap_false
-        AND srcsystem IN lt_srcsystem.    "#EC CI_GENBUFF "#EC CI_SUBRC
+        AND srcsystem IN lt_srcsystem
+        ORDER BY PRIMARY KEY.             "#EC CI_GENBUFF "#EC CI_SUBRC
     ENDIF.
 
     SORT rt_tadir BY devclass pgmid object obj_name.
@@ -104,19 +104,17 @@ CLASS ZCL_ABAPGIT_TADIR IMPLEMENTATION.
       it_tadir = rt_tadir
       io_log   = io_log ).
 
-    "Supplement Local Packages
-    LOOP AT lt_packages ASSIGNING FIELD-SYMBOL(<package>).
+    LOOP AT lt_packages ASSIGNING <lv_package>.
       " Local packages are not in TADIR, only in TDEVC, act as if they were
-      IF <package> CP '$*'. " OR <package> CP 'T*' ).
+      IF <lv_package> CP '$*'. " OR <lv_package> CP 'T*' ).
         APPEND INITIAL LINE TO rt_tadir ASSIGNING <ls_tadir>.
         <ls_tadir>-pgmid    = 'R3TR'.
         <ls_tadir>-object   = 'DEVC'.
-        <ls_tadir>-obj_name = <package>.
-        <ls_tadir>-devclass = <package>.
+        <ls_tadir>-obj_name = <lv_package>.
+        <ls_tadir>-devclass = <lv_package>.
       ENDIF.
     ENDLOOP.
 
-    "Supplement Package Info
     LOOP AT rt_tadir ASSIGNING <ls_tadir>.
 
       IF last_package <> <ls_tadir>-devclass.
@@ -135,17 +133,15 @@ CLASS ZCL_ABAPGIT_TADIR IMPLEMENTATION.
             io_dot     = io_dot
             iv_package = <ls_tadir>-devclass ).
         ENDIF.
-
       ENDIF.
 
       <ls_tadir>-path = lv_path.
 
       CASE <ls_tadir>-object.
         WHEN 'SICF'.
-          "Replace the internal GUID with a hash of the path
+* replace the internal GUID with a hash of the path
           <ls_tadir>-obj_name+15 = zcl_abapgit_object_sicf=>read_sicf_url( <ls_tadir>-obj_name ).
       ENDCASE.
-
     ENDLOOP.
 
   ENDMETHOD.                    "build
@@ -203,7 +199,7 @@ CLASS ZCL_ABAPGIT_TADIR IMPLEMENTATION.
 
   METHOD zif_abapgit_tadir~get_object_package.
 
-    DATA: ls_tadir TYPE tadir,
+    DATA: ls_tadir TYPE zif_abapgit_definitions=>ty_tadir,
           ls_item  TYPE zif_abapgit_definitions=>ty_item.
 
     ls_tadir = zif_abapgit_tadir~read_single(
@@ -229,6 +225,8 @@ CLASS ZCL_ABAPGIT_TADIR IMPLEMENTATION.
 
   METHOD zif_abapgit_tadir~read.
 
+    DATA: li_exit TYPE REF TO zif_abapgit_exit.
+
 * start recursion
 * hmm, some problems here, should TADIR also build path?
     rt_tadir = build( iv_package            = iv_package
@@ -238,16 +236,15 @@ CLASS ZCL_ABAPGIT_TADIR IMPLEMENTATION.
                       iv_only_local_objects = iv_only_local_objects
                       io_log                = io_log ).
 
-    zcl_abapgit_exit=>get_instance( )->change_tadir(
+    li_exit = zcl_abapgit_exit=>get_instance( ).
+    li_exit->change_tadir(
       EXPORTING
         iv_package = iv_package
         io_log     = io_log
       CHANGING
         ct_tadir   = rt_tadir ).
 
-    rt_tadir = zcl_abapgit_parallel_check=>check_exists(
-                          it_tadir = rt_tadir
-                          io_log   = io_log ).
+    rt_tadir = check_exists( rt_tadir ).
 
   ENDMETHOD.
 
@@ -259,7 +256,7 @@ CLASS ZCL_ABAPGIT_TADIR IMPLEMENTATION.
         iv_pgmid    = iv_pgmid
         iv_obj_name = iv_obj_name ).
     ELSE.
-      SELECT SINGLE * FROM tadir INTO rs_tadir
+      SELECT SINGLE * FROM tadir INTO CORRESPONDING FIELDS OF rs_tadir
         WHERE pgmid = iv_pgmid
         AND object = iv_object
         AND obj_name = iv_obj_name.                       "#EC CI_SUBRC

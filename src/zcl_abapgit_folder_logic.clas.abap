@@ -1,32 +1,37 @@
-class ZCL_ABAPGIT_FOLDER_LOGIC definition
-  public
-  create public .
+CLASS zcl_abapgit_folder_logic DEFINITION
+  PUBLIC
+  CREATE PUBLIC .
 
-public section.
+  PUBLIC SECTION.
 
-  methods PACKAGE_TO_PATH
-    importing
-      !IV_TOP type DEVCLASS
-      !IO_DOT type ref to ZCL_ABAPGIT_DOT_ABAPGIT
-      !IV_PACKAGE type DEVCLASS
-    returning
-      value(RV_PATH) type STRING
-    raising
-      ZCX_ABAPGIT_EXCEPTION .
-  methods PATH_TO_PACKAGE
-    importing
-      !IV_TOP type DEVCLASS
-      !IO_DOT type ref to ZCL_ABAPGIT_DOT_ABAPGIT
-      !IV_PATH type STRING
-      !IV_CREATE_IF_NOT_EXISTS type ABAP_BOOL default ABAP_TRUE
-    returning
-      value(RV_PACKAGE) type DEVCLASS
-    raising
-      ZCX_ABAPGIT_EXCEPTION .
-  class-methods GET_INSTANCE
-    returning
-      value(RO_INSTANCE) type ref to ZCL_ABAPGIT_FOLDER_LOGIC .
+    METHODS package_to_path
+      IMPORTING
+        !iv_top        TYPE devclass
+        !io_dot        TYPE REF TO zcl_abapgit_dot_abapgit
+        !iv_package    TYPE devclass
+      RETURNING
+        VALUE(rv_path) TYPE string
+      RAISING
+        zcx_abapgit_exception .
+    METHODS path_to_package
+      IMPORTING
+        !iv_top                  TYPE devclass
+        !io_dot                  TYPE REF TO zcl_abapgit_dot_abapgit
+        !iv_path                 TYPE string
+        !iv_create_if_not_exists TYPE abap_bool DEFAULT abap_true
+      RETURNING
+        VALUE(rv_package)        TYPE devclass
+      RAISING
+        zcx_abapgit_exception .
+    CLASS-METHODS get_instance
+      RETURNING
+        VALUE(ro_instance) TYPE REF TO zcl_abapgit_folder_logic .
   PROTECTED SECTION.
+    METHODS get_parent
+      IMPORTING
+        !iv_package     TYPE devclass
+      RETURNING
+        VALUE(r_parent) TYPE devclass.
   PRIVATE SECTION.
     TYPES:
       BEGIN OF ty_devclass_info,
@@ -46,11 +51,24 @@ CLASS ZCL_ABAPGIT_FOLDER_LOGIC IMPLEMENTATION.
 
 
   METHOD get_instance.
-
     CREATE OBJECT ro_instance.
-
   ENDMETHOD.
 
+  METHOD get_parent.
+    DATA: st_parent LIKE LINE OF mt_parent.
+
+    "Determine Parent Package
+    READ TABLE mt_parent INTO st_parent
+      WITH TABLE KEY devclass = iv_package.
+    IF sy-subrc <> 0.
+      r_parent = zcl_abapgit_factory=>get_sap_package( iv_package )->read_parent( ).
+      st_parent-devclass = iv_package.
+      st_parent-parentcl = r_parent.
+      INSERT st_parent INTO TABLE mt_parent.
+    ELSE.
+      r_parent = st_parent-parentcl.
+    ENDIF.
+  ENDMETHOD.
 
   METHOD package_to_path.
 
@@ -59,22 +77,11 @@ CLASS ZCL_ABAPGIT_FOLDER_LOGIC IMPLEMENTATION.
           lv_message      TYPE string,
           lv_parentcl     TYPE tdevc-parentcl,
           lv_folder_logic TYPE string.
-    DATA: st_parent LIKE LINE OF mt_parent.
 
     IF iv_top = iv_package.
       rv_path = io_dot->get_starting_folder( ).
     ELSE.
-      "Determine Parent Package
-      READ TABLE mt_parent INTO st_parent
-        WITH TABLE KEY devclass = iv_package.
-      IF sy-subrc <> 0.
-        lv_parentcl = zcl_abapgit_factory=>get_sap_package( iv_package )->read_parent( ).
-        st_parent-devclass = iv_package.
-        st_parent-parentcl = lv_parentcl.
-        INSERT st_parent INTO TABLE mt_parent.
-      ELSE.
-        lv_parentcl = st_parent-parentcl.
-      ENDIF.
+      lv_parentcl = get_parent( iv_package ).
 
       IF lv_parentcl IS INITIAL.
         zcx_abapgit_exception=>raise( |error, expected parent package, { iv_package }| ).
