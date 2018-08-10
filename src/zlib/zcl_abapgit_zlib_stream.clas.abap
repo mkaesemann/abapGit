@@ -55,7 +55,7 @@ CLASS ZCL_ABAPGIT_ZLIB_STREAM IMPLEMENTATION.
     WHILE strlen( rv_bits ) < iv_length.
       IF mv_bits IS INITIAL.
         lv_x = mv_compressed(1).
-        mv_bits = zcl_abapgit_zlib_convert=>hex_to_bits( lv_x ).
+        mv_bits = zcl_abapgit_zlib_convert=>byte_to_bits( lv_x ).
         mv_compressed = mv_compressed+1.
       ENDIF.
       lv_left = iv_length - strlen( rv_bits ).
