@@ -5,10 +5,11 @@ CLASS zcl_abapgit_gui_page_bkg DEFINITION
   CREATE PUBLIC .
 
   PUBLIC SECTION.
+    INTERFACES: zif_abapgit_gui_page_hotkey.
 
     METHODS constructor
       IMPORTING
-        !iv_key TYPE zif_abapgit_persistence=>ty_repo-key .
+        iv_key TYPE zif_abapgit_persistence=>ty_repo-key .
 
     METHODS zif_abapgit_gui_page~on_event
         REDEFINITION .
@@ -67,7 +68,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_BKG IMPLEMENTATION.
     CREATE OBJECT ro_menu.
 
     ro_menu->add( iv_txt = 'Run background logic'
-                  iv_act = zif_abapgit_definitions=>gc_action-go_background_run ) ##NO_TEXT.
+                  iv_act = zif_abapgit_definitions=>c_action-go_background_run ) ##NO_TEXT.
 
   ENDMETHOD.
 
@@ -155,14 +156,8 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_BKG IMPLEMENTATION.
 
   METHOD render.
 
-    DATA: lo_repo    TYPE REF TO zcl_abapgit_repo_online,
-          ls_per     TYPE zcl_abapgit_persist_background=>ty_background,
-          lv_nothing TYPE string,
-          lv_push    TYPE string,
-          lv_pull    TYPE string,
-          lv_afixed  TYPE string,
-          lv_aauto   TYPE string,
-          lv_auser   TYPE string.
+    DATA: lo_repo TYPE REF TO zcl_abapgit_repo_online,
+          ls_per  TYPE zcl_abapgit_persist_background=>ty_background.
 
 
     lo_repo ?= zcl_abapgit_repo_srv=>get_instance( )->get( mv_key ).
@@ -229,7 +224,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_BKG IMPLEMENTATION.
     lt_methods = zcl_abapgit_background=>list_methods( ).
 
     ro_html->add( '<u>Method</u><br>' ) ##NO_TEXT.
-    ro_html->add( |<form method="get" action="sapevent:{ zif_abapgit_definitions=>gc_action-bg_update }">| ).
+    ro_html->add( |<form method="get" action="sapevent:{ zif_abapgit_definitions=>c_action-bg_update }">| ).
 
     IF is_per-method IS INITIAL.
       lv_checked = ' checked' ##NO_TEXT.
@@ -313,12 +308,17 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_BKG IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD zif_abapgit_gui_page_hotkey~get_hotkey_actions.
+
+  ENDMETHOD.
+
+
   METHOD zif_abapgit_gui_page~on_event.
 
     CASE iv_action.
-      WHEN zif_abapgit_definitions=>gc_action-bg_update.
+      WHEN zif_abapgit_definitions=>c_action-bg_update.
         update( decode( iv_getdata ) ).
-        ev_state = zif_abapgit_definitions=>gc_event_state-re_render.
+        ev_state = zif_abapgit_definitions=>c_event_state-re_render.
     ENDCASE.
 
   ENDMETHOD.

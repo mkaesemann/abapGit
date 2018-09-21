@@ -86,12 +86,12 @@ CLASS ZCL_ABAPGIT_SERVICES_GIT IMPLEMENTATION.
   METHOD commit.
 
     DATA: ls_comment TYPE zif_abapgit_definitions=>ty_comment,
-          lo_user    TYPE REF TO zcl_abapgit_persistence_user.
+          li_user    TYPE REF TO zif_abapgit_persist_user.
 
-    lo_user = zcl_abapgit_persistence_user=>get_instance( ).
-    lo_user->set_repo_git_user_name( iv_url      = io_repo->get_url( )
+    li_user = zcl_abapgit_persistence_user=>get_instance( ).
+    li_user->set_repo_git_user_name( iv_url      = io_repo->get_url( )
                                      iv_username = is_commit-committer_name ).
-    lo_user->set_repo_git_user_email( iv_url     = io_repo->get_url( )
+    li_user->set_repo_git_user_email( iv_url     = io_repo->get_url( )
                                       iv_email   = is_commit-committer_email ).
 
     IF is_commit-committer_name IS INITIAL.
@@ -112,7 +112,7 @@ CLASS ZCL_ABAPGIT_SERVICES_GIT IMPLEMENTATION.
 
     IF NOT is_commit-body IS INITIAL.
       CONCATENATE ls_comment-comment '' is_commit-body
-        INTO ls_comment-comment SEPARATED BY zif_abapgit_definitions=>gc_newline.
+        INTO ls_comment-comment SEPARATED BY zif_abapgit_definitions=>c_newline.
     ENDIF.
 
     io_repo->push( is_comment = ls_comment
@@ -120,7 +120,7 @@ CLASS ZCL_ABAPGIT_SERVICES_GIT IMPLEMENTATION.
 
     COMMIT WORK.
 
-  ENDMETHOD.  "commit
+  ENDMETHOD.
 
 
   METHOD create_branch.
@@ -234,14 +234,14 @@ CLASS ZCL_ABAPGIT_SERVICES_GIT IMPLEMENTATION.
 
 * todo, separate UI and logic
     lv_answer = zcl_abapgit_ui_factory=>get_popups( )->popup_to_confirm(
-      titlebar              = 'Warning'
-      text_question         = 'Reset local objects?'
-      text_button_1         = 'Ok'
-      icon_button_1         = 'ICON_OKAY'
-      text_button_2         = 'Cancel'
-      icon_button_2         = 'ICON_CANCEL'
-      default_button        = '2'
-      display_cancel_button = abap_false ).                 "#EC NOTEXT
+      iv_titlebar              = 'Warning'
+      iv_text_question         = 'Reset local objects?'
+      iv_text_button_1         = 'Ok'
+      iv_icon_button_1         = 'ICON_OKAY'
+      iv_text_button_2         = 'Cancel'
+      iv_icon_button_2         = 'ICON_CANCEL'
+      iv_default_button        = '2'
+      iv_display_cancel_button = abap_false ).                 "#EC NOTEXT
 
     IF lv_answer = '2'.
       RAISE EXCEPTION TYPE zcx_abapgit_cancel.
@@ -258,8 +258,8 @@ CLASS ZCL_ABAPGIT_SERVICES_GIT IMPLEMENTATION.
       li_popups->popup_to_select_from_list(
         EXPORTING
           it_list              = lt_unnecessary_local_objs
-          i_header_text        = |Which unnecessary objects should be deleted?|
-          i_select_column_text = 'Delete?'
+          iv_header_text        = |Which unnecessary objects should be deleted?|
+          iv_select_column_text = 'Delete?'
           it_columns_to_display = lt_columns
         IMPORTING
           et_list              = lt_selected ).

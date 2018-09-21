@@ -2,6 +2,7 @@ CLASS zcl_abapgit_gui_page_tag DEFINITION PUBLIC FINAL
     CREATE PUBLIC INHERITING FROM zcl_abapgit_gui_page.
 
   PUBLIC SECTION.
+    INTERFACES: zif_abapgit_gui_page_hotkey.
 
     CONSTANTS: BEGIN OF c_action,
                  commit_post     TYPE string VALUE 'commit_post',
@@ -155,8 +156,8 @@ CLASS zcl_abapgit_gui_page_tag IMPLEMENTATION.
     CLEAR eg_fields.
 
     CONCATENATE LINES OF it_postdata INTO lv_string.
-    REPLACE ALL OCCURRENCES OF zif_abapgit_definitions=>gc_crlf    IN lv_string WITH lc_replace.
-    REPLACE ALL OCCURRENCES OF zif_abapgit_definitions=>gc_newline IN lv_string WITH lc_replace.
+    REPLACE ALL OCCURRENCES OF zif_abapgit_definitions=>c_crlf    IN lv_string WITH lc_replace.
+    REPLACE ALL OCCURRENCES OF zif_abapgit_definitions=>c_newline IN lv_string WITH lc_replace.
     lt_fields = zcl_abapgit_html_action_utils=>parse_fields_upper_case_name( lv_string ).
 
     zcl_abapgit_html_action_utils=>get_field( EXPORTING iv_name = 'SHA1'
@@ -180,7 +181,7 @@ CLASS zcl_abapgit_gui_page_tag IMPLEMENTATION.
 
     ASSIGN COMPONENT 'BODY' OF STRUCTURE eg_fields TO <lv_body>.
     ASSERT <lv_body> IS ASSIGNED.
-    REPLACE ALL OCCURRENCES OF lc_replace IN <lv_body> WITH zif_abapgit_definitions=>gc_newline.
+    REPLACE ALL OCCURRENCES OF lc_replace IN <lv_body> WITH zif_abapgit_definitions=>c_newline.
 
   ENDMETHOD.
 
@@ -201,7 +202,7 @@ CLASS zcl_abapgit_gui_page_tag IMPLEMENTATION.
 
     CONSTANTS: lc_body_col_max TYPE i VALUE 150.
 
-    DATA: lo_user      TYPE REF TO zcl_abapgit_persistence_user,
+    DATA: li_user      TYPE REF TO zif_abapgit_persist_user,
           lv_user      TYPE string,
           lv_email     TYPE string,
           lv_s_param   TYPE string,
@@ -209,22 +210,24 @@ CLASS zcl_abapgit_gui_page_tag IMPLEMENTATION.
           lv_body_size TYPE i,
           lt_type      TYPE stringtab,
           lv_selected  TYPE string.
+
     FIELD-SYMBOLS: <lv_type> LIKE LINE OF lt_type.
 
-    lo_user  = zcl_abapgit_persistence_user=>get_instance( ).
 
-    lv_user  = lo_user->get_repo_git_user_name( mo_repo_online->get_url( ) ).
+    li_user = zcl_abapgit_persistence_user=>get_instance( ).
+
+    lv_user = li_user->get_repo_git_user_name( mo_repo_online->get_url( ) ).
     IF lv_user IS INITIAL.
-      lv_user  = lo_user->get_default_git_user_name( ).
+      lv_user = li_user->get_default_git_user_name( ).
     ENDIF.
     IF lv_user IS INITIAL.
       " get default from user master record
       lv_user = zcl_abapgit_user_master_record=>get_instance( sy-uname )->get_name( ).
     ENDIF.
 
-    lv_email = lo_user->get_repo_git_user_email( mo_repo_online->get_url( ) ).
+    lv_email = li_user->get_repo_git_user_email( mo_repo_online->get_url( ) ).
     IF lv_email IS INITIAL.
-      lv_email = lo_user->get_default_git_user_email( ).
+      lv_email = li_user->get_default_git_user_email( ).
     ENDIF.
     IF lv_email IS INITIAL.
       " get default from user master record
@@ -321,12 +324,12 @@ CLASS zcl_abapgit_gui_page_tag IMPLEMENTATION.
 
     lo_toolbar->add( iv_act = 'submitFormById(''commit_form'');'
                      iv_txt = 'Create'
-                     iv_typ = zif_abapgit_definitions=>gc_action_type-onclick
-                     iv_opt = zif_abapgit_definitions=>gc_html_opt-strong ) ##NO_TEXT.
+                     iv_typ = zif_abapgit_definitions=>c_action_type-onclick
+                     iv_opt = zif_abapgit_definitions=>c_html_opt-strong ) ##NO_TEXT.
 
     lo_toolbar->add( iv_act = c_action-commit_cancel
                      iv_txt = 'Cancel'
-                     iv_opt = zif_abapgit_definitions=>gc_html_opt-cancel ) ##NO_TEXT.
+                     iv_opt = zif_abapgit_definitions=>c_html_opt-cancel ) ##NO_TEXT.
 
     ro_html->add( '<div class="paddings">' ).
     ro_html->add( lo_toolbar->render( ) ).
@@ -373,17 +376,22 @@ CLASS zcl_abapgit_gui_page_tag IMPLEMENTATION.
 
         create_tag( it_postdata ).
 
-        ev_state = zif_abapgit_definitions=>gc_event_state-go_back.
+        ev_state = zif_abapgit_definitions=>c_event_state-go_back.
 
       WHEN c_action-change_tag_type.
 
         parse_change_tag_type_request( it_postdata ).
 
-        ev_state = zif_abapgit_definitions=>gc_event_state-re_render.
+        ev_state = zif_abapgit_definitions=>c_event_state-re_render.
 
       WHEN c_action-commit_cancel.
-        ev_state = zif_abapgit_definitions=>gc_event_state-go_back.
+        ev_state = zif_abapgit_definitions=>c_event_state-go_back.
     ENDCASE.
 
   ENDMETHOD.
+
+  METHOD zif_abapgit_gui_page_hotkey~get_hotkey_actions.
+
+  ENDMETHOD.
+
 ENDCLASS.

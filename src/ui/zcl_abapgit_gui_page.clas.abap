@@ -1,7 +1,18 @@
 CLASS zcl_abapgit_gui_page DEFINITION PUBLIC ABSTRACT CREATE PUBLIC.
 
   PUBLIC SECTION.
-    INTERFACES zif_abapgit_gui_page.
+    INTERFACES:
+      zif_abapgit_gui_page.
+
+    CONSTANTS:
+      BEGIN OF c_global_page_action,
+        showhotkeys TYPE string VALUE `showHotkeys` ##NO_TEXT,
+      END OF c_global_page_action.
+
+    CLASS-METHODS:
+      get_hotkey_actions
+        RETURNING
+          VALUE(rt_hotkey_actions) TYPE zif_abapgit_gui_page_hotkey=>tty_hotkey_action.
 
   PROTECTED SECTION.
 
@@ -22,7 +33,6 @@ CLASS zcl_abapgit_gui_page DEFINITION PUBLIC ABSTRACT CREATE PUBLIC.
       RAISING   zcx_abapgit_exception.
 
   PRIVATE SECTION.
-
     METHODS html_head
       RETURNING VALUE(ro_html) TYPE REF TO zcl_abapgit_html.
 
@@ -35,11 +45,63 @@ CLASS zcl_abapgit_gui_page DEFINITION PUBLIC ABSTRACT CREATE PUBLIC.
     METHODS redirect
       RETURNING VALUE(ro_html) TYPE REF TO zcl_abapgit_html.
 
+    METHODS link_hints
+      IMPORTING
+        io_html TYPE REF TO zcl_abapgit_html
+      RAISING
+        zcx_abapgit_exception.
+
+    METHODS add_hotkeys
+      IMPORTING
+        io_html TYPE REF TO zcl_abapgit_html
+      RAISING
+        zcx_abapgit_exception.
+
+    METHODS render_hotkey_overview
+      RETURNING
+        VALUE(ro_html) TYPE REF TO zcl_abapgit_html
+      RAISING
+        zcx_abapgit_exception.
+
+    METHODS call_browser
+      IMPORTING
+        iv_url TYPE csequence
+      RAISING
+        zcx_abapgit_exception.
+
 ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_GUI_PAGE IMPLEMENTATION.
+CLASS zcl_abapgit_gui_page IMPLEMENTATION.
+
+
+  METHOD add_hotkeys.
+
+    DATA: lv_json    TYPE string,
+          lt_hotkeys TYPE zif_abapgit_definitions=>tty_hotkey.
+
+    FIELD-SYMBOLS: <ls_hotkey> TYPE zif_abapgit_definitions=>ty_hotkey.
+
+    lt_hotkeys = zcl_abapgit_hotkeys=>get_relevant_hotkeys_for_page( me ).
+
+    lv_json = `{`.
+
+    LOOP AT lt_hotkeys ASSIGNING <ls_hotkey>.
+
+      IF sy-tabix > 1.
+        lv_json = lv_json && |,|.
+      ENDIF.
+
+      lv_json = lv_json && |  "{ <ls_hotkey>-sequence }" : "{ <ls_hotkey>-action }" |.
+
+    ENDLOOP.
+
+    lv_json = lv_json && `}`.
+
+    io_html->add( |setKeyBindings({ lv_json });| ).
+
+  ENDMETHOD.
 
 
   METHOD footer.
@@ -59,6 +121,20 @@ CLASS ZCL_ABAPGIT_GUI_PAGE IMPLEMENTATION.
     ro_html->add( '</div>' ).                               "#EC NOTEXT
 
   ENDMETHOD. "footer
+
+
+  METHOD get_hotkey_actions.
+
+    " these are the global shortcuts active on all pages
+
+    DATA: ls_hotkey_action LIKE LINE OF rt_hotkey_actions.
+
+    ls_hotkey_action-name           = |Global: Show hotkeys|.
+    ls_hotkey_action-action         = c_global_page_action-showhotkeys.
+    ls_hotkey_action-default_hotkey = |?|.
+    INSERT ls_hotkey_action INTO TABLE rt_hotkey_actions.
+
+  ENDMETHOD.
 
 
   METHOD html_head.
@@ -81,6 +157,29 @@ CLASS ZCL_ABAPGIT_GUI_PAGE IMPLEMENTATION.
   ENDMETHOD.                    "html_head
 
 
+  METHOD link_hints.
+
+    DATA: lo_settings         TYPE REF TO zcl_abapgit_settings,
+          lv_link_hint_key    TYPE char01,
+          lv_background_color TYPE string.
+
+    lo_settings = zcl_abapgit_persist_settings=>get_instance( )->read( ).
+
+    lv_link_hint_key = lo_settings->get_link_hint_key( ).
+    lv_background_color = lo_settings->get_link_hint_background_color( ).
+
+    IF lo_settings->get_link_hints_enabled( ) = abap_true
+    AND lv_link_hint_key IS NOT INITIAL.
+
+      io_html->add( |setLinkHints("{ lv_link_hint_key }","{ lv_background_color }");| ).
+      io_html->add( |setInitialFocusWithQuerySelector('a span', true);| ).
+      io_html->add( |enableArrowListNavigation();| ).
+
+    ENDIF.
+
+  ENDMETHOD.
+
+
   METHOD redirect.
 
     CREATE OBJECT ro_html.
@@ -96,25 +195,20 @@ CLASS ZCL_ABAPGIT_GUI_PAGE IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD scripts.
+  METHOD render_hotkey_overview.
 
-    DATA: lo_settings         TYPE REF TO zcl_abapgit_settings,
-          lv_link_hint_key    TYPE char01,
-          lv_background_color TYPE string.
+    CREATE OBJECT ro_html.
+    ro_html->add( zcl_abapgit_gui_chunk_lib=>render_hotkey_overview( ) ).
+
+  ENDMETHOD.
+
+
+  METHOD scripts.
 
     CREATE OBJECT ro_html.
 
-    lo_settings = zcl_abapgit_persist_settings=>get_instance( )->read( ).
-
-    lv_link_hint_key = lo_settings->get_link_hint_key( ).
-    lv_background_color = lo_settings->get_link_hint_background_color( ).
-
-    IF lo_settings->get_link_hints_enabled( ) = abap_true
-    AND lv_link_hint_key IS NOT INITIAL.
-      ro_html->add( |setLinkHints("{ lv_link_hint_key }","{ lv_background_color }");| ).
-      ro_html->add( |setInitialFocusWithQuerySelector('a span', true);| ).
-      ro_html->add( |enableArrowListNavigation();| ).
-    ENDIF.
+    link_hints( ro_html ).
+    add_hotkeys( ro_html ).
 
   ENDMETHOD. "scripts
 
@@ -129,7 +223,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE IMPLEMENTATION.
     ro_html->add( |<td class="logo">{
                   zcl_abapgit_html=>a( iv_txt = '<img src="img/logo" alt="logo">'
                                        iv_id  = 'abapGitLogo'
-                                       iv_act = zif_abapgit_definitions=>gc_action-abapgit_home )
+                                       iv_act = zif_abapgit_definitions=>c_action-abapgit_home )
                   }</td>| ).                                "#EC NOTEXT
 
     ro_html->add( |<td><span class="page_title"> &#x25BA; {
@@ -149,7 +243,19 @@ CLASS ZCL_ABAPGIT_GUI_PAGE IMPLEMENTATION.
 
 
   METHOD zif_abapgit_gui_page~on_event.
-    ev_state = zif_abapgit_definitions=>gc_event_state-not_handled.
+
+    CASE iv_action.
+      WHEN zif_abapgit_definitions=>c_action-url.
+
+        call_browser( iv_getdata ).
+        ev_state = zif_abapgit_definitions=>c_event_state-no_more_act.
+
+      WHEN  OTHERS.
+
+        ev_state = zif_abapgit_definitions=>c_event_state-not_handled.
+
+    ENDCASE.
+
   ENDMETHOD. "lif_gui_page~on_event
 
 
@@ -171,6 +277,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE IMPLEMENTATION.
     ro_html->add( html_head( ) ).
     ro_html->add( '<body>' ).                               "#EC NOTEXT
     ro_html->add( title( ) ).
+    ro_html->add( render_hotkey_overview( ) ).
     ro_html->add( render_content( ) ).
     ro_html->add( footer( ) ).
     ro_html->add( '</body>' ).                              "#EC NOTEXT
@@ -187,4 +294,28 @@ CLASS ZCL_ABAPGIT_GUI_PAGE IMPLEMENTATION.
     ro_html->add( '</html>' ).                              "#EC NOTEXT
 
   ENDMETHOD.  " lif_gui_page~render.
+
+  METHOD call_browser.
+
+    cl_gui_frontend_services=>execute(
+      EXPORTING
+        document               = |{ iv_url }|
+      EXCEPTIONS
+        cntl_error             = 1
+        error_no_gui           = 2
+        bad_parameter          = 3
+        file_not_found         = 4
+        path_not_found         = 5
+        file_extension_unknown = 6
+        error_execute_failed   = 7
+        synchronous_failed     = 8
+        not_supported_by_gui   = 9
+        OTHERS                 = 10 ).
+
+    IF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise_t100( ).
+    ENDIF.
+
+  ENDMETHOD.
+
 ENDCLASS.

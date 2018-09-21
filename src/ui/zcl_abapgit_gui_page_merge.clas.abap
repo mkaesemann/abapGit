@@ -5,12 +5,13 @@ CLASS zcl_abapgit_gui_page_merge DEFINITION
   CREATE PUBLIC .
 
   PUBLIC SECTION.
+    INTERFACES: zif_abapgit_gui_page_hotkey.
 
     METHODS constructor
       IMPORTING
-        !io_repo   TYPE REF TO zcl_abapgit_repo_online
-        !iv_source TYPE string
-        !iv_target TYPE string
+        io_repo   TYPE REF TO zcl_abapgit_repo_online
+        iv_source TYPE string
+        iv_target TYPE string
       RAISING
         zcx_abapgit_exception .
 
@@ -38,7 +39,7 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_GUI_PAGE_MERGE IMPLEMENTATION.
+CLASS zcl_abapgit_gui_page_merge IMPLEMENTATION.
 
 
   METHOD build_menu.
@@ -201,7 +202,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_MERGE IMPLEMENTATION.
 
         ENDIF.
 
-        ev_state = zif_abapgit_definitions=>gc_event_state-new_page.
+        ev_state = zif_abapgit_definitions=>c_event_state-new_page.
 
       WHEN c_actions-res_conflicts.
 
@@ -210,9 +211,15 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_MERGE IMPLEMENTATION.
             io_repo       = mo_repo
             io_merge_page = me
             io_merge      = mo_merge.
-        ev_state = zif_abapgit_definitions=>gc_event_state-new_page.
+        ev_state = zif_abapgit_definitions=>c_event_state-new_page.
 
     ENDCASE.
 
   ENDMETHOD.
+
+
+  METHOD zif_abapgit_gui_page_hotkey~get_hotkey_actions.
+
+  ENDMETHOD.
+
 ENDCLASS.

@@ -16,6 +16,21 @@ CLASS zcl_abapgit_diff DEFINITION
 
     METHODS stats
       RETURNING VALUE(rs_count) TYPE zif_abapgit_definitions=>ty_count.
+
+    METHODS set_patch_new
+      IMPORTING
+        iv_line_new   TYPE i
+        iv_patch_flag TYPE abap_bool
+      RAISING
+        zcx_abapgit_exception.
+
+    METHODS set_patch_old
+      IMPORTING
+        iv_line_old   TYPE i
+        iv_patch_flag TYPE abap_bool
+      RAISING
+        zcx_abapgit_exception.
+
   PRIVATE SECTION.
     DATA mt_diff     TYPE zif_abapgit_definitions=>ty_diffs_tt.
     DATA ms_stats    TYPE zif_abapgit_definitions=>ty_count.
@@ -258,6 +273,54 @@ CLASS ZCL_ABAPGIT_DIFF IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD set_patch_new.
+
+    DATA: lv_new_num TYPE i.
+    FIELD-SYMBOLS: <ls_diff> TYPE zif_abapgit_definitions=>ty_diff.
+
+    LOOP AT mt_diff ASSIGNING <ls_diff>.
+
+      lv_new_num = <ls_diff>-new_num.
+
+      IF lv_new_num = iv_line_new.
+        EXIT.
+      ENDIF.
+
+    ENDLOOP.
+
+    IF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise( |Invalid new line number { iv_line_new }| ).
+    ENDIF.
+
+    <ls_diff>-patch_flag = iv_patch_flag.
+
+  ENDMETHOD.
+
+
+  METHOD set_patch_old.
+
+    DATA: lv_old_num TYPE i.
+    FIELD-SYMBOLS: <ls_diff> TYPE zif_abapgit_definitions=>ty_diff.
+
+    LOOP AT mt_diff ASSIGNING <ls_diff>.
+
+      lv_old_num = <ls_diff>-old_num.
+
+      IF lv_old_num = iv_line_old.
+        EXIT.
+      ENDIF.
+
+    ENDLOOP.
+
+    IF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise( |Invalid old line number { iv_line_old }| ).
+    ENDIF.
+
+    <ls_diff>-patch_flag = iv_patch_flag.
+
+  ENDMETHOD.
+
+
   METHOD shortlist.
 
     DATA: lv_index TYPE i.
@@ -310,8 +373,8 @@ CLASS ZCL_ABAPGIT_DIFF IMPLEMENTATION.
     lv_new = zcl_abapgit_convert=>xstring_to_string_utf8( iv_new ).
     lv_old = zcl_abapgit_convert=>xstring_to_string_utf8( iv_old ).
 
-    SPLIT lv_new AT zif_abapgit_definitions=>gc_newline INTO TABLE et_new.
-    SPLIT lv_old AT zif_abapgit_definitions=>gc_newline INTO TABLE et_old.
+    SPLIT lv_new AT zif_abapgit_definitions=>c_newline INTO TABLE et_new.
+    SPLIT lv_old AT zif_abapgit_definitions=>c_newline INTO TABLE et_old.
 
   ENDMETHOD.
 ENDCLASS.

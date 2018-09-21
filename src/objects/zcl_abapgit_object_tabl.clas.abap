@@ -3,12 +3,14 @@ CLASS zcl_abapgit_object_tabl DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
   PUBLIC SECTION.
     INTERFACES zif_abapgit_object.
     ALIASES mo_files FOR zif_abapgit_object~mo_files.
+  PRIVATE SECTION.
+    CONSTANTS: c_longtext_id_tabl TYPE dokil-id VALUE 'TB'.
 
 ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_OBJECT_TABL IMPLEMENTATION.
+CLASS zcl_abapgit_object_tabl IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~changed_by.
@@ -135,6 +137,8 @@ CLASS ZCL_ABAPGIT_OBJECT_TABL IMPLEMENTATION.
       zcx_abapgit_exception=>raise( 'error from RS_DD_DELETE_OBJ, TABL' ).
     ENDIF.
 
+    delete_longtexts( c_longtext_id_tabl ).
+
   ENDMETHOD.
 
 
@@ -244,6 +248,8 @@ CLASS ZCL_ABAPGIT_OBJECT_TABL IMPLEMENTATION.
                                            iv_name = lv_tname ).
 
     ENDLOOP.
+
+    deserialize_longtexts( io_xml ).
 
   ENDMETHOD.
 
@@ -355,10 +361,11 @@ CLASS ZCL_ABAPGIT_OBJECT_TABL IMPLEMENTATION.
           lv_masklen TYPE c LENGTH 4,
           lt_dd36m   TYPE dd36mttyp.
 
-    FIELD-SYMBOLS: <ls_dd12v> LIKE LINE OF lt_dd12v,
-                   <ls_dd05m> LIKE LINE OF lt_dd05m,
-                   <ls_dd36m> LIKE LINE OF lt_dd36m,
-                   <ls_dd03p> LIKE LINE OF lt_dd03p.
+    FIELD-SYMBOLS: <ls_dd12v>      LIKE LINE OF lt_dd12v,
+                   <ls_dd05m>      LIKE LINE OF lt_dd05m,
+                   <ls_dd36m>      LIKE LINE OF lt_dd36m,
+                   <ls_dd03p>      LIKE LINE OF lt_dd03p,
+                   <lg_roworcolst> TYPE any.
 
 
     lv_name = ms_item-obj_name.
@@ -409,6 +416,12 @@ CLASS ZCL_ABAPGIT_OBJECT_TABL IMPLEMENTATION.
     CLEAR: ls_dd09l-as4user,
            ls_dd09l-as4date,
            ls_dd09l-as4time.
+
+    ASSIGN COMPONENT 'ROWORCOLST' OF STRUCTURE ls_dd09l TO <lg_roworcolst>.
+    IF sy-subrc = 0 AND <lg_roworcolst> = 'C'.
+      CLEAR <lg_roworcolst>. "To avoid diff errors. This field doesn't exists in all releases
+    ENDIF.
+
 
     LOOP AT lt_dd12v ASSIGNING <ls_dd12v>.
       CLEAR: <ls_dd12v>-as4user,
@@ -514,6 +527,9 @@ CLASS ZCL_ABAPGIT_OBJECT_TABL IMPLEMENTATION.
                  iv_name = 'DD35V_TALE' ).
     io_xml->add( iv_name = 'DD36M'
                  ig_data = lt_dd36m ).
+
+    serialize_longtexts( io_xml         = io_xml
+                         iv_longtext_id = c_longtext_id_tabl ).
 
   ENDMETHOD.
 ENDCLASS.

@@ -48,7 +48,8 @@ CLASS zcl_abapgit_objects DEFINITION
         zcx_abapgit_exception .
     CLASS-METHODS jump
       IMPORTING
-        !is_item TYPE zif_abapgit_definitions=>ty_item
+        !is_item       TYPE zif_abapgit_definitions=>ty_item
+        !i_line_number TYPE i OPTIONAL
       RAISING
         zcx_abapgit_exception .
     CLASS-METHODS changed_by
@@ -89,7 +90,7 @@ CLASS zcl_abapgit_objects DEFINITION
            END OF ty_obj_serializer_map,
            tty_obj_serializer_map
         TYPE SORTED TABLE OF ty_obj_serializer_map WITH UNIQUE KEY item.
-    CLASS-DATA st_obj_serializer_map TYPE tty_obj_serializer_map.
+    CLASS-DATA gt_obj_serializer_map TYPE tty_obj_serializer_map.
 
     CLASS-METHODS files_to_deserialize
       IMPORTING
@@ -162,7 +163,7 @@ CLASS zcl_abapgit_objects DEFINITION
         zcx_abapgit_exception .
     CLASS-METHODS compare_remote_to_local
       IMPORTING
-        !io_object TYPE REF TO zif_abapgit_object
+        !ii_object TYPE REF TO zif_abapgit_object
         !it_remote TYPE zif_abapgit_definitions=>ty_files_tt
         !is_result TYPE zif_abapgit_definitions=>ty_result
       RAISING
@@ -219,7 +220,7 @@ CLASS ZCL_ABAPGIT_OBJECTS IMPLEMENTATION.
       rv_user = zcl_abapgit_objects_super=>c_user_unknown.
     ELSE.
       li_obj = create_object( is_item     = is_item
-                              iv_language = zif_abapgit_definitions=>gc_english ).
+                              iv_language = zif_abapgit_definitions=>c_english ).
       rv_user = li_obj->changed_by( ).
     ENDIF.
 
@@ -303,7 +304,7 @@ CLASS ZCL_ABAPGIT_OBJECTS IMPLEMENTATION.
     FIND ALL OCCURRENCES OF '.' IN is_result-filename MATCH COUNT lv_count.
 
     IF is_result-filename CS '.XML' AND lv_count = 2.
-      IF io_object->exists( ) = abap_false.
+      IF ii_object->exists( ) = abap_false.
         RETURN.
       ENDIF.
 
@@ -314,7 +315,7 @@ CLASS ZCL_ABAPGIT_OBJECTS IMPLEMENTATION.
         CREATE OBJECT lo_remote_version
           EXPORTING
             iv_xml = zcl_abapgit_convert=>xstring_to_string_utf8( ls_remote_file-data ).
-        li_comparison_result = io_object->compare_to_remote_version( lo_remote_version ).
+        li_comparison_result = ii_object->compare_to_remote_version( lo_remote_version ).
         li_comparison_result->show_confirmation_dialog( ).
 
         IF li_comparison_result->is_result_complete_halt( ) = abap_true.
@@ -330,10 +331,10 @@ CLASS ZCL_ABAPGIT_OBJECTS IMPLEMENTATION.
 
     DATA: lv_message            TYPE string,
           lv_class_name         TYPE string,
-          ls_obj_serializer_map LIKE LINE OF st_obj_serializer_map.
+          ls_obj_serializer_map LIKE LINE OF gt_obj_serializer_map.
 
 
-    READ TABLE st_obj_serializer_map
+    READ TABLE gt_obj_serializer_map
       INTO ls_obj_serializer_map WITH KEY item = is_item.
     IF sy-subrc = 0.
       lv_class_name = ls_obj_serializer_map-metadata-class.
@@ -344,7 +345,7 @@ CLASS ZCL_ABAPGIT_OBJECTS IMPLEMENTATION.
 *        Thus, buffer the metadata afterwards
       ls_obj_serializer_map-item      = is_item.
       ls_obj_serializer_map-metadata  = is_metadata.
-      INSERT ls_obj_serializer_map INTO TABLE st_obj_serializer_map.
+      INSERT ls_obj_serializer_map INTO TABLE gt_obj_serializer_map.
 
       lv_class_name = is_metadata-class.
     ELSE.
@@ -407,7 +408,7 @@ CLASS ZCL_ABAPGIT_OBJECTS IMPLEMENTATION.
 
         lt_items = map_tadir_to_items( lt_tadir ).
 
-        check_objects_locked( iv_language = zif_abapgit_definitions=>gc_english
+        check_objects_locked( iv_language = zif_abapgit_definitions=>c_english
                               it_items    = lt_items ).
 
         LOOP AT lt_tadir ASSIGNING <ls_tadir>.
@@ -441,7 +442,7 @@ CLASS ZCL_ABAPGIT_OBJECTS IMPLEMENTATION.
 
     IF is_supported( is_item ) = abap_true.
       li_obj = create_object( is_item     = is_item
-                              iv_language = zif_abapgit_definitions=>gc_english ).
+                              iv_language = zif_abapgit_definitions=>c_english ).
 
       li_obj->delete( ).
 
@@ -542,7 +543,7 @@ CLASS ZCL_ABAPGIT_OBJECTS IMPLEMENTATION.
                               is_metadata = lo_xml->get_metadata( ) ).
 
       compare_remote_to_local(
-        io_object = li_obj
+        ii_object = li_obj
         it_remote = lt_remote
         is_result = <ls_result> ).
 
@@ -646,7 +647,7 @@ CLASS ZCL_ABAPGIT_OBJECTS IMPLEMENTATION.
 
     TRY.
         li_obj = create_object( is_item = is_item
-                                iv_language = zif_abapgit_definitions=>gc_english ).
+                                iv_language = zif_abapgit_definitions=>c_english ).
         rv_bool = li_obj->exists( ).
       CATCH zcx_abapgit_exception.
 * ignore all errors and assume the object exists
@@ -670,7 +671,7 @@ CLASS ZCL_ABAPGIT_OBJECTS IMPLEMENTATION.
     DELETE ADJACENT DUPLICATES FROM rt_results COMPARING obj_type obj_name filename.
 
     DELETE rt_results WHERE obj_type IS INITIAL.
-    DELETE rt_results WHERE lstate = zif_abapgit_definitions=>gc_state-added AND rstate IS INITIAL.
+    DELETE rt_results WHERE lstate = zif_abapgit_definitions=>c_state-added AND rstate IS INITIAL.
 
     rt_results = prioritize_deser( rt_results ).
 
@@ -691,7 +692,7 @@ CLASS ZCL_ABAPGIT_OBJECTS IMPLEMENTATION.
 
     rv_changed = create_object(
       is_item     = is_item
-      iv_language = zif_abapgit_definitions=>gc_english )->has_changed_since( iv_timestamp ).
+      iv_language = zif_abapgit_definitions=>c_english )->has_changed_since( iv_timestamp ).
 
   ENDMETHOD.  "has_changed_since
 
@@ -700,7 +701,7 @@ CLASS ZCL_ABAPGIT_OBJECTS IMPLEMENTATION.
 
     TRY.
         create_object( is_item        = is_item
-                       iv_language    = zif_abapgit_definitions=>gc_english
+                       iv_language    = zif_abapgit_definitions=>c_english
                        iv_native_only = iv_native_only ).
         rv_bool = abap_true.
       CATCH zcx_abapgit_exception.
@@ -716,15 +717,16 @@ CLASS ZCL_ABAPGIT_OBJECTS IMPLEMENTATION.
           lv_adt_jump_enabled TYPE abap_bool.
 
     li_obj = create_object( is_item     = is_item
-                            iv_language = zif_abapgit_definitions=>gc_english ).
+                            iv_language = zif_abapgit_definitions=>c_english ).
 
     lv_adt_jump_enabled = zcl_abapgit_persist_settings=>get_instance( )->read( )->get_adt_jump_enabled( ).
 
     IF lv_adt_jump_enabled = abap_true.
       TRY.
           zcl_abapgit_objects_super=>jump_adt(
-            i_obj_name = is_item-obj_name
-            i_obj_type = is_item-obj_type ).
+            i_obj_name    = is_item-obj_name
+            i_obj_type    = is_item-obj_type
+            i_line_number = i_line_number ).
         CATCH zcx_abapgit_exception.
           li_obj->jump( ).
       ENDTRY.
@@ -816,6 +818,8 @@ CLASS ZCL_ABAPGIT_OBJECTS IMPLEMENTATION.
           lo_xml   TYPE REF TO zcl_abapgit_xml_output,
           lo_files TYPE REF TO zcl_abapgit_objects_files.
 
+    FIELD-SYMBOLS: <ls_file> LIKE LINE OF rt_files.
+
 
     IF is_supported( is_item ) = abap_false.
       IF NOT io_log IS INITIAL.
@@ -842,7 +846,13 @@ CLASS ZCL_ABAPGIT_OBJECTS IMPLEMENTATION.
 
     check_duplicates( rt_files ).
 
-  ENDMETHOD.                    "serialize
+    LOOP AT rt_files ASSIGNING <ls_file>.
+      <ls_file>-sha1 = zcl_abapgit_hash=>sha1(
+        iv_type = zif_abapgit_definitions=>c_type-blob
+        iv_data = <ls_file>-data ).
+    ENDLOOP.
+
+  ENDMETHOD.
 
 
   METHOD supported_list.
@@ -939,8 +949,8 @@ CLASS ZCL_ABAPGIT_OBJECTS IMPLEMENTATION.
     LOOP AT it_results ASSIGNING <ls_result>
         WHERE NOT obj_type IS INITIAL.
       IF <ls_result>-lstate IS NOT INITIAL
-          AND <ls_result>-lstate <> zif_abapgit_definitions=>gc_state-deleted
-          AND NOT ( <ls_result>-lstate = zif_abapgit_definitions=>gc_state-added
+          AND <ls_result>-lstate <> zif_abapgit_definitions=>c_state-deleted
+          AND NOT ( <ls_result>-lstate = zif_abapgit_definitions=>c_state-added
           AND <ls_result>-rstate IS INITIAL ).
 * current object has been modified locally, add to table
         CLEAR ls_overwrite.

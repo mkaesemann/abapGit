@@ -5,6 +5,7 @@ CLASS zcl_abapgit_gui_page_commit DEFINITION
   CREATE PUBLIC .
 
   PUBLIC SECTION.
+    INTERFACES: zif_abapgit_gui_page_hotkey.
 
     CONSTANTS:
       BEGIN OF c_action,
@@ -14,10 +15,10 @@ CLASS zcl_abapgit_gui_page_commit DEFINITION
 
     METHODS constructor
       IMPORTING
-        !io_repo  TYPE REF TO zcl_abapgit_repo_online
-        !io_stage TYPE REF TO zcl_abapgit_stage
+        io_repo  TYPE REF TO zcl_abapgit_repo_online
+        io_stage TYPE REF TO zcl_abapgit_stage
       RAISING
-        zcx_abapgit_exception .
+        zcx_abapgit_exception.
 
     METHODS zif_abapgit_gui_page~on_event
         REDEFINITION .
@@ -82,8 +83,8 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_COMMIT IMPLEMENTATION.
     CLEAR eg_fields.
 
     CONCATENATE LINES OF it_postdata INTO lv_string.
-    REPLACE ALL OCCURRENCES OF zif_abapgit_definitions=>gc_crlf    IN lv_string WITH lc_replace.
-    REPLACE ALL OCCURRENCES OF zif_abapgit_definitions=>gc_newline IN lv_string WITH lc_replace.
+    REPLACE ALL OCCURRENCES OF zif_abapgit_definitions=>c_crlf    IN lv_string WITH lc_replace.
+    REPLACE ALL OCCURRENCES OF zif_abapgit_definitions=>c_newline IN lv_string WITH lc_replace.
     lt_fields = zcl_abapgit_html_action_utils=>parse_fields_upper_case_name( lv_string ).
 
     zcl_abapgit_html_action_utils=>get_field(
@@ -125,7 +126,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_COMMIT IMPLEMENTATION.
 
     ASSIGN COMPONENT 'BODY' OF STRUCTURE eg_fields TO <lv_body>.
     ASSERT <lv_body> IS ASSIGNED.
-    REPLACE ALL OCCURRENCES OF lc_replace IN <lv_body> WITH zif_abapgit_definitions=>gc_newline.
+    REPLACE ALL OCCURRENCES OF lc_replace IN <lv_body> WITH zif_abapgit_definitions=>c_newline.
 
   ENDMETHOD.
 
@@ -152,7 +153,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_COMMIT IMPLEMENTATION.
 
     CONSTANTS: lc_body_col_max TYPE i VALUE 150.
 
-    DATA: lo_user      TYPE REF TO zcl_abapgit_persistence_user.
+    DATA: li_user      TYPE REF TO zif_abapgit_persist_user.
     DATA: lv_user      TYPE string.
     DATA: lv_email     TYPE string.
     DATA: lv_s_param   TYPE string.
@@ -163,20 +164,20 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_COMMIT IMPLEMENTATION.
 * commit messages should be max 50 characters
 * body should wrap at 72 characters
 
-    lo_user  = zcl_abapgit_persistence_user=>get_instance( ).
+    li_user = zcl_abapgit_persistence_user=>get_instance( ).
 
-    lv_user  = lo_user->get_repo_git_user_name( mo_repo->get_url( ) ).
+    lv_user  = li_user->get_repo_git_user_name( mo_repo->get_url( ) ).
     IF lv_user IS INITIAL.
-      lv_user  = lo_user->get_default_git_user_name( ).
+      lv_user  = li_user->get_default_git_user_name( ).
     ENDIF.
     IF lv_user IS INITIAL.
       " get default from user master record
       lv_user = zcl_abapgit_user_master_record=>get_instance( sy-uname )->get_name( ).
     ENDIF.
 
-    lv_email = lo_user->get_repo_git_user_email( mo_repo->get_url( ) ).
+    lv_email = li_user->get_repo_git_user_email( mo_repo->get_url( ) ).
     IF lv_email IS INITIAL.
-      lv_email = lo_user->get_default_git_user_email( ).
+      lv_email = li_user->get_default_git_user_email( ).
     ENDIF.
     IF lv_email IS INITIAL.
       " get default from user master record
@@ -245,12 +246,12 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_COMMIT IMPLEMENTATION.
 
     lo_toolbar->add( iv_act = 'submitFormById(''commit_form'');'
                      iv_txt = 'Commit'
-                     iv_typ = zif_abapgit_definitions=>gc_action_type-onclick
-                     iv_opt = zif_abapgit_definitions=>gc_html_opt-strong ) ##NO_TEXT.
+                     iv_typ = zif_abapgit_definitions=>c_action_type-onclick
+                     iv_opt = zif_abapgit_definitions=>c_html_opt-strong ) ##NO_TEXT.
 
     lo_toolbar->add( iv_act = c_action-commit_cancel
                      iv_txt = 'Cancel'
-                     iv_opt = zif_abapgit_definitions=>gc_html_opt-cancel ) ##NO_TEXT.
+                     iv_opt = zif_abapgit_definitions=>c_html_opt-cancel ) ##NO_TEXT.
 
     ro_html->add( '<div class="paddings">' ).
     ro_html->add( lo_toolbar->render( ) ).
@@ -326,6 +327,11 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_COMMIT IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD zif_abapgit_gui_page_hotkey~get_hotkey_actions.
+
+  ENDMETHOD.
+
+
   METHOD zif_abapgit_gui_page~on_event.
 
     DATA: ls_commit TYPE zcl_abapgit_services_git=>ty_commit_fields.
@@ -343,10 +349,10 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_COMMIT IMPLEMENTATION.
                                   io_repo     = mo_repo
                                   io_stage    = mo_stage ).
 
-        ev_state = zif_abapgit_definitions=>gc_event_state-go_back_to_bookmark.
+        ev_state = zif_abapgit_definitions=>c_event_state-go_back_to_bookmark.
 
       WHEN c_action-commit_cancel.
-        ev_state = zif_abapgit_definitions=>gc_event_state-go_back.
+        ev_state = zif_abapgit_definitions=>c_event_state-go_back.
     ENDCASE.
 
   ENDMETHOD.

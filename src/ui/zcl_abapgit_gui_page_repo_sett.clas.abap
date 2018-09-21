@@ -3,6 +3,8 @@ CLASS zcl_abapgit_gui_page_repo_sett DEFINITION
     CREATE PUBLIC INHERITING FROM zcl_abapgit_gui_page.
 
   PUBLIC SECTION.
+    INTERFACES: zif_abapgit_gui_page_hotkey.
+
     METHODS:
       constructor
         IMPORTING io_repo TYPE REF TO zcl_abapgit_repo,
@@ -318,12 +320,17 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_REPO_SETT IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD zif_abapgit_gui_page_hotkey~get_hotkey_actions.
+
+  ENDMETHOD.
+
+
   METHOD zif_abapgit_gui_page~on_event.
 
     CASE iv_action.
       WHEN c_action-save_settings.
         save( it_postdata ).
-        ev_state = zif_abapgit_definitions=>gc_event_state-go_back.
+        ev_state = zif_abapgit_definitions=>c_event_state-go_back.
     ENDCASE.
 
   ENDMETHOD.

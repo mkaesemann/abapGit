@@ -5,6 +5,7 @@ CLASS zcl_abapgit_gui_page_repo_over DEFINITION
   CREATE PUBLIC .
 
   PUBLIC SECTION.
+    INTERFACES: zif_abapgit_gui_page_hotkey.
 
     METHODS constructor .
 
@@ -34,13 +35,13 @@ CLASS zcl_abapgit_gui_page_repo_over DEFINITION
       tty_overview TYPE STANDARD TABLE OF ty_overview
                    WITH NON-UNIQUE DEFAULT KEY.
     CONSTANTS:
-      BEGIN OF gc_action,
+      BEGIN OF c_action,
         delete          TYPE string VALUE 'delete',
         select          TYPE string VALUE 'select',
         change_order_by TYPE string VALUE 'change_order_by',
         direction       TYPE string VALUE 'direction',
         apply_filter    TYPE string VALUE 'apply_filter',
-      END OF gc_action .
+      END OF c_action .
 
     DATA:
       mv_order_by         TYPE string,
@@ -215,20 +216,19 @@ CLASS zcl_abapgit_gui_page_repo_over IMPLEMENTATION.
 
     DATA: ls_overview LIKE LINE OF rt_overview,
           lo_repo_srv TYPE REF TO zcl_abapgit_repo,
-          lo_user     TYPE REF TO zcl_abapgit_persistence_user,
           lv_date     TYPE d,
           lv_time     TYPE t.
 
     FIELD-SYMBOLS: <ls_repo> LIKE LINE OF it_repo_list.
 
-    lo_user = zcl_abapgit_persistence_user=>get_instance( ).
 
     LOOP AT it_repo_list ASSIGNING <ls_repo>.
 
       CLEAR: ls_overview.
       lo_repo_srv = zcl_abapgit_repo_srv=>get_instance( )->get( <ls_repo>-key ).
 
-      ls_overview-favorite   = lo_user->is_favorite_repo( <ls_repo>-key ).
+      ls_overview-favorite   = zcl_abapgit_persistence_user=>get_instance(
+        )->is_favorite_repo( <ls_repo>-key ).
       ls_overview-type       = <ls_repo>-offline.
       ls_overview-key        = <ls_repo>-key.
       ls_overview-name       = lo_repo_srv->get_name( ).
@@ -266,13 +266,13 @@ CLASS zcl_abapgit_gui_page_repo_over IMPLEMENTATION.
 
   METHOD parse_change_order_by.
 
-    FIELD-SYMBOLS: <ls_postdata> TYPE cnht_post_data_line.
+    FIELD-SYMBOLS: <lv_postdata> TYPE cnht_post_data_line.
 
-    READ TABLE it_postdata ASSIGNING <ls_postdata>
+    READ TABLE it_postdata ASSIGNING <lv_postdata>
                            INDEX 1.
     IF sy-subrc = 0.
       FIND FIRST OCCURRENCE OF REGEX `orderBy=(.*)`
-           IN <ls_postdata>
+           IN <lv_postdata>
            SUBMATCHES mv_order_by.
     ENDIF.
 
@@ -285,15 +285,15 @@ CLASS zcl_abapgit_gui_page_repo_over IMPLEMENTATION.
 
     DATA: lv_direction TYPE string.
 
-    FIELD-SYMBOLS: <ls_postdata> TYPE cnht_post_data_line.
+    FIELD-SYMBOLS: <lv_postdata> TYPE cnht_post_data_line.
 
     CLEAR: mv_order_descending.
 
-    READ TABLE it_postdata ASSIGNING <ls_postdata>
+    READ TABLE it_postdata ASSIGNING <lv_postdata>
                            INDEX 1.
     IF sy-subrc = 0.
       FIND FIRST OCCURRENCE OF REGEX `direction=(.*)`
-           IN <ls_postdata>
+           IN <lv_postdata>
            SUBMATCHES lv_direction.
     ENDIF.
 
@@ -306,13 +306,13 @@ CLASS zcl_abapgit_gui_page_repo_over IMPLEMENTATION.
 
   METHOD parse_filter.
 
-    FIELD-SYMBOLS: <ls_postdata> LIKE LINE OF it_postdata.
+    FIELD-SYMBOLS: <lv_postdata> LIKE LINE OF it_postdata.
 
-    READ TABLE it_postdata ASSIGNING <ls_postdata>
+    READ TABLE it_postdata ASSIGNING <lv_postdata>
                            INDEX 1.
     IF sy-subrc = 0.
       FIND FIRST OCCURRENCE OF REGEX `filter=(.*)`
-           IN <ls_postdata>
+           IN <lv_postdata>
            SUBMATCHES mv_filter.
     ENDIF.
 
@@ -323,12 +323,11 @@ CLASS zcl_abapgit_gui_page_repo_over IMPLEMENTATION.
 
   METHOD render_content.
 
-    DATA: lo_persistence_repo TYPE REF TO zcl_abapgit_persistence_repo,
-          lt_overview         TYPE tty_overview.
+    DATA: lt_overview TYPE tty_overview.
 
-    CREATE OBJECT lo_persistence_repo.
 
-    lt_overview = map_repo_list_to_overview( lo_persistence_repo->list( ) ).
+    lt_overview = map_repo_list_to_overview(
+      zcl_abapgit_persist_factory=>get_repo( )->list( ) ).
 
     apply_order_by( CHANGING ct_overview = lt_overview ).
 
@@ -339,7 +338,7 @@ CLASS zcl_abapgit_gui_page_repo_over IMPLEMENTATION.
     ro_html->add( |<div class="form-container">| ).
 
     ro_html->add( |<form id="commit_form" class="grey70"|
-               && | method="post" action="sapevent:{ gc_action-apply_filter }">| ).
+               && | method="post" action="sapevent:{ c_action-apply_filter }">| ).
 
     render_header_bar( ro_html ).
 
@@ -351,152 +350,23 @@ CLASS zcl_abapgit_gui_page_repo_over IMPLEMENTATION.
   ENDMETHOD.            "render_content
 
 
-  METHOD render_text_input.
+  METHOD render_header_bar.
 
-    DATA lv_attrs TYPE string.
+    io_html->add( |<div class="row">| ).
 
-    CREATE OBJECT ro_html.
+    render_order_by( io_html ).
+    render_order_by_direction( io_html ).
 
-    IF iv_value IS NOT INITIAL.
-      lv_attrs = | value="{ iv_value }"|.
-    ENDIF.
+    io_html->add( render_text_input( iv_name  = |filter|
+                                     iv_label = |Filter: |
+                                     iv_value = mv_filter ) ).
 
-    IF iv_max_length IS NOT INITIAL.
-      lv_attrs = | maxlength="{ iv_max_length }"|.
-    ENDIF.
+    io_html->add( |<input type="submit" class="hidden-submit">| ).
 
-    ro_html->add( |<label for="{ iv_name }">{ iv_label }</label>| ).
-    ro_html->add( |<input id="{ iv_name }" name="{ iv_name }" type="text"{ lv_attrs }>| ).
+    io_html->add( |</div>| ).
 
-  ENDMETHOD.  " render_text_input
-
-
-  METHOD zif_abapgit_gui_page~on_event.
-
-    DATA: lv_key  TYPE zif_abapgit_persistence=>ty_value.
-
-    CASE iv_action.
-      WHEN gc_action-select.
-
-        lv_key = iv_getdata.
-
-        zcl_abapgit_persistence_user=>get_instance( )->set_repo_show( lv_key ).
-
-        TRY.
-            zcl_abapgit_repo_srv=>get_instance( )->get( lv_key )->refresh( ).
-          CATCH zcx_abapgit_exception ##NO_HANDLER.
-        ENDTRY.
-
-        ev_state = zif_abapgit_definitions=>gc_event_state-go_back.
-
-      WHEN gc_action-change_order_by.
-
-        parse_change_order_by( it_postdata ).
-        ev_state = zif_abapgit_definitions=>gc_event_state-re_render.
-
-      WHEN gc_action-direction.
-
-        parse_direction( it_postdata ).
-        ev_state = zif_abapgit_definitions=>gc_event_state-re_render.
-
-      WHEN gc_action-apply_filter.
-
-        parse_filter( it_postdata ).
-        ev_state = zif_abapgit_definitions=>gc_event_state-re_render.
-
-    ENDCASE.
-
-  ENDMETHOD.
-
-  METHOD render_table_header.
-
-    io_html->add( |<thead>| ).
-    io_html->add( |<tr>| ).
-    io_html->add( |<th>Favorite</th>| ).
-    io_html->add( |<th>Type</th>| ).
-    io_html->add( |<th>Key</th>| ).
-    io_html->add( |<th>Name</th>| ).
-    io_html->add( |<th>Url</th>| ).
-    io_html->add( |<th>Package</th>| ).
-    io_html->add( |<th>Branch name</th>| ).
-    io_html->add( |<th>Creator</th>| ).
-    io_html->add( |<th>Created at [{ mv_time_zone }]</th>| ).
-    io_html->add( |<th>Deserialized by</th>| ).
-    io_html->add( |<th>Deserialized at [{ mv_time_zone }]</th>| ).
-    io_html->add( |<th></th>| ).
-    io_html->add( '</tr>' ).
-    io_html->add( '</thead>' ).
-    io_html->add( '<tbody>' ).
-
-  ENDMETHOD.
-
-
-  METHOD render_table.
-
-    io_html->add( |<div class="db_list">| ).
-    io_html->add( |<table class="db_tab">| ).
-
-    render_table_header( io_html ).
-    render_table_body( io_html     = io_html
-                       it_overview = it_overview  ).
-
-    io_html->add( |</tbody>| ).
-    io_html->add( |</table>| ).
-
-  ENDMETHOD.
-
-
-  METHOD render_table_body.
-
-    DATA: lv_trclass       TYPE string,
-          lv_type_icon     TYPE string,
-          lv_favorite_icon TYPE string.
-
-    FIELD-SYMBOLS: <ls_overview> LIKE LINE OF it_overview.
-
-    LOOP AT it_overview ASSIGNING <ls_overview>.
-
-      CLEAR lv_trclass.
-      IF sy-tabix = 1.
-        lv_trclass = ' class="firstrow"' ##NO_TEXT.
-      ENDIF.
-
-      IF <ls_overview>-type = abap_true.
-        lv_type_icon = 'plug/darkgrey'.
-      ELSE.
-        lv_type_icon = 'cloud-upload/blue'.
-      ENDIF.
-
-      IF <ls_overview>-favorite = abap_true.
-        lv_favorite_icon = 'star/blue'.
-      ELSE.
-        lv_favorite_icon = 'star/grey'.
-      ENDIF.
-
-      io_html->add( |<tr{ lv_trclass }>| ).
-      io_html->add( |<td>| ).
-      io_html->add_a( iv_act = |{ zif_abapgit_definitions=>gc_action-repo_toggle_fav }?{ <ls_overview>-key }|
-                      iv_txt = zcl_abapgit_html=>icon( iv_name  = lv_favorite_icon
-                                                       iv_class = 'pad-sides'
-                                                       iv_hint  = 'Click to toggle favorite' ) ).
-      io_html->add( |</td>| ).
-      io_html->add( |<td>{ zcl_abapgit_html=>icon( lv_type_icon )  }</td>| ).
-
-      io_html->add( |<td>{ <ls_overview>-key }</td>| ).
-      io_html->add( |<td>{ zcl_abapgit_html=>a( iv_txt = <ls_overview>-name
-                                                iv_act = |{ gc_action-select }?{ <ls_overview>-key }| ) }</td>| ).
-      io_html->add( |<td>{ <ls_overview>-url }</td>| ).
-      io_html->add( |<td>{ <ls_overview>-package }</td>| ).
-      io_html->add( |<td>{ <ls_overview>-branch }</td>| ).
-      io_html->add( |<td>{ <ls_overview>-created_by }</td>| ).
-      io_html->add( |<td>{ <ls_overview>-created_at }</td>| ).
-      io_html->add( |<td>{ <ls_overview>-deserialized_by }</td>| ).
-      io_html->add( |<td>{ <ls_overview>-deserialized_at }</td>| ).
-      io_html->add( |<td>| ).
-      io_html->add( |</td>| ).
-      io_html->add( |</tr>| ).
-
-    ENDLOOP.
+    io_html->add( |</form>| ).
+    io_html->add( |</div>| ).
 
   ENDMETHOD.
 
@@ -557,31 +427,187 @@ CLASS zcl_abapgit_gui_page_repo_over IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD render_header_bar.
+  METHOD render_table.
 
-    io_html->add( |<div class="row">| ).
+    io_html->add( |<div class="db_list">| ).
+    io_html->add( |<table class="db_tab">| ).
 
-    render_order_by( io_html ).
-    render_order_by_direction( io_html ).
+    render_table_header( io_html ).
+    render_table_body( io_html     = io_html
+                       it_overview = it_overview  ).
 
-    io_html->add( render_text_input( iv_name  = |filter|
-                                     iv_label = |Filter: |
-                                     iv_value = mv_filter ) ).
-
-    io_html->add( |<input type="submit" class="hidden-submit">| ).
-
-    io_html->add( |</div>| ).
-
-    io_html->add( |</form>| ).
-    io_html->add( |</div>| ).
+    io_html->add( |</tbody>| ).
+    io_html->add( |</table>| ).
 
   ENDMETHOD.
+
+
+  METHOD render_table_body.
+
+    DATA: lv_trclass       TYPE string,
+          lv_type_icon     TYPE string,
+          lv_favorite_icon TYPE string.
+
+    FIELD-SYMBOLS: <ls_overview> LIKE LINE OF it_overview.
+
+    LOOP AT it_overview ASSIGNING <ls_overview>.
+
+      CLEAR lv_trclass.
+      IF sy-tabix = 1.
+        lv_trclass = ' class="firstrow"' ##NO_TEXT.
+      ENDIF.
+
+      IF <ls_overview>-type = abap_true.
+        lv_type_icon = 'plug/darkgrey'.
+      ELSE.
+        lv_type_icon = 'cloud-upload/blue'.
+      ENDIF.
+
+      IF <ls_overview>-favorite = abap_true.
+        lv_favorite_icon = 'star/blue'.
+      ELSE.
+        lv_favorite_icon = 'star/grey'.
+      ENDIF.
+
+      io_html->add( |<tr{ lv_trclass }>| ).
+      io_html->add( |<td>| ).
+      io_html->add_a( iv_act = |{ zif_abapgit_definitions=>c_action-repo_toggle_fav }?{ <ls_overview>-key }|
+                      iv_txt = zcl_abapgit_html=>icon( iv_name  = lv_favorite_icon
+                                                       iv_class = 'pad-sides'
+                                                       iv_hint  = 'Click to toggle favorite' ) ).
+      io_html->add( |</td>| ).
+      io_html->add( |<td>{ zcl_abapgit_html=>icon( lv_type_icon )  }</td>| ).
+
+      io_html->add( |<td>{ <ls_overview>-key }</td>| ).
+      io_html->add( |<td>{ zcl_abapgit_html=>a( iv_txt = <ls_overview>-name
+                                                iv_act = |{ c_action-select }?{ <ls_overview>-key }| ) }</td>| ).
+
+      IF <ls_overview>-type = abap_false.
+        io_html->add( |<td>{ io_html->a( iv_txt = <ls_overview>-url
+                                         iv_act = |{ zif_abapgit_definitions=>c_action-url }?|
+                                               && |{ <ls_overview>-url }| ) }</td>| ).
+      ELSE.
+        io_html->add( |<td> </td>| ).
+      ENDIF.
+
+      io_html->add( |<td>{ <ls_overview>-package }</td>| ).
+      io_html->add( |<td>{ <ls_overview>-branch }</td>| ).
+      io_html->add( |<td>{ <ls_overview>-created_by }</td>| ).
+      io_html->add( |<td>{ <ls_overview>-created_at }</td>| ).
+      io_html->add( |<td>{ <ls_overview>-deserialized_by }</td>| ).
+      io_html->add( |<td>{ <ls_overview>-deserialized_at }</td>| ).
+      io_html->add( |<td>| ).
+      io_html->add( |</td>| ).
+      io_html->add( |</tr>| ).
+
+    ENDLOOP.
+
+  ENDMETHOD.
+
+
+  METHOD render_table_header.
+
+    io_html->add( |<thead>| ).
+    io_html->add( |<tr>| ).
+    io_html->add( |<th>Favorite</th>| ).
+    io_html->add( |<th>Type</th>| ).
+    io_html->add( |<th>Key</th>| ).
+    io_html->add( |<th>Name</th>| ).
+    io_html->add( |<th>Url</th>| ).
+    io_html->add( |<th>Package</th>| ).
+    io_html->add( |<th>Branch name</th>| ).
+    io_html->add( |<th>Creator</th>| ).
+    io_html->add( |<th>Created at [{ mv_time_zone }]</th>| ).
+    io_html->add( |<th>Deserialized by</th>| ).
+    io_html->add( |<th>Deserialized at [{ mv_time_zone }]</th>| ).
+    io_html->add( |<th></th>| ).
+    io_html->add( '</tr>' ).
+    io_html->add( '</thead>' ).
+    io_html->add( '<tbody>' ).
+
+  ENDMETHOD.
+
+
+  METHOD render_text_input.
+
+    DATA lv_attrs TYPE string.
+
+    CREATE OBJECT ro_html.
+
+    IF iv_value IS NOT INITIAL.
+      lv_attrs = | value="{ iv_value }"|.
+    ENDIF.
+
+    IF iv_max_length IS NOT INITIAL.
+      lv_attrs = | maxlength="{ iv_max_length }"|.
+    ENDIF.
+
+    ro_html->add( |<label for="{ iv_name }">{ iv_label }</label>| ).
+    ro_html->add( |<input id="{ iv_name }" name="{ iv_name }" type="text"{ lv_attrs }>| ).
+
+  ENDMETHOD.  " render_text_input
+
 
   METHOD scripts.
 
     ro_html = super->scripts( ).
 
     ro_html->add( 'setInitialFocus("filter");' ).
+
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_gui_page~on_event.
+
+    DATA: lv_key  TYPE zif_abapgit_persistence=>ty_value.
+
+    CASE iv_action.
+      WHEN c_action-select.
+
+        lv_key = iv_getdata.
+
+        zcl_abapgit_persistence_user=>get_instance( )->set_repo_show( lv_key ).
+
+        TRY.
+            zcl_abapgit_repo_srv=>get_instance( )->get( lv_key )->refresh( ).
+          CATCH zcx_abapgit_exception ##NO_HANDLER.
+        ENDTRY.
+
+        ev_state = zif_abapgit_definitions=>c_event_state-go_back.
+
+      WHEN c_action-change_order_by.
+
+        parse_change_order_by( it_postdata ).
+        ev_state = zif_abapgit_definitions=>c_event_state-re_render.
+
+      WHEN c_action-direction.
+
+        parse_direction( it_postdata ).
+        ev_state = zif_abapgit_definitions=>c_event_state-re_render.
+
+      WHEN c_action-apply_filter.
+
+        parse_filter( it_postdata ).
+        ev_state = zif_abapgit_definitions=>c_event_state-re_render.
+
+      WHEN OTHERS.
+
+        super->zif_abapgit_gui_page~on_event(
+          EXPORTING
+            iv_action    = iv_action
+            iv_prev_page = iv_prev_page
+            iv_getdata   = iv_getdata
+            it_postdata  = it_postdata
+          IMPORTING
+            ei_page      = ei_page
+            ev_state     = ev_state  ).
+
+    ENDCASE.
+
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_gui_page_hotkey~get_hotkey_actions.
 
   ENDMETHOD.
 

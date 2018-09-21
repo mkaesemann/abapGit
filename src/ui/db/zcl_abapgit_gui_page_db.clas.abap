@@ -5,6 +5,7 @@ CLASS zcl_abapgit_gui_page_db DEFINITION
   CREATE PUBLIC .
 
   PUBLIC SECTION.
+    INTERFACES: zif_abapgit_gui_page_hotkey.
 
     METHODS constructor .
 
@@ -17,9 +18,9 @@ CLASS zcl_abapgit_gui_page_db DEFINITION
   PRIVATE SECTION.
 
     CONSTANTS:
-      BEGIN OF gc_action,
+      BEGIN OF c_action,
         delete TYPE string VALUE 'delete',
-      END OF gc_action .
+      END OF c_action .
 
     CLASS-METHODS delete
       IMPORTING
@@ -54,14 +55,14 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_DB IMPLEMENTATION.
     ASSERT is_key-type IS NOT INITIAL.
 
     lv_answer = zcl_abapgit_ui_factory=>get_popups( )->popup_to_confirm(
-      titlebar              = 'Warning'
-      text_question         = 'Delete?'
-      text_button_1         = 'Ok'
-      icon_button_1         = 'ICON_DELETE'
-      text_button_2         = 'Cancel'
-      icon_button_2         = 'ICON_CANCEL'
-      default_button        = '2'
-      display_cancel_button = abap_false ).                 "#EC NOTEXT
+      iv_titlebar              = 'Warning'
+      iv_text_question         = 'Delete?'
+      iv_text_button_1         = 'Ok'
+      iv_icon_button_1         = 'ICON_DELETE'
+      iv_text_button_2         = 'Cancel'
+      iv_icon_button_2         = 'ICON_CANCEL'
+      iv_default_button        = '2'
+      iv_display_cancel_button = abap_false ).                 "#EC NOTEXT
 
     IF lv_answer = '2'.
       RAISE EXCEPTION TYPE zcx_abapgit_cancel.
@@ -166,9 +167,9 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_DB IMPLEMENTATION.
       lv_action  = zcl_abapgit_html_action_utils=>dbkey_encode( <ls_data> ).
 
       CREATE OBJECT lo_toolbar.
-      lo_toolbar->add( iv_txt = 'Display' iv_act = |{ zif_abapgit_definitions=>gc_action-db_display }?{ lv_action }| ).
-      lo_toolbar->add( iv_txt = 'Edit'    iv_act = |{ zif_abapgit_definitions=>gc_action-db_edit }?{ lv_action }| ).
-      lo_toolbar->add( iv_txt = 'Delete'  iv_act = |{ gc_action-delete }?{ lv_action }| ).
+      lo_toolbar->add( iv_txt = 'Display' iv_act = |{ zif_abapgit_definitions=>c_action-db_display }?{ lv_action }| ).
+      lo_toolbar->add( iv_txt = 'Edit'    iv_act = |{ zif_abapgit_definitions=>c_action-db_edit }?{ lv_action }| ).
+      lo_toolbar->add( iv_txt = 'Delete'  iv_act = |{ c_action-delete }?{ lv_action }| ).
 
       ro_html->add( |<tr{ lv_trclass }>| ).
       ro_html->add( |<td>{ <ls_data>-type }</td>| ).
@@ -187,15 +188,20 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_DB IMPLEMENTATION.
   ENDMETHOD.            "render_content
 
 
+  METHOD zif_abapgit_gui_page_hotkey~get_hotkey_actions.
+
+  ENDMETHOD.
+
+
   METHOD zif_abapgit_gui_page~on_event.
 
     DATA: ls_db TYPE zif_abapgit_persistence=>ty_content.
 
     CASE iv_action.
-      WHEN gc_action-delete.
+      WHEN c_action-delete.
         ls_db = zcl_abapgit_html_action_utils=>dbkey_decode( iv_getdata ).
         delete( ls_db ).
-        ev_state = zif_abapgit_definitions=>gc_event_state-re_render.
+        ev_state = zif_abapgit_definitions=>c_event_state-re_render.
     ENDCASE.
 
   ENDMETHOD.

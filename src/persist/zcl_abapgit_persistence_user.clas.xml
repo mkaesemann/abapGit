@@ -12,14 +12,6 @@
     <FIXPT>X</FIXPT>
     <UNICODE>X</UNICODE>
    </VSEOCLASS>
-   <DESCRIPTIONS>
-    <SEOCOMPOTX>
-     <CLSNAME>ZCL_ABAPGIT_PERSISTENCE_USER</CLSNAME>
-     <CMPNAME>GO_CURRENT_USER</CMPNAME>
-     <LANGU>E</LANGU>
-     <DESCRIPT>User persistence</DESCRIPT>
-    </SEOCOMPOTX>
-   </DESCRIPTIONS>
   </asx:values>
  </asx:abap>
 </abapGit>

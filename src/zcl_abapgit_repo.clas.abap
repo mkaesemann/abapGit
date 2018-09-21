@@ -153,14 +153,9 @@ CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
 
   METHOD delete.
 
-    DATA: lo_persistence TYPE REF TO zcl_abapgit_persistence_repo.
+    zcl_abapgit_persist_factory=>get_repo( )->delete( ms_data-key ).
 
-
-    CREATE OBJECT lo_persistence.
-
-    lo_persistence->delete( ms_data-key ).
-
-  ENDMETHOD.                    "delete
+  ENDMETHOD.
 
 
   METHOD delete_checks.
@@ -237,8 +232,8 @@ CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
 
 
     READ TABLE mt_remote ASSIGNING <ls_remote>
-      WITH KEY path = zif_abapgit_definitions=>gc_root_dir
-      filename = zif_abapgit_definitions=>gc_dot_abapgit.
+      WITH KEY path = zif_abapgit_definitions=>c_root_dir
+      filename = zif_abapgit_definitions=>c_dot_abapgit.
     IF sy-subrc = 0.
       ro_dot = zcl_abapgit_dot_abapgit=>deserialize( <ls_remote>-data ).
       set_dot_abapgit( ro_dot ).
@@ -280,10 +275,10 @@ CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
     ENDIF.
 
     APPEND INITIAL LINE TO rt_files ASSIGNING <ls_return>.
-    <ls_return>-file-path     = zif_abapgit_definitions=>gc_root_dir.
-    <ls_return>-file-filename = zif_abapgit_definitions=>gc_dot_abapgit.
+    <ls_return>-file-path     = zif_abapgit_definitions=>c_root_dir.
+    <ls_return>-file-filename = zif_abapgit_definitions=>c_dot_abapgit.
     <ls_return>-file-data     = get_dot_abapgit( )->serialize( ).
-    <ls_return>-file-sha1     = zcl_abapgit_hash=>sha1( iv_type = zif_abapgit_definitions=>gc_type-blob
+    <ls_return>-file-sha1     = zcl_abapgit_hash=>sha1( iv_type = zif_abapgit_definitions=>c_type-blob
                                                         iv_data = <ls_return>-file-data ).
 
     lt_cache = mt_local.
@@ -349,15 +344,12 @@ CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
           ENDIF.
         ENDIF.
 
-        lt_files = zcl_abapgit_objects=>serialize(
-          is_item     = ls_item
-          iv_language = get_dot_abapgit( )->get_master_language( )
-          io_log      = io_log ).
-        LOOP AT lt_files ASSIGNING <ls_file>.
-          <ls_file>-path = <ls_tadir>-path.
-          <ls_file>-sha1 = zcl_abapgit_hash=>sha1(
-            iv_type = zif_abapgit_definitions=>gc_type-blob
-            iv_data = <ls_file>-data ).
+      lt_files = zcl_abapgit_objects=>serialize(
+        is_item     = ls_item
+        iv_language = get_dot_abapgit( )->get_master_language( )
+        io_log      = io_log ).
+      LOOP AT lt_files ASSIGNING <ls_file>.
+        <ls_file>-path = <ls_tadir>-path.
 
           APPEND INITIAL LINE TO rt_files ASSIGNING <ls_return>.
           <ls_return>-file = <ls_file>.
@@ -444,8 +436,8 @@ CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
 
     DELETE lt_local " Remove non-code related files except .abapgit
       WHERE item IS INITIAL
-      AND NOT ( file-path     = zif_abapgit_definitions=>gc_root_dir
-      AND       file-filename = zif_abapgit_definitions=>gc_dot_abapgit ).
+      AND NOT ( file-path     = zif_abapgit_definitions=>c_root_dir
+      AND       file-filename = zif_abapgit_definitions=>c_dot_abapgit ).
 
     SORT lt_local BY item.
 
@@ -508,7 +500,7 @@ CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
 
 * TODO: refactor
 
-    DATA: lo_persistence TYPE REF TO zcl_abapgit_persistence_repo.
+    DATA: li_persistence TYPE REF TO zif_abapgit_persist_repo.
 
 
     ASSERT it_checksums IS SUPPLIED
@@ -521,60 +513,59 @@ CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
       OR iv_deserialized_by IS SUPPLIED
       OR iv_deserialized_at IS SUPPLIED.
 
-    CREATE OBJECT lo_persistence.
+    li_persistence = zcl_abapgit_persist_factory=>get_repo( ).
 
     IF it_checksums IS SUPPLIED.
-      lo_persistence->update_local_checksums(
+      li_persistence->update_local_checksums(
         iv_key       = ms_data-key
         it_checksums = it_checksums ).
       ms_data-local_checksums = it_checksums.
     ENDIF.
 
     IF iv_url IS SUPPLIED.
-      lo_persistence->update_url(
+      li_persistence->update_url(
         iv_key = ms_data-key
         iv_url = iv_url ).
       ms_data-url = iv_url.
     ENDIF.
 
     IF iv_branch_name IS SUPPLIED.
-      lo_persistence->update_branch_name(
+      li_persistence->update_branch_name(
         iv_key         = ms_data-key
         iv_branch_name = iv_branch_name ).
       ms_data-branch_name = iv_branch_name.
     ENDIF.
 
     IF iv_head_branch IS SUPPLIED.
-      lo_persistence->update_head_branch(
+      li_persistence->update_head_branch(
         iv_key         = ms_data-key
         iv_head_branch = iv_head_branch ).
       ms_data-head_branch = iv_head_branch.
     ENDIF.
 
     IF iv_offline IS SUPPLIED.
-      lo_persistence->update_offline(
+      li_persistence->update_offline(
         iv_key     = ms_data-key
         iv_offline = iv_offline ).
       ms_data-offline = iv_offline.
     ENDIF.
 
     IF is_dot_abapgit IS SUPPLIED.
-      lo_persistence->update_dot_abapgit(
+      li_persistence->update_dot_abapgit(
         iv_key         = ms_data-key
         is_dot_abapgit = is_dot_abapgit ).
       ms_data-dot_abapgit = is_dot_abapgit.
     ENDIF.
 
     IF is_local_settings IS SUPPLIED.
-      lo_persistence->update_local_settings(
+      li_persistence->update_local_settings(
         iv_key      = ms_data-key
         is_settings = is_local_settings ).
       ms_data-local_settings = is_local_settings.
     ENDIF.
 
-    IF iv_deserialized_at IS SUPPLIED
-    OR iv_deserialized_by IS SUPPLIED.
-      lo_persistence->update_deserialized(
+    IF iv_deserialized_at IS SUPPLIED OR iv_deserialized_by IS SUPPLIED.
+      li_persistence->update_deserialized(
         iv_key             = ms_data-key
         iv_deserialized_at = iv_deserialized_at
         iv_deserialized_by = iv_deserialized_by ).

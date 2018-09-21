@@ -18,8 +18,8 @@ CLASS zcl_abapgit_gui_chunk_lib DEFINITION PUBLIC FINAL CREATE PUBLIC.
       RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS render_item_state
-      IMPORTING iv1            TYPE char1
-                iv2            TYPE char1
+      IMPORTING iv_lstate      TYPE char1
+                iv_rstate      TYPE char1
       RETURNING VALUE(rv_html) TYPE string.
 
     CLASS-METHODS render_branch_span
@@ -39,11 +39,17 @@ CLASS zcl_abapgit_gui_chunk_lib DEFINITION PUBLIC FINAL CREATE PUBLIC.
       RETURNING VALUE(ro_html) TYPE REF TO zcl_abapgit_html
       RAISING   zcx_abapgit_exception.
 
+    CLASS-METHODS render_hotkey_overview
+      RETURNING
+        VALUE(ro_html) TYPE REF TO zcl_abapgit_html
+      RAISING
+        zcx_abapgit_exception.
+
 ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_GUI_CHUNK_LIB IMPLEMENTATION.
+CLASS zcl_abapgit_gui_chunk_lib IMPLEMENTATION.
 
 
   METHOD render_branch_span.
@@ -63,7 +69,7 @@ CLASS ZCL_ABAPGIT_GUI_CHUNK_LIB IMPLEMENTATION.
     ro_html->add( |<span class="{ lv_class }">| ).
     ro_html->add_icon( iv_name = 'git-branch/darkgrey' iv_hint = 'Current branch' ).
     IF iv_interactive = abap_true.
-      ro_html->add_a( iv_act = |{ zif_abapgit_definitions=>gc_action-git_branch_switch }?{ io_repo->get_key( ) }|
+      ro_html->add_a( iv_act = |{ zif_abapgit_definitions=>c_action-git_branch_switch }?{ io_repo->get_key( ) }|
                       iv_txt = lv_text ).
     ELSE.
       ro_html->add( lv_text ).
@@ -92,6 +98,72 @@ CLASS ZCL_ABAPGIT_GUI_CHUNK_LIB IMPLEMENTATION.
   ENDMETHOD. "render_error
 
 
+  METHOD render_hotkey_overview.
+
+    DATA: lv_display  TYPE string,
+          lt_hotkeys  TYPE zif_abapgit_definitions=>tty_hotkey,
+          lt_actions  TYPE zif_abapgit_gui_page_hotkey=>tty_hotkey_action,
+          lo_settings TYPE REF TO zcl_abapgit_settings.
+
+    FIELD-SYMBOLS: <ls_hotkey> TYPE zif_abapgit_definitions=>ty_hotkey,
+                   <ls_action> LIKE LINE OF lt_actions.
+
+    lo_settings = zcl_abapgit_persist_settings=>get_instance( )->read( ).
+
+    lt_hotkeys = lo_settings->get_hotkeys( ).
+
+    lt_actions = zcl_abapgit_hotkeys=>get_default_hotkeys_from_pages( ).
+
+    CREATE OBJECT ro_html.
+
+    lv_display = 'display:none'.
+
+    ro_html->add( |<div id="hotkeys" class="news" style="{ lv_display }">| ).
+
+    ro_html->add( '<div class="headbar title">Hotkeys'
+               && '<div class="float-right">'
+               && zcl_abapgit_html=>a(
+                    iv_txt   = '&#x274c;'
+                    iv_typ   = zif_abapgit_definitions=>c_action_type-onclick
+                    iv_act   = 'closeHotkeyOverview()'
+                    iv_class = 'close-btn' )
+               && '</div></div>' ).
+
+    READ TABLE lt_hotkeys ASSIGNING <ls_hotkey>
+                          WITH KEY action = zcl_abapgit_gui_page=>c_global_page_action-showhotkeys.
+    IF sy-subrc = 0.
+      ro_html->add( |<div class="paddings">Close window with '{ <ls_hotkey>-sequence }' |
+                 && |or upper right corner X</div>| ).
+    ENDIF.
+
+    " Generate hotkeys
+    ro_html->add( |<div class="newslist">| ).
+
+    ro_html->add( '<table>' ).
+
+    LOOP AT lt_hotkeys ASSIGNING <ls_hotkey>.
+
+      READ TABLE lt_actions ASSIGNING <ls_action>
+                            WITH TABLE KEY action
+                            COMPONENTS action = <ls_hotkey>-action.
+
+      IF sy-subrc = 0.
+        ro_html->add( '<tr>' ).
+        ro_html->add( |<td>{ <ls_hotkey>-sequence }</td><td>-</td><td>{ <ls_action>-name }</td>| ).
+        ro_html->add( '</tr>' ).
+      ENDIF.
+
+    ENDLOOP.
+
+    ro_html->add( '</table>' ).
+
+    ro_html->add( '</div>' ).
+
+    ro_html->add( '</div>' ).
+
+  ENDMETHOD.
+
+
   METHOD render_item_state.
 
     DATA: lv_system TYPE string.
@@ -104,27 +176,27 @@ CLASS ZCL_ABAPGIT_GUI_CHUNK_LIB IMPLEMENTATION.
     DO 2 TIMES.
       CASE sy-index.
         WHEN 1.
-          ASSIGN iv1 TO <lv_state>.
+          ASSIGN iv_lstate TO <lv_state>.
           lv_system = 'Local:'.
         WHEN 2.
-          ASSIGN iv2 TO <lv_state>.
+          ASSIGN iv_rstate TO <lv_state>.
           lv_system = 'Remote:'.
       ENDCASE.
 
       CASE <lv_state>.
-        WHEN zif_abapgit_definitions=>gc_state-unchanged.  "None or unchanged
-          IF iv1 = zif_abapgit_definitions=>gc_state-added OR iv2 = zif_abapgit_definitions=>gc_state-added.
+        WHEN zif_abapgit_definitions=>c_state-unchanged.  "None or unchanged
+          IF iv_lstate = zif_abapgit_definitions=>c_state-added OR iv_rstate = zif_abapgit_definitions=>c_state-added.
             rv_html = rv_html && |<span class="none" title="{ lv_system } Not exists">X</span>|.
           ELSE.
             rv_html = rv_html && |<span class="none" title="{ lv_system } No changes">&nbsp;</span>|.
           ENDIF.
-        WHEN zif_abapgit_definitions=>gc_state-modified.   "Changed
+        WHEN zif_abapgit_definitions=>c_state-modified.   "Changed
           rv_html = rv_html && |<span class="changed" title="{ lv_system } Modified">M</span>|.
-        WHEN zif_abapgit_definitions=>gc_state-added.      "Added new
+        WHEN zif_abapgit_definitions=>c_state-added.      "Added new
           rv_html = rv_html && |<span class="added" title="{ lv_system } Added new">A</span>|.
-        WHEN zif_abapgit_definitions=>gc_state-mixed.      "Multiple changes (multifile)
+        WHEN zif_abapgit_definitions=>c_state-mixed.      "Multiple changes (multifile)
           rv_html = rv_html && |<span class="mixed" title="{ lv_system } Multiple changes">&#x25A0;</span>|.
-        WHEN zif_abapgit_definitions=>gc_state-deleted.    "Deleted
+        WHEN zif_abapgit_definitions=>c_state-deleted.    "Deleted
           rv_html = rv_html && |<span class="deleted" title="{ lv_system } Deleted">D</span>|.
       ENDCASE.
     ENDDO.
@@ -170,7 +242,7 @@ CLASS ZCL_ABAPGIT_GUI_CHUNK_LIB IMPLEMENTATION.
                && '<div class="float-right">'
                && zcl_abapgit_html=>a(
                     iv_txt   = '&#x274c;'
-                    iv_typ   = zif_abapgit_definitions=>gc_action_type-onclick
+                    iv_typ   = zif_abapgit_definitions=>c_action_type-onclick
                     iv_act   = 'displayNews()'
                     iv_class = 'close-btn' )
                && '</div></div>' ).
@@ -233,7 +305,12 @@ CLASS ZCL_ABAPGIT_GUI_CHUNK_LIB IMPLEMENTATION.
     ro_html->add( |<span class="name">{ io_repo->get_name( ) }</span>| ).
     IF io_repo->is_offline( ) = abap_false.
       lo_repo_online ?= io_repo.
-      ro_html->add( |<span class="url">{ lo_repo_online->get_url( ) }</span>| ).
+
+      ro_html->add_a( iv_txt   = lo_repo_online->get_url( )
+                      iv_act   = |{ zif_abapgit_definitions=>c_action-url }?|
+                              && |{ lo_repo_online->get_url( ) }|
+                      iv_class = |url| ).
+
     ENDIF.
 
     " News
@@ -244,10 +321,10 @@ CLASS ZCL_ABAPGIT_GUI_CHUNK_LIB IMPLEMENTATION.
         lv_icon = 'arrow-up/grey80'.
       ENDIF.
       ro_html->add_a( iv_act = 'displayNews()'
-                      iv_typ = zif_abapgit_definitions=>gc_action_type-onclick
+                      iv_typ = zif_abapgit_definitions=>c_action_type-onclick
                       iv_txt = zcl_abapgit_html=>icon( iv_name  = lv_icon
                                                        iv_class = 'pad-sides'
-                                                      iv_hint  = 'Display changelog' ) ).
+                                                       iv_hint  = 'Display changelog' ) ).
     ENDIF.
     ro_html->add( '</td>' ).
 
@@ -259,7 +336,7 @@ CLASS ZCL_ABAPGIT_GUI_CHUNK_LIB IMPLEMENTATION.
     ELSE.
       lv_icon = 'star/grey' ##NO_TEXT.
     ENDIF.
-    ro_html->add_a( iv_act = |{ zif_abapgit_definitions=>gc_action-repo_toggle_fav }?{ io_repo->get_key( ) }|
+    ro_html->add_a( iv_act = |{ zif_abapgit_definitions=>c_action-repo_toggle_fav }?{ io_repo->get_key( ) }|
                     iv_txt = zcl_abapgit_html=>icon( iv_name  = lv_icon
                                                      iv_class = 'pad-sides'
                                                      iv_hint  = 'Click to toggle favorite' ) ).
@@ -295,7 +372,7 @@ CLASS ZCL_ABAPGIT_GUI_CHUNK_LIB IMPLEMENTATION.
       ro_html->add_icon( iv_name = 'package/darkgrey' iv_hint = 'SAP package' ).
       ro_html->add( '<span>' ).
       ro_html->add_a( iv_txt = io_repo->get_package( )
-                      iv_act = |{ zif_abapgit_definitions=>gc_action-jump_pkg }?{ io_repo->get_package( ) }| ).
+                      iv_act = |{ zif_abapgit_definitions=>c_action-jump_pkg }?{ io_repo->get_package( ) }| ).
       ro_html->add( '</span>' ).
     ENDIF.
 

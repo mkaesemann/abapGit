@@ -5,10 +5,11 @@ CLASS zcl_abapgit_gui_page_db_edit DEFINITION
   CREATE PUBLIC .
 
   PUBLIC SECTION.
+    INTERFACES: zif_abapgit_gui_page_hotkey.
 
     METHODS constructor
       IMPORTING
-        !is_key TYPE zif_abapgit_persistence=>ty_content .
+        is_key TYPE zif_abapgit_persistence=>ty_content .
 
     METHODS zif_abapgit_gui_page~on_event
         REDEFINITION .
@@ -100,8 +101,8 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_DB_EDIT IMPLEMENTATION.
     CREATE OBJECT lo_toolbar.
     lo_toolbar->add( iv_act = 'submitFormById(''db_form'');'
                      iv_txt = 'Save'
-                     iv_typ = zif_abapgit_definitions=>gc_action_type-onclick
-                     iv_opt = zif_abapgit_definitions=>gc_html_opt-strong ) ##NO_TEXT.
+                     iv_typ = zif_abapgit_definitions=>c_action_type-onclick
+                     iv_opt = zif_abapgit_definitions=>c_html_opt-strong ) ##NO_TEXT.
 
     ro_html->add( '<div class="db_entry">' ).
 
@@ -138,6 +139,11 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_DB_EDIT IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD zif_abapgit_gui_page_hotkey~get_hotkey_actions.
+
+  ENDMETHOD.
+
+
   METHOD zif_abapgit_gui_page~on_event.
 
     DATA: ls_db TYPE zif_abapgit_persistence=>ty_content.
@@ -146,7 +152,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_DB_EDIT IMPLEMENTATION.
       WHEN c_action-update.
         ls_db = dbcontent_decode( it_postdata ).
         update( ls_db ).
-        ev_state = zif_abapgit_definitions=>gc_event_state-go_back.
+        ev_state = zif_abapgit_definitions=>c_event_state-go_back.
     ENDCASE.
 
   ENDMETHOD.

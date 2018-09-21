@@ -4,6 +4,8 @@ CLASS zcl_abapgit_gui_page_boverview DEFINITION
   CREATE PUBLIC INHERITING FROM zcl_abapgit_gui_page.
 
   PUBLIC SECTION.
+    INTERFACES: zif_abapgit_gui_page_hotkey.
+
     METHODS:
       constructor
         IMPORTING io_repo TYPE REF TO zcl_abapgit_repo_online
@@ -58,12 +60,11 @@ CLASS zcl_abapgit_gui_page_boverview DEFINITION
 ENDCLASS.
 
 
-
-CLASS ZCL_ABAPGIT_GUI_PAGE_BOVERVIEW IMPLEMENTATION.
-
+CLASS zcl_abapgit_gui_page_boverview IMPLEMENTATION.
 
   METHOD body.
-    DATA: lv_tag TYPE string.
+    DATA: lv_tag                 TYPE string.
+    DATA: lv_branch_display_name TYPE string.
 
     FIELD-SYMBOLS: <ls_commit> LIKE LINE OF mt_commits,
                    <ls_create> LIKE LINE OF <ls_commit>-create.
@@ -87,7 +88,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_BOVERVIEW IMPLEMENTATION.
     ro_html->add( '<canvas id="gitGraph"></canvas>' ).
 
     ro_html->add( '<script type="text/javascript" src="https://cdnjs.' &&
-      'cloudflare.com/ajax/libs/gitgraph.js/1.2.3/gitgraph.min.js">' &&
+      'cloudflare.com/ajax/libs/gitgraph.js/1.12.0/gitgraph.min.js">' &&
       '</script>' ) ##NO_TEXT.
 
     ro_html->add( '<script type="text/javascript">' ).
@@ -143,9 +144,15 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_BOVERVIEW IMPLEMENTATION.
       ENDIF.
 
       LOOP AT <ls_commit>-create ASSIGNING <ls_create>.
+        IF <ls_create>-name CS zcl_abapgit_branch_overview=>c_deleted_branch_name_prefix.
+          lv_branch_display_name = ''.
+        ELSE.
+          lv_branch_display_name = <ls_create>-name.
+        ENDIF.
+
         ro_html->add( |var { escape_branch( <ls_create>-name ) } = {
-          escape_branch( <ls_create>-parent ) }.branch("{
-          <ls_create>-name }");| ).
+                      escape_branch( <ls_create>-parent ) }.branch("{
+                      lv_branch_display_name }");| ).
       ENDLOOP.
 
     ENDLOOP.
@@ -285,6 +292,11 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_BOVERVIEW IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD zif_abapgit_gui_page_hotkey~get_hotkey_actions.
+
+  ENDMETHOD.
+
+
   METHOD zif_abapgit_gui_page~on_event.
 
     DATA: ls_merge TYPE ty_merge,
@@ -294,15 +306,15 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_BOVERVIEW IMPLEMENTATION.
     CASE iv_action.
       WHEN c_actions-refresh.
         refresh( ).
-        ev_state = zif_abapgit_definitions=>gc_event_state-re_render.
+        ev_state = zif_abapgit_definitions=>c_event_state-re_render.
       WHEN c_actions-uncompress.
         mv_compress = abap_false.
         refresh( ).
-        ev_state = zif_abapgit_definitions=>gc_event_state-re_render.
+        ev_state = zif_abapgit_definitions=>c_event_state-re_render.
       WHEN c_actions-compress.
         mv_compress = abap_true.
         refresh( ).
-        ev_state = zif_abapgit_definitions=>gc_event_state-re_render.
+        ev_state = zif_abapgit_definitions=>c_event_state-re_render.
       WHEN c_actions-merge.
         ls_merge = decode_merge( it_postdata ).
         CREATE OBJECT lo_merge
@@ -311,7 +323,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_BOVERVIEW IMPLEMENTATION.
             iv_source = ls_merge-source
             iv_target = ls_merge-target.
         ei_page = lo_merge.
-        ev_state = zif_abapgit_definitions=>gc_event_state-new_page.
+        ev_state = zif_abapgit_definitions=>c_event_state-new_page.
     ENDCASE.
 
   ENDMETHOD.

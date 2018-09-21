@@ -58,6 +58,13 @@ INTERFACE zif_abapgit_definitions PUBLIC.
   TYPES:
     ty_git_tag_list_tt TYPE STANDARD TABLE OF ty_git_tag WITH DEFAULT KEY .
 
+  TYPES:
+    BEGIN OF ty_hotkey,
+      sequence TYPE string,
+      action   TYPE string,
+    END OF ty_hotkey,
+    tty_hotkey TYPE STANDARD TABLE OF ty_hotkey
+                    WITH NON-UNIQUE DEFAULT KEY.
 
   CONSTANTS:
     BEGIN OF c_git_branch_type,
@@ -256,13 +263,14 @@ INTERFACE zif_abapgit_definitions PUBLIC.
              END OF c_diff.
 
   TYPES: BEGIN OF ty_diff,
-           new_num TYPE c LENGTH 6,
-           new     TYPE string,
-           result  TYPE c LENGTH 1,
-           old_num TYPE c LENGTH 6,
-           old     TYPE string,
-           short   TYPE abap_bool,
-           beacon  TYPE i,
+           patch_flag TYPE abap_bool,
+           new_num    TYPE c LENGTH 6,
+           new        TYPE string,
+           result     TYPE c LENGTH 1,
+           old_num    TYPE c LENGTH 6,
+           old        TYPE string,
+           short      TYPE abap_bool,
+           beacon     TYPE i,
          END OF ty_diff.
   TYPES:  ty_diffs_tt TYPE STANDARD TABLE OF ty_diff WITH DEFAULT KEY.
 
@@ -334,32 +342,46 @@ INTERFACE zif_abapgit_definitions PUBLIC.
            link_hints_enabled         TYPE abap_bool,
            link_hint_key              TYPE char01,
            link_hint_background_color TYPE string,
+           hotkeys                    TYPE tty_hotkey,
          END OF ty_s_user_settings.
 
+  TYPES:
+          tty_dokil TYPE STANDARD TABLE OF dokil
+                         WITH NON-UNIQUE DEFAULT KEY.
+  TYPES: tty_lines TYPE STANDARD TABLE OF i
+                        WITH NON-UNIQUE DEFAULT KEY,
+         BEGIN OF ty_patch,
+           filename  TYPE string,
+           lines_new TYPE tty_lines,
+           lines_old TYPE tty_lines,
+         END OF ty_patch,
+         tty_patch TYPE HASHED TABLE OF ty_patch
+                        WITH UNIQUE KEY filename.
+
   CONSTANTS:
-    BEGIN OF gc_type,
+    BEGIN OF c_type,
       commit TYPE zif_abapgit_definitions=>ty_type VALUE 'commit', "#EC NOTEXT
       tree   TYPE zif_abapgit_definitions=>ty_type VALUE 'tree', "#EC NOTEXT
       ref_d  TYPE zif_abapgit_definitions=>ty_type VALUE 'ref_d', "#EC NOTEXT
       tag    TYPE zif_abapgit_definitions=>ty_type VALUE 'tag', "#EC NOTEXT
       blob   TYPE zif_abapgit_definitions=>ty_type VALUE 'blob', "#EC NOTEXT
-    END OF gc_type .
+    END OF c_type .
   CONSTANTS:
-    BEGIN OF gc_state, " https://git-scm.com/docs/git-status
+    BEGIN OF c_state, " https://git-scm.com/docs/git-status
       unchanged TYPE char1 VALUE '',
       added     TYPE char1 VALUE 'A',
       modified  TYPE char1 VALUE 'M',
       deleted   TYPE char1 VALUE 'D', "For future use
       mixed     TYPE char1 VALUE '*',
-    END OF gc_state .
+    END OF c_state .
   CONSTANTS:
-    BEGIN OF gc_chmod,
+    BEGIN OF c_chmod,
       file       TYPE ty_chmod VALUE '100644',
       executable TYPE ty_chmod VALUE '100755',
       dir        TYPE ty_chmod VALUE '40000 ',
-    END OF gc_chmod .
+    END OF c_chmod .
   CONSTANTS:
-    BEGIN OF gc_event_state,
+    BEGIN OF c_event_state,
       not_handled         VALUE 0,
       re_render           VALUE 1,
       new_page            VALUE 2,
@@ -368,29 +390,29 @@ INTERFACE zif_abapgit_definitions PUBLIC.
       new_page_w_bookmark VALUE 5,
       go_back_to_bookmark VALUE 6,
       new_page_replacing  VALUE 7,
-    END OF gc_event_state .
+    END OF c_event_state .
   CONSTANTS:
-    BEGIN OF gc_html_opt,
+    BEGIN OF c_html_opt,
       strong   TYPE c VALUE 'E',
       cancel   TYPE c VALUE 'C',
       crossout TYPE c VALUE 'X',
-    END OF gc_html_opt .
+    END OF c_html_opt .
   CONSTANTS:
-    BEGIN OF gc_action_type,
+    BEGIN OF c_action_type,
       sapevent  TYPE c VALUE 'E',
       url       TYPE c VALUE 'U',
       onclick   TYPE c VALUE 'C',
       separator TYPE c VALUE 'S',
       dummy     TYPE c VALUE '_',
-    END OF gc_action_type .
-  CONSTANTS gc_crlf TYPE abap_cr_lf VALUE cl_abap_char_utilities=>cr_lf ##NO_TEXT.
-  CONSTANTS gc_newline TYPE abap_char1 VALUE cl_abap_char_utilities=>newline ##NO_TEXT.
-  CONSTANTS gc_english TYPE spras VALUE 'E' ##NO_TEXT.
-  CONSTANTS gc_root_dir TYPE string VALUE '/' ##NO_TEXT.
-  CONSTANTS gc_dot_abapgit TYPE string VALUE '.abapgit.xml' ##NO_TEXT.
-  CONSTANTS gc_author_regex TYPE string VALUE '^([\\\w\s\.\,\#@\-_1-9\(\) ]+) <(.*)> (\d{10})\s?.\d{4}$' ##NO_TEXT.
+    END OF c_action_type .
+  CONSTANTS c_crlf TYPE abap_cr_lf VALUE cl_abap_char_utilities=>cr_lf ##NO_TEXT.
+  CONSTANTS c_newline TYPE abap_char1 VALUE cl_abap_char_utilities=>newline ##NO_TEXT.
+  CONSTANTS c_english TYPE spras VALUE 'E' ##NO_TEXT.
+  CONSTANTS c_root_dir TYPE string VALUE '/' ##NO_TEXT.
+  CONSTANTS c_dot_abapgit TYPE string VALUE '.abapgit.xml' ##NO_TEXT.
+  CONSTANTS c_author_regex TYPE string VALUE '^([\\\w\s\.\,\#@\-_1-9\(\) ]+) <(.*)> (\d{10})\s?.\d{4}$' ##NO_TEXT.
   CONSTANTS:
-    BEGIN OF gc_action,
+    BEGIN OF c_action,
       repo_refresh             TYPE string VALUE 'repo_refresh',
       repo_remove              TYPE string VALUE 'repo_remove',
       repo_settings            TYPE string VALUE 'repo_settings',
@@ -444,15 +466,18 @@ INTERFACE zif_abapgit_definitions PUBLIC.
       go_debuginfo             TYPE string VALUE 'go_debuginfo',
       go_settings              TYPE string VALUE 'go_settings',
       go_tutorial              TYPE string VALUE 'go_tutorial',
+      go_patch                 TYPE string VALUE 'go_patch',
 
       jump                     TYPE string VALUE 'jump',
       jump_pkg                 TYPE string VALUE 'jump_pkg',
-    END OF gc_action .
+
+      url                      TYPE string VALUE 'url',
+    END OF c_action .
   CONSTANTS:
-    BEGIN OF gc_version,
+    BEGIN OF c_version,
       active   TYPE r3state VALUE 'A',
       inactive TYPE r3state VALUE 'I',
-    END OF gc_version .
-  CONSTANTS gc_tag_prefix TYPE string VALUE 'refs/tags/' ##NO_TEXT.
+    END OF c_version .
+  CONSTANTS c_tag_prefix TYPE string VALUE 'refs/tags/' ##NO_TEXT.
 
 ENDINTERFACE.

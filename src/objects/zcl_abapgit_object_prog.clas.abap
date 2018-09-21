@@ -10,6 +10,7 @@ CLASS zcl_abapgit_object_prog DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
              textpool TYPE zif_abapgit_definitions=>ty_tpool_tt,
            END OF ty_tpool_i18n,
            tt_tpool_i18n TYPE STANDARD TABLE OF ty_tpool_i18n.
+    CONSTANTS: c_longtext_id_prog TYPE dokil-id VALUE 'RE'.
 
     METHODS:
       serialize_texts
@@ -48,6 +49,14 @@ CLASS zcl_abapgit_object_prog IMPLEMENTATION.
                             iv_language = <ls_tpool>-language
                             it_tpool    = lt_tpool ).
     ENDLOOP.
+
+  ENDMETHOD.
+
+
+  METHOD is_program_locked.
+
+    rv_is_program_locked = exists_a_lock_entry_for( iv_lock_object = 'ESRDIRE'
+                                                    iv_argument    = |{ ms_item-obj_name }| ).
 
   ENDMETHOD.
 
@@ -123,6 +132,8 @@ CLASS zcl_abapgit_object_prog IMPLEMENTATION.
       zcx_abapgit_exception=>raise( |Error from RS_DELETE_PROGRAM: { sy-subrc }| ).
     ENDIF.
 
+    delete_longtexts( c_longtext_id_prog ).
+
   ENDMETHOD.
 
 
@@ -167,6 +178,8 @@ CLASS zcl_abapgit_object_prog IMPLEMENTATION.
     " Texts deserializing (translations)
     deserialize_texts( io_xml ).
 
+    deserialize_longtexts( io_xml ).
+
   ENDMETHOD.
 
 
@@ -196,29 +209,6 @@ CLASS zcl_abapgit_object_prog IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_object~jump.
-
-    CALL FUNCTION 'RS_TOOL_ACCESS'
-      EXPORTING
-        operation     = 'SHOW'
-        object_name   = ms_item-obj_name
-        object_type   = 'PROG'
-        in_new_window = abap_true.
-
-  ENDMETHOD.
-
-
-  METHOD zif_abapgit_object~serialize.
-
-    serialize_program( io_xml   = io_xml
-                       is_item  = ms_item
-                       io_files = mo_files ).
-
-    " Texts serializing (translations)
-    serialize_texts( io_xml ).
-
-  ENDMETHOD.
-
   METHOD zif_abapgit_object~is_locked.
 
     IF is_program_locked( )                     = abap_true
@@ -233,11 +223,32 @@ CLASS zcl_abapgit_object_prog IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD is_program_locked.
+  METHOD zif_abapgit_object~jump.
 
-    rv_is_program_locked = exists_a_lock_entry_for( iv_lock_object = 'ESRDIRE'
-                                                    iv_argument    = |{ ms_item-obj_name }| ).
+    CALL FUNCTION 'RS_TOOL_ACCESS'
+      EXPORTING
+        operation     = 'SHOW'
+        object_name   = ms_item-obj_name
+        object_type   = 'PROG'
+        in_new_window = abap_true.
 
   ENDMETHOD.
 
+
+  METHOD zif_abapgit_object~serialize.
+
+* see SAP note 1025291, run report DELETE_TADIR_FOR_EIMP_INCLUDE to clean bad TADIR entries
+    ASSERT NOT ms_item-obj_name CP '*=E'.
+
+    serialize_program( io_xml   = io_xml
+                       is_item  = ms_item
+                       io_files = mo_files ).
+
+    " Texts serializing (translations)
+    serialize_texts( io_xml ).
+
+    serialize_longtexts( io_xml         = io_xml
+                         iv_longtext_id = c_longtext_id_prog ).
+
+  ENDMETHOD.
 ENDCLASS.

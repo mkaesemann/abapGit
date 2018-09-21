@@ -4,6 +4,8 @@ CLASS zcl_abapgit_gui_page_settings DEFINITION
   CREATE PUBLIC INHERITING FROM zcl_abapgit_gui_page.
 
   PUBLIC SECTION.
+    INTERFACES: zif_abapgit_gui_page_hotkey.
+
     CONSTANTS:
       BEGIN OF c_action,
         save_settings TYPE string VALUE 'save_settings',
@@ -18,8 +20,9 @@ CLASS zcl_abapgit_gui_page_settings DEFINITION
   PRIVATE SECTION.
 
     DATA:
-      mo_settings TYPE REF TO zcl_abapgit_settings,
-      mv_error    TYPE abap_bool.
+      mo_settings    TYPE REF TO zcl_abapgit_settings,
+      mv_error       TYPE abap_bool,
+      mt_post_fields TYPE tihttpnvp.
 
     METHODS render_proxy
       RETURNING VALUE(ro_html) TYPE REF TO zcl_abapgit_html.
@@ -62,63 +65,84 @@ CLASS zcl_abapgit_gui_page_settings DEFINITION
         VALUE(ro_html) TYPE REF TO zcl_abapgit_html
       RAISING
         zcx_abapgit_exception.
+    METHODS render_hotkeys
+      RETURNING
+        VALUE(ro_html) TYPE REF TO zcl_abapgit_html
+      RAISING
+        zcx_abapgit_exception.
+    METHODS get_possible_hotkey_actions
+      RETURNING
+        VALUE(rt_hotkey_actions) TYPE zif_abapgit_gui_page_hotkey=>tty_hotkey_action
+      RAISING
+        zcx_abapgit_exception.
 
+    METHODS get_default_hotkeys
+      RETURNING
+        VALUE(rt_default_hotkeys) TYPE zif_abapgit_definitions=>tty_hotkey
+      RAISING
+        zcx_abapgit_exception.
+    METHODS is_post_field_checked
+      IMPORTING
+        iv_name          TYPE string
+      RETURNING
+        value(rv_return) TYPE abap_bool.
 
 ENDCLASS.
 
 
 
-CLASS zcl_abapgit_gui_page_settings IMPLEMENTATION.
+CLASS ZCL_ABAPGIT_GUI_PAGE_SETTINGS IMPLEMENTATION.
 
 
   METHOD build_settings.
 
-    DATA: lv_i_param_value         TYPE i.
-    FIELD-SYMBOLS: <ls_post_field> TYPE ihttpnvp.
+    DATA: lv_i_param_value TYPE i,
+          lv_column           TYPE string,
+          lt_key_bindings  TYPE zif_abapgit_definitions=>tty_hotkey.
+
+    FIELD-SYMBOLS: <ls_post_field>  TYPE ihttpnvp,
+                   <ls_key_binding> TYPE zif_abapgit_definitions=>ty_hotkey.
 
 
     CREATE OBJECT mo_settings.
-    READ TABLE it_post_fields ASSIGNING <ls_post_field> WITH KEY name = 'proxy_url'.
+    mt_post_fields = it_post_fields.
+    READ TABLE mt_post_fields ASSIGNING <ls_post_field> WITH KEY name = 'proxy_url'.
     IF sy-subrc <> 0.
       mv_error = abap_true.
     ENDIF.
     mo_settings->set_proxy_url( <ls_post_field>-value ).
 
-    READ TABLE it_post_fields ASSIGNING <ls_post_field> WITH KEY name = 'proxy_port'.
+    READ TABLE mt_post_fields ASSIGNING <ls_post_field> WITH KEY name = 'proxy_port'.
     IF sy-subrc <> 0.
       mv_error = abap_true.
     ENDIF.
     mo_settings->set_proxy_port( <ls_post_field>-value ).
 
-    READ TABLE it_post_fields ASSIGNING <ls_post_field> WITH KEY name = 'proxy_auth'.
-    IF sy-subrc = 0.
+    IF is_post_field_checked( 'proxy_auth' ) = abap_true.
       mo_settings->set_proxy_authentication( abap_true ).
     ELSE.
       mo_settings->set_proxy_authentication( abap_false ).
     ENDIF.
 
-    READ TABLE it_post_fields ASSIGNING <ls_post_field> WITH KEY name = 'critical_tests'.
-    IF sy-subrc = 0.
+    IF is_post_field_checked( 'critical_tests' ) = abap_true.
       mo_settings->set_run_critical_tests( abap_true ).
     ELSE.
       mo_settings->set_run_critical_tests( abap_false ).
     ENDIF.
 
-    READ TABLE it_post_fields ASSIGNING <ls_post_field> WITH KEY name = 'experimental_features'.
-    IF sy-subrc = 0.
+    IF is_post_field_checked( 'experimental_features' ) = abap_true.
       mo_settings->set_experimental_features( abap_true ).
     ELSE.
       mo_settings->set_experimental_features( abap_false ).
     ENDIF.
 
-    READ TABLE it_post_fields ASSIGNING <ls_post_field> WITH KEY name = 'show_default_repo'.
-    IF sy-subrc = 0.
+    IF is_post_field_checked( 'show_default_repo' ) = abap_true.
       mo_settings->set_show_default_repo( abap_true ).
     ELSE.
       mo_settings->set_show_default_repo( abap_false ).
     ENDIF.
 
-    READ TABLE it_post_fields ASSIGNING <ls_post_field> WITH KEY name = 'max_lines'.
+    READ TABLE mt_post_fields ASSIGNING <ls_post_field> WITH KEY name = 'max_lines'.
     IF sy-subrc = 0.
       lv_i_param_value = <ls_post_field>-value.
       mo_settings->set_max_lines( lv_i_param_value ).
@@ -126,31 +150,29 @@ CLASS zcl_abapgit_gui_page_settings IMPLEMENTATION.
       mo_settings->set_max_lines( 0 ).
     ENDIF.
 
-    READ TABLE it_post_fields ASSIGNING <ls_post_field> WITH KEY name = 'adt_jump_enabled'.
-    IF sy-subrc = 0.
+    IF is_post_field_checked( 'adt_jump_enabled' ) = abap_true.
       mo_settings->set_adt_jump_enanbled( abap_true ).
     ELSE.
       mo_settings->set_adt_jump_enanbled( abap_false ).
     ENDIF.
 
-    READ TABLE it_post_fields ASSIGNING <ls_post_field> WITH KEY name = 'link_hints_enabled'.
-    IF sy-subrc = 0.
+    IF is_post_field_checked( 'link_hints_enabled' ) = abap_true.
       mo_settings->set_link_hints_enabled( abap_true ).
     ELSE.
       mo_settings->set_link_hints_enabled( abap_false ).
     ENDIF.
 
-    READ TABLE it_post_fields ASSIGNING <ls_post_field> WITH KEY name = 'link_hint_key'.
+    READ TABLE mt_post_fields ASSIGNING <ls_post_field> WITH KEY name = 'link_hint_key'.
     IF sy-subrc = 0.
       mo_settings->set_link_hint_key( |{ <ls_post_field>-value }| ).
     ENDIF.
 
-    READ TABLE it_post_fields ASSIGNING <ls_post_field> WITH KEY name = 'link_hint_background_color'.
+    READ TABLE mt_post_fields ASSIGNING <ls_post_field> WITH KEY name = 'link_hint_background_color'.
     IF sy-subrc = 0.
       mo_settings->set_link_hint_background_color( |{ <ls_post_field>-value }| ).
     ENDIF.
 
-    READ TABLE it_post_fields ASSIGNING <ls_post_field> WITH KEY name = 'comment_length'.
+    READ TABLE mt_post_fields ASSIGNING <ls_post_field> WITH KEY name = 'comment_length'.
     IF sy-subrc = 0.
       lv_i_param_value = <ls_post_field>-value.
       IF lv_i_param_value < zcl_abapgit_settings=>c_commitmsg_comment_length_dft.
@@ -161,7 +183,7 @@ CLASS zcl_abapgit_gui_page_settings IMPLEMENTATION.
       mo_settings->set_commitmsg_comment_length( zcl_abapgit_settings=>c_commitmsg_comment_length_dft ).
     ENDIF.
 
-    READ TABLE it_post_fields ASSIGNING <ls_post_field> WITH KEY name = 'body_size'.
+    READ TABLE mt_post_fields ASSIGNING <ls_post_field> WITH KEY name = 'body_size'.
     IF sy-subrc = 0.
       lv_i_param_value = <ls_post_field>-value.
       IF lv_i_param_value < zcl_abapgit_settings=>c_commitmsg_body_size_dft.
@@ -172,6 +194,27 @@ CLASS zcl_abapgit_gui_page_settings IMPLEMENTATION.
       mo_settings->set_commitmsg_body_size( zcl_abapgit_settings=>c_commitmsg_body_size_dft ).
     ENDIF.
 
+
+    LOOP AT mt_post_fields ASSIGNING <ls_post_field> WHERE name CP 'key*'.
+
+      FIND FIRST OCCURRENCE OF REGEX `key_(.*)_`
+           IN <ls_post_field>-name
+           SUBMATCHES lv_column.
+
+      INSERT INITIAL LINE INTO TABLE lt_key_bindings ASSIGNING <ls_key_binding>.
+      CASE lv_column.
+        WHEN 'sequence'.
+          <ls_key_binding>-sequence = <ls_post_field>-value.
+        WHEN 'action'.
+          <ls_key_binding>-action = <ls_post_field>-value.
+      ENDCASE.
+    ENDLOOP.
+
+    DELETE lt_key_bindings WHERE sequence IS INITIAL
+                           OR    action IS INITIAL.
+
+    mo_settings->set_hotkeys( lt_key_bindings ).
+
   ENDMETHOD.
 
 
@@ -179,6 +222,36 @@ CLASS zcl_abapgit_gui_page_settings IMPLEMENTATION.
     super->constructor( ).
     ms_control-page_title = 'SETTINGS'.
   ENDMETHOD.  " constructor.
+
+
+  METHOD get_default_hotkeys.
+
+    DATA: lt_actions TYPE zif_abapgit_gui_page_hotkey=>tty_hotkey_action,
+          ls_hotkey  LIKE LINE OF rt_default_hotkeys.
+
+    FIELD-SYMBOLS: <ls_action> LIKE LINE OF lt_actions.
+
+    lt_actions = zcl_abapgit_hotkeys=>get_default_hotkeys_from_pages( ).
+
+    LOOP AT lt_actions ASSIGNING <ls_action>.
+      ls_hotkey-action   = <ls_action>-action.
+      ls_hotkey-sequence = <ls_action>-default_hotkey.
+      INSERT ls_hotkey INTO TABLE rt_default_hotkeys.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+
+  METHOD get_possible_hotkey_actions.
+
+    DATA: ls_hotkey_action LIKE LINE OF rt_hotkey_actions.
+
+    rt_hotkey_actions = zcl_abapgit_hotkeys=>get_default_hotkeys_from_pages( ).
+
+    " insert empty row at the beginning, so that we can unset a hotkey
+    INSERT ls_hotkey_action INTO rt_hotkey_actions INDEX 1.
+
+  ENDMETHOD.
 
 
   METHOD parse_post.
@@ -268,6 +341,8 @@ CLASS zcl_abapgit_gui_page_settings IMPLEMENTATION.
     ro_html->add( render_adt_jump_enabled( ) ).
     ro_html->add( |<hr>| ).
     ro_html->add( render_link_hints( ) ).
+    ro_html->add( |<hr>| ).
+    ro_html->add( render_hotkeys( ) ).
     ro_html->add( render_section_end( ) ).
     ro_html->add( render_form_end( ) ).
 
@@ -319,6 +394,111 @@ CLASS zcl_abapgit_gui_page_settings IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD render_hotkeys.
+
+    DATA: lv_index    TYPE i,
+          lt_hotkeys  TYPE zif_abapgit_definitions=>tty_hotkey,
+          lv_selected TYPE string,
+          lt_actions  TYPE zif_abapgit_gui_page_hotkey=>tty_hotkey_action.
+
+    FIELD-SYMBOLS: <ls_key_binding> LIKE LINE OF lt_hotkeys,
+                   <ls_action>      LIKE LINE OF lt_actions.
+
+    lt_hotkeys = mo_settings->get_hotkeys( ).
+
+    IF lines( lt_hotkeys ) = 0.
+      lt_hotkeys = get_default_hotkeys( ).
+    ENDIF.
+
+    DO 3 TIMES.
+      APPEND INITIAL LINE TO lt_hotkeys.
+    ENDDO.
+
+    CREATE OBJECT ro_html.
+    ro_html->add( |<h2>Hotkeys</h2>| ).
+    ro_html->add( |(Only available with installed abapGit repo)| ).
+    ro_html->add( |<br/>| ).
+    ro_html->add( |<br/>| ).
+
+    ro_html->add( '<table class="repo_tab" id="key_bindings" style="max-width: 300px;">' ).
+    ro_html->add( '<tr><th>key</th><th>action</th></tr>' ).
+
+    lt_actions = get_possible_hotkey_actions( ).
+
+    LOOP AT lt_hotkeys ASSIGNING <ls_key_binding>.
+
+      lv_index = sy-tabix.
+
+      ro_html->add( '<tr>' ).
+      ro_html->add( |<td><input name="key_sequence_{ lv_index }" maxlength=1 type="text" | &&
+                    |value="{ <ls_key_binding>-sequence }"></td>| ).
+
+      ro_html->add( |<td><select name="key_action_{ lv_index }">| ).
+
+      LOOP AT lt_actions ASSIGNING <ls_action>.
+
+        IF <ls_key_binding>-action = <ls_action>-action.
+          lv_selected = 'selected'.
+        ELSE.
+          CLEAR: lv_selected.
+        ENDIF.
+
+        ro_html->add( |<option value="{ <ls_action>-action }" |
+                   && |{ lv_selected }>|
+                   && |{ <ls_action>-name }</option>| ).
+
+      ENDLOOP.
+
+      ro_html->add( '</select></td>' ).
+      ro_html->add( '</tr>' ).
+
+    ENDLOOP.
+
+
+    ro_html->add( '</select></td>' ).
+    ro_html->add( '</tr>' ).
+
+    ro_html->add( '</table>' ).
+
+    ro_html->add( |<br>| ).
+    ro_html->add( |<br>| ).
+
+  ENDMETHOD.
+
+
+  METHOD render_link_hints.
+
+    DATA: lv_checked               TYPE string,
+          lv_link_hint_key         TYPE char01,
+          lv_link_background_color TYPE string.
+
+    IF mo_settings->get_link_hints_enabled( ) = abap_true.
+      lv_checked = 'checked'.
+    ENDIF.
+
+    lv_link_hint_key = mo_settings->get_link_hint_key( ).
+    lv_link_background_color = mo_settings->get_link_hint_background_color( ).
+
+    CREATE OBJECT ro_html.
+    ro_html->add( |<h2>Vimium like link hints</h2>| ).
+    ro_html->add( `<input type="checkbox" name="link_hints_enabled" value="X" `
+                   && lv_checked && ` > Enable Vimium like link hints` ).
+    ro_html->add( |<br>| ).
+    ro_html->add( |<br>| ).
+    ro_html->add( |<input type="text" name="link_hint_key" size="1" maxlength="1" value="{ lv_link_hint_key }" |
+               && |> Single key to activate links| ).
+    ro_html->add( |<br>| ).
+    ro_html->add( |<br>| ).
+    ro_html->add( |<input type="text" name="link_hint_background_color" size="20" maxlength="20"|
+               && | value="{ lv_link_background_color }"|
+               && |> Background Color (HTML colors e.g. lightgreen or #42f47a)| ).
+
+    ro_html->add( |<br>| ).
+    ro_html->add( |<br>| ).
+
+  ENDMETHOD.
+
+
   METHOD render_max_lines.
     CREATE OBJECT ro_html.
 
@@ -359,40 +539,6 @@ CLASS zcl_abapgit_gui_page_settings IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD validate_settings.
-
-    IF ( mo_settings->get_proxy_url( ) IS NOT INITIAL AND  mo_settings->get_proxy_port( ) IS INITIAL ) OR
-                 ( mo_settings->get_proxy_url( ) IS INITIAL AND  mo_settings->get_proxy_port( ) IS NOT INITIAL ).
-      MESSAGE 'If specifying proxy, specify both URL and port' TYPE 'W'.
-    ENDIF.
-
-  ENDMETHOD.
-
-
-  METHOD zif_abapgit_gui_page~on_event.
-* todo, check input values eg INT
-
-    DATA:
-      lt_post_fields TYPE tihttpnvp.
-
-    CASE iv_action.
-      WHEN c_action-save_settings.
-        lt_post_fields = parse_post( it_postdata ).
-
-        build_settings( lt_post_fields ).
-        validate_settings( ).
-
-        IF mv_error = abap_true.
-          MESSAGE 'Error when saving settings. Open an issue at https://github.com/larshp/abapGit' TYPE 'E'.
-        ELSE.
-          persist_settings( ).
-        ENDIF.
-
-        ev_state = zif_abapgit_definitions=>gc_event_state-go_back.
-    ENDCASE.
-
-  ENDMETHOD.
-
   METHOD render_section_begin.
 
     CREATE OBJECT ro_html.
@@ -429,36 +575,54 @@ CLASS zcl_abapgit_gui_page_settings IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD render_link_hints.
+  METHOD validate_settings.
 
-    DATA: lv_checked               TYPE string,
-          lv_link_hint_key         TYPE char01,
-          lv_link_background_color TYPE string.
-
-    IF mo_settings->get_link_hints_enabled( ) = abap_true.
-      lv_checked = 'checked'.
+    IF ( mo_settings->get_proxy_url( ) IS NOT INITIAL AND  mo_settings->get_proxy_port( ) IS INITIAL ) OR
+                 ( mo_settings->get_proxy_url( ) IS INITIAL AND  mo_settings->get_proxy_port( ) IS NOT INITIAL ).
+      MESSAGE 'If specifying proxy, specify both URL and port' TYPE 'W'.
     ENDIF.
 
-    lv_link_hint_key = mo_settings->get_link_hint_key( ).
-    lv_link_background_color = mo_settings->get_link_hint_background_color( ).
+  ENDMETHOD.
 
-    CREATE OBJECT ro_html.
-    ro_html->add( |<h2>Vimium like link hints</h2>| ).
-    ro_html->add( `<input type="checkbox" name="link_hints_enabled" value="X" `
-                   && lv_checked && ` > Enable Vimium like link hints` ).
-    ro_html->add( |<br>| ).
-    ro_html->add( |<br>| ).
-    ro_html->add( |<input type="text" name="link_hint_key" size="1" maxlength="1" value="{ lv_link_hint_key }" |
-               && |> Single key to activate links| ).
-    ro_html->add( |<br>| ).
-    ro_html->add( |<br>| ).
-    ro_html->add( |<input type="text" name="link_hint_background_color" size="20" maxlength="20"|
-               && | value="{ lv_link_background_color }"|
-               && |> Background Color (HTML colors e.g. lightgreen or #42f47a)| ).
 
-    ro_html->add( |<br>| ).
-    ro_html->add( |<br>| ).
+  METHOD zif_abapgit_gui_page_hotkey~get_hotkey_actions.
 
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_gui_page~on_event.
+* todo, check input values eg INT
+
+    DATA:
+      lt_post_fields TYPE tihttpnvp.
+
+    CASE iv_action.
+      WHEN c_action-save_settings.
+        lt_post_fields = parse_post( it_postdata ).
+
+        build_settings( lt_post_fields ).
+        validate_settings( ).
+
+        IF mv_error = abap_true.
+          MESSAGE 'Error when saving settings. Open an issue at https://github.com/larshp/abapGit' TYPE 'E'.
+        ELSE.
+          persist_settings( ).
+        ENDIF.
+
+        ev_state = zif_abapgit_definitions=>c_event_state-go_back.
+    ENDCASE.
+
+  ENDMETHOD.
+
+  METHOD is_post_field_checked.
+    FIELD-SYMBOLS: <ls_post_field> TYPE ihttpnvp.
+    READ TABLE mt_post_fields ASSIGNING <ls_post_field> WITH KEY name = iv_name.
+    IF sy-subrc = 0.
+      IF <ls_post_field>-value = abap_true "HTML value when using standard netweaver GUI
+      OR <ls_post_field>-value = 'on'.     "HTML value when using Netweaver Java GUI
+        rv_return = abap_true.
+      ENDIF.
+    ENDIF.
   ENDMETHOD.
 
 ENDCLASS.
