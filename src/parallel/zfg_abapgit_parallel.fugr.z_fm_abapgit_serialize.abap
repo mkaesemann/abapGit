@@ -80,7 +80,7 @@ FUNCTION z_fm_abapgit_serialize.
             LOOP AT lt_files ASSIGNING FIELD-SYMBOL(<ls_file>).
               <ls_file>-path = <ls_tadir>-path.
               <ls_file>-sha1 = zcl_abapgit_hash=>sha1(
-                iv_type = zif_abapgit_definitions=>gc_type-blob
+                iv_type = zif_abapgit_definitions=>c_type-blob
                 iv_data = <ls_file>-data ).
 
               APPEND INITIAL LINE TO rt_files[] ASSIGNING FIELD-SYMBOL(<ls_return>).
