@@ -9,19 +9,19 @@ CLASS zcl_abapgit_tadir DEFINITION
 
   PROTECTED SECTION.
   PRIVATE SECTION.
-    METHODS EXISTS
+    METHODS exists
       IMPORTING
-        !IS_ITEM TYPE ZIF_ABAPGIT_DEFINITIONS=>TY_ITEM
+        !is_item         TYPE zif_abapgit_definitions=>ty_item
       RETURNING
-        VALUE(RV_EXISTS) TYPE ABAP_BOOL .
-    METHODS CHECK_EXISTS
+        VALUE(rv_exists) TYPE abap_bool .
+    METHODS check_exists
       IMPORTING
-        !IT_TADIR TYPE ZIF_ABAPGIT_DEFINITIONS=>TY_TADIR_TT
+        !it_tadir       TYPE zif_abapgit_definitions=>ty_tadir_tt
       RETURNING
-        VALUE(RT_TADIR) TYPE ZIF_ABAPGIT_DEFINITIONS=>TY_TADIR_TT
+        VALUE(rt_tadir) TYPE zif_abapgit_definitions=>ty_tadir_tt
       RAISING
-        ZCX_ABAPGIT_EXCEPTION .
-    METHODS BUILD
+        zcx_abapgit_exception .
+    METHODS build
       IMPORTING
         !iv_package            TYPE tadir-devclass
         !iv_top                TYPE tadir-devclass
@@ -29,10 +29,11 @@ CLASS zcl_abapgit_tadir DEFINITION
         !iv_ignore_subpackages TYPE abap_bool DEFAULT abap_false
         !iv_only_local_objects TYPE abap_bool
         !io_log                TYPE REF TO zcl_abapgit_log OPTIONAL
+        !io_folder_logic       TYPE REF TO zcl_abapgit_folder_logic OPTIONAL
       RETURNING
-        VALUE(RT_TADIR) TYPE ZIF_ABAPGIT_DEFINITIONS=>TY_TADIR_TT
+        VALUE(rt_tadir)        TYPE zif_abapgit_definitions=>ty_tadir_tt
       RAISING
-        ZCX_ABAPGIT_EXCEPTION .
+        zcx_abapgit_exception.
 ENDCLASS.
 
 
@@ -61,7 +62,6 @@ CLASS ZCL_ABAPGIT_TADIR IMPLEMENTATION.
     ENDIF.
     INSERT iv_package INTO lt_packages INDEX 1.
 
-    "Select TADIR Info
     ls_exclude-sign = 'I'.
     ls_exclude-option = 'EQ'.
 
@@ -95,7 +95,6 @@ CLASS ZCL_ABAPGIT_TADIR IMPLEMENTATION.
 
     SORT rt_tadir BY devclass pgmid object obj_name.
 
-    "Skip Generated Objects
     CREATE OBJECT lo_skip_objects.
     rt_tadir = lo_skip_objects->skip_sadl_generated_objects(
       it_tadir = rt_tadir
@@ -103,7 +102,7 @@ CLASS ZCL_ABAPGIT_TADIR IMPLEMENTATION.
 
     LOOP AT lt_packages ASSIGNING <lv_package>.
       " Local packages are not in TADIR, only in TDEVC, act as if they were
-      IF <lv_package> CP '$*'. " OR <lv_package> CP 'T*' ).
+      IF <lv_package> CP '$*'. " OR <package> CP 'T*' ).
         APPEND INITIAL LINE TO rt_tadir ASSIGNING <ls_tadir>.
         <ls_tadir>-pgmid    = 'R3TR'.
         <ls_tadir>-object   = 'DEVC'.
