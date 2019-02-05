@@ -378,42 +378,19 @@ CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
     apply_filter( EXPORTING it_filter = it_filter
                   CHANGING ct_tadir  = lt_tadir ).
 
-    data(use_parallel) = abap_true.
-    IF use_parallel = abap_true.
+    lookup_cache(
+      EXPORTING it_cache = lt_cache
+      IMPORTING et_found = lt_found
+      CHANGING ct_tadir = lt_tadir ).
+    APPEND LINES OF lt_found TO rt_files.
 
-      rt_files = zcl_abapgit_parallel_serialize=>serialize_objects(
-                   i_last_serialization = mv_last_serialization
-                   i_master_language    = get_dot_abapgit( )->get_master_language( )
-                   io_log               = io_log
-                   it_tadir             = lt_tadir
-                   it_filter            = it_filter
-                   it_files             = rt_files ).
+    CREATE OBJECT lo_serialize.
 
-    ELSE.
-
-      apply_filter( EXPORTING it_filter = it_filter
-                    CHANGING ct_tadir  = lt_tadir ).
-
-      lookup_cache(
-        EXPORTING it_cache = lt_cache
-        IMPORTING et_found = lt_found
-        CHANGING ct_tadir = lt_tadir ).
-      APPEND LINES OF lt_found TO rt_files.
-
-      CREATE OBJECT lo_serialize.
-
-      lt_found = lo_serialize->serialize(
-        it_tadir    = lt_tadir
-        iv_language = get_dot_abapgit( )->get_master_language( )
-        io_log      = io_log ).
-      APPEND LINES OF lt_found TO rt_files.     
-      ENDLOOP.
-
-    ENDIF.
-
-      ENDLOOP.
-
-    ENDIF.
+    lt_found = lo_serialize->serialize(
+      it_tadir    = lt_tadir
+      iv_language = get_dot_abapgit( )->get_master_language( )
+      io_log      = io_log ).
+    APPEND LINES OF lt_found TO rt_files.
 
     GET TIME STAMP FIELD mv_last_serialization.
     mt_local                 = rt_files.
