@@ -7,7 +7,7 @@ CLASS zcl_abapgit_sap_package DEFINITION
       constructor
         IMPORTING iv_package TYPE devclass.
 
-    INTERFACES ZIF_ABAPGIT_SAP_PACKAGE .
+    INTERFACES: zif_abapgit_sap_package.
 
   PRIVATE SECTION.
     DATA: mv_package TYPE devclass.
@@ -186,7 +186,7 @@ CLASS ZCL_ABAPGIT_SAP_PACKAGE IMPLEMENTATION.
     ls_child-pdevclass = li_parent->transport_layer.
     ls_child-as4user   = sy-uname.
 
-    zif_abapgit_sap_package~create( ls_child ).
+    create( ls_child ).
 
   ENDMETHOD.
 
@@ -202,7 +202,7 @@ CLASS ZCL_ABAPGIT_SAP_PACKAGE IMPLEMENTATION.
     ls_package-dlvunit   = 'LOCAL'.
     ls_package-as4user   = sy-uname.
 
-    zif_abapgit_sap_package~create( ls_package ).
+    create( ls_package ).
 
   ENDMETHOD.
 
@@ -292,9 +292,9 @@ CLASS ZCL_ABAPGIT_SAP_PACKAGE IMPLEMENTATION.
     DATA: lt_list   LIKE rt_list,
           lv_parent TYPE tdevc-parentcl.
 
+
     APPEND mv_package TO rt_list.
 
-    "Determine Parent
     lv_parent = zif_abapgit_sap_package~read_parent( ).
 
     IF sy-subrc = 0 AND NOT lv_parent IS INITIAL.

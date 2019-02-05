@@ -9,7 +9,7 @@ CLASS zcl_abapgit_requirement_helper DEFINITION
       BEGIN OF ty_requirement_status,
         met               TYPE abap_bool,
         component         TYPE dlvunit,
-        description       TYPE cvers_sdu-desc_text,
+        description       TYPE text80,
         installed_release TYPE saprelease,
         installed_patch   TYPE sappatchlv,
         required_release  TYPE saprelease,
@@ -30,7 +30,6 @@ CLASS zcl_abapgit_requirement_helper DEFINITION
         VALUE(rv_status) TYPE zif_abapgit_definitions=>ty_yes_no
       RAISING
         zcx_abapgit_exception .
-  PROTECTED SECTION.
   PRIVATE SECTION.
 
     CLASS-METHODS show_requirement_popup
@@ -216,7 +215,7 @@ CLASS ZCL_ABAPGIT_REQUIREMENT_HELPER IMPLEMENTATION.
 
   METHOD version_greater_or_equal.
 
-    DATA: lv_number TYPE n LENGTH 4 ##NEEDED.
+    DATA: lv_number TYPE numc4 ##NEEDED.
 
     TRY.
         MOVE EXACT: is_status-installed_release TO lv_number,

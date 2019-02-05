@@ -38,8 +38,8 @@ CLASS zcl_abapgit_object_ecatt_super DEFINITION
     TYPES:
       BEGIN OF ty_last_changed,
         luser TYPE xubname,
-        ldate TYPE d,
-        ltime TYPE t,
+        ldate TYPE datum,
+        ltime TYPE uzeit,
       END OF ty_last_changed.
 
     CONSTANTS:
@@ -132,11 +132,12 @@ CLASS zcl_abapgit_object_ecatt_super DEFINITION
         RAISING
           cx_ecatt
           zcx_abapgit_exception.
+
 ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_OBJECT_ECATT_SUPER IMPLEMENTATION.
+CLASS zcl_abapgit_object_ecatt_super IMPLEMENTATION.
 
 
   METHOD clear_attributes.
@@ -402,41 +403,6 @@ CLASS ZCL_ABAPGIT_OBJECT_ECATT_SUPER IMPLEMENTATION.
 
   ENDMETHOD.
 
-
-  METHOD serialize_versions.
-
-    DATA: li_versions_node TYPE REF TO if_ixml_element.
-    FIELD-SYMBOLS: <ls_version_info> LIKE LINE OF it_version_info.
-
-    li_versions_node = ci_document->create_element( co_name-versions ).
-
-    IF lines( it_version_info ) > 0.
-
-      LOOP AT it_version_info ASSIGNING <ls_version_info>.
-
-        serialize_version(
-          EXPORTING
-            iv_version = <ls_version_info>-version
-          CHANGING
-            ci_node    = li_versions_node ).
-
-      ENDLOOP.
-
-    ELSE.
-
-      serialize_version(
-        EXPORTING
-          iv_version = co_default_version
-        CHANGING
-          ci_node    = li_versions_node ).
-
-    ENDIF.
-
-    ci_document->append_child( li_versions_node ).
-
-  ENDMETHOD.
-
-
   METHOD zif_abapgit_object~changed_by.
 
     DATA: ls_last_changed      TYPE ty_last_changed,
@@ -576,25 +542,6 @@ CLASS ZCL_ABAPGIT_OBJECT_ECATT_SUPER IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_object~is_active.
-    rv_active = is_active( ).
-  ENDMETHOD.
-
-
-  METHOD zif_abapgit_object~is_locked.
-
-    DATA: lv_object TYPE seqg3-garg.
-
-    lv_object = ms_item-obj_name.
-    OVERLAY lv_object WITH '                              '.
-    lv_object = lv_object && '*'.
-
-    rv_is_locked = exists_a_lock_entry_for( iv_lock_object = get_lock_object( )
-                                            iv_argument    = lv_object ).
-
-  ENDMETHOD.
-
-
   METHOD zif_abapgit_object~jump.
 
     CALL FUNCTION 'RS_TOOL_ACCESS'
@@ -650,4 +597,57 @@ CLASS ZCL_ABAPGIT_OBJECT_ECATT_SUPER IMPLEMENTATION.
     ENDTRY.
 
   ENDMETHOD.
+
+
+  METHOD serialize_versions.
+
+    DATA: li_versions_node TYPE REF TO if_ixml_element.
+    FIELD-SYMBOLS: <ls_version_info> LIKE LINE OF it_version_info.
+
+    li_versions_node = ci_document->create_element( co_name-versions ).
+
+    IF lines( it_version_info ) > 0.
+
+      LOOP AT it_version_info ASSIGNING <ls_version_info>.
+
+        serialize_version(
+          EXPORTING
+            iv_version = <ls_version_info>-version
+          CHANGING
+            ci_node    = li_versions_node ).
+
+      ENDLOOP.
+
+    ELSE.
+
+      serialize_version(
+        EXPORTING
+          iv_version = co_default_version
+        CHANGING
+          ci_node    = li_versions_node ).
+
+    ENDIF.
+
+    ci_document->append_child( li_versions_node ).
+
+  ENDMETHOD.
+
+  METHOD zif_abapgit_object~is_locked.
+
+    DATA: lv_object TYPE seqg3-garg.
+
+    lv_object = ms_item-obj_name.
+    OVERLAY lv_object WITH '                              '.
+    lv_object = lv_object && '*'.
+
+    rv_is_locked = exists_a_lock_entry_for( iv_lock_object = get_lock_object( )
+                                            iv_argument    = lv_object ).
+
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_object~is_active.
+    rv_active = is_active( ).
+  ENDMETHOD.
 ENDCLASS.
+

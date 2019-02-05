@@ -24,8 +24,8 @@ CLASS zcl_abapgit_progress DEFINITION
         !iv_current   TYPE i
       RETURNING
         VALUE(rv_pct) TYPE i .
-
   PRIVATE SECTION.
+
     DATA mv_cv_time_next TYPE sy-uzeit .
     DATA mv_cv_datum_next TYPE sy-datum .
 ENDCLASS.
@@ -92,7 +92,6 @@ CLASS ZCL_ABAPGIT_PROGRESS IMPLEMENTATION.
       mv_cv_time_next = lv_time + lc_wait_secs.
 
     ENDIF.
-
     IF sy-datum > mv_cv_datum_next.
       mv_cv_datum_next = sy-datum.
     ENDIF.
