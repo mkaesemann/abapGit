@@ -9,15 +9,17 @@ CLASS zcl_abapgit_http_client DEFINITION PUBLIC CREATE PUBLIC.
       set_digest
         IMPORTING io_digest TYPE REF TO zcl_abapgit_http_digest,
       send_receive_close
-        IMPORTING
-                  iv_data        TYPE xstring
-        RETURNING
-                  VALUE(rv_data) TYPE xstring
+        IMPORTING iv_data        TYPE xstring
+        RETURNING VALUE(rv_data) TYPE xstring
         RAISING   zcx_abapgit_exception,
       get_cdata
         RETURNING VALUE(rv_value) TYPE string,
       check_http_200
         RAISING zcx_abapgit_exception,
+      check_smart_response
+        IMPORTING iv_expected_content_type TYPE string
+                  iv_content_regex         TYPE string
+        RAISING   zcx_abapgit_exception,
       send_receive
         RAISING zcx_abapgit_exception,
       set_headers
@@ -33,14 +35,13 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_HTTP_CLIENT IMPLEMENTATION.
+CLASS zcl_abapgit_http_client IMPLEMENTATION.
 
 
   METHOD check_http_200.
 
     DATA: lv_code TYPE i,
           lv_text TYPE string.
-
 
     mi_client->response->get_status(
       IMPORTING
@@ -63,7 +64,30 @@ CLASS ZCL_ABAPGIT_HTTP_CLIENT IMPLEMENTATION.
         zcx_abapgit_exception=>raise( |HTTP error code: { lv_code }, { lv_text }| ).
     ENDCASE.
 
-  ENDMETHOD.                                                "http_200
+  ENDMETHOD.
+
+
+  METHOD check_smart_response.
+
+    DATA: lv_content_type TYPE string.
+    DATA: lv_data         TYPE string.
+
+    IF iv_expected_content_type IS NOT INITIAL.
+      lv_content_type = mi_client->response->get_content_type( ).
+      IF lv_content_type <> iv_expected_content_type.
+        zcx_abapgit_exception=>raise( 'Wrong Content-Type sent by server - no fallback to the dumb protocol!' ).
+      ENDIF.
+    ENDIF.
+
+    IF iv_content_regex IS NOT INITIAL.
+      lv_data = mi_client->response->get_cdata( ).
+      FIND REGEX iv_content_regex IN lv_data.
+      IF sy-subrc <> 0.
+        zcx_abapgit_exception=>raise( 'Wrong Content sent by server' ).
+      ENDIF.
+    ENDIF.
+
+  ENDMETHOD.
 
 
   METHOD close.
@@ -112,7 +136,7 @@ CLASS ZCL_ABAPGIT_HTTP_CLIENT IMPLEMENTATION.
       zcx_abapgit_exception=>raise( lv_text ).
     ENDIF.
 
-  ENDMETHOD.  "send_receive
+  ENDMETHOD.
 
 
   METHOD send_receive_close.
@@ -165,5 +189,5 @@ CLASS ZCL_ABAPGIT_HTTP_CLIENT IMPLEMENTATION.
       mo_digest->run( mi_client ).
     ENDIF.
 
-  ENDMETHOD.                    "set_headers
+  ENDMETHOD.
 ENDCLASS.

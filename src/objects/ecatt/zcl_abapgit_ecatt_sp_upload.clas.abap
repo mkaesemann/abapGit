@@ -28,7 +28,7 @@ ENDCLASS.
 
 
 
-CLASS zcl_abapgit_ecatt_sp_upload IMPLEMENTATION.
+CLASS ZCL_ABAPGIT_ECATT_SP_UPLOAD IMPLEMENTATION.
 
 
   METHOD get_ecatt_sp.
@@ -43,13 +43,12 @@ CLASS zcl_abapgit_ecatt_sp_upload IMPLEMENTATION.
           lv_exception_occurred TYPE etonoff,
           lo_ecatt_sp           TYPE REF TO object.
 
-    FIELD-SYMBOLS: <ecatt_object> TYPE any.
+    FIELD-SYMBOLS: <lg_ecatt_object> TYPE any.
 
     TRY.
         li_section = template_over_all->find_from_name_ns( 'START_PROFILE' ).
 
         IF NOT li_section IS INITIAL.
-          CLASS cl_ixml DEFINITION LOAD.
           li_ixml = cl_ixml=>create( ).
           li_dom  = li_ixml->create_document( ).
           li_root ?= li_section->clone( ).
@@ -60,10 +59,10 @@ CLASS zcl_abapgit_ecatt_sp_upload IMPLEMENTATION.
             IMPORTING
               xml_as_string = lv_start_profile.
 
-          ASSIGN ('ECATT_OBJECT') TO <ecatt_object>.
+          ASSIGN ('ECATT_OBJECT') TO <lg_ecatt_object>.
           ASSERT sy-subrc = 0.
 
-          lo_ecatt_sp = <ecatt_object>.
+          lo_ecatt_sp = <lg_ecatt_object>.
 
           CALL METHOD lo_ecatt_sp->('SET_SP_ATTRIBUTES')
             EXPORTING
@@ -93,12 +92,11 @@ CLASS zcl_abapgit_ecatt_sp_upload IMPLEMENTATION.
           lv_exists             TYPE etonoff,
           lv_exc_occ            TYPE etonoff,
           ls_tadir              TYPE tadir,
-          lv_exception_occurred TYPE etonoff,
           lo_ecatt_sp           TYPE REF TO object.
 
-    FIELD-SYMBOLS: <ecatt_sp> TYPE any,
-                   <lv_d_akh> TYPE data,
-                   <lv_i_akh> TYPE data.
+    FIELD-SYMBOLS: <lg_ecatt_sp> TYPE any,
+                   <lv_d_akh>    TYPE data,
+                   <lv_i_akh>    TYPE data.
 
     TRY.
         ch_object-i_devclass = ch_object-d_devclass.
@@ -107,14 +105,13 @@ CLASS zcl_abapgit_ecatt_sp_upload IMPLEMENTATION.
                TO <lv_d_akh>. " doesn't exist in 702
         ASSIGN COMPONENT 'I_AKH' OF STRUCTURE ch_object
                TO <lv_i_akh>. " doesn't exist in 702
-        IF  <lv_d_akh> IS ASSIGNED
-        AND <lv_i_akh> IS ASSIGNED.
+        IF <lv_d_akh> IS ASSIGNED AND <lv_i_akh> IS ASSIGNED.
           <lv_i_akh> = <lv_d_akh>.
         ENDIF.
 
         super->upload(
           CHANGING
-            ch_object       = ch_object ).
+            ch_object = ch_object ).
 
         upload_data_from_stream( ch_object-filename ).
 
@@ -134,10 +131,10 @@ CLASS zcl_abapgit_ecatt_sp_upload IMPLEMENTATION.
         lv_exc_occ = 'X'.
     ENDTRY.
 
-    ASSIGN me->ecatt_object TO <ecatt_sp>.
+    ASSIGN me->ecatt_object TO <lg_ecatt_sp>.
     ASSERT sy-subrc = 0.
 
-    lo_ecatt_sp = <ecatt_sp>.
+    lo_ecatt_sp = <lg_ecatt_sp>.
 
     TRY.
         get_ecatt_sp( ).
@@ -171,9 +168,8 @@ CLASS zcl_abapgit_ecatt_sp_upload IMPLEMENTATION.
 * Devesh,C5129871  18.07.2011  Releasing enqueu after uploading
 *begin
     TRY.
-        ecatt_object->close_object( im_suppress_events ='X' ).
+        ecatt_object->close_object( im_suppress_events = 'X' ).
       CATCH cx_ecatt_apl INTO lx_ecatt.
-        lv_exception_occurred = 'X'.
     ENDTRY.
 *end
 *     get devclass from existing object

@@ -30,13 +30,13 @@ CLASS zcl_abapgit_ecatt_system_downl DEFINITION
 ENDCLASS.
 
 
-CLASS zcl_abapgit_ecatt_system_downl IMPLEMENTATION.
+
+CLASS ZCL_ABAPGIT_ECATT_SYSTEM_DOWNL IMPLEMENTATION.
+
 
   METHOD download.
 
     " Downport
-
-    DATA: lv_partyp TYPE string.
 
     load_help = im_load_help.
     typ = im_object_type.
@@ -53,14 +53,8 @@ CLASS zcl_abapgit_ecatt_system_downl IMPLEMENTATION.
         RETURN.
     ENDTRY.
 
-    lv_partyp = cl_apl_ecatt_const=>params_type_par.
-
-* build_schema( ).
-* set_attributes_to_schema( ).
     set_attributes_to_template( ).
-* set_systems_data_to_schema( ).
     set_systems_data_to_template( ).
-* download_schema( ).
     download_data( ).
 
   ENDMETHOD.
@@ -134,5 +128,4 @@ CLASS zcl_abapgit_ecatt_system_downl IMPLEMENTATION.
     ENDLOOP.
 
   ENDMETHOD.
-
 ENDCLASS.

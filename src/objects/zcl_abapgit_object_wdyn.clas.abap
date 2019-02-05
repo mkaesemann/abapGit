@@ -4,6 +4,7 @@ CLASS zcl_abapgit_object_wdyn DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
     INTERFACES zif_abapgit_object.
     ALIASES mo_files FOR zif_abapgit_object~mo_files.
 
+  PROTECTED SECTION.
   PRIVATE SECTION.
 
     DATA:
@@ -52,16 +53,16 @@ CLASS zcl_abapgit_object_wdyn DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
         RETURNING VALUE(rs_delta) TYPE svrs2_xversionable_object
         RAISING   zcx_abapgit_exception,
       add_fm_param_exporting
-        IMPORTING iv_name   TYPE string
-                  ig_value  TYPE any
+        IMPORTING iv_name  TYPE string
+                  ig_value TYPE any
         CHANGING  ct_param TYPE abap_func_parmbind_tab,
       add_fm_param_tables
-        IMPORTING iv_name   TYPE string
+        IMPORTING iv_name  TYPE string
         CHANGING  ct_value TYPE ANY TABLE
                   ct_param TYPE abap_func_parmbind_tab,
       add_fm_exception
-        IMPORTING iv_name       TYPE string
-                  iv_value      TYPE i
+        IMPORTING iv_name      TYPE string
+                  iv_value     TYPE i
         CHANGING  ct_exception TYPE abap_func_excpbind_tab.
 
 ENDCLASS.
@@ -748,8 +749,6 @@ CLASS ZCL_ABAPGIT_OBJECT_WDYN IMPLEMENTATION.
     io_xml->read( EXPORTING iv_name  = 'SOURCES'
                   CHANGING cg_data = mt_sources ).
 
-*    tadir_insert( iv_package ).
-
     ls_component-comp_metadata-definition-author = sy-uname.
     ls_component-comp_metadata-definition-createdon = sy-datum.
     recover_definition( is_definition = ls_component-comp_metadata
@@ -795,6 +794,16 @@ CLASS ZCL_ABAPGIT_OBJECT_WDYN IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD zif_abapgit_object~is_active.
+    rv_active = is_active( ).
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_object~is_locked.
+    rv_is_locked = abap_false.
+  ENDMETHOD.
+
+
   METHOD zif_abapgit_object~jump.
 
     CALL FUNCTION 'RS_TOOL_ACCESS'
@@ -822,11 +831,4 @@ CLASS ZCL_ABAPGIT_OBJECT_WDYN IMPLEMENTATION.
                  iv_name = 'SOURCES' ).
 
   ENDMETHOD.
-
-  METHOD zif_abapgit_object~is_locked.
-
-    rv_is_locked = abap_false.
-
-  ENDMETHOD.
-
 ENDCLASS.

@@ -3,11 +3,10 @@
  <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
   <asx:values>
    <VSEOCLASS>
-    <CLSNAME>ZCL_ABAPGIT_HTTP_CLIENT</CLSNAME>
+    <CLSNAME>ZCL_ABAPGIT_CTS_API</CLSNAME>
     <VERSION>1</VERSION>
     <LANGU>E</LANGU>
-    <DESCRIPT>http client</DESCRIPT>
-    <EXPOSURE>2</EXPOSURE>
+    <DESCRIPT>Change transport system API</DESCRIPT>
     <STATE>1</STATE>
     <CLSCCINCL>X</CLSCCINCL>
     <FIXPT>X</FIXPT>

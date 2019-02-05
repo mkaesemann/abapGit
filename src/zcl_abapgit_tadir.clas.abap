@@ -7,8 +7,8 @@ CLASS zcl_abapgit_tadir DEFINITION
   PUBLIC SECTION.
     INTERFACES zif_abapgit_tadir .
 
+  PROTECTED SECTION.
   PRIVATE SECTION.
-
     METHODS EXISTS
       IMPORTING
         !IS_ITEM TYPE ZIF_ABAPGIT_DEFINITIONS=>TY_ITEM
@@ -42,23 +42,21 @@ CLASS ZCL_ABAPGIT_TADIR IMPLEMENTATION.
 
   METHOD build.
 
-    DATA: lt_tadir        TYPE zif_abapgit_definitions=>ty_tadir_tt,
-          lt_tdevc        TYPE STANDARD TABLE OF tdevc,
+    DATA: lt_tdevc        TYPE STANDARD TABLE OF tdevc,
           lv_path         TYPE string,
           lo_skip_objects TYPE REF TO zcl_abapgit_skip_objects,
           lt_excludes     TYPE RANGE OF trobjtype,
           lt_srcsystem    TYPE RANGE OF tadir-srcsystem,
           ls_srcsystem    LIKE LINE OF lt_srcsystem,
-          ls_exclude      LIKE LINE OF lt_excludes.
-    DATA: lo_folder_logic TYPE REF TO zcl_abapgit_folder_logic.
-    DATA: last_package    TYPE devclass VALUE cl_abap_char_utilities=>horizontal_tab.
+          ls_exclude      LIKE LINE OF lt_excludes,
+          lo_folder_logic TYPE REF TO zcl_abapgit_folder_logic,
+          lv_last_package TYPE devclass VALUE cl_abap_char_utilities=>horizontal_tab,
+          lt_packages     TYPE zif_abapgit_sap_package=>ty_devclass_tt.
 
-    FIELD-SYMBOLS: <ls_tdevc> LIKE LINE OF lt_tdevc,
-                   <ls_tadir> LIKE LINE OF rt_tadir,
-                   <lv_package>  TYPE devclass.
+    FIELD-SYMBOLS: <ls_tadir>   LIKE LINE OF rt_tadir,
+                   <lv_package> TYPE devclass.
 
     "Determine Packages to Read
-    DATA: lt_packages TYPE zif_abapgit_sap_package=>ty_devclass_tt.
     IF iv_ignore_subpackages = abap_false.
       lt_packages = zcl_abapgit_factory=>get_sap_package( iv_package )->list_subpackages( ).
     ENDIF.
@@ -117,9 +115,9 @@ CLASS ZCL_ABAPGIT_TADIR IMPLEMENTATION.
 
     LOOP AT rt_tadir ASSIGNING <ls_tadir>.
 
-      IF last_package <> <ls_tadir>-devclass.
+      IF lv_last_package <> <ls_tadir>-devclass.
         "Change in Package
-        last_package = <ls_tadir>-devclass.
+        lv_last_package = <ls_tadir>-devclass.
 
         IF NOT io_dot IS INITIAL.
           "Reuse given Folder Logic Instance
@@ -140,31 +138,35 @@ CLASS ZCL_ABAPGIT_TADIR IMPLEMENTATION.
       CASE <ls_tadir>-object.
         WHEN 'SICF'.
 * replace the internal GUID with a hash of the path
-          <ls_tadir>-obj_name+15 = zcl_abapgit_object_sicf=>read_sicf_url( <ls_tadir>-obj_name ).
+          TRY.
+              CALL METHOD ('ZCL_ABAPGIT_OBJECT_SICF')=>read_sicf_url
+                EXPORTING
+                  iv_obj_name = <ls_tadir>-obj_name
+                RECEIVING
+                  rv_hash     = <ls_tadir>-obj_name+15.
+            CATCH cx_sy_dyn_call_illegal_method.
+* SICF might not be supported in some systems, assume this code is not called
+          ENDTRY.
       ENDCASE.
     ENDLOOP.
-
-  ENDMETHOD.                    "build
+  ENDMETHOD.
 
 
   METHOD check_exists.
 
-    DATA: lv_exists   TYPE abap_bool,
-          lo_progress TYPE REF TO zcl_abapgit_progress,
+    DATA: li_progress TYPE REF TO zif_abapgit_progress,
           ls_item     TYPE zif_abapgit_definitions=>ty_item.
 
     FIELD-SYMBOLS: <ls_tadir> LIKE LINE OF it_tadir.
 
 
-    CREATE OBJECT lo_progress
-      EXPORTING
-        iv_total = lines( it_tadir ).
+    li_progress = zcl_abapgit_progress=>get_instance( lines( it_tadir ) ).
 
 * rows from database table TADIR are not removed for
 * transportable objects until the transport is released
     LOOP AT it_tadir ASSIGNING <ls_tadir>.
       IF sy-tabix MOD 200 = 0.
-        lo_progress->show(
+        li_progress->show(
           iv_current = sy-tabix
           iv_text    = |Check object exists { <ls_tadir>-object } { <ls_tadir>-obj_name }| ).
       ENDIF.
@@ -178,7 +180,7 @@ CLASS ZCL_ABAPGIT_TADIR IMPLEMENTATION.
       ENDIF.
     ENDLOOP.
 
-  ENDMETHOD.                    "check_exists
+  ENDMETHOD.
 
 
   METHOD exists.
@@ -252,9 +254,16 @@ CLASS ZCL_ABAPGIT_TADIR IMPLEMENTATION.
   METHOD zif_abapgit_tadir~read_single.
 
     IF iv_object = 'SICF'.
-      rs_tadir = zcl_abapgit_object_sicf=>read_tadir_sicf(
-        iv_pgmid    = iv_pgmid
-        iv_obj_name = iv_obj_name ).
+      TRY.
+          CALL METHOD ('ZCL_ABAPGIT_OBJECT_SICF')=>read_tadir
+            EXPORTING
+              iv_pgmid    = iv_pgmid
+              iv_obj_name = iv_obj_name
+            RECEIVING
+              rs_tadir    = rs_tadir.
+        CATCH cx_sy_dyn_call_illegal_method.
+* SICF might not be supported in some systems, assume this code is not called
+      ENDTRY.
     ELSE.
       SELECT SINGLE * FROM tadir INTO CORRESPONDING FIELDS OF rs_tadir
         WHERE pgmid = iv_pgmid

@@ -3,7 +3,14 @@ CLASS zcl_abapgit_object_ucsa DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
   PUBLIC SECTION.
     INTERFACES zif_abapgit_object.
 
+  PROTECTED SECTION.
   PRIVATE SECTION.
+    CONSTANTS:
+    BEGIN OF c_version,
+      active   TYPE r3state VALUE 'A',
+      inactive TYPE r3state VALUE 'I',
+    END OF c_version .
+
     TYPES:
       ty_id TYPE c LENGTH 30.
 
@@ -118,7 +125,7 @@ CLASS ZCL_ABAPGIT_OBJECT_UCSA IMPLEMENTATION.
 
         CALL METHOD lo_persistence->('IF_UCON_SA_PERSIST~DELETE')
           EXPORTING
-            version = zif_abapgit_definitions=>c_version-active.
+            version = c_version-active.
 
       CATCH cx_root INTO lx_root.
         lv_text = lx_root->get_text( ).
@@ -158,7 +165,7 @@ CLASS ZCL_ABAPGIT_OBJECT_UCSA IMPLEMENTATION.
         CALL METHOD lo_persistence->('IF_UCON_SA_PERSIST~SAVE')
           EXPORTING
             sa      = <lg_complete_comm_assembly>
-            version = zif_abapgit_definitions=>c_version-active.
+            version = c_version-active.
 
         tadir_insert( iv_package ).
 
@@ -186,7 +193,7 @@ CLASS ZCL_ABAPGIT_OBJECT_UCSA IMPLEMENTATION.
 
         CALL METHOD lo_persistence->('IF_UCON_SA_PERSIST~LOAD')
           EXPORTING
-            version  = zif_abapgit_definitions=>c_version-active
+            version  = c_version-active
             language = sy-langu.
 
       CATCH cx_root.
@@ -211,6 +218,16 @@ CLASS ZCL_ABAPGIT_OBJECT_UCSA IMPLEMENTATION.
 
     rv_changed = abap_true.
 
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_object~is_active.
+    rv_active = is_active( ).
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_object~is_locked.
+    rv_is_locked = abap_false.
   ENDMETHOD.
 
 
@@ -256,7 +273,7 @@ CLASS ZCL_ABAPGIT_OBJECT_UCSA IMPLEMENTATION.
 
         CALL METHOD lo_persistence->('IF_UCON_SA_PERSIST~LOAD')
           EXPORTING
-            version  = zif_abapgit_definitions=>c_version-active
+            version  = c_version-active
             language = sy-langu
           IMPORTING
             sa       = <lg_complete_comm_assembly>.
@@ -272,11 +289,4 @@ CLASS ZCL_ABAPGIT_OBJECT_UCSA IMPLEMENTATION.
     ENDTRY.
 
   ENDMETHOD.
-
-  METHOD zif_abapgit_object~is_locked.
-
-    rv_is_locked = abap_false.
-
-  ENDMETHOD.
-
 ENDCLASS.

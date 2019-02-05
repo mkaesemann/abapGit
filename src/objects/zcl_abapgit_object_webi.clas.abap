@@ -3,6 +3,7 @@ CLASS zcl_abapgit_object_webi DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
   PUBLIC SECTION.
     INTERFACES zif_abapgit_object.
 
+  PROTECTED SECTION.
   PRIVATE SECTION.
     TYPES: BEGIN OF ty_webi,
              veptext         TYPE veptext,
@@ -78,12 +79,12 @@ CLASS ZCL_ABAPGIT_OBJECT_WEBI IMPLEMENTATION.
       zcx_abapgit_exception=>raise( 'todo, WEBI BAPI' ).
     ENDIF.
 
-    IF lines( is_webi-pvepfunction ) <> 1.
-      zcx_abapgit_exception=>raise( 'todo, WEBI, function name' ).
-    ENDIF.
-
 * field ls_endpoint-endpointname does not exist in 702
     READ TABLE is_webi-pvepfunction INDEX 1 ASSIGNING <ls_function>.
+    IF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise( |WEBI { ms_item-obj_name }: couldn't detect endpoint name| ).
+    ENDIF.
+
     li_endpoint->set_data(
       data_version = '1'
       data         = <ls_function>-function ).
@@ -160,7 +161,6 @@ CLASS ZCL_ABAPGIT_OBJECT_WEBI IMPLEMENTATION.
           WHERE function = <ls_function>-function.
         li_fault = li_function->create_fault( <ls_fault>-fault ).
         li_fault->set_name_mapped_to( <ls_fault>-mappedname ).
-*        li_fault->set_description( <ls_fault>-description_id ).
         li_fault->set_detail( <ls_fault>-detail ).
       ENDLOOP.
 
@@ -339,6 +339,8 @@ CLASS ZCL_ABAPGIT_OBJECT_WEBI IMPLEMENTATION.
         handle_function( ls_webi ).
         handle_soap( ls_webi ).
 
+        tadir_insert( iv_package ).
+
         mi_vi->if_ws_md_lockable_object~save( ).
         mi_vi->if_ws_md_lockable_object~unlock( ).
       CATCH cx_ws_md_exception INTO lx_root.
@@ -376,6 +378,16 @@ CLASS ZCL_ABAPGIT_OBJECT_WEBI IMPLEMENTATION.
 
   METHOD zif_abapgit_object~has_changed_since.
     rv_changed = abap_true.
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_object~is_active.
+    rv_active = is_active( ).
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_object~is_locked.
+    rv_is_locked = abap_false.
   ENDMETHOD.
 
 
@@ -462,11 +474,4 @@ CLASS ZCL_ABAPGIT_OBJECT_WEBI IMPLEMENTATION.
                  ig_data = ls_webi ).
 
   ENDMETHOD.
-
-  METHOD zif_abapgit_object~is_locked.
-
-    rv_is_locked = abap_false.
-
-  ENDMETHOD.
-
 ENDCLASS.

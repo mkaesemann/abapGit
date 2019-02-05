@@ -1,47 +1,50 @@
 CLASS zcl_abapgit_syntax_check DEFINITION
   PUBLIC
-  INHERITING FROM zcl_abapgit_code_inspector
+  CREATE PRIVATE
   GLOBAL FRIENDS zcl_abapgit_factory.
 
-  PROTECTED SECTION.
+
+  PUBLIC SECTION.
+    INTERFACES:
+      zif_abapgit_code_inspector.
+
     METHODS:
-      create_variant REDEFINITION.
+      constructor
+        IMPORTING
+          iv_package TYPE devclass
+        RAISING
+          zcx_abapgit_exception.
+
+  PRIVATE SECTION.
+    DATA:
+      mo_adhoc_code_inspector TYPE REF TO zif_abapgit_code_inspector.
 
 ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_SYNTAX_CHECK IMPLEMENTATION.
+CLASS zcl_abapgit_syntax_check IMPLEMENTATION.
 
 
-  METHOD create_variant.
+  METHOD constructor.
 
-    DATA: lt_variant TYPE sci_tstvar,
-          ls_variant LIKE LINE OF lt_variant.
+    mo_adhoc_code_inspector = zcl_abapgit_factory=>get_adhoc_code_inspector(
+                                iv_package   = iv_package
+                                iv_test_name = 'CL_CI_TEST_SYNTAX_CHECK' ).
 
-    cl_ci_checkvariant=>create(
-      EXPORTING
-        p_user              = sy-uname
-      RECEIVING
-        p_ref               = ro_variant
-      EXCEPTIONS
-        chkv_already_exists = 1
-        locked              = 2
-        error_in_enqueue    = 3
-        not_authorized      = 4
-        OTHERS              = 5 ).
-    ASSERT sy-subrc = 0.
+  ENDMETHOD.
 
-    ls_variant-testname = 'CL_CI_TEST_SYNTAX_CHECK'.
-    INSERT ls_variant INTO TABLE lt_variant.
 
-    ro_variant->set_variant(
-      EXPORTING
-        p_variant    = lt_variant
-      EXCEPTIONS
-        not_enqueued = 1
-        OTHERS       = 2 ).
-    ASSERT sy-subrc = 0.
+  METHOD zif_abapgit_code_inspector~get_inspection.
+
+    ro_inspection = mo_adhoc_code_inspector->get_inspection( ).
+
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_code_inspector~run.
+
+    rt_list = mo_adhoc_code_inspector->run( ).
 
   ENDMETHOD.
 ENDCLASS.

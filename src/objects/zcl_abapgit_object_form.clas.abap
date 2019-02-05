@@ -8,6 +8,7 @@ CLASS zcl_abapgit_object_form DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
         is_item     TYPE zif_abapgit_definitions=>ty_item
         iv_language TYPE spras.
 
+  PROTECTED SECTION.
   PRIVATE SECTION.
     CONSTANTS: c_objectname_form    TYPE thead-tdobject VALUE 'FORM' ##NO_TEXT.
     CONSTANTS: c_objectname_tdlines TYPE thead-tdobject VALUE 'TDLINES' ##NO_TEXT.
@@ -85,9 +86,14 @@ CLASS zcl_abapgit_object_form DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
       IMPORTING
         is_text_header TYPE zcl_abapgit_object_form=>tys_text_header
       EXPORTING
-        ev_form_found  TYPE flag
+        ev_form_found  TYPE abap_bool
         es_form_data   TYPE zcl_abapgit_object_form=>tys_form_data
         et_lines       TYPE zcl_abapgit_object_form=>tyt_lines.
+
+    METHODS _sort_tdlines_by_windows
+      CHANGING
+        ct_form_windows TYPE zcl_abapgit_object_form=>tys_form_data-windows
+        ct_lines        TYPE zcl_abapgit_object_form=>tyt_lines.
 
     METHODS order_check_and_insert
       RAISING
@@ -97,16 +103,7 @@ ENDCLASS.
 
 
 
-CLASS zcl_abapgit_object_form IMPLEMENTATION.
-
-  METHOD constructor.
-
-    super->constructor( is_item     = is_item
-                        iv_language = iv_language ).
-
-    mv_form_name = ms_item-obj_name.
-
-  ENDMETHOD.
+CLASS ZCL_ABAPGIT_OBJECT_FORM IMPLEMENTATION.
 
 
   METHOD build_extra_from_header.
@@ -144,6 +141,16 @@ CLASS zcl_abapgit_object_form IMPLEMENTATION.
                             iv_ext    = c_extension_xml
                             iv_string = lv_string ).
     ENDIF.
+
+  ENDMETHOD.
+
+
+  METHOD constructor.
+
+    super->constructor( is_item     = is_item
+                        iv_language = iv_language ).
+
+    mv_form_name = ms_item-obj_name.
 
   ENDMETHOD.
 
@@ -207,6 +214,43 @@ CLASS zcl_abapgit_object_form IMPLEMENTATION.
         read_only_header = abap_true
       IMPORTING
         form_header      = rs_last_changed.
+
+  ENDMETHOD.
+
+
+  METHOD order_check_and_insert.
+
+    DATA: ls_order TYPE e071k-trkorr.
+
+    CALL FUNCTION 'SAPSCRIPT_ORDER_CHECK'
+      EXPORTING
+        objecttype           = ms_item-obj_type
+        form                 = mv_form_name
+      EXCEPTIONS
+        invalid_input        = 1
+        object_locked        = 2
+        object_not_available = 3
+        OTHERS               = 4.
+
+    IF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise_t100( ).
+    ENDIF.
+
+    CALL FUNCTION 'SAPSCRIPT_ORDER_INSERT'
+      EXPORTING
+        objecttype     = ms_item-obj_type
+        form           = mv_form_name
+        masterlang     = mv_language
+      CHANGING
+        order          = ls_order
+      EXCEPTIONS
+        invalid_input  = 1
+        order_canceled = 2
+        OTHERS         = 3.
+
+    IF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise_t100( ).
+    ENDIF.
 
   ENDMETHOD.
 
@@ -289,6 +333,7 @@ CLASS zcl_abapgit_object_form IMPLEMENTATION.
   METHOD zif_abapgit_object~get_metadata.
 
     rs_metadata = get_metadata( ).
+    rs_metadata-delete_tadir = abap_true.
 
   ENDMETHOD.
 
@@ -305,6 +350,11 @@ CLASS zcl_abapgit_object_form IMPLEMENTATION.
 
     rv_changed = boolc( sy-subrc <> 0 OR lv_last_changed_ts > iv_timestamp ).
 
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_object~is_active.
+    rv_active = is_active( ).
   ENDMETHOD.
 
 
@@ -364,8 +414,7 @@ CLASS zcl_abapgit_object_form IMPLEMENTATION.
     DATA: ls_form_data              TYPE tys_form_data.
     DATA: lt_text_header            TYPE tyt_text_header.
     DATA: lt_lines                  TYPE tyt_lines.
-*    DATA: lo_xml                    TYPE REF TO zcl_abapgit_xml_output.
-    DATA: lv_form_found             TYPE flag.
+    DATA: lv_form_found             TYPE abap_bool.
     FIELD-SYMBOLS: <ls_text_header> LIKE LINE OF lt_text_header.
 
     lt_text_header = find_form( ms_item-obj_name ).
@@ -373,7 +422,6 @@ CLASS zcl_abapgit_object_form IMPLEMENTATION.
     LOOP AT lt_text_header ASSIGNING <ls_text_header>.
       CLEAR lt_lines.
       CLEAR ls_form_data.
-*      FREE lo_xml.
 
       _read_form( EXPORTING is_text_header = <ls_text_header>
                   IMPORTING ev_form_found = lv_form_found
@@ -448,6 +496,8 @@ CLASS zcl_abapgit_object_form IMPLEMENTATION.
         tabs         = es_form_data-tabs
         windows      = es_form_data-windows.
 
+    _sort_tdlines_by_windows( CHANGING ct_form_windows  = es_form_data-windows
+                                       ct_lines         = et_lines ).
   ENDMETHOD.
 
 
@@ -477,40 +527,31 @@ CLASS zcl_abapgit_object_form IMPLEMENTATION.
 
   ENDMETHOD.
 
-  METHOD order_check_and_insert.
 
-    DATA: ls_order TYPE e071k-trkorr.
+  METHOD _sort_tdlines_by_windows.
+    DATA lt_lines        TYPE zcl_abapgit_object_form=>tyt_lines.
+    DATA ls_lines        LIKE LINE OF lt_lines.
+    DATA ls_form_windows LIKE LINE OF ct_form_windows.
+    DATA lv_elt_windows  TYPE tdformat VALUE '/W'.
+    DATA lv_firstloop    TYPE abap_bool.
 
-    CALL FUNCTION 'SAPSCRIPT_ORDER_CHECK'
-      EXPORTING
-        objecttype           = ms_item-obj_type
-        form                 = mv_form_name
-      EXCEPTIONS
-        invalid_input        = 1
-        object_locked        = 2
-        object_not_available = 3
-        OTHERS               = 4.
+    lt_lines = ct_lines.
+    CLEAR ct_lines.
 
-    IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise_t100( ).
-    ENDIF.
+    SORT ct_form_windows BY tdwindow.
 
-    CALL FUNCTION 'SAPSCRIPT_ORDER_INSERT'
-      EXPORTING
-        objecttype     = ms_item-obj_type
-        form           = mv_form_name
-        masterlang     = mv_language
-      CHANGING
-        order          = ls_order
-      EXCEPTIONS
-        invalid_input  = 1
-        order_canceled = 2
-        OTHERS         = 3.
-
-    IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise_t100( ).
-    ENDIF.
-
+    LOOP AT ct_form_windows INTO ls_form_windows.
+      lv_firstloop = abap_true.
+      READ TABLE lt_lines INTO ls_lines WITH KEY tdformat = lv_elt_windows
+                                                 tdline   = ls_form_windows-tdwindow.
+      LOOP AT lt_lines INTO ls_lines FROM sy-tabix.
+        IF lv_firstloop = abap_false AND
+           ls_lines-tdformat = lv_elt_windows.
+          EXIT.
+        ENDIF.
+        APPEND ls_lines TO ct_lines.
+        lv_firstloop = abap_false.
+      ENDLOOP.
+    ENDLOOP.
   ENDMETHOD.
-
 ENDCLASS.

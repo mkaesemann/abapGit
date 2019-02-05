@@ -73,6 +73,15 @@ CLASS zcl_abapgit_services_git DEFINITION
         zcx_abapgit_exception
         zcx_abapgit_cancel.
 
+  PROTECTED SECTION.
+
+    CLASS-METHODS get_unnecessary_local_objs
+      IMPORTING
+        !io_repo                            TYPE REF TO zcl_abapgit_repo
+      RETURNING
+        VALUE(rt_unnecessary_local_objects) TYPE zif_abapgit_definitions=>ty_tadir_tt
+      RAISING
+        zcx_abapgit_exception .
   PRIVATE SECTION.
 
 
@@ -152,20 +161,18 @@ CLASS ZCL_ABAPGIT_SERVICES_GIT IMPLEMENTATION.
   METHOD delete_branch.
 
     DATA: lo_repo   TYPE REF TO zcl_abapgit_repo_online,
-          ls_branch TYPE zif_abapgit_definitions=>ty_git_branch.
+          ls_branch TYPE zif_abapgit_definitions=>ty_git_branch,
+          lo_popups TYPE REF TO zif_abapgit_popups.
 
 
     lo_repo ?= zcl_abapgit_repo_srv=>get_instance( )->get( iv_key ).
 
-    ls_branch = zcl_abapgit_ui_factory=>get_popups( )->branch_list_popup( lo_repo->get_url( ) ).
+    lo_popups = zcl_abapgit_ui_factory=>get_popups( ).
+    ls_branch = lo_popups->branch_list_popup( iv_url         = lo_repo->get_url( )
+                                              iv_hide_branch = lo_repo->get_branch_name( )
+                                              iv_hide_head   = abap_true ).
     IF ls_branch IS INITIAL.
       RAISE EXCEPTION TYPE zcx_abapgit_cancel.
-    ENDIF.
-
-    IF ls_branch-name = 'HEAD'.
-      zcx_abapgit_exception=>raise( 'Cannot delete HEAD' ).
-    ELSEIF ls_branch-name = lo_repo->get_branch_name( ).
-      zcx_abapgit_exception=>raise( 'Switch branch before deleting current' ).
     ENDIF.
 
     zcl_abapgit_git_porcelain=>delete_branch(
@@ -201,11 +208,58 @@ CLASS ZCL_ABAPGIT_SERVICES_GIT IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD get_unnecessary_local_objs.
+
+    DATA: lt_tadir        TYPE zif_abapgit_definitions=>ty_tadir_tt,
+          lt_tadir_unique TYPE HASHED TABLE OF zif_abapgit_definitions=>ty_tadir
+                               WITH UNIQUE KEY pgmid object obj_name,
+          lt_local        TYPE zif_abapgit_definitions=>ty_files_item_tt,
+          lt_remote       TYPE zif_abapgit_definitions=>ty_files_tt,
+          lt_status       TYPE zif_abapgit_definitions=>ty_results_tt,
+          lv_package      TYPE zif_abapgit_persistence=>ty_repo-package.
+
+    FIELD-SYMBOLS: <ls_status> TYPE zif_abapgit_definitions=>ty_result,
+                   <ls_tadir>  TYPE zif_abapgit_definitions=>ty_tadir.
+
+
+
+    " delete objects which are added locally but are not in remote repo
+    lt_local  = io_repo->get_files_local( ).
+    lt_remote = io_repo->get_files_remote( ).
+    lt_status = io_repo->status( ).
+
+    lv_package = io_repo->get_package( ).
+    lt_tadir = zcl_abapgit_factory=>get_tadir( )->read( lv_package ).
+    SORT lt_tadir BY pgmid ASCENDING object ASCENDING obj_name ASCENDING devclass ASCENDING.
+
+    LOOP AT lt_status ASSIGNING <ls_status>
+                      WHERE lstate = zif_abapgit_definitions=>c_state-added.
+
+      READ TABLE lt_tadir ASSIGNING <ls_tadir>
+                          WITH KEY pgmid    = 'R3TR'
+                                   object   = <ls_status>-obj_type
+                                   obj_name = <ls_status>-obj_name
+                                   devclass = <ls_status>-package
+                          BINARY SEARCH.
+      IF sy-subrc <> 0.
+* skip objects that does not exist locally
+        CONTINUE.
+      ENDIF.
+
+      INSERT <ls_tadir> INTO TABLE lt_tadir_unique.
+
+    ENDLOOP.
+
+    rt_unnecessary_local_objects = lt_tadir_unique.
+
+  ENDMETHOD.
+
+
   METHOD pull.
 
-    DATA: lo_repo TYPE REF TO zcl_abapgit_repo_online.
+    DATA: lo_repo TYPE REF TO zcl_abapgit_repo.
 
-    lo_repo ?= zcl_abapgit_repo_srv=>get_instance( )->get( iv_key ).
+    lo_repo = zcl_abapgit_repo_srv=>get_instance( )->get( iv_key ).
 
     lo_repo->refresh( ).
 
@@ -213,12 +267,12 @@ CLASS ZCL_ABAPGIT_SERVICES_GIT IMPLEMENTATION.
 
     COMMIT WORK.
 
-  ENDMETHOD.                    "pull
+  ENDMETHOD.
 
 
   METHOD reset.
 
-    DATA: lo_repo                   TYPE REF TO zcl_abapgit_repo_online,
+    DATA: lo_repo                   TYPE REF TO zcl_abapgit_repo,
           lv_answer                 TYPE c LENGTH 1,
           lt_unnecessary_local_objs TYPE zif_abapgit_definitions=>ty_tadir_tt,
           lt_selected               LIKE lt_unnecessary_local_objs,
@@ -226,7 +280,7 @@ CLASS ZCL_ABAPGIT_SERVICES_GIT IMPLEMENTATION.
           ls_checks                 TYPE zif_abapgit_definitions=>ty_delete_checks,
           li_popups                 TYPE REF TO zif_abapgit_popups.
 
-    lo_repo ?= zcl_abapgit_repo_srv=>get_instance( )->get( iv_key ).
+    lo_repo = zcl_abapgit_repo_srv=>get_instance( )->get( iv_key ).
 
     IF lo_repo->get_local_settings( )-write_protected = abap_true.
       zcx_abapgit_exception=>raise( 'Cannot reset. Local code is write-protected by repo config' ).
@@ -241,13 +295,13 @@ CLASS ZCL_ABAPGIT_SERVICES_GIT IMPLEMENTATION.
       iv_text_button_2         = 'Cancel'
       iv_icon_button_2         = 'ICON_CANCEL'
       iv_default_button        = '2'
-      iv_display_cancel_button = abap_false ).                 "#EC NOTEXT
+      iv_display_cancel_button = abap_false ).              "#EC NOTEXT
 
     IF lv_answer = '2'.
       RAISE EXCEPTION TYPE zcx_abapgit_cancel.
     ENDIF.
 
-    lt_unnecessary_local_objs = lo_repo->get_unnecessary_local_objs( ).
+    lt_unnecessary_local_objs = get_unnecessary_local_objs( lo_repo ).
 
     IF lines( lt_unnecessary_local_objs ) > 0.
 
@@ -300,7 +354,7 @@ CLASS ZCL_ABAPGIT_SERVICES_GIT IMPLEMENTATION.
       RAISE EXCEPTION TYPE zcx_abapgit_cancel.
     ENDIF.
 
-    IF ls_branch-name = zcl_abapgit_ui_factory=>get_popups( )->c_new_branch_label.
+    IF ls_branch-name = zif_abapgit_popups=>c_new_branch_label.
       create_branch( iv_key ).
       RETURN.
     ENDIF.

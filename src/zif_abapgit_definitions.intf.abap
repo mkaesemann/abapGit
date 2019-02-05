@@ -91,6 +91,7 @@ INTERFACE zif_abapgit_definitions PUBLIC.
       obj_type TYPE tadir-object,
       obj_name TYPE tadir-obj_name,
       devclass TYPE devclass,
+      inactive TYPE abap_bool,
     END OF ty_item .
   TYPES:
     ty_items_tt TYPE STANDARD TABLE OF ty_item WITH DEFAULT KEY .
@@ -111,8 +112,9 @@ INTERFACE zif_abapgit_definitions PUBLIC.
   TYPES: decision TYPE ty_yes_no,
          END OF ty_overwrite.
 
-  TYPES: ty_overwrite_tt TYPE STANDARD TABLE OF ty_overwrite WITH DEFAULT KEY.
-
+  TYPES: ty_overwrite_tt TYPE STANDARD TABLE OF ty_overwrite WITH DEFAULT KEY
+                              WITH UNIQUE HASHED KEY object_type_and_name
+                                   COMPONENTS obj_type obj_name.
   TYPES: BEGIN OF ty_requirements,
            met      TYPE ty_yes_no,
            decision TYPE ty_yes_no,
@@ -148,14 +150,6 @@ INTERFACE zif_abapgit_definitions PUBLIC.
       delete_tadir TYPE abap_bool,
       ddic         TYPE abap_bool,
     END OF ty_metadata .
-  TYPES:
-    BEGIN OF ty_web_asset,
-      url     TYPE w3url,
-      base64  TYPE string,
-      content TYPE xstring,
-    END OF ty_web_asset .
-  TYPES:
-    tt_web_assets TYPE STANDARD TABLE OF ty_web_asset WITH DEFAULT KEY .
   TYPES:
     BEGIN OF ty_repo_file,
       path       TYPE string,
@@ -201,10 +195,11 @@ INTERFACE zif_abapgit_definitions PUBLIC.
     BEGIN OF ty_result,
       obj_type TYPE tadir-object,
       obj_name TYPE tadir-obj_name,
+      inactive TYPE abap_bool,
       path     TYPE string,
       filename TYPE string,
       package  TYPE devclass,
-      match    TYPE sap_bool,
+      match    TYPE abap_bool,
       lstate   TYPE char1,
       rstate   TYPE char1,
     END OF ty_result .
@@ -213,7 +208,7 @@ INTERFACE zif_abapgit_definitions PUBLIC.
   TYPES:
     ty_sval_tt TYPE STANDARD TABLE OF sval WITH DEFAULT KEY .
   TYPES:
-    ty_seocompotx_tt TYPE STANDARD TABLE OF seocompotx WITH DEFAULT KEY .
+    ty_seocompotx_tt TYPE STANDARD TABLE OF seocompotx WITH DEFAULT KEY.
   TYPES:
     BEGIN OF ty_tpool.
       INCLUDE TYPE textpool.
@@ -228,6 +223,14 @@ INTERFACE zif_abapgit_definitions PUBLIC.
     END OF ty_sotr .
   TYPES:
     ty_sotr_tt TYPE STANDARD TABLE OF ty_sotr WITH DEFAULT KEY .
+  TYPES:
+    BEGIN OF ty_obj_attribute,
+      cmpname   TYPE seocmpname,
+      attkeyfld TYPE seokeyfld,
+      attbusobj TYPE seobusobj,
+    END OF ty_obj_attribute,
+    ty_obj_attribute_tt TYPE STANDARD TABLE OF ty_obj_attribute WITH DEFAULT KEY
+                             WITH NON-UNIQUE SORTED KEY cmpname COMPONENTS cmpname.
   TYPES:
     BEGIN OF ty_transport_to_branch,
       branch_name TYPE string,
@@ -247,6 +250,7 @@ INTERFACE zif_abapgit_definitions PUBLIC.
            email      TYPE string,
            time       TYPE string,
            message    TYPE string,
+           body       TYPE stringtab,
            branch     TYPE string,
            merge      TYPE string,
            tags       TYPE stringtab,
@@ -325,6 +329,7 @@ INTERFACE zif_abapgit_definitions PUBLIC.
   TYPES: BEGIN OF ty_repo_item,
            obj_type TYPE tadir-object,
            obj_name TYPE tadir-obj_name,
+           inactive TYPE abap_bool,
            sortkey  TYPE i,
            path     TYPE string,
            is_dir   TYPE abap_bool,
@@ -410,7 +415,7 @@ INTERFACE zif_abapgit_definitions PUBLIC.
   CONSTANTS c_english TYPE spras VALUE 'E' ##NO_TEXT.
   CONSTANTS c_root_dir TYPE string VALUE '/' ##NO_TEXT.
   CONSTANTS c_dot_abapgit TYPE string VALUE '.abapgit.xml' ##NO_TEXT.
-  CONSTANTS c_author_regex TYPE string VALUE '^([\\\w\s\.\,\#@\-_1-9\(\) ]+) <(.*)> (\d{10})\s?.\d{4}$' ##NO_TEXT.
+  CONSTANTS c_author_regex TYPE string VALUE '^([\\\w\s\.\*\,\#@\-_1-9\(\) ]+) <(.*)> (\d{10})\s?.\d{4}$' ##NO_TEXT.
   CONSTANTS:
     BEGIN OF c_action,
       repo_refresh             TYPE string VALUE 'repo_refresh',
@@ -427,6 +432,7 @@ INTERFACE zif_abapgit_definitions PUBLIC.
       repo_transport_to_branch TYPE string VALUE 'repo_transport_to_branch',
       repo_syntax_check        TYPE string VALUE 'repo_syntax_check',
       repo_code_inspector      TYPE string VALUE 'repo_code_inspector',
+      repo_open_in_master_lang TYPE string VALUE 'repo_open_in_master_lang',
 
       abapgit_home             TYPE string VALUE 'abapgit_home',
       abapgit_install          TYPE string VALUE 'abapgit_install',
@@ -470,14 +476,13 @@ INTERFACE zif_abapgit_definitions PUBLIC.
 
       jump                     TYPE string VALUE 'jump',
       jump_pkg                 TYPE string VALUE 'jump_pkg',
+      jump_transport           TYPE string VALUE 'jump_transport',
 
       url                      TYPE string VALUE 'url',
     END OF c_action .
-  CONSTANTS:
-    BEGIN OF c_version,
-      active   TYPE r3state VALUE 'A',
-      inactive TYPE r3state VALUE 'I',
-    END OF c_version .
+
   CONSTANTS c_tag_prefix TYPE string VALUE 'refs/tags/' ##NO_TEXT.
+  CONSTANTS c_spagpa_param_repo_key TYPE char20 VALUE 'REPO_KEY'.
+  CONSTANTS c_spagpa_param_package TYPE char20 VALUE 'PACKAGE'.
 
 ENDINTERFACE.

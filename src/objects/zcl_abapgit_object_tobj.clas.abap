@@ -33,11 +33,27 @@ CLASS zcl_abapgit_object_tobj IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD update_extra.
+    DATA: lt_current_tvimf TYPE STANDARD TABLE OF tvimf.
+    FIELD-SYMBOLS: <ls_tvimf> TYPE tvimf.
 
     MODIFY tddat FROM is_tobj-tddat.
     MODIFY tvdir FROM is_tobj-tvdir.
-    MODIFY tvimf FROM TABLE is_tobj-tvimf.
 
+    SELECT * INTO TABLE lt_current_tvimf
+      FROM tvimf
+      WHERE tabname = is_tobj-tddat-tabname
+      ORDER BY PRIMARY KEY.
+
+    LOOP AT lt_current_tvimf ASSIGNING <ls_tvimf>.
+      READ TABLE is_tobj-tvimf WITH KEY tabname = <ls_tvimf>-tabname
+                                        event   = <ls_tvimf>-event
+                               TRANSPORTING NO FIELDS.
+      IF sy-subrc <> 0.
+        DELETE tvimf FROM <ls_tvimf>.
+      ENDIF.
+    ENDLOOP.
+
+    MODIFY tvimf FROM TABLE is_tobj-tvimf.
   ENDMETHOD.
 
   METHOD delete_extra.
@@ -301,9 +317,11 @@ CLASS zcl_abapgit_object_tobj IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD zif_abapgit_object~is_locked.
-
     rv_is_locked = abap_false.
-
   ENDMETHOD.
 
+
+  METHOD zif_abapgit_object~is_active.
+    rv_active = is_active( ).
+  ENDMETHOD.
 ENDCLASS.

@@ -13,6 +13,8 @@ ASFC | Field Catalog | Yes
 ASIS | Archiving Information Structure | [#1579](https://github.com/larshp/abapGit/issues/1579)
 AUTH | Authorization Check Fields | Yes
 AVAS | Classification | [#1360](https://github.com/larshp/abapGit/issues/1360)
+BDEF | Behaviour Definition | [#2021](https://github.com/larshp/abapGit/issues/2021)
+BMFR | Application Component | [#2108](https://github.com/larshp/abapGit/issues/2108)
 BOBF | BOPF: Business Object Model | [#165](https://github.com/larshp/abapGit/issues/165)
 CHAR | Object characteristic | Yes
 CHDO | Change Document Object | [#802](https://github.com/larshp/abapGit/issues/802)
@@ -80,16 +82,17 @@ SHLP | Search Help | Yes
 SHMA | Shared Objects: Defined Area Attributes | Yes
 SICF | ICF Service | Yes
 SMIM | Info Object from the MIME Repository | Yes
-SOTS | All Concepts (OTR) of a Package - Long Texts | [#792](https://github.com/larshp/abapGit/issues/792)
+SOTS | All Concepts (OTR) of a Package - Long Texts | Yes
 SPLO | Format Types | Yes
 SPRX | Proxy Object | [#87](https://github.com/larshp/abapGit/issues/87)
-SUCU | Authorization Groups (TBRG_AUTH) | [#1434](https://github.com/larshp/abapGit/issues/1434)
-SUSH | Assignment: Service --> Authorization Objects | [#1582](https://github.com/larshp/abapGit/issues/1582)
+SQSC | Database Procedure Proxy | Yes
 SRFC | RFC Service | Yes
 SSFO | SAP Smart Form | Yes
 SSST | SAP Smart Style | Yes
 STYL | SAPscript style | Yes
+SUCU | Authorization Groups (TBRG_AUTH) | Yes
 SUSC | Authorization object class | Yes
+SUSH | Assignment: Service --> Authorization Objects | [#1582](https://github.com/larshp/abapGit/issues/1582)
 SUSO | Authorization object | Yes
 SXCI | Business Add-Ins - Implementations | Yes
 TABL | Table | Yes
@@ -98,7 +101,7 @@ TRAN | Transaction | Yes
 TTYP | Table Type | Yes
 TYPE | Type Group | Yes
 UCSA | Unified Connectivity Service Assembly | Yes
-UDMO | Data model | [#1905](https://github.com/larshp/abapGit/issues/1905)
+UDMO | Data model | Yes
 UENO | Entity type | [#1906](https://github.com/larshp/abapGit/issues/1906)
 VCLS | View cluster | Yes
 VIEW | View | Yes

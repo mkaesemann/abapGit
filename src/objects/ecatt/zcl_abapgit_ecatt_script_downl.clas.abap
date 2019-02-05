@@ -64,9 +64,6 @@ CLASS ZCL_ABAPGIT_ECATT_SCRIPT_DOWNL IMPLEMENTATION.
 
     " Downport
 
-    DATA: lv_partyp TYPE string,
-          lx_ecatt  TYPE REF TO cx_ecatt_apl.
-
     load_help = im_load_help.
     typ = im_object_type.
 
@@ -83,21 +80,17 @@ CLASS ZCL_ABAPGIT_ECATT_SCRIPT_DOWNL IMPLEMENTATION.
     ENDTRY.
 
     toolname = ecatt_object->attrib->get_tool_name( ).
-* build_schema( ).
-* set_attributes_to_schema( ).
     set_attributes_to_template( ).
 
     IF toolname EQ cl_apl_ecatt_const=>toolname_ecatt.
 
       ecatt_script ?= ecatt_object.
 
-*   set_script_to_schema( ).
       set_script_to_template( ).
 
-*   set_params_to_schema( ).
       TRY.
           get_general_params_data( ecatt_script->params ).
-        CATCH cx_ecatt_apl INTO lx_ecatt.                "#EC NOHANDLER
+        CATCH cx_ecatt_apl.                              "#EC NOHANDLER
 *         proceed with download and report errors later
       ENDTRY.
 
@@ -116,7 +109,7 @@ CLASS ZCL_ABAPGIT_ECATT_SCRIPT_DOWNL IMPLEMENTATION.
 
               ENDIF.
             ENDIF.
-          CATCH cx_ecatt_apl INTO lx_ecatt.              "#EC NOHANDLER
+          CATCH cx_ecatt_apl.                            "#EC NOHANDLER
 *         proceed with download and report errors later
         ENDTRY.
       ENDLOOP.
@@ -128,7 +121,6 @@ CLASS ZCL_ABAPGIT_ECATT_SCRIPT_DOWNL IMPLEMENTATION.
 
     ENDIF.
 
-* download_schema( ).
     download_data( ).
 
   ENDMETHOD.

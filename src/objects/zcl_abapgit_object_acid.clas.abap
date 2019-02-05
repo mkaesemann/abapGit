@@ -111,7 +111,7 @@ CLASS zcl_abapgit_object_acid IMPLEMENTATION.
 
   METHOD zif_abapgit_object~exists.
 
-    DATA: lv_state TYPE flag,
+    DATA: lv_state TYPE abap_bool,
           lo_aab   TYPE REF TO cl_aab_id.
 
 
@@ -143,6 +143,11 @@ CLASS zcl_abapgit_object_acid IMPLEMENTATION.
 
     rv_is_locked = abap_false.
 
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_object~is_active.
+    rv_active = is_active( ).
   ENDMETHOD.
 
 ENDCLASS.

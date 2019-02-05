@@ -62,7 +62,7 @@ CLASS zcl_abapgit_gui_page_merge_res DEFINITION
         zcx_abapgit_exception .
     METHODS build_menu
       IMPORTING
-        VALUE(iv_with_conflict) TYPE boolean OPTIONAL
+        VALUE(iv_with_conflict) TYPE abap_bool OPTIONAL
       RETURNING
         VALUE(ro_menu)          TYPE REF TO zcl_abapgit_html_toolbar .
     METHODS is_binary
@@ -142,13 +142,13 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_MERGE_RES IMPLEMENTATION.
     ls_filedata-merge_content = cl_http_utility=>unescape_url( escaped = ls_filedata-merge_content ).
     REPLACE ALL OCCURRENCES OF lc_replace IN ls_filedata-merge_content WITH zif_abapgit_definitions=>c_newline.
 
-    lv_new_file_content = zcl_abapgit_convert=>string_to_xstring_utf8( iv_string = ls_filedata-merge_content ).
+    lv_new_file_content = zcl_abapgit_convert=>string_to_xstring_utf8( ls_filedata-merge_content ).
 
     READ TABLE mt_conflicts ASSIGNING <ls_conflict> INDEX mv_current_conflict_index.
     <ls_conflict>-result_sha1 = zcl_abapgit_hash=>sha1( iv_type = zif_abapgit_definitions=>c_type-blob
                                                         iv_data = lv_new_file_content ).
     <ls_conflict>-result_data = lv_new_file_content.
-    mo_merge->resolve_conflict( is_conflict = <ls_conflict> ).
+    mo_merge->resolve_conflict( <ls_conflict> ).
 
   ENDMETHOD.
 
@@ -215,7 +215,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_MERGE_RES IMPLEMENTATION.
       ENDIF.
     ENDDO.
 
-  ENDMETHOD.  " is_binary.
+  ENDMETHOD.
 
 
   METHOD render_beacon.
@@ -240,7 +240,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_MERGE_RES IMPLEMENTATION.
     ro_html->add( '</tr>' ).
     ro_html->add( '</thead>' ).
 
-  ENDMETHOD.  " render_beacon.
+  ENDMETHOD.
 
 
   METHOD render_content.
@@ -255,7 +255,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_MERGE_RES IMPLEMENTATION.
     ro_html->add( render_diff( ms_diff_file ) ).
     ro_html->add( '</div>' ).
 
-  ENDMETHOD.  "render_content
+  ENDMETHOD.
 
 
   METHOD render_diff.
@@ -284,7 +284,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_MERGE_RES IMPLEMENTATION.
 
         "Table for Div-Table and textarea
         ro_html->add( '<div class="diff_content">' ).       "#EC NOTEXT
-        ro_html->add( '<table class="w100">' ).                          "#EC NOTEXT
+        ro_html->add( '<table class="w100">' ).             "#EC NOTEXT
         ro_html->add( '<thead class="header">' ).           "#EC NOTEXT
         ro_html->add( '<tr>' ).                             "#EC NOTEXT
         ro_html->add( '<th>Code</th>' ).                    "#EC NOTEXT
@@ -333,7 +333,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_MERGE_RES IMPLEMENTATION.
 
     ro_html->add( '</div>' ).                               "#EC NOTEXT
 
-  ENDMETHOD.  " render_diff
+  ENDMETHOD.
 
 
   METHOD render_diff_head.
@@ -397,7 +397,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_MERGE_RES IMPLEMENTATION.
 
     ENDLOOP.
 
-  ENDMETHOD.  "render_lines
+  ENDMETHOD.
 
 
   METHOD render_line_split.
@@ -440,7 +440,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_MERGE_RES IMPLEMENTATION.
     ro_html->add( lv_new ). " Source
     ro_html->add( '</tr>' ).                                "#EC NOTEXT
 
-  ENDMETHOD. "render_line_split
+  ENDMETHOD.
 
 
   METHOD render_table_head.
@@ -460,7 +460,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_MERGE_RES IMPLEMENTATION.
       ro_html->add( '</form>' ).                            "#EC NOTEXT
       ro_html->add( '<th class="num"></th>' ).              "#EC NOTEXT
       ro_html->add( '<form id="source_form" method="post" action="sapevent:apply_source">' ). "#EC NOTEXT
-      ro_html->add( '<th>Source  - ' && mo_merge->get_source_branch( ) &&' - ' ). "#EC NOTEXT
+      ro_html->add( '<th>Source  - ' && mo_merge->get_source_branch( ) && ' - ' ). "#EC NOTEXT
       ro_html->add_a( iv_act = 'submitFormById(''source_form'');' "#EC NOTEXT
                       iv_txt = 'Apply'
                       iv_typ = zif_abapgit_definitions=>c_action_type-onclick
@@ -473,14 +473,14 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_MERGE_RES IMPLEMENTATION.
       ro_html->add( '<thead class="header">' ).             "#EC NOTEXT
       ro_html->add( '<tr>' ).                               "#EC NOTEXT
       ro_html->add( '<th class="num"></th>' ).              "#EC NOTEXT
-      ro_html->add( '<th>Target - ' && mo_repo->get_branch_name( ) &&'</th> ' ). "#EC NOTEXT
+      ro_html->add( '<th>Target - ' && mo_repo->get_branch_name( ) && '</th> ' ). "#EC NOTEXT
       ro_html->add( '<th class="num"></th>' ).              "#EC NOTEXT
-      ro_html->add( '<th>Source - ' && mo_merge->get_source_branch( ) &&'</th> ' ). "#EC NOTEXT
+      ro_html->add( '<th>Source - ' && mo_merge->get_source_branch( ) && '</th> ' ). "#EC NOTEXT
       ro_html->add( '</tr>' ).                              "#EC NOTEXT
       ro_html->add( '</thead>' ).                           "#EC NOTEXT
     ENDIF.
 
-  ENDMETHOD.  " render_table_head.
+  ENDMETHOD.
 
 
   METHOD resolve_diff.
@@ -548,19 +548,19 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_MERGE_RES IMPLEMENTATION.
 
         CASE iv_action.
           WHEN c_actions-apply_merge.
-            apply_merged_content( it_postdata = it_postdata ).
+            apply_merged_content( it_postdata ).
 
           WHEN c_actions-apply_source.
             READ TABLE mt_conflicts ASSIGNING <ls_conflict> INDEX mv_current_conflict_index.
             <ls_conflict>-result_sha1 = <ls_conflict>-source_sha1.
             <ls_conflict>-result_data = <ls_conflict>-source_data.
-            mo_merge->resolve_conflict( is_conflict = <ls_conflict> ).
+            mo_merge->resolve_conflict( <ls_conflict> ).
 
           WHEN c_actions-apply_target.
             READ TABLE mt_conflicts ASSIGNING <ls_conflict> INDEX mv_current_conflict_index.
             <ls_conflict>-result_sha1 = <ls_conflict>-target_sha1.
             <ls_conflict>-result_data = <ls_conflict>-target_data.
-            mo_merge->resolve_conflict( is_conflict = <ls_conflict> ).
+            mo_merge->resolve_conflict( <ls_conflict> ).
 
         ENDCASE.
 

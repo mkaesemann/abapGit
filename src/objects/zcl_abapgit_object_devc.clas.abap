@@ -36,13 +36,17 @@ ENDCLASS.
 
 
 
-CLASS zcl_abapgit_object_devc IMPLEMENTATION.
+CLASS ZCL_ABAPGIT_OBJECT_DEVC IMPLEMENTATION.
 
 
   METHOD constructor.
     super->constructor( is_item     = is_item
                         iv_language = iv_language ).
-    mv_local_devclass = is_item-devclass.
+    IF is_item-devclass IS NOT INITIAL.
+      mv_local_devclass = is_item-devclass.
+    ELSE.
+      mv_local_devclass = is_item-obj_name.
+    ENDIF.
   ENDMETHOD.
 
 
@@ -388,14 +392,15 @@ CLASS zcl_abapgit_object_devc IMPLEMENTATION.
     " the hierarchy before.
     CLEAR ls_package_data-parentcl.
 
+* Fields not set:
+* korrflag
+* dlvunit
+* parentcl
     ls_data_sign-ctext            = abap_true.
-*    ls_data_sign-korrflag         = abap_true.
     ls_data_sign-as4user          = abap_true.
     ls_data_sign-pdevclass        = abap_true.
-*    ls_data_sign-dlvunit          = abap_true.
     ls_data_sign-comp_posid       = abap_true.
     ls_data_sign-component        = abap_true.
-*    ls_data_sign-parentcl         = abap_true. " No parent package change here
     ls_data_sign-perminher        = abap_true.
     ls_data_sign-intfprefx        = abap_true.
     ls_data_sign-packtype         = abap_true.
@@ -552,6 +557,11 @@ CLASS zcl_abapgit_object_devc IMPLEMENTATION.
 
   METHOD zif_abapgit_object~has_changed_since.
     rv_changed = abap_true.
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_object~is_active.
+    rv_active = is_active( ).
   ENDMETHOD.
 
 

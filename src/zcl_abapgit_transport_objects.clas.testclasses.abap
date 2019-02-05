@@ -51,7 +51,7 @@ CLASS ltcl_transport_objects DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HA
           ms_stage_objects     TYPE zif_abapgit_definitions=>ty_stage_files,
           mo_stage             TYPE REF TO zcl_abapgit_stage.
 
-ENDCLASS.       "ltcl_Transport_Objects
+ENDCLASS.
 
 
 CLASS ltcl_transport_objects IMPLEMENTATION.
@@ -337,7 +337,7 @@ CLASS ltcl_transport_objects IMPLEMENTATION.
 
     TRY.
         when_staging( ).
-        cl_abap_unit_assert=>fail( 'Should have raised exception').
+        cl_abap_unit_assert=>fail( 'Should have raised exception' ).
       CATCH zcx_abapgit_exception INTO lx_exception.
         cl_abap_unit_assert=>assert_equals(
           act = lx_exception->get_text( )

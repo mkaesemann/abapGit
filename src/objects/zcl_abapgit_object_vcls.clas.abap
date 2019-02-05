@@ -3,6 +3,7 @@ CLASS zcl_abapgit_object_vcls DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
   PUBLIC SECTION.
     INTERFACES zif_abapgit_object.
 
+  PROTECTED SECTION.
   PRIVATE SECTION.
 * See include MTOBJCON:
     CONSTANTS: c_cluster_type TYPE c VALUE 'C'.
@@ -61,6 +62,7 @@ CLASS ZCL_ABAPGIT_OBJECT_VCLS IMPLEMENTATION.
                   CHANGING cg_data = lt_vclmf ).
 
     ls_vcldir_entry-author = sy-uname.
+    ls_vcldir_entry-changedate = sy-datum.
 
     CALL FUNCTION 'VIEWCLUSTER_SAVE_DEFINITION'
       EXPORTING
@@ -135,6 +137,11 @@ CLASS ZCL_ABAPGIT_OBJECT_VCLS IMPLEMENTATION.
 
   METHOD zif_abapgit_object~has_changed_since.
     rv_changed = abap_true.
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_object~is_active.
+    rv_active = is_active( ).
   ENDMETHOD.
 
 
@@ -236,6 +243,7 @@ CLASS ZCL_ABAPGIT_OBJECT_VCLS IMPLEMENTATION.
     ENDIF.
 
     CLEAR ls_vcldir_entry-author.
+    CLEAR ls_vcldir_entry-changedate.
 
     io_xml->add( iv_name = 'VCLDIR'
                  ig_data = ls_vcldir_entry ).

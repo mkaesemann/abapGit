@@ -1,17 +1,12 @@
 CLASS zcl_abapgit_stage_logic DEFINITION
   PUBLIC
-  FINAL
-  CREATE PUBLIC .
+  CREATE PRIVATE
+
+  GLOBAL FRIENDS zcl_abapgit_factory .
 
   PUBLIC SECTION.
 
-    CLASS-METHODS get
-      IMPORTING
-        !io_repo        TYPE REF TO zcl_abapgit_repo_online
-      RETURNING
-        VALUE(rs_files) TYPE zif_abapgit_definitions=>ty_stage_files
-      RAISING
-        zcx_abapgit_exception .
+    INTERFACES zif_abapgit_stage_logic .
   PRIVATE SECTION.
     CLASS-METHODS:
       remove_ignored
@@ -25,17 +20,6 @@ ENDCLASS.
 
 
 CLASS ZCL_ABAPGIT_STAGE_LOGIC IMPLEMENTATION.
-
-
-  METHOD get.
-
-    rs_files-local  = io_repo->get_files_local( ).
-    rs_files-remote = io_repo->get_files_remote( ).
-    remove_identical( CHANGING cs_files = rs_files ).
-    remove_ignored( EXPORTING io_repo  = io_repo
-                    CHANGING  cs_files = rs_files ).
-
-  ENDMETHOD.
 
 
   METHOD remove_identical.
@@ -68,7 +52,8 @@ CLASS ZCL_ABAPGIT_STAGE_LOGIC IMPLEMENTATION.
 
     DATA: lv_index TYPE i.
 
-    FIELD-SYMBOLS: <ls_remote> LIKE LINE OF cs_files-remote.
+    FIELD-SYMBOLS: <ls_remote> LIKE LINE OF cs_files-remote,
+                   <ls_local>  LIKE LINE OF cs_files-local.
 
 
     LOOP AT cs_files-remote ASSIGNING <ls_remote>.
@@ -85,6 +70,28 @@ CLASS ZCL_ABAPGIT_STAGE_LOGIC IMPLEMENTATION.
       ENDIF.
 
     ENDLOOP.
+
+    LOOP AT cs_files-local ASSIGNING <ls_local>.
+      lv_index = sy-tabix.
+
+      IF io_repo->get_dot_abapgit( )->is_ignored(
+          iv_path     = <ls_local>-file-path
+          iv_filename = <ls_local>-file-filename ) = abap_true.
+        DELETE cs_files-local INDEX lv_index.
+      ENDIF.
+
+    ENDLOOP.
+
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_stage_logic~get.
+
+    rs_files-local  = io_repo->get_files_local( ).
+    rs_files-remote = io_repo->get_files_remote( ).
+    remove_identical( CHANGING cs_files = rs_files ).
+    remove_ignored( EXPORTING io_repo  = io_repo
+                    CHANGING  cs_files = rs_files ).
 
   ENDMETHOD.
 ENDCLASS.

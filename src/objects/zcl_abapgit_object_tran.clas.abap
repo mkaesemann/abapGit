@@ -4,45 +4,289 @@ CLASS zcl_abapgit_object_tran DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
     INTERFACES zif_abapgit_object.
     ALIASES mo_files FOR zif_abapgit_object~mo_files.
 
+  PROTECTED SECTION.
   PRIVATE SECTION.
 
-    CONSTANTS: c_oo_program(9)    VALUE '\PROGRAM=',
-               c_oo_class(7)      VALUE '\CLASS=',
-               c_oo_method(8)     VALUE '\METHOD=',
-               c_oo_tcode         TYPE tcode VALUE 'OS_APPLICATION',
-               c_oo_frclass(30)   VALUE 'CLASS',
-               c_oo_frmethod(30)  VALUE 'METHOD',
-               c_oo_frupdtask(30) VALUE 'UPDATE_MODE',
-               c_oo_synchron      VALUE 'S',
-               c_oo_asynchron     VALUE 'U',
-               c_true             TYPE c VALUE 'X',
-               c_false            TYPE c VALUE space.
+    TYPES:
+      tty_param_values TYPE STANDARD TABLE OF rsparam
+                                     WITH NON-UNIQUE DEFAULT KEY .
 
-    METHODS:
-      split_parameters
-        CHANGING ct_rsparam TYPE s_param
-                 cs_rsstcd  TYPE rsstcd
-                 cs_tstcp   TYPE tstcp
-                 cs_tstc    TYPE tstc,
+    CONSTANTS:
+      c_oo_program(9) VALUE '\PROGRAM=' ##NO_TEXT.
+    CONSTANTS:
+      c_oo_class(7) VALUE '\CLASS=' ##NO_TEXT.
+    CONSTANTS:
+      c_oo_method(8) VALUE '\METHOD=' ##NO_TEXT.
+    CONSTANTS c_oo_tcode TYPE tcode VALUE 'OS_APPLICATION' ##NO_TEXT.
+    CONSTANTS:
+      c_oo_frclass(30) VALUE 'CLASS' ##NO_TEXT.
+    CONSTANTS:
+      c_oo_frmethod(30) VALUE 'METHOD' ##NO_TEXT.
+    CONSTANTS:
+      c_oo_frupdtask(30) VALUE 'UPDATE_MODE' ##NO_TEXT.
+    CONSTANTS c_oo_synchron TYPE c VALUE 'S' ##NO_TEXT.
+    CONSTANTS c_oo_asynchron TYPE c VALUE 'U' ##NO_TEXT.
+    CONSTANTS c_true TYPE c VALUE 'X' ##NO_TEXT.
+    CONSTANTS c_false TYPE c VALUE space ##NO_TEXT.
+    DATA:
+      mt_bcdata TYPE STANDARD TABLE OF bdcdata .
 
-      split_parameters_comp
-        IMPORTING ig_type  TYPE any
-                  ig_param TYPE any
-        CHANGING  cg_value TYPE any,
-
-      serialize_texts
-        IMPORTING io_xml TYPE REF TO zcl_abapgit_xml_output
-        RAISING   zcx_abapgit_exception,
-
-      deserialize_texts
-        IMPORTING io_xml TYPE REF TO zcl_abapgit_xml_input
-        RAISING   zcx_abapgit_exception.
-
+    METHODS shift_param
+      CHANGING
+        !ct_rsparam TYPE s_param
+        !cs_tstcp   TYPE tstcp .
+    METHODS add_data
+      IMPORTING
+        !iv_fnam TYPE bdcdata-fnam
+        !iv_fval TYPE clike .
+    METHODS call_se93
+      RAISING
+        zcx_abapgit_exception .
+    METHODS set_oo_parameters
+      IMPORTING
+        !it_rsparam TYPE s_param
+      CHANGING
+        !cs_rsstcd  TYPE rsstcd .
+    METHODS split_parameters
+      CHANGING
+        !ct_rsparam TYPE s_param
+        !cs_rsstcd  TYPE rsstcd
+        !cs_tstcp   TYPE tstcp
+        !cs_tstc    TYPE tstc .
+    METHODS split_parameters_comp
+      IMPORTING
+        !ig_type  TYPE any
+        !ig_param TYPE any
+      CHANGING
+        !cg_value TYPE any .
+    METHODS serialize_texts
+      IMPORTING
+        !io_xml TYPE REF TO zcl_abapgit_xml_output
+      RAISING
+        zcx_abapgit_exception .
+    METHODS deserialize_texts
+      IMPORTING
+        !io_xml TYPE REF TO zcl_abapgit_xml_input
+      RAISING
+        zcx_abapgit_exception .
+    METHODS deserialize_oo_transaction
+      IMPORTING
+        !iv_package TYPE devclass
+        !is_tstc    TYPE tstc
+        !is_tstcc   TYPE tstcc
+        !is_tstct   TYPE tstct
+        !is_rsstcd  TYPE rsstcd
+      RAISING
+        zcx_abapgit_exception .
 ENDCLASS.
 
 
 
 CLASS ZCL_ABAPGIT_OBJECT_TRAN IMPLEMENTATION.
+
+
+  METHOD add_data.
+
+    DATA: ls_bcdata LIKE LINE OF mt_bcdata.
+
+    ls_bcdata-fnam = iv_fnam.
+    ls_bcdata-fval = iv_fval.
+    APPEND ls_bcdata TO mt_bcdata.
+
+  ENDMETHOD.
+
+
+  METHOD call_se93.
+
+    DATA: lt_message TYPE STANDARD TABLE OF bdcmsgcoll.
+
+    FIELD-SYMBOLS: <ls_message> TYPE bdcmsgcoll.
+
+
+    CALL FUNCTION 'ABAP4_CALL_TRANSACTION'
+      EXPORTING
+        tcode     = 'SE93'
+        mode_val  = 'N'
+      TABLES
+        using_tab = mt_bcdata
+        mess_tab  = lt_message
+      EXCEPTIONS
+        OTHERS    = 1.
+
+    IF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise( |Error deserializing { ms_item-obj_type } { ms_item-obj_name }| ).
+    ENDIF.
+
+    LOOP AT lt_message ASSIGNING <ls_message>
+                       WHERE msgtyp CA 'EAX'.
+
+      MESSAGE ID     <ls_message>-msgid
+              TYPE   <ls_message>-msgtyp
+              NUMBER <ls_message>-msgnr
+              WITH   <ls_message>-msgv1 <ls_message>-msgv2 <ls_message>-msgv3 <ls_message>-msgv4
+              INTO sy-msgli.
+      zcx_abapgit_exception=>raise_t100( ).
+
+    ENDLOOP.
+
+  ENDMETHOD.
+
+
+  METHOD deserialize_oo_transaction.
+
+    " You should remember that we don't use batch input just for fun,
+    " but because FM RPY_TRANSACTION_INSERT doesn't support OO transactions.
+
+    DATA: ls_bcdata  TYPE bdcdata.
+
+
+    CLEAR mt_bcdata.
+
+    ls_bcdata-program  = 'SAPLSEUK'.
+    ls_bcdata-dynpro   = '0390'.
+    ls_bcdata-dynbegin = 'X'.
+    APPEND ls_bcdata TO mt_bcdata.
+
+    add_data( iv_fnam = 'TSTC-TCODE'
+              iv_fval = is_tstc-tcode ).
+
+    IF zif_abapgit_object~exists( ) = abap_true.
+
+      add_data( iv_fnam = 'BDC_OKCODE'
+                iv_fval = '=CHNG' ).
+
+    ELSE.
+
+      add_data( iv_fnam = 'BDC_OKCODE'
+                iv_fval = '=ADD' ).
+
+    ENDIF.
+
+    ls_bcdata-program  = 'SAPLSEUK'.
+    ls_bcdata-dynpro   = '0300'.
+    ls_bcdata-dynbegin = 'X'.
+    APPEND ls_bcdata TO mt_bcdata.
+
+    add_data( iv_fnam     = 'TSTCT-TTEXT'
+              iv_fval     = is_tstct-ttext ).
+
+    add_data( iv_fnam     = 'RSSTCD-S_CLASS'
+              iv_fval     = 'X' ).
+
+    add_data( iv_fnam = 'BDC_OKCODE'
+              iv_fval = '=ENTR' ).
+
+    ls_bcdata-program  = 'SAPLSEUK'.
+    ls_bcdata-dynpro   = '0360'.
+    ls_bcdata-dynbegin = 'X'.
+    APPEND ls_bcdata TO mt_bcdata.
+
+    add_data( iv_fnam     = 'RSSTCD-S_TRFRAME'
+              iv_fval     = is_rsstcd-s_trframe ).
+
+    add_data( iv_fnam     = 'RSSTCD-S_UPDTASK'
+              iv_fval     = is_rsstcd-s_updtask ).
+
+    add_data( iv_fnam = 'BDC_OKCODE'
+              iv_fval = '=TR_FRAMEWORK' ).
+
+    ls_bcdata-program  = 'SAPLSEUK'.
+    ls_bcdata-dynpro   = '0360'.
+    ls_bcdata-dynbegin = 'X'.
+    APPEND ls_bcdata TO mt_bcdata.
+
+    add_data( iv_fnam     = 'RSSTCD-CLASSNAME'
+              iv_fval     = is_rsstcd-classname ).
+
+    add_data( iv_fnam     = 'RSSTCD-METHOD'
+              iv_fval     = is_rsstcd-method ).
+
+    IF is_rsstcd-s_local IS NOT INITIAL.
+      add_data( iv_fnam     = 'RSSTCD-S_LOCAL'
+                iv_fval     = is_rsstcd-s_local ).
+    ENDIF.
+
+    IF is_rsstcd-s_updlok IS NOT INITIAL.
+      add_data( iv_fnam     = 'RSSTCD-S_UPDLOK'
+                iv_fval     = is_rsstcd-s_updlok ).
+    ENDIF.
+
+    add_data( iv_fnam     = 'TSTC-PGMNA'
+              iv_fval     = is_tstc-pgmna ).
+
+    IF is_tstcc-s_webgui = '2'.
+
+      add_data( iv_fnam     = 'G_IAC_EWT'
+                iv_fval     = abap_true ).
+
+      add_data( iv_fnam = 'BDC_OKCODE'
+                iv_fval = 'MAKE_PROFI' ).
+
+      ls_bcdata-program  = 'SAPLSEUK'.
+      ls_bcdata-dynpro   = '0360'.
+      ls_bcdata-dynbegin = 'X'.
+      APPEND ls_bcdata TO mt_bcdata.
+
+    ELSEIF is_tstcc-s_webgui IS NOT INITIAL.
+
+      add_data( iv_fnam     = 'TSTCC-S_WEBGUI'
+                iv_fval     = is_tstcc-s_webgui ).
+
+    ENDIF.
+
+    IF is_tstcc-s_pervas IS NOT INITIAL.
+      add_data( iv_fnam     = 'TSTCC-S_PERVAS'
+                iv_fval     = is_tstcc-s_pervas ).
+    ENDIF.
+
+    IF is_tstcc-s_service IS NOT INITIAL.
+      add_data( iv_fnam     = 'TSTCC-S_SERVICE'
+                iv_fval     = is_tstcc-s_service ).
+    ENDIF.
+
+    IF is_tstcc-s_platin IS NOT INITIAL.
+      add_data( iv_fnam     = 'TSTCC-S_PLATIN'
+                iv_fval     = is_tstcc-s_platin ).
+    ENDIF.
+
+    IF is_tstcc-s_win32 IS NOT INITIAL.
+      add_data( iv_fnam     = 'TSTCC-S_WIN32'
+                iv_fval     = is_tstcc-s_win32 ).
+    ENDIF.
+
+    add_data( iv_fnam = 'BDC_OKCODE'
+              iv_fval = '=WB_SAVE' ).
+
+    ls_bcdata-program  = 'SAPLSTRD'.
+    ls_bcdata-dynpro   = '0100'.
+    ls_bcdata-dynbegin = 'X'.
+    APPEND ls_bcdata TO mt_bcdata.
+
+    add_data( iv_fnam     = 'KO007-L_DEVCLASS'
+              iv_fval     = iv_package ).
+
+    add_data( iv_fnam = 'BDC_OKCODE'
+              iv_fval = '=ADD' ).
+
+    ls_bcdata-program  = 'BDC_OKCODE'.
+    ls_bcdata-dynpro   = '0360'.
+    ls_bcdata-dynbegin = 'X'.
+    APPEND ls_bcdata TO mt_bcdata.
+
+    add_data( iv_fnam = 'BDC_OKCODE'
+              iv_fval = '=WB_BACK' ).
+
+    ls_bcdata-program  = 'BDC_OKCODE'.
+    ls_bcdata-dynpro   = '0360'.
+    ls_bcdata-dynbegin = 'X'.
+    APPEND ls_bcdata TO mt_bcdata.
+
+    add_data( iv_fnam = 'BDC_OKCODE'
+              iv_fval = '=WB_BACK' ).
+
+    call_se93( ).
+
+  ENDMETHOD.
 
 
   METHOD deserialize_texts.
@@ -92,15 +336,95 @@ CLASS ZCL_ABAPGIT_OBJECT_TRAN IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD set_oo_parameters.
+
+    DATA: ls_param LIKE LINE OF it_rsparam.
+
+    IF cs_rsstcd-call_tcode = c_oo_tcode.
+      cs_rsstcd-s_trframe = c_true.
+      LOOP AT it_rsparam INTO ls_param.
+        CASE ls_param-field.
+          WHEN c_oo_frclass.
+            cs_rsstcd-classname = ls_param-value.
+          WHEN c_oo_frmethod.
+            cs_rsstcd-method   = ls_param-value.
+          WHEN c_oo_frupdtask.
+            IF ls_param-value = c_oo_synchron.
+              cs_rsstcd-s_upddir  = c_true.
+              cs_rsstcd-s_updtask = c_false.
+              cs_rsstcd-s_updlok  = c_false.
+            ELSEIF ls_param-value = c_oo_asynchron.
+              cs_rsstcd-s_upddir  = c_false.
+              cs_rsstcd-s_updtask = c_true.
+              cs_rsstcd-s_updlok  = c_false.
+            ELSE.
+              cs_rsstcd-s_upddir  = c_false.
+              cs_rsstcd-s_updtask = c_false.
+              cs_rsstcd-s_updlok  = c_true.
+            ENDIF.
+        ENDCASE.
+      ENDLOOP.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+  METHOD shift_param.
+
+    DATA: ls_param  LIKE LINE OF ct_rsparam,
+          lv_length TYPE i.
+
+    FIELD-SYMBOLS <lg_f> TYPE any.
+
+
+    DO 254 TIMES.
+      IF cs_tstcp-param = space.
+        EXIT.
+      ENDIF.
+      CLEAR ls_param.
+      IF cs_tstcp-param CA '='.
+        CHECK sy-fdpos <> 0.
+        ASSIGN cs_tstcp-param(sy-fdpos) TO <lg_f>.
+        ls_param-field = <lg_f>.
+        IF ls_param-field(1) = space.
+          SHIFT ls_param-field.
+        ENDIF.
+        sy-fdpos = sy-fdpos + 1.
+        SHIFT cs_tstcp-param BY sy-fdpos PLACES.
+        IF cs_tstcp-param CA ';'.
+          IF sy-fdpos <> 0.
+            ASSIGN cs_tstcp-param(sy-fdpos) TO <lg_f>.
+            ls_param-value = <lg_f>.
+            IF ls_param-value(1) = space.
+              SHIFT ls_param-value.
+            ENDIF.
+          ENDIF.
+          sy-fdpos = sy-fdpos + 1.
+          SHIFT cs_tstcp-param BY sy-fdpos PLACES.
+          APPEND ls_param TO ct_rsparam.
+        ELSE.
+          lv_length = strlen( cs_tstcp-param ).
+          CHECK lv_length > 0.
+          ASSIGN cs_tstcp-param(lv_length) TO <lg_f>.
+          ls_param-value = <lg_f>.
+          IF ls_param-value(1) = space.
+            SHIFT ls_param-value.
+          ENDIF.
+          lv_length = lv_length + 1.
+          SHIFT cs_tstcp-param BY lv_length PLACES.
+          APPEND ls_param TO ct_rsparam.
+        ENDIF.
+      ENDIF.
+    ENDDO.
+
+  ENDMETHOD.
+
+
   METHOD split_parameters.
 * see subroutine split_parameters in include LSEUKF01
 
     DATA: lv_off       TYPE i,
-          lv_param_beg TYPE i,
-          lv_length    TYPE i,
-          ls_param     LIKE LINE OF ct_rsparam.
-
-    FIELD-SYMBOLS <lg_f> TYPE any.
+          lv_param_beg TYPE i.
 
 
     CLEAR cs_rsstcd-s_vari.
@@ -158,71 +482,14 @@ CLASS ZCL_ABAPGIT_OBJECT_TRAN IMPLEMENTATION.
       cs_rsstcd-st_prog  = c_true.
     ENDIF.
 
-    DO 254 TIMES.
-      IF cs_tstcp-param = space.
-        EXIT.
-      ENDIF.
-      CLEAR ls_param.
-      IF cs_tstcp-param CA '='.
-        CHECK sy-fdpos <> 0.
-        ASSIGN cs_tstcp-param(sy-fdpos) TO <lg_f>.
-        ls_param-field = <lg_f>.
-        IF ls_param-field(1) = space.
-          SHIFT ls_param-field.
-        ENDIF.
-        sy-fdpos = sy-fdpos + 1.
-        SHIFT cs_tstcp-param BY sy-fdpos PLACES.
-        IF cs_tstcp-param CA ';'.
-          IF sy-fdpos <> 0.
-            ASSIGN cs_tstcp-param(sy-fdpos) TO <lg_f>.
-            ls_param-value = <lg_f>.
-            IF ls_param-value(1) = space.
-              SHIFT ls_param-value.
-            ENDIF.
-          ENDIF.
-          sy-fdpos = sy-fdpos + 1.
-          SHIFT cs_tstcp-param BY sy-fdpos PLACES.
-          APPEND ls_param TO ct_rsparam.
-        ELSE.
-          lv_length = strlen( cs_tstcp-param ).
-          CHECK lv_length > 0.
-          ASSIGN cs_tstcp-param(lv_length) TO <lg_f>.
-          ls_param-value = <lg_f>.
-          IF ls_param-value(1) = space.
-            SHIFT ls_param-value.
-          ENDIF.
-          lv_length = lv_length + 1.
-          SHIFT cs_tstcp-param BY lv_length PLACES.
-          APPEND ls_param TO ct_rsparam.
-        ENDIF.
-      ENDIF.
-    ENDDO.
-* oo-Transaktion mit Framework
-    IF cs_rsstcd-call_tcode = c_oo_tcode.
-      cs_rsstcd-s_trframe = c_true.
-      LOOP AT ct_rsparam INTO ls_param.
-        CASE ls_param-field.
-          WHEN c_oo_frclass.
-            cs_rsstcd-classname = ls_param-value.
-          WHEN c_oo_frmethod.
-            cs_rsstcd-method   = ls_param-value.
-          WHEN c_oo_frupdtask.
-            IF ls_param-value = c_oo_synchron.
-              cs_rsstcd-s_upddir  = c_true.
-              cs_rsstcd-s_updtask = c_false.
-              cs_rsstcd-s_updlok  = c_false.
-            ELSEIF ls_param-value = c_oo_asynchron.
-              cs_rsstcd-s_upddir  = c_false.
-              cs_rsstcd-s_updtask = c_true.
-              cs_rsstcd-s_updlok  = c_false.
-            ELSE.
-              cs_rsstcd-s_upddir  = c_false.
-              cs_rsstcd-s_updtask = c_false.
-              cs_rsstcd-s_updlok  = c_true.
-            ENDIF.
-        ENDCASE.
-      ENDLOOP.
-    ENDIF.
+    shift_param(
+      CHANGING ct_rsparam = ct_rsparam
+               cs_tstcp   = cs_tstcp ).
+
+    set_oo_parameters(
+      EXPORTING it_rsparam = ct_rsparam
+      CHANGING cs_rsstcd = cs_rsstcd ).
+
   ENDMETHOD.
 
 
@@ -261,7 +528,7 @@ CLASS ZCL_ABAPGIT_OBJECT_TRAN IMPLEMENTATION.
         transaction      = lv_transaction
       EXCEPTIONS
         not_excecuted    = 1
-        object_not_found = 2
+        object_not_found = 0
         OTHERS           = 3.
     IF sy-subrc <> 0.
       zcx_abapgit_exception=>raise( 'Error from RPY_TRANSACTION_DELETE' ).
@@ -275,11 +542,9 @@ CLASS ZCL_ABAPGIT_OBJECT_TRAN IMPLEMENTATION.
     CONSTANTS: lc_hex_tra TYPE x VALUE '00',
 *               c_hex_men TYPE x VALUE '01',
                lc_hex_par TYPE x VALUE '02',
-               lc_hex_rep TYPE x VALUE '80'.
+               lc_hex_rep TYPE x VALUE '80',
 *               c_hex_rpv TYPE x VALUE '10',
-*               c_hex_obj TYPE x VALUE '08',
-*               c_hex_chk TYPE x VALUE '04',
-*               c_hex_enq TYPE x VALUE '20'.
+               lc_hex_obj TYPE x VALUE '08'.
 
     DATA: lv_dynpro       TYPE d020s-dnum,
           ls_tstc         TYPE tstc,
@@ -287,7 +552,7 @@ CLASS ZCL_ABAPGIT_OBJECT_TRAN IMPLEMENTATION.
           ls_tstct        TYPE tstct,
           ls_tstcc        TYPE tstcc,
           ls_tstcp        TYPE tstcp,
-          lt_param_values TYPE TABLE OF rsparam,
+          lt_param_values TYPE tty_param_values,
           ls_rsstcd       TYPE rsstcd.
 
 
@@ -313,6 +578,8 @@ CLASS ZCL_ABAPGIT_OBJECT_TRAN IMPLEMENTATION.
         lv_type = ststc_c_type_report.
       WHEN lc_hex_par.
         lv_type = ststc_c_type_parameters.
+      WHEN lc_hex_obj.
+        lv_type = ststc_c_type_object.
 * todo, or ststc_c_type_variant?
       WHEN OTHERS.
         zcx_abapgit_exception=>raise( 'Transaction, unknown CINFO' ).
@@ -327,37 +594,50 @@ CLASS ZCL_ABAPGIT_OBJECT_TRAN IMPLEMENTATION.
           cs_tstc    = ls_tstc ).
     ENDIF.
 
-    CALL FUNCTION 'RPY_TRANSACTION_INSERT'
-      EXPORTING
-        transaction             = ls_tstc-tcode
-        program                 = ls_tstc-pgmna
-        dynpro                  = lv_dynpro
-        language                = mv_language
-        development_class       = iv_package
-        transaction_type        = lv_type
-        shorttext               = ls_tstct-ttext
-        called_transaction      = ls_rsstcd-call_tcode
-        called_transaction_skip = ls_rsstcd-st_skip_1
-        variant                 = ls_rsstcd-variant
-        cl_independend          = ls_rsstcd-s_ind_vari
-        html_enabled            = ls_tstcc-s_webgui
-        java_enabled            = ls_tstcc-s_platin
-        wingui_enabled          = ls_tstcc-s_win32
-      TABLES
-        param_values            = lt_param_values
-      EXCEPTIONS
-        cancelled               = 1
-        already_exist           = 2
-        permission_error        = 3
-        name_not_allowed        = 4
-        name_conflict           = 5
-        illegal_type            = 6
-        object_inconsistent     = 7
-        db_access_error         = 8
-        OTHERS                  = 9.
-    IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'Error from RPY_TRANSACTION_INSERT' ).
-    ENDIF.
+    CASE lv_type.
+      WHEN ststc_c_type_object.
+
+        deserialize_oo_transaction( iv_package      = iv_package
+                                    is_tstc         = ls_tstc
+                                    is_tstcc        = ls_tstcc
+                                    is_tstct        = ls_tstct
+                                    is_rsstcd       = ls_rsstcd ).
+
+      WHEN OTHERS.
+
+        CALL FUNCTION 'RPY_TRANSACTION_INSERT'
+          EXPORTING
+            transaction             = ls_tstc-tcode
+            program                 = ls_tstc-pgmna
+            dynpro                  = lv_dynpro
+            language                = mv_language
+            development_class       = iv_package
+            transaction_type        = lv_type
+            shorttext               = ls_tstct-ttext
+            called_transaction      = ls_rsstcd-call_tcode
+            called_transaction_skip = ls_rsstcd-st_skip_1
+            variant                 = ls_rsstcd-variant
+            cl_independend          = ls_rsstcd-s_ind_vari
+            html_enabled            = ls_tstcc-s_webgui
+            java_enabled            = ls_tstcc-s_platin
+            wingui_enabled          = ls_tstcc-s_win32
+          TABLES
+            param_values            = lt_param_values
+          EXCEPTIONS
+            cancelled               = 1
+            already_exist           = 2
+            permission_error        = 3
+            name_not_allowed        = 4
+            name_conflict           = 5
+            illegal_type            = 6
+            object_inconsistent     = 7
+            db_access_error         = 8
+            OTHERS                  = 9.
+        IF sy-subrc <> 0.
+          zcx_abapgit_exception=>raise( 'Error from RPY_TRANSACTION_INSERT' ).
+        ENDIF.
+
+    ENDCASE.
 
     " Texts deserializing (translations)
     deserialize_texts( io_xml ).
@@ -384,6 +664,26 @@ CLASS ZCL_ABAPGIT_OBJECT_TRAN IMPLEMENTATION.
 
   METHOD zif_abapgit_object~has_changed_since.
     rv_changed = abap_true.
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_object~is_active.
+    rv_active = is_active( ).
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_object~is_locked.
+
+    DATA: lv_object TYPE eqegraarg.
+
+    lv_object = |TN{ ms_item-obj_name }|.
+    OVERLAY lv_object WITH '                                          '.
+    lv_object = lv_object && '*'.
+
+    rv_is_locked = exists_a_lock_entry_for( iv_lock_object = 'EEUDB'
+                                            iv_argument    = lv_object ).
+
+
   ENDMETHOD.
 
 
@@ -482,19 +782,4 @@ CLASS ZCL_ABAPGIT_OBJECT_TRAN IMPLEMENTATION.
     serialize_texts( io_xml ).
 
   ENDMETHOD.
-
-  METHOD zif_abapgit_object~is_locked.
-
-    DATA: lv_object TYPE eqegraarg.
-
-    lv_object = |TN{ ms_item-obj_name }|.
-    OVERLAY lv_object WITH '                                          '.
-    lv_object = lv_object && '*'.
-
-    rv_is_locked = exists_a_lock_entry_for( iv_lock_object = 'EEUDB'
-                                            iv_argument    = lv_object ).
-
-
-  ENDMETHOD.
-
 ENDCLASS.

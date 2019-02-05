@@ -32,14 +32,14 @@ CLASS zcl_abapgit_gui_page_merge DEFINITION
 
     METHODS build_menu
       IMPORTING
-        VALUE(iv_with_conflict) TYPE boolean OPTIONAL
+        VALUE(iv_with_conflict) TYPE abap_bool OPTIONAL
       RETURNING
         VALUE(ro_menu)          TYPE REF TO zcl_abapgit_html_toolbar .
 ENDCLASS.
 
 
 
-CLASS zcl_abapgit_gui_page_merge IMPLEMENTATION.
+CLASS ZCL_ABAPGIT_GUI_PAGE_MERGE IMPLEMENTATION.
 
 
   METHOD build_menu.
@@ -70,7 +70,7 @@ CLASS zcl_abapgit_gui_page_merge IMPLEMENTATION.
     mo_merge->run( ).
 
     ms_control-page_title = 'MERGE'.
-    ms_control-page_menu  = build_menu( iv_with_conflict = mo_merge->has_conflicts( ) ).
+    ms_control-page_menu  = build_menu( mo_merge->has_conflicts( ) ).
 
   ENDMETHOD.
 
@@ -105,7 +105,7 @@ CLASS zcl_abapgit_gui_page_merge IMPLEMENTATION.
     ls_merge = mo_merge->get_result( ).
 
     "If now exists no conflicts anymore, conflicts button should disappear
-    ms_control-page_menu  = build_menu( iv_with_conflict = mo_merge->has_conflicts( ) ).
+    ms_control-page_menu = build_menu( mo_merge->has_conflicts( ) ).
 
     CREATE OBJECT ro_html.
 
@@ -171,7 +171,12 @@ CLASS zcl_abapgit_gui_page_merge IMPLEMENTATION.
     ro_html->add( '</b>' ).
     ro_html->add( '</div>' ).
 
-  ENDMETHOD.  "render_content
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_gui_page_hotkey~get_hotkey_actions.
+
+  ENDMETHOD.
 
 
   METHOD zif_abapgit_gui_page~on_event.
@@ -216,10 +221,4 @@ CLASS zcl_abapgit_gui_page_merge IMPLEMENTATION.
     ENDCASE.
 
   ENDMETHOD.
-
-
-  METHOD zif_abapgit_gui_page_hotkey~get_hotkey_actions.
-
-  ENDMETHOD.
-
 ENDCLASS.

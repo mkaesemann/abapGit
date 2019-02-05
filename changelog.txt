@@ -8,6 +8,83 @@ Legend
 + : added
 - : removed
 
+2019-01-24 v1.82.0
+------------------
+* Fix icons for HiDPI screens
+* Better error handling for TTYP
+! Overwrite popup, selection list
+! Code inspection, ask for variant
+* TOBJ, delete missing TVIMF
++ SQSC support
+! Limit list of shown code inspector findings
+* PINF fix package popup and locking
++ SOTS support
+
+2019-01-05 v1.81.1
+------------------
+! GUI tweaks, removing toolbar, disabling save button
+* Refactoring
+! VCLS, clear CHANGEDATE
+! Repo overview page redesign
+! IDOC segments part of TABL
+* Branch overview, skip orphaned commits
+
+2018-12-12 v1.81.0
+------------------
+! CLAS XML changed, redundant fields cleared
++ SUCU support
++ Hotkey improvements
+* patch feature bugfixes
+* SAP script window sequence
+* backport
+
+2018-11-23 v1.80.0
+------------------
++ Parallel serialization
++ 2 step zip import
++ possibility to open repo in master language
++ Set SSL_ID via user exit
+* SUSC tadir handling
+
+2018-11-17 v1.79.1
+------------------
+* SICF error handling + is_locked
+* fix duplicate deserialization
+* Better TADIR handling
+* Less GUI popups
+* Fix branch overview not refreshed
+* Refactoring
+* Code cleanup
+
+2018-11-09 v1.79.0
+------------------
++ CTS integration, show corresponding transports
++ Mark inactive objects in repo list
+* SSFO handle leading spaces
+* PARA error handling
+* ENHO do not show gui
+* SCP1 do not show gui
+* DDLX fix tadir handling
+
+2018-10-19 v1.78.1
+------------------
+* Diff fixes
+* Jump only if object exists
+* IEXT: clear additional fields
+* TRAN: support OO transactions
+* SSFO: fix id renumbering
+
+2018-10-07 v1.78.0
+------------------
++ UDMO support
+* PROG fix dynpro ordering
+* SUSO downport
++ Run code inspector in parallel
+* WEBI fixes
+* Syntax check results page clean up
+! DDLX source in separate file
+! smart response checks for verifying git endpoint
+
 2018-09-21 v1.77.0
 ------------------
 + ENHC support

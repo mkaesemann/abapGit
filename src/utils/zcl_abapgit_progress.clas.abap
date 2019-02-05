@@ -1,21 +1,24 @@
 CLASS zcl_abapgit_progress DEFINITION
   PUBLIC
   FINAL
-  CREATE PUBLIC .
+  CREATE PROTECTED .
 
   PUBLIC SECTION.
 
-    METHODS show
+    INTERFACES zif_abapgit_progress .
+
+    CLASS-METHODS get_instance
       IMPORTING
-        VALUE(iv_current) TYPE i
-        !iv_text          TYPE csequence .
-    METHODS constructor
-      IMPORTING
-        !iv_total TYPE i .
+        !iv_total          TYPE i
+      RETURNING
+        VALUE(ri_progress) TYPE REF TO zif_abapgit_progress .
   PROTECTED SECTION.
 
     DATA mv_total TYPE i .
 
+    METHODS constructor
+      IMPORTING
+        !iv_total TYPE i .
     METHODS calc_pct
       IMPORTING
         !iv_current   TYPE i
@@ -53,12 +56,21 @@ CLASS ZCL_ABAPGIT_PROGRESS IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD show.
+  METHOD get_instance.
 
-    DATA: lv_pct  TYPE i.
-    DATA: lv_time TYPE t.
+    CREATE OBJECT ri_progress TYPE zcl_abapgit_progress
+      EXPORTING
+        iv_total = iv_total.
 
-    CONSTANTS: c_wait_secs TYPE i VALUE 2.
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_progress~show.
+
+    DATA: lv_pct  TYPE i,
+          lv_time TYPE t.
+
+    CONSTANTS: lc_wait_secs TYPE i VALUE 2.
 
     GET TIME.
     lv_time = sy-uzeit.
@@ -77,7 +89,7 @@ CLASS ZCL_ABAPGIT_PROGRESS IMPLEMENTATION.
         EXPORTING
           percentage = lv_pct
           text       = iv_text.
-      mv_cv_time_next = lv_time + c_wait_secs.
+      mv_cv_time_next = lv_time + lc_wait_secs.
 
     ENDIF.
 

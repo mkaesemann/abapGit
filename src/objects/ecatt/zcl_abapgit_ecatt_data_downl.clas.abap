@@ -4,31 +4,24 @@ CLASS zcl_abapgit_ecatt_data_downl DEFINITION
   CREATE PUBLIC .
 
   PUBLIC SECTION.
-    METHODS:
-      download REDEFINITION,
 
-      set_generate_xml_no_download
-        IMPORTING
-          iv_generate_xml_no_download TYPE abap_bool,
+    METHODS get_xml_stream
+      RETURNING
+        VALUE(rv_xml_stream) TYPE xstring .
+    METHODS get_xml_stream_size
+      RETURNING
+        VALUE(rv_xml_stream_size) TYPE int4 .
 
-      get_xml_stream
-        RETURNING
-          VALUE(rv_xml_stream) TYPE xstring,
-
-      get_xml_stream_size
-        RETURNING
-          VALUE(rv_xml_stream_size) TYPE int4.
-
+    METHODS download
+        REDEFINITION .
   PROTECTED SECTION.
     METHODS:
       download_data REDEFINITION.
 
   PRIVATE SECTION.
-    DATA:
-      mv_generate_xml_no_download TYPE abap_bool,
-      mv_xml_stream               TYPE xstring,
-      mv_xml_stream_size          TYPE int4.
 
+    DATA mv_xml_stream TYPE xstring .
+    DATA mv_xml_stream_size TYPE int4 .
 ENDCLASS.
 
 
@@ -61,10 +54,7 @@ CLASS ZCL_ABAPGIT_ECATT_DATA_DOWNL IMPLEMENTATION.
     lv_partyp = cl_apl_ecatt_const=>params_type_par.
 
     ecatt_data ?= ecatt_object.
-* build_schema( ).
-* set_attributes_to_schema( ).
     set_attributes_to_template( ).
-* set_params_to_schema( ).
     get_general_params_data( im_params = ecatt_data->params
                              im_ptyp   = lv_partyp ).
 
@@ -82,7 +72,6 @@ CLASS ZCL_ABAPGIT_ECATT_DATA_DOWNL IMPLEMENTATION.
 * ENDMS180406
     set_variants_to_dom( ecatt_data->params ).
 
-* download_schema( ).
     download_data( ).
 
   ENDMETHOD.
@@ -112,13 +101,6 @@ CLASS ZCL_ABAPGIT_ECATT_DATA_DOWNL IMPLEMENTATION.
   METHOD get_xml_stream_size.
 
     rv_xml_stream_size = mv_xml_stream_size.
-
-  ENDMETHOD.
-
-
-  METHOD set_generate_xml_no_download.
-
-    mv_generate_xml_no_download = iv_generate_xml_no_download.
 
   ENDMETHOD.
 ENDCLASS.

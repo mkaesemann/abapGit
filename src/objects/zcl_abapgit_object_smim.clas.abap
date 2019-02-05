@@ -20,7 +20,7 @@ CLASS zcl_abapgit_object_smim DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
 
     METHODS get_url_for_io
       EXPORTING ev_url       TYPE string
-                ev_is_folder TYPE boole_d
+                ev_is_folder TYPE abap_bool
       RAISING   zcx_abapgit_not_found
                 zcx_abapgit_exception.
 
@@ -331,9 +331,11 @@ CLASS zcl_abapgit_object_smim IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD zif_abapgit_object~is_locked.
-
     rv_is_locked = abap_false.
-
   ENDMETHOD.
 
+
+  METHOD zif_abapgit_object~is_active.
+    rv_active = is_active( ).
+  ENDMETHOD.
 ENDCLASS.

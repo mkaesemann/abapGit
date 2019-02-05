@@ -23,50 +23,42 @@ CLASS zcl_abapgit_default_transport DEFINITION
 
       reset
         RAISING
-          zcx_abapgit_exception.
-
-
-  PRIVATE SECTION.
-
-    CLASS-DATA:
-      mo_instance TYPE REF TO zcl_abapgit_default_transport .
-
-    DATA:
-      mv_is_set_by_abapgit TYPE abap_bool,
-      ms_save              TYPE e070use.
-
-    METHODS:
-      store
-        RAISING
           zcx_abapgit_exception,
-
-      restore
-        RAISING
-          zcx_abapgit_exception,
-
       get
         RETURNING
           VALUE(rs_default_task) TYPE e070use
         RAISING
-          zcx_abapgit_exception,
+          zcx_abapgit_exception .
 
-      set_internal
-        IMPORTING
-          iv_transport TYPE trkorr
-        RAISING
-          zcx_abapgit_exception,
 
-      clear
-        IMPORTING
-          is_default_task TYPE e070use
-        RAISING
-          zcx_abapgit_exception.
+  PRIVATE SECTION.
 
+    CLASS-DATA go_instance TYPE REF TO zcl_abapgit_default_transport .
+    DATA mv_is_set_by_abapgit TYPE abap_bool .
+    DATA ms_save TYPE e070use .
+
+    METHODS store
+      RAISING
+        zcx_abapgit_exception .
+    METHODS restore
+      RAISING
+        zcx_abapgit_exception .
+    METHODS set_internal
+      IMPORTING
+        !iv_transport TYPE trkorr
+      RAISING
+        zcx_abapgit_exception .
+    METHODS clear
+      IMPORTING
+        !is_default_task TYPE e070use
+      RAISING
+        zcx_abapgit_exception .
 ENDCLASS.
 
 
 
 CLASS zcl_abapgit_default_transport IMPLEMENTATION.
+
 
   METHOD clear.
 
@@ -121,11 +113,11 @@ CLASS zcl_abapgit_default_transport IMPLEMENTATION.
 
   METHOD get_instance.
 
-    IF mo_instance IS NOT BOUND.
-      CREATE OBJECT mo_instance.
+    IF go_instance IS NOT BOUND.
+      CREATE OBJECT go_instance.
     ENDIF.
 
-    ro_instance = mo_instance.
+    ro_instance = go_instance.
 
   ENDMETHOD.
 
@@ -211,7 +203,6 @@ CLASS zcl_abapgit_default_transport IMPLEMENTATION.
     CALL FUNCTION 'TR_TASK_SET'
       EXPORTING
         iv_order          = iv_transport
-*       iv_task           = iv_task
       EXCEPTIONS
         invalid_username  = 1
         invalid_category  = 2

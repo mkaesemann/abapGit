@@ -73,7 +73,7 @@ CLASS zcl_abapgit_object_auth IMPLEMENTATION.
 
     DELETE FROM authx WHERE fieldname = mv_fieldname.
     IF sy-subrc <> 0.
-      MESSAGE e507(0m) INTO DATA(dummy).
+      MESSAGE e507(0m) INTO lv_dummy.
       zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
 
@@ -121,6 +121,7 @@ CLASS zcl_abapgit_object_auth IMPLEMENTATION.
 
   METHOD zif_abapgit_object~get_metadata.
     rs_metadata = get_metadata( ).
+    rs_metadata-delete_tadir = abap_true.
   ENDMETHOD.
 
 
@@ -157,9 +158,12 @@ CLASS zcl_abapgit_object_auth IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD zif_abapgit_object~is_locked.
-
     rv_is_locked = abap_false.
+  ENDMETHOD.
 
+
+  METHOD zif_abapgit_object~is_active.
+    rv_active = is_active( ).
   ENDMETHOD.
 
 ENDCLASS.

@@ -73,7 +73,7 @@ ENDCLASS.
 
 
 
-CLASS zcl_abapgit_gui_page IMPLEMENTATION.
+CLASS ZCL_ABAPGIT_GUI_PAGE IMPLEMENTATION.
 
 
   METHOD add_hotkeys.
@@ -104,6 +104,30 @@ CLASS zcl_abapgit_gui_page IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD call_browser.
+
+    cl_gui_frontend_services=>execute(
+      EXPORTING
+        document               = |{ iv_url }|
+      EXCEPTIONS
+        cntl_error             = 1
+        error_no_gui           = 2
+        bad_parameter          = 3
+        file_not_found         = 4
+        path_not_found         = 5
+        file_extension_unknown = 6
+        error_execute_failed   = 7
+        synchronous_failed     = 8
+        not_supported_by_gui   = 9
+        OTHERS                 = 10 ).
+
+    IF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise_t100( ).
+    ENDIF.
+
+  ENDMETHOD.
+
+
   METHOD footer.
 
     CREATE OBJECT ro_html.
@@ -120,7 +144,7 @@ CLASS zcl_abapgit_gui_page IMPLEMENTATION.
     ro_html->add( '</tr></table>' ).                        "#EC NOTEXT
     ro_html->add( '</div>' ).                               "#EC NOTEXT
 
-  ENDMETHOD. "footer
+  ENDMETHOD.
 
 
   METHOD get_hotkey_actions.
@@ -129,7 +153,7 @@ CLASS zcl_abapgit_gui_page IMPLEMENTATION.
 
     DATA: ls_hotkey_action LIKE LINE OF rt_hotkey_actions.
 
-    ls_hotkey_action-name           = |Global: Show hotkeys|.
+    ls_hotkey_action-name           = |Show hotkeys help|.
     ls_hotkey_action-action         = c_global_page_action-showhotkeys.
     ls_hotkey_action-default_hotkey = |?|.
     INSERT ls_hotkey_action INTO TABLE rt_hotkey_actions.
@@ -138,6 +162,8 @@ CLASS zcl_abapgit_gui_page IMPLEMENTATION.
 
 
   METHOD html_head.
+
+    DATA lv_font TYPE string.
 
     CREATE OBJECT ro_html.
 
@@ -150,11 +176,14 @@ CLASS zcl_abapgit_gui_page IMPLEMENTATION.
     ro_html->add( '<link rel="stylesheet" type="text/css" href="css/common.css">' ).
     ro_html->add( '<script type="text/javascript" src="js/common.js"></script>' ). "#EC NOTEXT
 
-    ro_html->add( zcl_abapgit_gui_asset_manager=>get_webfont_link( ) ). " Web fonts
+    lv_font = |<link rel="stylesheet" type="text/css" href="|
+      && 'https://cdnjs.cloudflare.com/ajax/libs/octicons/4.4.0/font/octicons.min.css'
+      && '">'.                                         "#EC NOTEXT
+    ro_html->add( lv_font ). " Web fonts
 
     ro_html->add( '</head>' ).                              "#EC NOTEXT
 
-  ENDMETHOD.                    "html_head
+  ENDMETHOD.
 
 
   METHOD link_hints.
@@ -197,8 +226,7 @@ CLASS zcl_abapgit_gui_page IMPLEMENTATION.
 
   METHOD render_hotkey_overview.
 
-    CREATE OBJECT ro_html.
-    ro_html->add( zcl_abapgit_gui_chunk_lib=>render_hotkey_overview( ) ).
+    ro_html = zcl_abapgit_gui_chunk_lib=>render_hotkey_overview( me ).
 
   ENDMETHOD.
 
@@ -210,7 +238,7 @@ CLASS zcl_abapgit_gui_page IMPLEMENTATION.
     link_hints( ro_html ).
     add_hotkeys( ro_html ).
 
-  ENDMETHOD. "scripts
+  ENDMETHOD.
 
 
   METHOD title.
@@ -239,7 +267,7 @@ CLASS zcl_abapgit_gui_page IMPLEMENTATION.
     ro_html->add( '</tr></table>' ).                        "#EC NOTEXT
     ro_html->add( '</div>' ).                               "#EC NOTEXT
 
-  ENDMETHOD.                    "render page title
+  ENDMETHOD.
 
 
   METHOD zif_abapgit_gui_page~on_event.
@@ -250,13 +278,13 @@ CLASS zcl_abapgit_gui_page IMPLEMENTATION.
         call_browser( iv_getdata ).
         ev_state = zif_abapgit_definitions=>c_event_state-no_more_act.
 
-      WHEN  OTHERS.
+      WHEN OTHERS.
 
         ev_state = zif_abapgit_definitions=>c_event_state-not_handled.
 
     ENDCASE.
 
-  ENDMETHOD. "lif_gui_page~on_event
+  ENDMETHOD.
 
 
   METHOD zif_abapgit_gui_page~render.
@@ -293,29 +321,5 @@ CLASS zcl_abapgit_gui_page IMPLEMENTATION.
 
     ro_html->add( '</html>' ).                              "#EC NOTEXT
 
-  ENDMETHOD.  " lif_gui_page~render.
-
-  METHOD call_browser.
-
-    cl_gui_frontend_services=>execute(
-      EXPORTING
-        document               = |{ iv_url }|
-      EXCEPTIONS
-        cntl_error             = 1
-        error_no_gui           = 2
-        bad_parameter          = 3
-        file_not_found         = 4
-        path_not_found         = 5
-        file_extension_unknown = 6
-        error_execute_failed   = 7
-        synchronous_failed     = 8
-        not_supported_by_gui   = 9
-        OTHERS                 = 10 ).
-
-    IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise_t100( ).
-    ENDIF.
-
   ENDMETHOD.
-
 ENDCLASS.

@@ -41,6 +41,13 @@ CLASS zcl_abapgit_convert DEFINITION
         !iv_string      TYPE string
       RETURNING
         VALUE(rt_lines) TYPE string_table .
+    CLASS-METHODS conversion_exit_isola_output
+      IMPORTING
+        iv_spras        TYPE spras
+      RETURNING
+        VALUE(rv_spras) TYPE laiso.
+  PROTECTED SECTION.
+  PRIVATE SECTION.
 ENDCLASS.
 
 
@@ -50,36 +57,47 @@ CLASS ZCL_ABAPGIT_CONVERT IMPLEMENTATION.
 
   METHOD bitbyte_to_int.
 
-    DATA: bitbyte TYPE string,
-          len     TYPE i,
-          offset  TYPE i.
+    DATA: lv_bitbyte TYPE string,
+          lv_len     TYPE i,
+          lv_offset  TYPE i.
 
-    bitbyte = iv_bits.
-    SHIFT bitbyte LEFT DELETING LEADING '0 '.
-    len     = strlen( bitbyte ).
-    offset  = len - 1.
+    lv_bitbyte = iv_bits.
+    SHIFT lv_bitbyte LEFT DELETING LEADING '0 '.
+    lv_len     = strlen( lv_bitbyte ).
+    lv_offset  = lv_len - 1.
 
     rv_int = 0.
-    DO len TIMES.
+    DO lv_len TIMES.
 
       IF sy-index = 1.
 
         "Intialize
-        CASE bitbyte+offset(1).
+        CASE lv_bitbyte+lv_offset(1).
           WHEN '1'.
             rv_int = 1.
         ENDCASE.
 
       ELSE.
-        CASE bitbyte+offset(1).
+        CASE lv_bitbyte+lv_offset(1).
           WHEN '1'.
             rv_int = rv_int + ( 2 ** ( sy-index - 1 ) ).
         ENDCASE.
       ENDIF.
 
-      offset = offset - 1. "Move Cursor
+      lv_offset = lv_offset - 1. "Move Cursor
 
     ENDDO.
+
+  ENDMETHOD.
+
+
+  METHOD conversion_exit_isola_output.
+
+    CALL FUNCTION 'CONVERSION_EXIT_ISOLA_OUTPUT'
+      EXPORTING
+        input  = iv_spras
+      IMPORTING
+        output = rv_spras.
 
   ENDMETHOD.
 

@@ -1,28 +1,29 @@
 CLASS zcl_abapgit_gui DEFINITION
   PUBLIC
-  FINAL
-  CREATE PRIVATE .
+  FINAL .
 
   PUBLIC SECTION.
-
-    CLASS-METHODS: get_instance
-      RETURNING VALUE(ro_gui) TYPE REF TO zcl_abapgit_gui
-      RAISING   zcx_abapgit_exception.
 
     METHODS go_home
       RAISING zcx_abapgit_exception.
 
     METHODS back
       IMPORTING iv_to_bookmark TYPE abap_bool DEFAULT abap_false
-      RETURNING VALUE(rv_exit) TYPE xfeld
+      RETURNING VALUE(rv_exit) TYPE abap_bool
       RAISING   zcx_abapgit_exception.
 
     METHODS on_event FOR EVENT sapevent OF cl_gui_html_viewer
       IMPORTING action frame getdata postdata query_table.
 
-  PRIVATE SECTION.
+    METHODS constructor
+      IMPORTING
+        ii_router    TYPE REF TO zif_abapgit_gui_router
+        ii_asset_man TYPE REF TO zif_abapgit_gui_asset_manager
+      RAISING
+        zcx_abapgit_exception.
 
-    CLASS-DATA: go_gui TYPE REF TO zcl_abapgit_gui.
+  PROTECTED SECTION.
+  PRIVATE SECTION.
 
     TYPES: BEGIN OF ty_page_stack,
              page     TYPE REF TO zif_abapgit_gui_page,
@@ -31,12 +32,9 @@ CLASS zcl_abapgit_gui DEFINITION
 
     DATA: mi_cur_page    TYPE REF TO zif_abapgit_gui_page,
           mt_stack       TYPE STANDARD TABLE OF ty_page_stack,
-          mo_router      TYPE REF TO zcl_abapgit_gui_router,
-          mo_asset_man   TYPE REF TO zcl_abapgit_gui_asset_manager,
+          mi_router      TYPE REF TO zif_abapgit_gui_router,
+          mi_asset_man   TYPE REF TO zif_abapgit_gui_asset_manager,
           mo_html_viewer TYPE REF TO cl_gui_html_viewer.
-
-    METHODS constructor
-      RAISING zcx_abapgit_exception.
 
     METHODS startup
       RAISING zcx_abapgit_exception.
@@ -108,39 +106,29 @@ CLASS ZCL_ABAPGIT_GUI IMPLEMENTATION.
     mi_cur_page = ls_stack-page. " last page always stays
     render( ).
 
-  ENDMETHOD.                "back
+  ENDMETHOD.
 
 
   METHOD cache_asset.
 
     DATA: lv_xstr  TYPE xstring,
-          lt_xdata TYPE TABLE OF w3_mime, " RAW255
+          lt_xdata TYPE lvc_t_mime,
           lv_size  TYPE int4.
 
     ASSERT iv_text IS SUPPLIED OR iv_xdata IS SUPPLIED.
 
     IF iv_text IS SUPPLIED. " String input
-
-      CALL FUNCTION 'SCMS_STRING_TO_XSTRING'
-        EXPORTING
-          text   = iv_text
-        IMPORTING
-          buffer = lv_xstr
-        EXCEPTIONS
-          OTHERS = 1.
-      ASSERT sy-subrc = 0.
-
+      lv_xstr = zcl_abapgit_string_utils=>string_to_xstring( iv_text ).
     ELSE. " Raw input
       lv_xstr = iv_xdata.
     ENDIF.
 
-    CALL FUNCTION 'SCMS_XSTRING_TO_BINARY'
+    zcl_abapgit_string_utils=>xstring_to_bintab(
       EXPORTING
-        buffer        = lv_xstr
+        iv_xstr   = lv_xstr
       IMPORTING
-        output_length = lv_size
-      TABLES
-        binary_tab    = lt_xdata.
+        ev_size   = lv_size
+        et_bintab = lt_xdata ).
 
     mo_html_viewer->load_data(
       EXPORTING
@@ -157,7 +145,7 @@ CLASS ZCL_ABAPGIT_GUI IMPLEMENTATION.
 
     ASSERT sy-subrc = 0. " Image data error
 
-  ENDMETHOD.  " cache_asset.
+  ENDMETHOD.
 
 
   METHOD cache_html.
@@ -166,7 +154,7 @@ CLASS ZCL_ABAPGIT_GUI IMPLEMENTATION.
                           iv_type    = 'text'
                           iv_subtype = 'html' ).
 
-  ENDMETHOD.                    "cache_html
+  ENDMETHOD.
 
 
   METHOD call_page.
@@ -182,31 +170,25 @@ CLASS ZCL_ABAPGIT_GUI IMPLEMENTATION.
     mi_cur_page = ii_page.
     render( ).
 
-  ENDMETHOD.                "call_page
+  ENDMETHOD.
 
 
   METHOD constructor.
 
+    mi_router    = ii_router.
+    mi_asset_man = ii_asset_man.
     startup( ).
 
-  ENDMETHOD.            "constructor
+  ENDMETHOD.
+
 
   METHOD get_current_page_name.
     IF mi_cur_page IS BOUND.
       rv_page_name =
         cl_abap_classdescr=>describe_by_object_ref( mi_cur_page
           )->get_relative_name( ).
-      SHIFT rv_page_name LEFT DELETING LEADING 'LCL_GUI_'.
     ENDIF." ELSE - return is empty => initial page
 
-  ENDMETHOD.  "get_current_page_name
-
-
-  METHOD get_instance.
-    IF go_gui IS INITIAL.
-      CREATE OBJECT go_gui.
-    ENDIF.
-    ro_gui = go_gui.
   ENDMETHOD.
 
 
@@ -214,7 +196,7 @@ CLASS ZCL_ABAPGIT_GUI IMPLEMENTATION.
 
     on_event( action = |{ zif_abapgit_definitions=>c_action-go_main }| ). " doesn't accept strings directly
 
-  ENDMETHOD.                "go_home
+  ENDMETHOD.
 
 
   METHOD handle_action.
@@ -237,7 +219,7 @@ CLASS ZCL_ABAPGIT_GUI IMPLEMENTATION.
         ENDIF.
 
         IF lv_state IS INITIAL.
-          mo_router->on_event(
+          mi_router->on_event(
             EXPORTING
               iv_action    = iv_action
               iv_prev_page = get_current_page_name( )
@@ -274,7 +256,7 @@ CLASS ZCL_ABAPGIT_GUI IMPLEMENTATION.
         " Do nothing = gc_event_state-no_more_act
     ENDTRY.
 
-  ENDMETHOD.  "handle_action
+  ENDMETHOD.
 
 
   METHOD on_event.
@@ -286,7 +268,7 @@ CLASS ZCL_ABAPGIT_GUI IMPLEMENTATION.
       it_postdata    = postdata
       it_query_table = query_table ).
 
-  ENDMETHOD.                    "on_event
+  ENDMETHOD.
 
 
   METHOD render.
@@ -299,43 +281,29 @@ CLASS ZCL_ABAPGIT_GUI IMPLEMENTATION.
 
     mo_html_viewer->show_url( lv_url ).
 
-  ENDMETHOD.                    "render
+  ENDMETHOD.
 
 
   METHOD startup.
 
     DATA: lt_events TYPE cntl_simple_events,
           ls_event  LIKE LINE OF lt_events,
-          lt_assets TYPE zif_abapgit_definitions=>tt_web_assets.
+          lt_assets TYPE zif_abapgit_gui_asset_manager=>tt_web_assets.
 
     FIELD-SYMBOLS <ls_asset> LIKE LINE OF lt_assets.
 
-    CREATE OBJECT mo_router.
-    CREATE OBJECT mo_asset_man.
     CREATE OBJECT mo_html_viewer
       EXPORTING
         query_table_disabled = abap_true
         parent               = cl_gui_container=>screen0.
 
-    cache_asset( iv_xdata   = mo_asset_man->get_asset( 'css_common' )
-                 iv_url     = 'css/common.css'
-                 iv_type    = 'text'
-                 iv_subtype = 'css' ).
-
-    cache_asset( iv_xdata   = mo_asset_man->get_asset( 'js_common' )
-                 iv_url     = 'js/common.js'
-                 iv_type    = 'text'
-                 iv_subtype = 'javascript' ).
-
-    lt_assets = mo_asset_man->get_images( ).
-    IF lines( lt_assets ) > 0.
-      LOOP AT lt_assets ASSIGNING <ls_asset>.
-        cache_asset( iv_xdata   = <ls_asset>-content
-                     iv_url     = <ls_asset>-url
-                     iv_type    = 'image'
-                     iv_subtype = 'png' ).
-      ENDLOOP.
-    ENDIF.
+    lt_assets = mi_asset_man->get_all_assets( ).
+    LOOP AT lt_assets ASSIGNING <ls_asset>.
+      cache_asset( iv_xdata   = <ls_asset>-content
+                   iv_url     = <ls_asset>-url
+                   iv_type    = <ls_asset>-type
+                   iv_subtype = <ls_asset>-subtype ).
+    ENDLOOP.
 
     ls_event-eventid    = mo_html_viewer->m_id_sapevent.
     ls_event-appl_event = abap_true.
@@ -344,5 +312,5 @@ CLASS ZCL_ABAPGIT_GUI IMPLEMENTATION.
     mo_html_viewer->set_registered_events( lt_events ).
     SET HANDLER me->on_event FOR mo_html_viewer.
 
-  ENDMETHOD.                    "startup
+  ENDMETHOD.
 ENDCLASS.
