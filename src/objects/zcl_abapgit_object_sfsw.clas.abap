@@ -3,6 +3,7 @@ CLASS zcl_abapgit_object_sfsw DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
   PUBLIC SECTION.
     INTERFACES zif_abapgit_object.
 
+  PROTECTED SECTION.
   PRIVATE SECTION.
     METHODS:
       get
@@ -17,7 +18,7 @@ ENDCLASS.
 
 
 
-CLASS zcl_abapgit_object_sfsw IMPLEMENTATION.
+CLASS ZCL_ABAPGIT_OBJECT_SFSW IMPLEMENTATION.
 
 
   METHOD get.
@@ -35,6 +36,49 @@ CLASS zcl_abapgit_object_sfsw IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD wait_for_background_job.
+
+    DATA: lv_job_count TYPE tbtco-jobcount.
+
+    " We wait for at most 5 seconds. If it takes
+    " more than that it probably doesn't matter,
+    " because we have other problems
+
+    DO 5 TIMES.
+
+      SELECT SINGLE jobcount
+             FROM tbtco
+             INTO lv_job_count
+             WHERE jobname = 'SFW_DELETE_SWITCH'
+             AND   status  = 'R'
+             AND   sdluname = sy-uname.
+
+      IF sy-subrc = 0.
+        WAIT UP TO 1 SECONDS.
+      ELSE.
+        EXIT.
+      ENDIF.
+
+    ENDDO.
+
+  ENDMETHOD.
+
+
+  METHOD wait_for_deletion.
+
+    DO 5 TIMES.
+
+      IF zif_abapgit_object~exists( ) = abap_true.
+        WAIT UP TO 1 SECONDS.
+      ELSE.
+        EXIT.
+      ENDIF.
+
+    ENDDO.
+
+  ENDMETHOD.
+
+
   METHOD zif_abapgit_object~changed_by.
 
     DATA: ls_data TYPE sfw_switch.
@@ -47,11 +91,6 @@ CLASS zcl_abapgit_object_sfsw IMPLEMENTATION.
       rv_user = ls_data-author.
     ENDIF.
 
-  ENDMETHOD.
-
-
-  METHOD zif_abapgit_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE zcl_abapgit_comparison_null.
   ENDMETHOD.
 
 
@@ -160,14 +199,19 @@ CLASS zcl_abapgit_object_sfsw IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_object~get_metadata.
-    rs_metadata = get_metadata( ).
-    rs_metadata-ddic = abap_true.
+  METHOD zif_abapgit_object~get_comparator.
+    RETURN.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_object~has_changed_since.
-    rv_changed = abap_true.
+  METHOD zif_abapgit_object~get_deserialize_steps.
+    APPEND zif_abapgit_object=>gc_step_id-ddic TO rt_steps.
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_object~get_metadata.
+    rs_metadata = get_metadata( ).
+    rs_metadata-ddic = abap_true.
   ENDMETHOD.
 
 
@@ -237,47 +281,4 @@ CLASS zcl_abapgit_object_sfsw IMPLEMENTATION.
                  iv_name = 'CONFLICTS' ).
 
   ENDMETHOD.
-
-  METHOD wait_for_background_job.
-
-    DATA: lv_job_count TYPE tbtco-jobcount.
-
-    " We wait for at most 5 seconds. If it takes
-    " more than that it probably doesn't matter,
-    " because we have other problems
-
-    DO 5 TIMES.
-
-      SELECT SINGLE jobcount
-             FROM tbtco
-             INTO lv_job_count
-             WHERE jobname = 'SFW_DELETE_SWITCH'
-             AND   status  = 'R'
-             AND   sdluname = sy-uname.
-
-      IF sy-subrc = 0.
-        WAIT UP TO 1 SECONDS.
-      ELSE.
-        EXIT.
-      ENDIF.
-
-    ENDDO.
-
-  ENDMETHOD.
-
-
-  METHOD wait_for_deletion.
-
-    DO 5 TIMES.
-
-      IF zif_abapgit_object~exists( ) = abap_true.
-        WAIT UP TO 1 SECONDS.
-      ELSE.
-        EXIT.
-      ENDIF.
-
-    ENDDO.
-
-  ENDMETHOD.
-
 ENDCLASS.

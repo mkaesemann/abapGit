@@ -2,7 +2,6 @@ CLASS zcl_abapgit_branch_overview DEFINITION
   PUBLIC
   FINAL
   CREATE PRIVATE
-
   GLOBAL FRIENDS zcl_abapgit_factory .
 
   PUBLIC SECTION.
@@ -76,7 +75,7 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_BRANCH_OVERVIEW IMPLEMENTATION.
+CLASS zcl_abapgit_branch_overview IMPLEMENTATION.
 
 
   METHOD constructor.
@@ -104,15 +103,23 @@ CLASS ZCL_ABAPGIT_BRANCH_OVERVIEW IMPLEMENTATION.
 
     CONSTANTS: lc_head TYPE string VALUE 'HEAD'.
 
-    DATA: lv_name TYPE string.
+    TYPES: BEGIN OF ty_branch_with_time,
+             time TYPE string,
+             name TYPE string,
+             sha1 TYPE zif_abapgit_definitions=>ty_sha1,
+           END OF ty_branch_with_time.
 
-    FIELD-SYMBOLS: <ls_branch> LIKE LINE OF mt_branches,
-                   <ls_head>   LIKE LINE OF mt_branches,
-                   <ls_commit> LIKE LINE OF mt_commits,
-                   <ls_create> LIKE LINE OF <ls_commit>-create.
+    DATA: lt_branches_sorted_by_time TYPE SORTED TABLE OF ty_branch_with_time WITH NON-UNIQUE KEY time,
+          ls_branches_with_time      TYPE ty_branch_with_time.
+
+    FIELD-SYMBOLS: <ls_branch>                LIKE LINE OF mt_branches,
+                   <ls_branch_sorted_by_time> LIKE LINE OF lt_branches_sorted_by_time,
+                   <ls_head>                  LIKE LINE OF mt_branches,
+                   <ls_commit>                LIKE LINE OF mt_commits,
+                   <ls_create>                LIKE LINE OF <ls_commit>-create.
 
 
-* exchange HEAD, and make sure the branch determination starts with the HEAD branch
+* Exchange HEAD, and make sure the branch determination starts with the HEAD branch
     READ TABLE mt_branches ASSIGNING <ls_head> WITH KEY name = lc_head.
     ASSERT sy-subrc = 0.
     LOOP AT mt_branches ASSIGNING <ls_branch>
@@ -122,17 +129,39 @@ CLASS ZCL_ABAPGIT_BRANCH_OVERVIEW IMPLEMENTATION.
       EXIT.
     ENDLOOP.
 
+* Sort Branches by Commit Time
     LOOP AT mt_branches ASSIGNING <ls_branch>.
-      lv_name = <ls_branch>-name+11.
+
       READ TABLE mt_commits ASSIGNING <ls_commit> WITH KEY sha1 = <ls_branch>-sha1.
+      IF sy-subrc = 0.
+
+        ls_branches_with_time-name = <ls_branch>-name+11.
+        ls_branches_with_time-sha1 = <ls_branch>-sha1.
+
+        IF <ls_branch>-is_head = abap_true.
+          ls_branches_with_time-time = '0000000000'. "Force HEAD to be the first one
+        ELSE.
+          ls_branches_with_time-time = <ls_commit>-time.
+        ENDIF.
+
+        INSERT ls_branches_with_time INTO TABLE lt_branches_sorted_by_time.
+        CLEAR ls_branches_with_time.
+
+      ENDIF.
+    ENDLOOP.
+
+
+    LOOP AT lt_branches_sorted_by_time ASSIGNING <ls_branch_sorted_by_time>.
+
+      READ TABLE mt_commits ASSIGNING <ls_commit> WITH KEY sha1 = <ls_branch_sorted_by_time>-sha1.
       ASSERT sy-subrc = 0.
 
       DO.
         IF <ls_commit>-branch IS INITIAL.
-          <ls_commit>-branch = lv_name.
+          <ls_commit>-branch = <ls_branch_sorted_by_time>-name.
         ELSE.
           APPEND INITIAL LINE TO <ls_commit>-create ASSIGNING <ls_create>.
-          <ls_create>-name = lv_name.
+          <ls_create>-name = <ls_branch_sorted_by_time>-name.
           <ls_create>-parent = <ls_commit>-branch.
           EXIT.
         ENDIF.
@@ -233,7 +262,7 @@ CLASS ZCL_ABAPGIT_BRANCH_OVERVIEW IMPLEMENTATION.
 
       CHECK sy-subrc = 0.
 
-      lv_tag = zcl_abapgit_tag=>remove_tag_prefix( <ls_tag>-name ).
+      lv_tag = zcl_abapgit_git_tag=>remove_tag_prefix( <ls_tag>-name ).
       INSERT lv_tag INTO TABLE <ls_commit>-tags.
 
     ENDLOOP.
@@ -530,7 +559,7 @@ CLASS ZCL_ABAPGIT_BRANCH_OVERVIEW IMPLEMENTATION.
   METHOD _sort_commits.
 
     DATA: lt_sorted_commits TYPE ty_commits,
-          lv_next_commit    TYPE zif_abapgit_definitions=>ty_commit,
+          ls_next_commit    TYPE zif_abapgit_definitions=>ty_commit,
           lt_parents        TYPE tyt_commit_sha1_range,
           ls_parent         LIKE LINE OF lt_parents.
 
@@ -554,12 +583,12 @@ CLASS ZCL_ABAPGIT_BRANCH_OVERVIEW IMPLEMENTATION.
       DO.
         _get_1st_child_commit( EXPORTING it_commit_sha1s = lt_parents
                                IMPORTING et_commit_sha1s = lt_parents
-                                         es_1st_commit   = lv_next_commit
+                                         es_1st_commit   = ls_next_commit
                                CHANGING  ct_commits      = ct_commits ).
-        IF lv_next_commit IS INITIAL.
+        IF ls_next_commit IS INITIAL.
           EXIT. "DO
         ENDIF.
-        INSERT lv_next_commit INTO TABLE lt_sorted_commits.
+        INSERT ls_next_commit INTO TABLE lt_sorted_commits.
       ENDDO.
     ENDIF.
 

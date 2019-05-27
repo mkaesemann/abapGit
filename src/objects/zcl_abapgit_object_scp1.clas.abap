@@ -50,7 +50,8 @@ CLASS ZCL_ABAPGIT_OBJECT_SCP1 IMPLEMENTATION.
   METHOD adjust_inbound.
 
     FIELD-SYMBOLS: <ls_scprvals> TYPE scprvals,
-                   <ls_scprreca> TYPE scprreca.
+                   <ls_scprreca> TYPE scprreca,
+                   <ls_scprvall> TYPE scprvall.
 
 * back to internal format
     LOOP AT cs_scp1-scprvals ASSIGNING <ls_scprvals>.
@@ -59,6 +60,9 @@ CLASS ZCL_ABAPGIT_OBJECT_SCP1 IMPLEMENTATION.
     LOOP AT cs_scp1-scprreca ASSIGNING <ls_scprreca>.
       SHIFT <ls_scprreca>-recnumber RIGHT DELETING TRAILING space.
     ENDLOOP.
+    LOOP AT cs_scp1-scprvall ASSIGNING <ls_scprvall>.
+      SHIFT <ls_scprvall>-recnumber RIGHT DELETING TRAILING space.
+    ENDLOOP.
 
   ENDMETHOD.
 
@@ -66,7 +70,8 @@ CLASS ZCL_ABAPGIT_OBJECT_SCP1 IMPLEMENTATION.
   METHOD adjust_outbound.
 
     FIELD-SYMBOLS: <ls_scprvals> TYPE scprvals,
-                   <ls_scprreca> TYPE scprreca.
+                   <ls_scprreca> TYPE scprreca,
+                   <ls_scprvall> TYPE scprvall.
 
 * normalize the XML
     LOOP AT cs_scp1-scprvals ASSIGNING <ls_scprvals>.
@@ -74,6 +79,9 @@ CLASS ZCL_ABAPGIT_OBJECT_SCP1 IMPLEMENTATION.
     ENDLOOP.
     LOOP AT cs_scp1-scprreca ASSIGNING <ls_scprreca>.
       CONDENSE <ls_scprreca>-recnumber.
+    ENDLOOP.
+    LOOP AT cs_scp1-scprvall ASSIGNING <ls_scprvall>.
+      CONDENSE <ls_scprvall>-recnumber.
     ENDLOOP.
 
   ENDMETHOD.
@@ -261,13 +269,6 @@ CLASS ZCL_ABAPGIT_OBJECT_SCP1 IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_object~compare_to_remote_version.
-
-    CREATE OBJECT ro_comparison_result TYPE zcl_abapgit_comparison_null.
-
-  ENDMETHOD.
-
-
   METHOD zif_abapgit_object~delete.
 
     DATA: lv_profile_id TYPE scpr_id.
@@ -324,16 +325,19 @@ CLASS ZCL_ABAPGIT_OBJECT_SCP1 IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_object~get_metadata.
-
-    rs_metadata = get_metadata( ).
-
+  METHOD zif_abapgit_object~get_comparator.
+    RETURN.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_object~has_changed_since.
+  METHOD zif_abapgit_object~get_deserialize_steps.
+    APPEND zif_abapgit_object=>gc_step_id-abap TO rt_steps.
+  ENDMETHOD.
 
-    rv_changed = abap_true.
+
+  METHOD zif_abapgit_object~get_metadata.
+
+    rs_metadata = get_metadata( ).
 
   ENDMETHOD.
 

@@ -4,9 +4,6 @@ CLASS zcl_abapgit_html_action_utils DEFINITION
 
   PUBLIC SECTION.
 
-    CLASS-METHODS field_keys_to_upper
-      CHANGING
-        !ct_fields TYPE tihttpnvp .
     CLASS-METHODS parse_fields
       IMPORTING
         !iv_string       TYPE clike
@@ -17,18 +14,13 @@ CLASS zcl_abapgit_html_action_utils DEFINITION
         !iv_string       TYPE clike
       RETURNING
         VALUE(rt_fields) TYPE tihttpnvp .
-    CLASS-METHODS add_field
-      IMPORTING
-        !iv_name TYPE string
-        !ig_field   TYPE any
-      CHANGING
-        !ct_field   TYPE tihttpnvp .
     CLASS-METHODS get_field
       IMPORTING
-        !iv_name  TYPE string
-        !it_field TYPE tihttpnvp
+        !iv_name   TYPE string
+        !it_field  TYPE tihttpnvp
+        !iv_decode TYPE abap_bool DEFAULT abap_false
       CHANGING
-        !cg_field TYPE any .
+        !cg_field  TYPE any .
     CLASS-METHODS jump_encode
       IMPORTING
         !iv_obj_type     TYPE tadir-object
@@ -58,13 +50,13 @@ CLASS zcl_abapgit_html_action_utils DEFINITION
     CLASS-METHODS file_encode
       IMPORTING
         !iv_key          TYPE zif_abapgit_persistence=>ty_repo-key
-        !ig_file         TYPE any                                                 "assuming ty_file
+        !ig_file         TYPE any
       RETURNING
         VALUE(rv_string) TYPE string .
     CLASS-METHODS obj_encode
       IMPORTING
         !iv_key          TYPE zif_abapgit_persistence=>ty_repo-key
-        !ig_object       TYPE any                                         "assuming ty_item
+        !ig_object       TYPE any
       RETURNING
         VALUE(rv_string) TYPE string .
     CLASS-METHODS file_obj_decode
@@ -72,8 +64,8 @@ CLASS zcl_abapgit_html_action_utils DEFINITION
         !iv_string TYPE clike
       EXPORTING
         !ev_key    TYPE zif_abapgit_persistence=>ty_repo-key
-        !eg_file   TYPE any                        "assuming ty_file
-        !eg_object TYPE any                "assuming ty_item
+        !eg_file   TYPE any                                    "assuming ty_file
+        !eg_object TYPE any                      "assuming ty_item
       RAISING
         zcx_abapgit_exception .
     CLASS-METHODS dbkey_encode
@@ -94,16 +86,28 @@ CLASS zcl_abapgit_html_action_utils DEFINITION
         !ev_seed    TYPE string
       RAISING
         zcx_abapgit_exception .
+  PROTECTED SECTION.
   PRIVATE SECTION.
-    CLASS-METHODS unescape
-      IMPORTING iv_string        TYPE string
-      RETURNING VALUE(rv_string) TYPE string.
 
+    CLASS-METHODS field_keys_to_upper
+      CHANGING
+        !ct_fields TYPE tihttpnvp .
+    CLASS-METHODS add_field
+      IMPORTING
+        !iv_name  TYPE string
+        !ig_field TYPE any
+      CHANGING
+        !ct_field TYPE tihttpnvp .
+    CLASS-METHODS unescape
+      IMPORTING
+        !iv_string       TYPE string
+      RETURNING
+        VALUE(rv_string) TYPE string .
 ENDCLASS.
 
 
 
-CLASS zcl_abapgit_html_action_utils IMPLEMENTATION.
+CLASS ZCL_ABAPGIT_HTML_ACTION_UTILS IMPLEMENTATION.
 
 
   METHOD add_field.
@@ -216,13 +220,16 @@ CLASS zcl_abapgit_html_action_utils IMPLEMENTATION.
 
     IF eg_object IS SUPPLIED.
       get_field( EXPORTING iv_name = 'OBJ_TYPE' it_field = lt_fields CHANGING cg_field = eg_object ).
-      get_field( EXPORTING iv_name = 'OBJ_NAME' it_field = lt_fields CHANGING cg_field = eg_object ).
+      get_field( EXPORTING iv_name = 'OBJ_NAME' it_field = lt_fields iv_decode = abap_true
+                 CHANGING cg_field = eg_object ).
     ENDIF.
 
   ENDMETHOD.
 
 
   METHOD get_field.
+
+    DATA: lv_value TYPE string.
 
     FIELD-SYMBOLS: <ls_field> LIKE LINE OF it_field,
                    <lg_dest>  TYPE any.
@@ -233,13 +240,20 @@ CLASS zcl_abapgit_html_action_utils IMPLEMENTATION.
       RETURN.
     ENDIF.
 
+    lv_value = <ls_field>-value.
+
+    IF iv_decode = abap_true.
+* URL decode, not sure why some are decoded automatically
+      REPLACE ALL OCCURRENCES OF '%3d' IN lv_value WITH '='.
+    ENDIF.
+
     CASE cl_abap_typedescr=>describe_by_data( cg_field )->kind.
       WHEN cl_abap_typedescr=>kind_elem.
-        cg_field = <ls_field>-value.
+        cg_field = lv_value.
       WHEN cl_abap_typedescr=>kind_struct.
         ASSIGN COMPONENT iv_name OF STRUCTURE cg_field TO <lg_dest>.
         ASSERT <lg_dest> IS ASSIGNED.
-        <lg_dest> = <ls_field>-value.
+        <lg_dest> = lv_value.
       WHEN OTHERS.
         ASSERT 0 = 1.
     ENDCASE.

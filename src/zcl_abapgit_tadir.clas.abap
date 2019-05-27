@@ -9,6 +9,7 @@ CLASS zcl_abapgit_tadir DEFINITION
 
   PROTECTED SECTION.
   PRIVATE SECTION.
+
     METHODS exists
       IMPORTING
         !is_item         TYPE zif_abapgit_definitions=>ty_item
@@ -28,12 +29,11 @@ CLASS zcl_abapgit_tadir DEFINITION
         !io_dot                TYPE REF TO zcl_abapgit_dot_abapgit
         !iv_ignore_subpackages TYPE abap_bool DEFAULT abap_false
         !iv_only_local_objects TYPE abap_bool
-        !io_log                TYPE REF TO zcl_abapgit_log OPTIONAL
-        !io_folder_logic       TYPE REF TO zcl_abapgit_folder_logic OPTIONAL
+        !ii_log                TYPE REF TO zif_abapgit_log OPTIONAL
       RETURNING
         VALUE(rt_tadir)        TYPE zif_abapgit_definitions=>ty_tadir_tt
       RAISING
-        zcx_abapgit_exception.
+        zcx_abapgit_exception .
 ENDCLASS.
 
 
@@ -54,7 +54,8 @@ CLASS ZCL_ABAPGIT_TADIR IMPLEMENTATION.
           lt_packages     TYPE zif_abapgit_sap_package=>ty_devclass_tt.
 
     FIELD-SYMBOLS: <ls_tadir>   LIKE LINE OF rt_tadir,
-                   <lv_package> TYPE devclass.
+                   <lv_package> LIKE LINE OF lt_packages.
+
 
     "Determine Packages to Read
     IF iv_ignore_subpackages = abap_false.
@@ -90,7 +91,7 @@ CLASS ZCL_ABAPGIT_TADIR IMPLEMENTATION.
         AND object NOT IN lt_excludes
         AND delflag = abap_false
         AND srcsystem IN lt_srcsystem
-        ORDER BY PRIMARY KEY.             "#EC CI_GENBUFF "#EC CI_SUBRC
+        ORDER BY PRIMARY KEY ##TOO_MANY_ITAB_FIELDS. "#EC CI_GENBUFF "#EC CI_SUBRC
     ENDIF.
 
     SORT rt_tadir BY devclass pgmid object obj_name.
@@ -98,7 +99,7 @@ CLASS ZCL_ABAPGIT_TADIR IMPLEMENTATION.
     CREATE OBJECT lo_skip_objects.
     rt_tadir = lo_skip_objects->skip_sadl_generated_objects(
       it_tadir = rt_tadir
-      io_log   = io_log ).
+      ii_log   = ii_log ).
 
     LOOP AT lt_packages ASSIGNING <lv_package>.
       " Local packages are not in TADIR, only in TDEVC, act as if they were
@@ -133,19 +134,18 @@ CLASS ZCL_ABAPGIT_TADIR IMPLEMENTATION.
 
       <ls_tadir>-path = lv_path.
 
-      CASE <ls_tadir>-object.
-        WHEN 'SICF'.
+      IF <ls_tadir>-object = 'SICF'.
 * replace the internal GUID with a hash of the path
-          TRY.
-              CALL METHOD ('ZCL_ABAPGIT_OBJECT_SICF')=>read_sicf_url
-                EXPORTING
-                  iv_obj_name = <ls_tadir>-obj_name
-                RECEIVING
-                  rv_hash     = <ls_tadir>-obj_name+15.
-            CATCH cx_sy_dyn_call_illegal_method.
+        TRY.
+            CALL METHOD ('ZCL_ABAPGIT_OBJECT_SICF')=>read_sicf_url
+              EXPORTING
+                iv_obj_name = <ls_tadir>-obj_name
+              RECEIVING
+                rv_hash     = <ls_tadir>-obj_name+15.
+          CATCH cx_sy_dyn_call_illegal_method ##NO_HANDLER.
 * SICF might not be supported in some systems, assume this code is not called
-          ENDTRY.
-      ENDCASE.
+        ENDTRY.
+      ENDIF.
     ENDLOOP.
   ENDMETHOD.
 
@@ -234,13 +234,13 @@ CLASS ZCL_ABAPGIT_TADIR IMPLEMENTATION.
                       io_dot                = io_dot
                       iv_ignore_subpackages = iv_ignore_subpackages
                       iv_only_local_objects = iv_only_local_objects
-                      io_log                = io_log ).
+                      ii_log                = ii_log ).
 
     li_exit = zcl_abapgit_exit=>get_instance( ).
     li_exit->change_tadir(
       EXPORTING
         iv_package = iv_package
-        io_log     = io_log
+        ii_log     = ii_log
       CHANGING
         ct_tadir   = rt_tadir ).
 
@@ -259,7 +259,7 @@ CLASS ZCL_ABAPGIT_TADIR IMPLEMENTATION.
               iv_obj_name = iv_obj_name
             RECEIVING
               rs_tadir    = rs_tadir.
-        CATCH cx_sy_dyn_call_illegal_method.
+        CATCH cx_sy_dyn_call_illegal_method ##NO_HANDLER.
 * SICF might not be supported in some systems, assume this code is not called
       ENDTRY.
     ELSE.

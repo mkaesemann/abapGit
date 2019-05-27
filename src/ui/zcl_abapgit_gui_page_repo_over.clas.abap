@@ -9,7 +9,7 @@ CLASS zcl_abapgit_gui_page_repo_over DEFINITION
 
     METHODS constructor .
 
-    METHODS zif_abapgit_gui_page~on_event
+    METHODS zif_abapgit_gui_event_handler~on_event
         REDEFINITION .
 
   PROTECTED SECTION.
@@ -361,7 +361,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_REPO_OVER IMPLEMENTATION.
     io_html->add( zcl_abapgit_html=>a(
       iv_txt = 'Toggle detail'
       iv_act = |toggleRepoListDetail()|
-      iv_typ = zif_abapgit_definitions=>c_action_type-onclick ) ).
+      iv_typ = zif_abapgit_html=>c_action_type-onclick ) ).
 
     io_html->add( |</div>| ).
 
@@ -454,7 +454,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_REPO_OVER IMPLEMENTATION.
       IF <ls_overview>-type = abap_true.
         lv_type_icon = 'plug/darkgrey'.
       ELSE.
-        lv_type_icon = 'cloud-upload/blue'.
+        lv_type_icon = 'cloud-upload-alt/darkgrey'.
       ENDIF.
 
       IF <ls_overview>-favorite = abap_true.
@@ -554,7 +554,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_REPO_OVER IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_gui_page~on_event.
+  METHOD zif_abapgit_gui_event_handler~on_event.
 
     DATA: lv_key  TYPE zif_abapgit_persistence=>ty_value.
 
@@ -570,26 +570,26 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_REPO_OVER IMPLEMENTATION.
           CATCH zcx_abapgit_exception ##NO_HANDLER.
         ENDTRY.
 
-        ev_state = zif_abapgit_definitions=>c_event_state-go_back.
+        ev_state = zcl_abapgit_gui=>c_event_state-go_back.
 
       WHEN c_action-change_order_by.
 
         parse_change_order_by( it_postdata ).
-        ev_state = zif_abapgit_definitions=>c_event_state-re_render.
+        ev_state = zcl_abapgit_gui=>c_event_state-re_render.
 
       WHEN c_action-direction.
 
         parse_direction( it_postdata ).
-        ev_state = zif_abapgit_definitions=>c_event_state-re_render.
+        ev_state = zcl_abapgit_gui=>c_event_state-re_render.
 
       WHEN c_action-apply_filter.
 
         parse_filter( it_postdata ).
-        ev_state = zif_abapgit_definitions=>c_event_state-re_render.
+        ev_state = zcl_abapgit_gui=>c_event_state-re_render.
 
       WHEN OTHERS.
 
-        super->zif_abapgit_gui_page~on_event(
+        super->zif_abapgit_gui_event_handler~on_event(
           EXPORTING
             iv_action    = iv_action
             iv_prev_page = iv_prev_page

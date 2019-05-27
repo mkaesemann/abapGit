@@ -15,7 +15,7 @@ CLASS zcl_abapgit_gui_page_tag DEFINITION PUBLIC FINAL
         IMPORTING io_repo TYPE REF TO zcl_abapgit_repo
         RAISING   zcx_abapgit_exception,
 
-      zif_abapgit_gui_page~on_event REDEFINITION.
+      zif_abapgit_gui_event_handler~on_event REDEFINITION.
 
   PROTECTED SECTION.
     METHODS:
@@ -90,7 +90,7 @@ CLASS zcl_abapgit_gui_page_tag IMPLEMENTATION.
       zcx_abapgit_exception=>raise( |Please supply a tag name| ).
     ENDIF.
 
-    ls_tag-name = zcl_abapgit_tag=>add_tag_prefix( ls_tag-name ).
+    ls_tag-name = zcl_abapgit_git_tag=>add_tag_prefix( ls_tag-name ).
     ASSERT ls_tag-name CP 'refs/tags/+*'.
 
     CASE mv_selected_type.
@@ -117,9 +117,9 @@ CLASS zcl_abapgit_gui_page_tag IMPLEMENTATION.
     ENDTRY.
 
     IF ls_tag-type = zif_abapgit_definitions=>c_git_branch_type-lightweight_tag.
-      lv_text = |Lightweight tag { zcl_abapgit_tag=>remove_tag_prefix( ls_tag-name ) } created| ##NO_TEXT.
+      lv_text = |Lightweight tag { zcl_abapgit_git_tag=>remove_tag_prefix( ls_tag-name ) } created| ##NO_TEXT.
     ELSEIF ls_tag-type = zif_abapgit_definitions=>c_git_branch_type-annotated_tag.
-      lv_text = |Annotated tag { zcl_abapgit_tag=>remove_tag_prefix( ls_tag-name ) } created| ##NO_TEXT.
+      lv_text = |Annotated tag { zcl_abapgit_git_tag=>remove_tag_prefix( ls_tag-name ) } created| ##NO_TEXT.
     ENDIF.
 
     MESSAGE lv_text TYPE 'S'.
@@ -324,12 +324,12 @@ CLASS zcl_abapgit_gui_page_tag IMPLEMENTATION.
 
     lo_toolbar->add( iv_act = 'submitFormById(''commit_form'');'
                      iv_txt = 'Create'
-                     iv_typ = zif_abapgit_definitions=>c_action_type-onclick
-                     iv_opt = zif_abapgit_definitions=>c_html_opt-strong ) ##NO_TEXT.
+                     iv_typ = zif_abapgit_html=>c_action_type-onclick
+                     iv_opt = zif_abapgit_html=>c_html_opt-strong ) ##NO_TEXT.
 
     lo_toolbar->add( iv_act = c_action-commit_cancel
                      iv_txt = 'Cancel'
-                     iv_opt = zif_abapgit_definitions=>c_html_opt-cancel ) ##NO_TEXT.
+                     iv_opt = zif_abapgit_html=>c_html_opt-cancel ) ##NO_TEXT.
 
     ro_html->add( '<div class="paddings">' ).
     ro_html->add( lo_toolbar->render( ) ).
@@ -369,23 +369,23 @@ CLASS zcl_abapgit_gui_page_tag IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_gui_page~on_event.
+  METHOD zif_abapgit_gui_event_handler~on_event.
 
     CASE iv_action.
       WHEN c_action-commit_post.
 
         create_tag( it_postdata ).
 
-        ev_state = zif_abapgit_definitions=>c_event_state-go_back.
+        ev_state = zcl_abapgit_gui=>c_event_state-go_back.
 
       WHEN c_action-change_tag_type.
 
         parse_change_tag_type_request( it_postdata ).
 
-        ev_state = zif_abapgit_definitions=>c_event_state-re_render.
+        ev_state = zcl_abapgit_gui=>c_event_state-re_render.
 
       WHEN c_action-commit_cancel.
-        ev_state = zif_abapgit_definitions=>c_event_state-go_back.
+        ev_state = zcl_abapgit_gui=>c_event_state-go_back.
     ENDCASE.
 
   ENDMETHOD.

@@ -19,14 +19,15 @@ CLASS zcl_abapgit_object_udmo DEFINITION
   PRIVATE SECTION.
 
     TYPES:
-      " You are reminded that the text serialisation / de-serialisation methods depend upon a common type.
-      " To make the dependency explicit, there is one common definition.
+        " You are reminded that the text serialisation / de-serialisation methods depend upon a common type.
+        " To make the dependency explicit, there is one common definition.
       BEGIN OF ty_udmo_text_type.
     TYPES sprache TYPE dm40t-sprache.
     TYPES dmoid TYPE dm40t-dmoid.
     TYPES langbez TYPE dm40t-langbez.
     TYPES as4local TYPE dm40t-as4local.
     TYPES END OF ty_udmo_text_type .
+
     DATA mv_data_model TYPE uddmodl .
     DATA mv_text_object TYPE doku_obj .
     DATA mv_lxe_text_name TYPE lxeobjname .
@@ -119,7 +120,7 @@ CLASS ZCL_ABAPGIT_OBJECT_UDMO IMPLEMENTATION.
         request_language_denied  = 9
         OTHERS                   = 10.
 
-    IF sy-subrc NE 0.
+    IF sy-subrc <> 0.
       zcx_abapgit_exception=>raise_t100( ).
     ELSE.
       rv_result = abap_true.
@@ -157,7 +158,7 @@ CLASS ZCL_ABAPGIT_OBJECT_UDMO IMPLEMENTATION.
         request_language_denied  = 9
         OTHERS                   = 10.
 
-    IF sy-subrc NE 0.
+    IF sy-subrc <> 0.
       zcx_abapgit_exception=>raise_t100( ).
     ELSE.
       rv_result = abap_true.
@@ -204,6 +205,7 @@ CLASS ZCL_ABAPGIT_OBJECT_UDMO IMPLEMENTATION.
         master_language     = mv_language
         mode                = 'INSERT'
         global_lock         = abap_true
+        suppress_dialog     = abap_true
       EXCEPTIONS
         cancelled           = 1
         permission_failure  = 2
@@ -241,10 +243,6 @@ CLASS ZCL_ABAPGIT_OBJECT_UDMO IMPLEMENTATION.
 
 
   METHOD deserialize_long_texts.
-
-    TYPES BEGIN OF language_type.
-    TYPES language TYPE dm40t-sprache.
-    TYPES END OF language_type.
 
     DATA BEGIN OF ls_udmo_long_text.
     DATA language TYPE dm40t-sprache.
@@ -347,14 +345,14 @@ CLASS ZCL_ABAPGIT_OBJECT_UDMO IMPLEMENTATION.
       SELECT SINGLE *
         FROM dm40t
         INTO ls_dm40t
-        WHERE sprache  EQ ls_udmo_text-sprache
-        AND   dmoid    EQ ls_udmo_text-dmoid
-        AND   as4local EQ me->mv_activation_state.
+        WHERE sprache  = ls_udmo_text-sprache
+        AND   dmoid    = ls_udmo_text-dmoid
+        AND   as4local = me->mv_activation_state.
 
-      IF sy-subrc EQ 0.
+      IF sy-subrc = 0.
         " There is already an active description for this language
         " but the provided description differs
-        IF ls_dm40t-langbez NE ls_udmo_text-langbez.
+        IF ls_dm40t-langbez <> ls_udmo_text-langbez.
 
           ls_dm40t-langbez = ls_udmo_text-langbez.
           ls_dm40t-lstdate = sy-datum.
@@ -415,8 +413,8 @@ CLASS ZCL_ABAPGIT_OBJECT_UDMO IMPLEMENTATION.
 
     SELECT * FROM dm41s
       INTO TABLE lt_udmo_entities
-      WHERE dmoid EQ me->mv_data_model
-      AND as4local EQ me->mv_activation_state.
+      WHERE dmoid = me->mv_data_model
+      AND as4local = me->mv_activation_state.
 
 
     LOOP AT lt_udmo_entities ASSIGNING <ls_udmo_entity>.
@@ -467,8 +465,8 @@ CLASS ZCL_ABAPGIT_OBJECT_UDMO IMPLEMENTATION.
     SELECT sprache AS language
       FROM dm40t
       INTO TABLE lt_udmo_languages
-      WHERE dmoid    EQ me->mv_data_model
-      AND   as4local EQ me->mv_activation_state
+      WHERE dmoid    = me->mv_data_model
+      AND   as4local = me->mv_activation_state
       ORDER BY sprache ASCENDING.                       "#EC CI_NOFIRST
 
     " For every language for which a short text is maintained,
@@ -490,7 +488,7 @@ CLASS ZCL_ABAPGIT_OBJECT_UDMO IMPLEMENTATION.
           content = ls_udmo_long_text-content
           pstatus = lv_error_status.
 
-      CHECK lv_error_status EQ 'S'. "Success
+      CHECK lv_error_status = 'S'. "Success
 
       " Administrative information is not serialised
       CLEAR ls_udmo_long_text-header-tdfuser.
@@ -506,7 +504,7 @@ CLASS ZCL_ABAPGIT_OBJECT_UDMO IMPLEMENTATION.
     ENDLOOP.
 
     " You are reminded that long texts do not have to be in existence
-    IF lines( lt_udmo_long_texts ) GT 0.
+    IF lines( lt_udmo_long_texts ) > 0.
       io_xml->add( iv_name = 'UDMO_LONG_TEXTS'
                    ig_data = lt_udmo_long_texts ).
     ENDIF.
@@ -523,11 +521,11 @@ CLASS ZCL_ABAPGIT_OBJECT_UDMO IMPLEMENTATION.
     SELECT SINGLE *
     FROM dm40l
     INTO ls_dm40l
-    WHERE dmoid    EQ me->mv_data_model
-    AND   as4local EQ me->mv_activation_state.
+    WHERE dmoid    = me->mv_data_model
+    AND   as4local = me->mv_activation_state.
 
 
-    IF sy-subrc NE 0.
+    IF sy-subrc <> 0.
       zcx_abapgit_exception=>raise( 'error from UDMO - model serialisation' ).
     ENDIF.
 
@@ -555,12 +553,12 @@ CLASS ZCL_ABAPGIT_OBJECT_UDMO IMPLEMENTATION.
     SELECT sprache dmoid as4local langbez
       FROM dm40t
       INTO CORRESPONDING FIELDS OF TABLE lt_udmo_texts
-      WHERE dmoid    EQ me->mv_data_model
-      AND   as4local EQ me->mv_activation_state
+      WHERE dmoid    = me->mv_data_model
+      AND   as4local = me->mv_activation_state
       ORDER BY sprache ASCENDING.                       "#EC CI_NOFIRST
 
     " You are reminded that descriptions in other languages do not have to be in existence.
-    IF lines( lt_udmo_texts ) GT 0.
+    IF lines( lt_udmo_texts ) > 0.
       io_xml->add( iv_name = 'UDMO_TEXTS'
                    ig_data = lt_udmo_texts ).
     ENDIF.
@@ -587,15 +585,10 @@ CLASS ZCL_ABAPGIT_OBJECT_UDMO IMPLEMENTATION.
       WHERE  dmoid    = me->mv_data_model
       AND    as4local = me->mv_activation_state.
 
-    IF sy-subrc NE 0.
+    IF sy-subrc <> 0.
       rv_user = c_user_unknown.
     ENDIF.
 
-  ENDMETHOD.
-
-
-  METHOD zif_abapgit_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE zcl_abapgit_comparison_null.
   ENDMETHOD.
 
 
@@ -619,7 +612,7 @@ CLASS ZCL_ABAPGIT_OBJECT_UDMO IMPLEMENTATION.
         is_used          = 4
         OTHERS           = 5.
 
-    IF sy-subrc NE 0.
+    IF sy-subrc <> 0.
       zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
 
@@ -686,28 +679,18 @@ CLASS ZCL_ABAPGIT_OBJECT_UDMO IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_object~get_metadata.
-    rs_metadata = get_metadata( ).
+  METHOD zif_abapgit_object~get_comparator.
+    RETURN.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_object~has_changed_since.
-
-    DATA lv_date TYPE dats.
-    DATA lv_time TYPE tims.
-
-
-    SELECT SINGLE lstdate lsttime FROM dm40l
-      INTO (lv_date, lv_time)
-           WHERE  dmoid     = me->mv_data_model
-           AND    as4local  = me->mv_activation_state.
-
-    rv_changed = check_timestamp(
-      iv_timestamp = iv_timestamp
-      iv_date      = lv_date
-      iv_time      = lv_time ).
+  METHOD zif_abapgit_object~get_deserialize_steps.
+    APPEND zif_abapgit_object=>gc_step_id-abap TO rt_steps.
+  ENDMETHOD.
 
 
+  METHOD zif_abapgit_object~get_metadata.
+    rs_metadata = get_metadata( ).
   ENDMETHOD.
 
 
@@ -776,7 +759,7 @@ CLASS ZCL_ABAPGIT_OBJECT_UDMO IMPLEMENTATION.
     ENDIF.
 
     serialize_model( io_xml ).
-    me->serialize_entities( io_xml  ).
+    me->serialize_entities( io_xml ).
     me->serialize_short_texts( io_xml ).
     me->serialize_long_texts( io_xml ).
 

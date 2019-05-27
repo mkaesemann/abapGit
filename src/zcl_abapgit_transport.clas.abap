@@ -6,6 +6,8 @@ CLASS zcl_abapgit_transport DEFINITION
   PUBLIC SECTION.
 
     CLASS-METHODS zip
+      RETURNING
+        VALUE(rv_xstr) TYPE xstring
       RAISING
         zcx_abapgit_exception .
     CLASS-METHODS to_tadir
@@ -71,8 +73,7 @@ CLASS ZCL_ABAPGIT_TRANSPORT IMPLEMENTATION.
       ENDLOOP.
     ENDLOOP.
 
-    SORT lt_super.
-    READ TABLE lt_super INDEX 1 INTO rv_package.
+    READ TABLE lt_super INDEX lines( lt_super ) INTO rv_package.
   ENDMETHOD.
 
 
@@ -193,7 +194,9 @@ CLASS ZCL_ABAPGIT_TRANSPORT IMPLEMENTATION.
       EXPORTING
         is_data = ls_data.
 
-    zcl_abapgit_zip=>export( io_repo   = lo_repo
-                             it_filter = lt_tadir ).
+    rv_xstr = zcl_abapgit_zip=>export(
+      io_repo   = lo_repo
+      it_filter = lt_tadir ).
+
   ENDMETHOD.
 ENDCLASS.

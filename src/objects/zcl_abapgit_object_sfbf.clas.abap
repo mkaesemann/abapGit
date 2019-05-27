@@ -3,6 +3,7 @@ CLASS zcl_abapgit_object_sfbf DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
   PUBLIC SECTION.
     INTERFACES zif_abapgit_object.
 
+  PROTECTED SECTION.
   PRIVATE SECTION.
     METHODS:
       get
@@ -13,7 +14,7 @@ ENDCLASS.
 
 
 
-CLASS zcl_abapgit_object_sfbf IMPLEMENTATION.
+CLASS ZCL_ABAPGIT_OBJECT_SFBF IMPLEMENTATION.
 
 
   METHOD get.
@@ -47,11 +48,6 @@ CLASS zcl_abapgit_object_sfbf IMPLEMENTATION.
       rv_user = ls_data-author.
     ENDIF.
 
-  ENDMETHOD.
-
-
-  METHOD zif_abapgit_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE zcl_abapgit_comparison_null.
   ENDMETHOD.
 
 
@@ -165,6 +161,16 @@ CLASS zcl_abapgit_object_sfbf IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD zif_abapgit_object~get_comparator.
+    RETURN.
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_object~get_deserialize_steps.
+    APPEND zif_abapgit_object=>gc_step_id-ddic TO rt_steps.
+  ENDMETHOD.
+
+
   METHOD zif_abapgit_object~get_metadata.
     rs_metadata = get_metadata( ).
     rs_metadata-ddic = abap_true.
@@ -172,8 +178,8 @@ CLASS zcl_abapgit_object_sfbf IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_object~has_changed_since.
-    rv_changed = abap_true.
+  METHOD zif_abapgit_object~is_active.
+    rv_active = is_active( ).
   ENDMETHOD.
 
 
@@ -257,10 +263,5 @@ CLASS zcl_abapgit_object_sfbf IMPLEMENTATION.
     io_xml->add( ig_data = lt_parent_bfs
                  iv_name = 'PARENT_BFS' ).
 
-  ENDMETHOD.
-
-
-  METHOD zif_abapgit_object~is_active.
-    rv_active = is_active( ).
   ENDMETHOD.
 ENDCLASS.

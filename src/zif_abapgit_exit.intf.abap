@@ -35,14 +35,22 @@ INTERFACE zif_abapgit_exit
       zcx_abapgit_exception .
   METHODS http_client
     IMPORTING
+      !iv_url    TYPE string
       !ii_client TYPE REF TO if_http_client .
   METHODS change_tadir
     IMPORTING
       !iv_package TYPE devclass
-      !io_log     TYPE REF TO zcl_abapgit_log
+      !ii_log     TYPE REF TO zif_abapgit_log
     CHANGING
       !ct_tadir   TYPE zif_abapgit_definitions=>ty_tadir_tt .
   METHODS get_ssl_id
     RETURNING
       VALUE(rv_ssl_id) TYPE ssfapplssl .
+  METHODS custom_serialize_abap_clif
+    IMPORTING
+      is_class_key     TYPE seoclskey
+    RETURNING
+      VALUE(rt_source) TYPE zif_abapgit_definitions=>ty_string_tt
+    RAISING
+      zcx_abapgit_exception.
 ENDINTERFACE.

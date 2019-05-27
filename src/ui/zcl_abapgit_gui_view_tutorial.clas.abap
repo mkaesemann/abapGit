@@ -1,10 +1,12 @@
 CLASS zcl_abapgit_gui_view_tutorial DEFINITION PUBLIC FINAL CREATE PUBLIC.
 
   PUBLIC SECTION.
-    INTERFACES zif_abapgit_gui_page.
+    INTERFACES zif_abapgit_gui_renderable.
+    INTERFACES zif_abapgit_gui_event_handler.
     INTERFACES zif_abapgit_gui_page_hotkey.
-    ALIASES render FOR zif_abapgit_gui_page~render.
+    ALIASES render FOR zif_abapgit_gui_renderable~render.
 
+  PROTECTED SECTION.
   PRIVATE SECTION.
     METHODS render_content
       RETURNING VALUE(ro_html) TYPE REF TO zcl_abapgit_html.
@@ -17,6 +19,8 @@ CLASS ZCL_ABAPGIT_GUI_VIEW_TUTORIAL IMPLEMENTATION.
 
 
   METHOD render_content.
+
+    DATA: lv_devclass TYPE tadir-devclass.
 
     CREATE OBJECT ro_html.
 
@@ -45,7 +49,7 @@ CLASS ZCL_ABAPGIT_GUI_VIEW_TUTORIAL IMPLEMENTATION.
     ro_html->add( '<h2>Repository list and favorites</h2>' ).
     ro_html->add( '<p><ul>' ).
     ro_html->add( |<li>To choose a repo press {
-                  zcl_abapgit_html=>icon( 'three-bars/blue' ) } at the favorite bar.</li>| ).
+                  zcl_abapgit_html=>icon( 'bars/blue' ) } at the favorite bar.</li>| ).
     ro_html->add( |<li>To favorite a repo click {
                   zcl_abapgit_html=>icon( 'star/darkgrey' ) } icon at repo toolbar.</li>| ).
     ro_html->add( '</ul></p>' ).
@@ -53,17 +57,25 @@ CLASS ZCL_ABAPGIT_GUI_VIEW_TUTORIAL IMPLEMENTATION.
     ro_html->add( '<h2>abapGit repository</h2>' ).
     ro_html->add( '<p><ul>' ).
     ro_html->add( '<li>' ).
-    IF zcl_abapgit_services_abapgit=>is_installed( ) = abap_true.
+
+    lv_devclass = zcl_abapgit_services_abapgit=>is_installed( ).
+    IF NOT lv_devclass IS INITIAL.
       ro_html->add( 'abapGit installed in package&nbsp;' ).
-      ro_html->add( zcl_abapgit_services_abapgit=>c_package_abapgit ).
+      ro_html->add( lv_devclass ).
     ELSE.
       ro_html->add_a( iv_txt = 'install abapGit repo' iv_act = zif_abapgit_definitions=>c_action-abapgit_install ).
       ro_html->add( ' - To keep abapGit up-to-date (or also to contribute) you need to' ).
       ro_html->add( 'install it as a repository.' ).
     ENDIF.
+
     ro_html->add( '</li>' ).
     ro_html->add( '</ul></p>' ).
 
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_gui_event_handler~on_event.
+    ev_state = zcl_abapgit_gui=>c_event_state-not_handled.
   ENDMETHOD.
 
 
@@ -72,14 +84,9 @@ CLASS ZCL_ABAPGIT_GUI_VIEW_TUTORIAL IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_gui_page~on_event.
-    ev_state = zif_abapgit_definitions=>c_event_state-not_handled.
-  ENDMETHOD.
+  METHOD zif_abapgit_gui_renderable~render.
 
-
-  METHOD zif_abapgit_gui_page~render.
-
-    CREATE OBJECT ro_html.
+    CREATE OBJECT ro_html TYPE zcl_abapgit_html.
 
     ro_html->add( '<div class="tutorial">' ).
     ro_html->add( render_content( ) ).

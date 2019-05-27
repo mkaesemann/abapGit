@@ -1,7 +1,6 @@
 CLASS zcl_abapgit_persistence_repo DEFINITION
   PUBLIC
   CREATE PROTECTED
-
   GLOBAL FRIENDS zcl_abapgit_persist_factory .
 
   PUBLIC SECTION.
@@ -151,6 +150,8 @@ CLASS ZCL_ABAPGIT_PERSISTENCE_REPO IMPLEMENTATION.
     GET TIME STAMP FIELD ls_repo-created_at.
     ls_repo-dot_abapgit  = is_dot_abapgit.
 
+    ls_repo-local_settings-display_name = iv_display_name.
+
     lv_repo_as_xml = to_xml( ls_repo ).
 
     rv_key = get_next_id( ).
@@ -186,6 +187,10 @@ CLASS ZCL_ABAPGIT_PERSISTENCE_REPO IMPLEMENTATION.
 
     LOOP AT lt_content INTO ls_content.
       MOVE-CORRESPONDING from_xml( ls_content-data_str ) TO ls_repo.
+      IF ls_repo-local_settings-write_protected = abap_false AND
+         zcl_abapgit_environment=>is_repo_object_changes_allowed( ) = abap_false.
+        ls_repo-local_settings-write_protected = abap_true.
+      ENDIF.
       ls_repo-key = ls_content-value.
       INSERT ls_repo INTO TABLE rt_repos.
     ENDLOOP.

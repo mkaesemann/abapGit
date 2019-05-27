@@ -12,6 +12,7 @@ CLASS zcl_abapgit_object_enhc DEFINITION
           is_item     TYPE zif_abapgit_definitions=>ty_item
           iv_language TYPE spras.
 
+  PROTECTED SECTION.
   PRIVATE SECTION.
     DATA:
       mv_composite_id TYPE enhcompositename.
@@ -37,11 +38,6 @@ CLASS ZCL_ABAPGIT_OBJECT_ENHC IMPLEMENTATION.
 
     rv_user = c_user_unknown.
 
-  ENDMETHOD.
-
-
-  METHOD zif_abapgit_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE zcl_abapgit_comparison_null.
   ENDMETHOD.
 
 
@@ -138,13 +134,18 @@ CLASS ZCL_ABAPGIT_OBJECT_ENHC IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_object~get_metadata.
-    rs_metadata = get_metadata( ).
+  METHOD zif_abapgit_object~get_comparator.
+    RETURN.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_object~has_changed_since.
-    rv_changed = abap_true.
+  METHOD zif_abapgit_object~get_deserialize_steps.
+    APPEND zif_abapgit_object=>gc_step_id-abap TO rt_steps.
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_object~get_metadata.
+    rs_metadata = get_metadata( ).
   ENDMETHOD.
 
 

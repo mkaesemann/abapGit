@@ -163,7 +163,8 @@ CLASS ZCL_ABAPGIT_OBJECT_MSAG IMPLEMENTATION.
     DATA: lv_object  TYPE dokhl-object,
           lt_objects TYPE STANDARD TABLE OF dokhl-object
                           WITH NON-UNIQUE DEFAULT KEY,
-          lt_dokil   TYPE zif_abapgit_definitions=>tty_dokil.
+          lt_dokil   TYPE zif_abapgit_definitions=>tty_dokil,
+          ls_dokil   LIKE LINE OF lt_dokil.
 
     FIELD-SYMBOLS: <ls_t100>  TYPE t100.
 
@@ -183,6 +184,9 @@ CLASS ZCL_ABAPGIT_OBJECT_MSAG IMPLEMENTATION.
              FOR ALL ENTRIES IN lt_objects
              WHERE id     = 'NA'
              AND   object = lt_objects-table_line.
+
+    CLEAR ls_dokil-dokstate.
+    MODIFY lt_dokil FROM ls_dokil TRANSPORTING dokstate WHERE dokstate IS NOT INITIAL.
 
     IF lines( lt_dokil ) > 0.
       serialize_longtexts( io_xml   = io_xml
@@ -250,11 +254,6 @@ CLASS ZCL_ABAPGIT_OBJECT_MSAG IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE zcl_abapgit_comparison_null.
-  ENDMETHOD.
-
-
   METHOD zif_abapgit_object~delete.
     DATA: lv_t100a          TYPE t100a,
           lv_frozen         TYPE abap_bool,
@@ -264,12 +263,12 @@ CLASS ZCL_ABAPGIT_OBJECT_MSAG IMPLEMENTATION.
 * parameter SUPPRESS_DIALOG doesnt exist in all versions of FM RS_DELETE_MESSAGE_ID
 * replaced with a copy
     lv_message_id = ms_item-obj_name.
-    IF ms_item-obj_name EQ space.
+    IF ms_item-obj_name = space.
       zcx_abapgit_exception=>raise( 'Error from (copy of) RS_DELETE_MESSAGE_ID' )."blank message id
     ENDIF.
 
     SELECT SINGLE * FROM t100a INTO lv_t100a WHERE arbgb = ms_item-obj_name.
-    IF sy-subrc NE 0.
+    IF sy-subrc <> 0.
       zcx_abapgit_exception=>raise( 'Error from (copy of) RS_DELETE_MESSAGE_ID' )."not found
     ENDIF.
 
@@ -286,7 +285,7 @@ CLASS ZCL_ABAPGIT_OBJECT_MSAG IMPLEMENTATION.
       EXCEPTIONS
         OTHERS          = 1.
 
-    IF sy-subrc NE 0 OR lv_frozen NE space.
+    IF sy-subrc <> 0 OR lv_frozen <> space.
       zcx_abapgit_exception=>raise( 'Error from (copy of) RS_DELETE_MESSAGE_ID' )."can't access
     ENDIF.
 
@@ -298,11 +297,12 @@ CLASS ZCL_ABAPGIT_OBJECT_MSAG IMPLEMENTATION.
         object             = lv_message_id
         object_class       = 'MSAG'
         mode               = 'D'
+        suppress_dialog    = abap_true
       EXCEPTIONS
         cancelled          = 01
         permission_failure = 02.
 
-    IF sy-subrc NE 0.
+    IF sy-subrc <> 0.
       IF lv_access_granted = abap_true.
         free_access_permission( lv_message_id ).
       ENDIF.
@@ -335,20 +335,7 @@ CLASS ZCL_ABAPGIT_OBJECT_MSAG IMPLEMENTATION.
     io_xml->read( EXPORTING iv_name = 'T100'
                   CHANGING cg_data = lt_t100 ).
 
-    CALL FUNCTION 'RS_CORR_INSERT'
-      EXPORTING
-        global_lock         = abap_true
-        devclass            = iv_package
-        object              = ls_t100a-arbgb
-        object_class        = 'T100'
-        mode                = 'INSERT'
-      EXCEPTIONS
-        cancelled           = 01
-        permission_failure  = 02
-        unknown_objectclass = 03.
-    IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'Error from RS_CORR_INSERT' ).
-    ENDIF.
+    corr_insert( iv_package ).
 
     SELECT * FROM t100u INTO TABLE lt_before
       WHERE arbgb = ls_t100a-arbgb ORDER BY msgnr. "#EC CI_GENBUFF "#EC CI_BYPASS
@@ -415,13 +402,18 @@ CLASS ZCL_ABAPGIT_OBJECT_MSAG IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_object~get_metadata.
-    rs_metadata = get_metadata( ).
+  METHOD zif_abapgit_object~get_comparator.
+    RETURN.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_object~has_changed_since.
-    rv_changed = abap_true.
+  METHOD zif_abapgit_object~get_deserialize_steps.
+    APPEND zif_abapgit_object=>gc_step_id-abap TO rt_steps.
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_object~get_metadata.
+    rs_metadata = get_metadata( ).
   ENDMETHOD.
 
 

@@ -50,11 +50,6 @@ CLASS ZCL_ABAPGIT_OBJECT_VCLS IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE zcl_abapgit_comparison_null.
-  ENDMETHOD.
-
-
   METHOD zif_abapgit_object~delete.
 * Do the same as in VIEWCLUSTER_SAVE_DEFINITION
     DATA: lv_vclname TYPE vcl_name.
@@ -109,6 +104,7 @@ CLASS ZCL_ABAPGIT_OBJECT_VCLS IMPLEMENTATION.
         master_language     = mv_language
         mode                = 'INSERT'
         global_lock         = abap_true
+        suppress_dialog     = abap_true
       EXCEPTIONS
         cancelled           = 1
         permission_failure  = 2
@@ -153,14 +149,19 @@ CLASS ZCL_ABAPGIT_OBJECT_VCLS IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_object~get_metadata.
-    rs_metadata = get_metadata( ).
-    rs_metadata-delete_tadir = abap_true.
+  METHOD zif_abapgit_object~get_comparator.
+    RETURN.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_object~has_changed_since.
-    rv_changed = abap_true.
+  METHOD zif_abapgit_object~get_deserialize_steps.
+    APPEND zif_abapgit_object=>gc_step_id-abap TO rt_steps.
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_object~get_metadata.
+    rs_metadata = get_metadata( ).
+    rs_metadata-delete_tadir = abap_true.
   ENDMETHOD.
 
 
@@ -187,16 +188,16 @@ CLASS ZCL_ABAPGIT_OBJECT_VCLS IMPLEMENTATION.
       lv_argument       TYPE seqg3-garg,
       lv_argument_langu TYPE seqg3-garg.
 
-    lv_argument         = me->ms_item-obj_name.
-    lv_argument_langu   = |@{ me->ms_item-obj_name }|.
+    lv_argument       = me->ms_item-obj_name.
+    lv_argument_langu = |@{ me->ms_item-obj_name }|.
 
     "Check all relevant maintein tabeles for view clusters
-    IF   check_lock( iv_tabname = 'VCLDIR'    iv_argument = lv_argument )        = abap_true
-      OR check_lock( iv_tabname = 'VCLDIRT'   iv_argument = lv_argument_langu )  = abap_true
-      OR check_lock( iv_tabname = 'VCLSTRUC'  iv_argument = lv_argument )        = abap_true
-      OR check_lock( iv_tabname = 'VCLSTRUCT' iv_argument = lv_argument_langu )  = abap_true
-      OR check_lock( iv_tabname = 'VCLSTRUC'  iv_argument = lv_argument )        = abap_true
-      OR check_lock( iv_tabname = 'VCLMF'     iv_argument = lv_argument )        = abap_true.
+    IF check_lock( iv_tabname = 'VCLDIR'    iv_argument = lv_argument ) = abap_true
+        OR check_lock( iv_tabname = 'VCLDIRT'   iv_argument = lv_argument_langu ) = abap_true
+        OR check_lock( iv_tabname = 'VCLSTRUC'  iv_argument = lv_argument )       = abap_true
+        OR check_lock( iv_tabname = 'VCLSTRUCT' iv_argument = lv_argument_langu ) = abap_true
+        OR check_lock( iv_tabname = 'VCLSTRUC'  iv_argument = lv_argument )       = abap_true
+        OR check_lock( iv_tabname = 'VCLMF'     iv_argument = lv_argument )       = abap_true.
 
       rv_is_locked = abap_true.
     ENDIF.
@@ -293,6 +294,8 @@ CLASS ZCL_ABAPGIT_OBJECT_VCLS IMPLEMENTATION.
     IF sy-subrc <> 0.
       zcx_abapgit_exception=>raise( 'error in VIEWCLUSTER_GET_DEFINITION' ).
     ENDIF.
+
+    SORT lt_vclstrudep BY vclname object objfield.
 
     CLEAR ls_vcldir_entry-author.
     CLEAR ls_vcldir_entry-changedate.

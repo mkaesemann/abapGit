@@ -12,7 +12,7 @@ CLASS zcl_abapgit_gui_page_repo_sett DEFINITION
       IMPORTING
         !io_repo TYPE REF TO zcl_abapgit_repo .
 
-    METHODS zif_abapgit_gui_page~on_event
+    METHODS zif_abapgit_gui_event_handler~on_event
         REDEFINITION .
   PROTECTED SECTION.
 
@@ -27,7 +27,9 @@ CLASS zcl_abapgit_gui_page_repo_sett DEFINITION
         !io_html TYPE REF TO zcl_abapgit_html .
     METHODS render_local_settings
       IMPORTING
-        !io_html TYPE REF TO zcl_abapgit_html .
+        !io_html TYPE REF TO zcl_abapgit_html
+      RAISING
+        zcx_abapgit_exception .
     METHODS save
       IMPORTING
         !it_postdata TYPE cnht_post_data_tab
@@ -88,7 +90,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_REPO_SETT IMPLEMENTATION.
     render_dot_abapgit( ro_html ).
     render_local_settings( ro_html ).
 
-    ro_html->add( '<br><input type="submit" value="Save" class="submit">' ).
+    ro_html->add( '<br><input type="submit" value="Save" class="floating-button blue-set emphasis">' ).
     ro_html->add( '</form>' ).
     ro_html->add( '</div>' ).
 
@@ -179,9 +181,20 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_REPO_SETT IMPLEMENTATION.
 
     io_html->add( '<h2>Local settings</h2>' ).
 
+    IF mo_repo->is_offline( ) = abap_false.
+      io_html->add( '<br>' ).
+      io_html->add( 'Display name: <input name="display_name" type="text" size="30" value="' &&
+        ls_settings-display_name && '">' ).
+      io_html->add( '<br>' ).
+    ENDIF.
+
     CLEAR lv_checked.
     IF ls_settings-write_protected = abap_true.
-      lv_checked = | checked|.
+      IF zcl_abapgit_environment=>is_repo_object_changes_allowed( ) = abap_true.
+        lv_checked = | checked|.
+      ELSE.
+        lv_checked = | checked disabled|.
+      ENDIF.
     ENDIF.
     io_html->add( |Write protected <input name="write_protected" type="checkbox"{ lv_checked }><br>| ).
 
@@ -273,6 +286,12 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_REPO_SETT IMPLEMENTATION.
 
     ls_settings = mo_repo->get_local_settings( ).
 
+    IF mo_repo->is_offline( ) = abap_false.
+      READ TABLE it_post_fields INTO ls_post_field WITH KEY name = 'display_name'.
+      ASSERT sy-subrc = 0.
+      ls_settings-display_name = ls_post_field-value.
+    ENDIF.
+
     READ TABLE it_post_fields INTO ls_post_field WITH KEY name = 'write_protected' value = 'on'.
     IF sy-subrc = 0.
       ls_settings-write_protected = abap_true.
@@ -319,18 +338,18 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_REPO_SETT IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_gui_page_hotkey~get_hotkey_actions.
-
-  ENDMETHOD.
-
-
-  METHOD zif_abapgit_gui_page~on_event.
+  METHOD zif_abapgit_gui_event_handler~on_event.
 
     CASE iv_action.
       WHEN c_action-save_settings.
         save( it_postdata ).
-        ev_state = zif_abapgit_definitions=>c_event_state-go_back.
+        ev_state = zcl_abapgit_gui=>c_event_state-go_back.
     ENDCASE.
+
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_gui_page_hotkey~get_hotkey_actions.
 
   ENDMETHOD.
 ENDCLASS.

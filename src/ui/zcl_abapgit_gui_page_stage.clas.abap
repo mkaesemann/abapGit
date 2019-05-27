@@ -18,7 +18,7 @@ CLASS zcl_abapgit_gui_page_stage DEFINITION
                   io_repo TYPE REF TO zcl_abapgit_repo_online
                   iv_seed TYPE string OPTIONAL
         RAISING   zcx_abapgit_exception,
-      zif_abapgit_gui_page~on_event REDEFINITION.
+      zif_abapgit_gui_event_handler~on_event REDEFINITION.
 
   PROTECTED SECTION.
     METHODS:
@@ -83,7 +83,7 @@ CLASS zcl_abapgit_gui_page_stage DEFINITION
     METHODS get_page_patch
       IMPORTING iv_getdata     TYPE clike
                 iv_prev_page   TYPE clike
-      RETURNING VALUE(ri_page) TYPE REF TO zif_abapgit_gui_page
+      RETURNING VALUE(ri_page) TYPE REF TO zif_abapgit_gui_renderable
       RAISING   zcx_abapgit_exception.
 ENDCLASS.
 
@@ -241,7 +241,11 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_STAGE IMPLEMENTATION.
           READ TABLE ms_files-local ASSIGNING <ls_file>
             WITH KEY file-path     = ls_file-path
                      file-filename = ls_file-filename.
-          ASSERT sy-subrc = 0.
+
+          IF sy-subrc <> 0.
+            zcx_abapgit_exception=>raise( |process_stage_list: unknown file { ls_file-path }{ ls_file-filename }| ).
+          ENDIF.
+
           io_stage->add(    iv_path     = <ls_file>-file-path
                             iv_filename = <ls_file>-file-filename
                             iv_data     = <ls_file>-file-data ).
@@ -280,11 +284,11 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_STAGE IMPLEMENTATION.
     " Action buttons
     ro_html->add( '<td class="indent5em">' ).
     ro_html->add_a( iv_act   = 'errorStub(event)' " Will be reinit by JS
-                    iv_typ   = zif_abapgit_definitions=>c_action_type-onclick
+                    iv_typ   = zif_abapgit_html=>c_action_type-onclick
                     iv_id    = 'commitButton'
                     iv_style = 'display: none'
                     iv_txt   = 'Commit (<span id="fileCounter"></span>)'
-                    iv_opt   = zif_abapgit_definitions=>c_html_opt-strong ) ##NO_TEXT.
+                    iv_opt   = zif_abapgit_html=>c_html_opt-strong ) ##NO_TEXT.
     ro_html->add_a( iv_act = |{ c_action-stage_all }|
                     iv_id  = 'commitAllButton'
                     iv_txt = lv_add_all_txt ) ##NO_TEXT.
@@ -485,17 +489,17 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_STAGE IMPLEMENTATION.
 
   METHOD zif_abapgit_gui_page_hotkey~get_hotkey_actions.
 
-    DATA: ls_hotkey_action TYPE zif_abapgit_gui_page_hotkey=>ty_hotkey_action.
+    DATA: ls_hotkey_action TYPE zif_abapgit_gui_page_hotkey=>ty_hotkey_with_name.
 
-    ls_hotkey_action-name           = |Patch|.
-    ls_hotkey_action-action         = zif_abapgit_definitions=>c_action-go_patch.
-    ls_hotkey_action-default_hotkey = |p|.
+    ls_hotkey_action-name   = |Patch|.
+    ls_hotkey_action-action = zif_abapgit_definitions=>c_action-go_patch.
+    ls_hotkey_action-hotkey = |p|.
     INSERT ls_hotkey_action INTO TABLE rt_hotkey_actions.
 
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_gui_page~on_event.
+  METHOD zif_abapgit_gui_event_handler~on_event.
 
     DATA: lo_stage  TYPE REF TO zcl_abapgit_stage,
           lv_string TYPE string,
@@ -521,9 +525,9 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_STAGE IMPLEMENTATION.
           EXPORTING
             io_repo  = mo_repo
             io_stage = lo_stage.
-        ev_state = zif_abapgit_definitions=>c_event_state-new_page.
+        ev_state = zcl_abapgit_gui=>c_event_state-new_page.
 
-        ev_state = zif_abapgit_definitions=>c_event_state-new_page.
+        ev_state = zcl_abapgit_gui=>c_event_state-new_page.
 
       WHEN c_action-stage_commit.
 
@@ -533,7 +537,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_STAGE IMPLEMENTATION.
           EXPORTING
             io_repo  = mo_repo
             io_stage = lo_stage.
-        ev_state = zif_abapgit_definitions=>c_event_state-new_page.
+        ev_state = zcl_abapgit_gui=>c_event_state-new_page.
 
       WHEN c_action-stage_filter.
 
@@ -545,17 +549,25 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_STAGE IMPLEMENTATION.
                                                             it_field = lt_fields
                                                   CHANGING  cg_field = mv_filter_value ).
 
-        ev_state = zif_abapgit_definitions=>c_event_state-no_more_act.
+        ev_state = zcl_abapgit_gui=>c_event_state-no_more_act.
 
       WHEN zif_abapgit_definitions=>c_action-go_patch.                         " Go Patch page
 
         ei_page  = get_page_patch(
           iv_getdata   = iv_getdata
           iv_prev_page = iv_prev_page ).
-        ev_state = zif_abapgit_definitions=>c_event_state-new_page.
+        ev_state = zcl_abapgit_gui=>c_event_state-new_page.
 
       WHEN OTHERS.
-        RETURN.
+        super->zif_abapgit_gui_event_handler~on_event(
+          EXPORTING
+            iv_action    = iv_action
+            iv_prev_page = iv_prev_page
+            iv_getdata   = iv_getdata
+            it_postdata  = it_postdata
+          IMPORTING
+            ei_page      = ei_page
+            ev_state     = ev_state  ).
     ENDCASE.
 
   ENDMETHOD.

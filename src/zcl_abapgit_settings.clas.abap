@@ -4,6 +4,12 @@ CLASS zcl_abapgit_settings DEFINITION PUBLIC CREATE PUBLIC.
     CONSTANTS: c_commitmsg_comment_length_dft TYPE i VALUE 50.
     CONSTANTS: c_commitmsg_body_size_dft      TYPE i VALUE 72.
 
+    CONSTANTS:
+      BEGIN OF c_icon_scaling,
+        large TYPE c VALUE 'L',
+        small TYPE c VALUE 'S',
+      END OF c_icon_scaling.
+
     METHODS:
       set_proxy_url
         IMPORTING
@@ -110,8 +116,20 @@ CLASS zcl_abapgit_settings DEFINITION PUBLIC CREATE PUBLIC.
         RETURNING
           VALUE(rt_hotkeys) TYPE zif_abapgit_definitions=>tty_hotkey
         RAISING
-          zcx_abapgit_exception.
-
+          zcx_abapgit_exception,
+      set_parallel_proc_disabled
+        IMPORTING
+          iv_disable_parallel_proc TYPE abap_bool,
+      get_parallel_proc_disabled
+        RETURNING
+          VALUE(rv_disable_parallel_proc) TYPE abap_bool,
+      get_icon_scaling
+        RETURNING
+          VALUE(rv_scaling) TYPE zif_abapgit_definitions=>ty_s_user_settings-icon_scaling,
+      set_icon_scaling
+        IMPORTING
+          iv_scaling TYPE zif_abapgit_definitions=>ty_s_user_settings-icon_scaling.
+  PROTECTED SECTION.
   PRIVATE SECTION.
     TYPES: BEGIN OF ty_s_settings,
              proxy_url                TYPE string,
@@ -157,8 +175,23 @@ CLASS zcl_abapgit_settings IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD get_hotkeys.
+    rt_hotkeys = ms_user_settings-hotkeys.
+  ENDMETHOD.
+
+
+  METHOD get_icon_scaling.
+    rv_scaling = ms_user_settings-icon_scaling.
+  ENDMETHOD.
+
+
   METHOD get_link_hints_enabled.
     rv_link_hints_enabled = ms_user_settings-link_hints_enabled.
+  ENDMETHOD.
+
+
+  METHOD get_link_hint_background_color.
+    rv_background_color = ms_user_settings-link_hint_background_color.
   ENDMETHOD.
 
 
@@ -169,6 +202,11 @@ CLASS zcl_abapgit_settings IMPLEMENTATION.
 
   METHOD get_max_lines.
     rv_lines = ms_user_settings-max_lines.
+  ENDMETHOD.
+
+
+  METHOD get_parallel_proc_disabled.
+    rv_disable_parallel_proc = ms_user_settings-parallel_proc_disabled.
   ENDMETHOD.
 
 
@@ -246,6 +284,7 @@ CLASS zcl_abapgit_settings IMPLEMENTATION.
     set_commitmsg_body_size( c_commitmsg_body_size_dft ).
     set_default_link_hint_key( ).
     set_default_link_hint_bg_color( ).
+    set_icon_scaling( '' ).
 
   ENDMETHOD.
 
@@ -265,8 +304,26 @@ CLASS zcl_abapgit_settings IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD set_hotkeys.
+    ms_user_settings-hotkeys = it_hotkeys.
+  ENDMETHOD.
+
+
+  METHOD set_icon_scaling.
+    ms_user_settings-icon_scaling = iv_scaling.
+    IF ms_user_settings-icon_scaling NA c_icon_scaling.
+      ms_user_settings-icon_scaling = ''. " Reset to default
+    ENDIF.
+  ENDMETHOD.
+
+
   METHOD set_link_hints_enabled.
     ms_user_settings-link_hints_enabled = iv_link_hints_enabled.
+  ENDMETHOD.
+
+
+  METHOD set_link_hint_background_color.
+    ms_user_settings-link_hint_background_color = iv_background_color.
   ENDMETHOD.
 
 
@@ -277,6 +334,11 @@ CLASS zcl_abapgit_settings IMPLEMENTATION.
 
   METHOD set_max_lines.
     ms_user_settings-max_lines = iv_lines.
+  ENDMETHOD.
+
+
+  METHOD set_parallel_proc_disabled.
+    ms_user_settings-parallel_proc_disabled = iv_disable_parallel_proc.
   ENDMETHOD.
 
 
@@ -334,47 +396,4 @@ CLASS zcl_abapgit_settings IMPLEMENTATION.
         cg_data = ms_settings ).
 
   ENDMETHOD.
-
-  METHOD get_link_hint_background_color.
-    rv_background_color = ms_user_settings-link_hint_background_color.
-  ENDMETHOD.
-
-
-  METHOD set_link_hint_background_color.
-    ms_user_settings-link_hint_background_color = iv_background_color.
-  ENDMETHOD.
-
-
-  METHOD set_hotkeys.
-    ms_user_settings-hotkeys = it_hotkeys.
-  ENDMETHOD.
-
-  METHOD get_hotkeys.
-
-    DATA: lt_default_hotkeys TYPE zif_abapgit_gui_page_hotkey=>tty_hotkey_action,
-          ls_hotkey          LIKE LINE OF rt_hotkeys.
-
-    FIELD-SYMBOLS: <ls_default_hotkey> LIKE LINE OF lt_default_hotkeys.
-
-    IF lines( ms_user_settings-hotkeys ) > 0.
-
-      rt_hotkeys = ms_user_settings-hotkeys.
-
-    ELSE.
-
-      " provide default hotkeys
-      lt_default_hotkeys = zcl_abapgit_hotkeys=>get_default_hotkeys_from_pages( ).
-
-      LOOP AT lt_default_hotkeys ASSIGNING <ls_default_hotkey>.
-
-        ls_hotkey-action   = <ls_default_hotkey>-action.
-        ls_hotkey-sequence = <ls_default_hotkey>-default_hotkey.
-        INSERT ls_hotkey INTO TABLE rt_hotkeys.
-
-      ENDLOOP.
-
-    ENDIF.
-
-  ENDMETHOD.
-
 ENDCLASS.

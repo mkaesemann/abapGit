@@ -20,11 +20,6 @@ CLASS ZCL_ABAPGIT_OBJECT_SUCU IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE zcl_abapgit_comparison_null.
-  ENDMETHOD.
-
-
   METHOD zif_abapgit_object~delete.
 
     DATA: lo_generic TYPE REF TO zcl_abapgit_objects_generic.
@@ -66,17 +61,20 @@ CLASS ZCL_ABAPGIT_OBJECT_SUCU IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD zif_abapgit_object~get_comparator.
+    RETURN.
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_object~get_deserialize_steps.
+    APPEND zif_abapgit_object=>gc_step_id-abap TO rt_steps.
+  ENDMETHOD.
+
+
   METHOD zif_abapgit_object~get_metadata.
 
     rs_metadata = get_metadata( ).
     rs_metadata-delete_tadir = abap_true.
-
-  ENDMETHOD.
-
-
-  METHOD zif_abapgit_object~has_changed_since.
-
-    rv_changed = abap_true.
 
   ENDMETHOD.
 

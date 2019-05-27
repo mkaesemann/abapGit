@@ -1,76 +1,85 @@
-CLASS zcl_abapgit_gui_chunk_lib DEFINITION PUBLIC FINAL CREATE PUBLIC.
+CLASS zcl_abapgit_gui_chunk_lib DEFINITION
+  PUBLIC
+  FINAL
+  CREATE PUBLIC .
 
   PUBLIC SECTION.
 
     CLASS-METHODS render_error
-      IMPORTING ix_error       TYPE REF TO zcx_abapgit_exception OPTIONAL
-                iv_error       TYPE string OPTIONAL
-      RETURNING VALUE(ro_html) TYPE REF TO zcl_abapgit_html.
-
+      IMPORTING
+        !ix_error      TYPE REF TO zcx_abapgit_exception OPTIONAL
+        !iv_error      TYPE string OPTIONAL
+      RETURNING
+        VALUE(ro_html) TYPE REF TO zcl_abapgit_html .
     CLASS-METHODS render_repo_top
-      IMPORTING io_repo               TYPE REF TO zcl_abapgit_repo
-                iv_show_package       TYPE abap_bool DEFAULT abap_true
-                iv_show_branch        TYPE abap_bool DEFAULT abap_true
-                iv_interactive_branch TYPE abap_bool DEFAULT abap_false
-                iv_branch             TYPE string OPTIONAL
-                io_news               TYPE REF TO zcl_abapgit_news OPTIONAL
-      RETURNING VALUE(ro_html)        TYPE REF TO zcl_abapgit_html
-      RAISING   zcx_abapgit_exception.
-
+      IMPORTING
+        !io_repo               TYPE REF TO zcl_abapgit_repo
+        !iv_show_package       TYPE abap_bool DEFAULT abap_true
+        !iv_show_branch        TYPE abap_bool DEFAULT abap_true
+        !iv_interactive_branch TYPE abap_bool DEFAULT abap_false
+        !iv_branch             TYPE string OPTIONAL
+        !io_news               TYPE REF TO zcl_abapgit_news OPTIONAL
+      RETURNING
+        VALUE(ro_html)         TYPE REF TO zcl_abapgit_html
+      RAISING
+        zcx_abapgit_exception .
     CLASS-METHODS render_item_state
-      IMPORTING iv_lstate      TYPE char1
-                iv_rstate      TYPE char1
-      RETURNING VALUE(rv_html) TYPE string.
-
-    CLASS-METHODS render_branch_span
-      IMPORTING iv_branch      TYPE string
-                io_repo        TYPE REF TO zcl_abapgit_repo_online
-                iv_interactive TYPE abap_bool
-      RETURNING VALUE(ro_html) TYPE REF TO zcl_abapgit_html
-      RAISING   zcx_abapgit_exception.
-
+      IMPORTING
+        !iv_lstate     TYPE char1
+        !iv_rstate     TYPE char1
+      RETURNING
+        VALUE(rv_html) TYPE string .
     CLASS-METHODS render_js_error_banner
-      RETURNING VALUE(ro_html) TYPE REF TO zcl_abapgit_html
-      RAISING   zcx_abapgit_exception.
-
+      RETURNING
+        VALUE(ro_html) TYPE REF TO zcl_abapgit_html
+      RAISING
+        zcx_abapgit_exception .
     CLASS-METHODS render_news
       IMPORTING
-                io_news        TYPE REF TO zcl_abapgit_news
-      RETURNING VALUE(ro_html) TYPE REF TO zcl_abapgit_html
-      RAISING   zcx_abapgit_exception.
-
+        !io_news       TYPE REF TO zcl_abapgit_news
+      RETURNING
+        VALUE(ro_html) TYPE REF TO zcl_abapgit_html
+      RAISING
+        zcx_abapgit_exception .
     CLASS-METHODS render_hotkey_overview
       IMPORTING
-        io_page        TYPE REF TO zcl_abapgit_gui_page
+        !io_page       TYPE REF TO zcl_abapgit_gui_page
       RETURNING
         VALUE(ro_html) TYPE REF TO zcl_abapgit_html
       RAISING
-        zcx_abapgit_exception.
-
-    CLASS-METHODS render_infopanel
-      IMPORTING
-        iv_div_id      TYPE string
-        iv_title       TYPE string
-        iv_hide        TYPE abap_bool DEFAULT abap_true
-        iv_hint        TYPE string OPTIONAL
-        iv_scrollable  TYPE abap_bool DEFAULT abap_true
-        io_content     TYPE REF TO zcl_abapgit_html
-      RETURNING
-        VALUE(ro_html) TYPE REF TO zcl_abapgit_html
-      RAISING
-        zcx_abapgit_exception.
-
+        zcx_abapgit_exception .
     CLASS-METHODS render_commit_popup
       IMPORTING
-        iv_content     TYPE csequence
-        iv_id          TYPE csequence
+        !iv_content    TYPE csequence
+        !iv_id         TYPE csequence
       RETURNING
         VALUE(ro_html) TYPE REF TO zcl_abapgit_html
       RAISING
-        zcx_abapgit_exception.
-
+        zcx_abapgit_exception .
   PROTECTED SECTION.
   PRIVATE SECTION.
+
+    CLASS-METHODS render_branch_span
+      IMPORTING
+        !iv_branch      TYPE string
+        !io_repo        TYPE REF TO zcl_abapgit_repo_online
+        !iv_interactive TYPE abap_bool
+      RETURNING
+        VALUE(ro_html)  TYPE REF TO zcl_abapgit_html
+      RAISING
+        zcx_abapgit_exception .
+    CLASS-METHODS render_infopanel
+      IMPORTING
+        !iv_div_id     TYPE string
+        !iv_title      TYPE string
+        !iv_hide       TYPE abap_bool DEFAULT abap_true
+        !iv_hint       TYPE string OPTIONAL
+        !iv_scrollable TYPE abap_bool DEFAULT abap_true
+        !io_content    TYPE REF TO zcl_abapgit_html
+      RETURNING
+        VALUE(ro_html) TYPE REF TO zcl_abapgit_html
+      RAISING
+        zcx_abapgit_exception .
 ENDCLASS.
 
 
@@ -93,7 +102,7 @@ CLASS zcl_abapgit_gui_chunk_lib IMPLEMENTATION.
 
     CREATE OBJECT ro_html.
     ro_html->add( |<span class="{ lv_class }">| ).
-    ro_html->add_icon( iv_name = 'git-branch/darkgrey' iv_hint = 'Current branch' ).
+    ro_html->add_icon( iv_name = 'code-branch/grey70' iv_hint = 'Current branch' ).
     IF iv_interactive = abap_true.
       ro_html->add_a( iv_act = |{ zif_abapgit_definitions=>c_action-git_branch_switch }?{ io_repo->get_key( ) }|
                       iv_txt = lv_text ).
@@ -138,7 +147,7 @@ CLASS zcl_abapgit_gui_chunk_lib IMPLEMENTATION.
     ENDIF.
 
     ro_html->add( '<div class="dummydiv error">' ).
-    ro_html->add( |{ zcl_abapgit_html=>icon( 'alert/red' ) } Error: { lv_error }| ).
+    ro_html->add( |{ zcl_abapgit_html=>icon( 'exclamation-circle/red' ) } Error: { lv_error }| ).
     ro_html->add( '</div>' ).
 
   ENDMETHOD.
@@ -146,42 +155,62 @@ CLASS zcl_abapgit_gui_chunk_lib IMPLEMENTATION.
 
   METHOD render_hotkey_overview.
 
-    DATA: lv_hint     TYPE string,
-          lt_hotkeys  TYPE zif_abapgit_definitions=>tty_hotkey,
-          lt_actions  TYPE zif_abapgit_gui_page_hotkey=>tty_hotkey_action,
-          lo_settings TYPE REF TO zcl_abapgit_settings.
+    DATA: lv_hint                 TYPE string,
+          lt_user_defined_hotkeys TYPE zif_abapgit_definitions=>tty_hotkey,
+          lt_hotkeys_for_page     TYPE zif_abapgit_gui_page_hotkey=>tty_hotkey_with_name,
+          lo_settings             TYPE REF TO zcl_abapgit_settings,
+          lv_hotkey               TYPE string.
 
-    FIELD-SYMBOLS: <ls_hotkey> TYPE zif_abapgit_definitions=>ty_hotkey,
-                   <ls_action> LIKE LINE OF lt_actions.
+    FIELD-SYMBOLS:
+      <ls_hotkey>              LIKE LINE OF lt_hotkeys_for_page,
+      <ls_user_defined_hotkey> LIKE LINE OF lt_user_defined_hotkeys.
 
-    lo_settings = zcl_abapgit_persist_settings=>get_instance( )->read( ).
-    lt_hotkeys  = lo_settings->get_hotkeys( ).
-    lt_actions  = zcl_abapgit_hotkeys=>get_default_hotkeys_from_pages( io_page ).
+    lo_settings             = zcl_abapgit_persist_settings=>get_instance( )->read( ).
+    lt_user_defined_hotkeys = lo_settings->get_hotkeys( ).
+    lt_hotkeys_for_page     = zcl_abapgit_hotkeys=>get_all_default_hotkeys( io_page ).
 
     CREATE OBJECT ro_html.
 
     " Render hotkeys
     ro_html->add( '<ul class="hotkeys">' ).
-    LOOP AT lt_hotkeys ASSIGNING <ls_hotkey>.
+    LOOP AT lt_hotkeys_for_page ASSIGNING <ls_hotkey>.
 
-      READ TABLE lt_actions ASSIGNING <ls_action>
-                            WITH TABLE KEY action
-                            COMPONENTS action = <ls_hotkey>-action.
+      READ TABLE lt_user_defined_hotkeys ASSIGNING <ls_user_defined_hotkey>
+                                         WITH TABLE KEY action
+                                         COMPONENTS action = <ls_hotkey>-action.
       IF sy-subrc = 0.
-        ro_html->add( |<li>|
-          && |<span class="key-id">{ <ls_hotkey>-sequence }</span>|
-          && |<span class="key-descr">{ <ls_action>-name }</span>|
-          && |</li>| ).
+        lv_hotkey = <ls_user_defined_hotkey>-hotkey.
+      ELSE.
+        lv_hotkey = <ls_hotkey>-hotkey.
       ENDIF.
+
+      ro_html->add( |<li>|
+          && |<span class="key-id">{ lv_hotkey }</span>|
+          && |<span class="key-descr">{ <ls_hotkey>-name }</span>|
+          && |</li>| ).
 
     ENDLOOP.
     ro_html->add( '</ul>' ).
 
     " Wrap
-    READ TABLE lt_hotkeys ASSIGNING <ls_hotkey>
-      WITH KEY action = zcl_abapgit_gui_page=>c_global_page_action-showhotkeys.
+    CLEAR: lv_hotkey.
+
+    READ TABLE lt_hotkeys_for_page ASSIGNING <ls_hotkey>
+      WITH TABLE KEY action
+      COMPONENTS action = zcl_abapgit_gui_page=>c_global_page_action-showhotkeys.
     IF sy-subrc = 0.
-      lv_hint = |Close window with '{ <ls_hotkey>-sequence }' or upper right corner 'X'|.
+      lv_hotkey = <ls_hotkey>-hotkey.
+    ENDIF.
+
+    READ TABLE lt_user_defined_hotkeys ASSIGNING <ls_user_defined_hotkey>
+      WITH TABLE KEY action
+      COMPONENTS action = zcl_abapgit_gui_page=>c_global_page_action-showhotkeys.
+    IF sy-subrc = 0.
+      lv_hotkey = <ls_user_defined_hotkey>-hotkey.
+    ENDIF.
+
+    IF lv_hotkey IS NOT INITIAL.
+      lv_hint = |Close window with '{ <ls_hotkey>-hotkey }' or upper right corner 'X'|.
     ENDIF.
 
     ro_html = render_infopanel(
@@ -194,7 +223,7 @@ CLASS zcl_abapgit_gui_chunk_lib IMPLEMENTATION.
 
     IF <ls_hotkey> IS ASSIGNED AND zcl_abapgit_hotkeys=>should_show_hint( ) = abap_true.
       ro_html->add( |<div id="hotkeys-hint" class="corner-hint">|
-        && |Press '{ <ls_hotkey>-sequence }' to get keyboard shortcuts list|
+        && |Press '{ <ls_hotkey>-hotkey }' to get keyboard shortcuts list|
         && |</div>| ).
     ENDIF.
 
@@ -223,14 +252,14 @@ CLASS zcl_abapgit_gui_chunk_lib IMPLEMENTATION.
                && '<div class="float-right">'
                && zcl_abapgit_html=>a(
                     iv_txt   = '&#x274c;'
-                    iv_typ   = zif_abapgit_definitions=>c_action_type-onclick
+                    iv_typ   = zif_abapgit_html=>c_action_type-onclick
                     iv_act   = |toggleDisplay('{ iv_div_id }')|
                     iv_class = 'close-btn' )
                && '</div></div>' ).
 
     IF iv_hint IS NOT INITIAL.
       ro_html->add( '<div class="info-hint">'
-        && zcl_abapgit_html=>icon( iv_name = 'alert' iv_class = 'pad-right' )
+        && zcl_abapgit_html=>icon( iv_name = 'exclamation-triangle' iv_class = 'pad-right' )
         && iv_hint
         && '</div>' ).
     ENDIF.
@@ -288,7 +317,7 @@ CLASS zcl_abapgit_gui_chunk_lib IMPLEMENTATION.
   METHOD render_js_error_banner.
     CREATE OBJECT ro_html.
     ro_html->add( '<div id="js-error-banner" class="dummydiv error">' ).
-    ro_html->add( |{ zcl_abapgit_html=>icon( 'alert/red' ) }| &&
+    ro_html->add( |{ zcl_abapgit_html=>icon( 'exclamation-triangle/red' ) }| &&
                   ' If this does not disappear soon,' &&
                   ' then there is a JS init error, please log an issue' ).
     ro_html->add( '</div>' ).
@@ -357,7 +386,7 @@ CLASS zcl_abapgit_gui_chunk_lib IMPLEMENTATION.
       lv_icon = 'plug/darkgrey' ##NO_TEXT.
       lv_hint = 'Offline repository' ##NO_TEXT.
     ELSE.
-      lv_icon = 'cloud-upload/blue' ##NO_TEXT.
+      lv_icon = 'cloud-upload-alt/blue' ##NO_TEXT.
       lv_hint = 'On-line repository' ##NO_TEXT.
     ENDIF.
 
@@ -381,12 +410,12 @@ CLASS zcl_abapgit_gui_chunk_lib IMPLEMENTATION.
     " News
     IF io_news IS BOUND AND io_news->has_news( ) = abap_true.
       IF io_news->has_updates( ) = abap_true.
-        lv_icon = 'arrow-up/warning'.
+        lv_icon = 'arrow-circle-up/warning'.
       ELSE.
-        lv_icon = 'arrow-up/grey80'.
+        lv_icon = 'arrow-circle-up/grey80'.
       ENDIF.
       ro_html->add_a( iv_act = |toggleDisplay('news')|
-                      iv_typ = zif_abapgit_definitions=>c_action_type-onclick
+                      iv_typ = zif_abapgit_html=>c_action_type-onclick
                       iv_txt = zcl_abapgit_html=>icon( iv_name  = lv_icon
                                                        iv_class = 'pad-sides'
                                                        iv_hint  = 'Display changelog' ) ).
@@ -413,7 +442,7 @@ CLASS zcl_abapgit_gui_chunk_lib IMPLEMENTATION.
 
     " Write protect
     IF io_repo->get_local_settings( )-write_protected = abap_true.
-      ro_html->add_icon( iv_name = 'lock/darkgrey' iv_hint = 'Locked from pulls' ).
+      ro_html->add_icon( iv_name = 'lock/grey70' iv_hint = 'Locked from pulls' ).
     ENDIF.
 
     " Branch
@@ -434,7 +463,7 @@ CLASS zcl_abapgit_gui_chunk_lib IMPLEMENTATION.
 
     " Package
     IF iv_show_package = abap_true.
-      ro_html->add_icon( iv_name = 'package/darkgrey' iv_hint = 'SAP package' ).
+      ro_html->add_icon( iv_name = 'box/grey70' iv_hint = 'SAP package' ).
       ro_html->add( '<span>' ).
       ro_html->add_a( iv_txt = io_repo->get_package( )
                       iv_act = |{ zif_abapgit_definitions=>c_action-jump_pkg }?{ io_repo->get_package( ) }| ).

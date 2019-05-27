@@ -197,6 +197,9 @@ CLASS ZCL_ABAPGIT_OBJECTS_GENERIC IMPLEMENTATION.
       zcx_abapgit_exception=>raise( |Obviously corrupted object-type {
         is_item-obj_type }: No tables defined| ).
     ENDIF.
+* only unique tables
+    SORT mt_object_table BY tobj_name ASCENDING.
+    DELETE ADJACENT DUPLICATES FROM mt_object_table COMPARING tobj_name.
 
 * object methods
     SELECT * FROM objm INTO TABLE mt_object_method
@@ -219,6 +222,7 @@ CLASS ZCL_ABAPGIT_OBJECTS_GENERIC IMPLEMENTATION.
         global_lock         = abap_true
         devclass            = iv_package
         master_language     = sy-langu
+        suppress_dialog     = abap_true
       EXCEPTIONS
         cancelled           = 1
         permission_failure  = 2

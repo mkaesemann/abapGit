@@ -3,6 +3,7 @@ CLASS zcl_abapgit_object_enqu DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
   PUBLIC SECTION.
     INTERFACES zif_abapgit_object.
     ALIASES mo_files FOR zif_abapgit_object~mo_files.
+  PROTECTED SECTION.
   PRIVATE SECTION.
     TYPES: tyt_dd27p TYPE STANDARD TABLE OF dd27p WITH DEFAULT KEY.
     METHODS _clear_dd27p_fields CHANGING ct_dd27p TYPE tyt_dd27p.
@@ -11,7 +12,7 @@ ENDCLASS.
 
 
 
-CLASS zcl_abapgit_object_enqu IMPLEMENTATION.
+CLASS ZCL_ABAPGIT_OBJECT_ENQU IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~changed_by.
@@ -25,11 +26,6 @@ CLASS zcl_abapgit_object_enqu IMPLEMENTATION.
       rv_user = c_user_unknown.
     ENDIF.
 
-  ENDMETHOD.
-
-
-  METHOD zif_abapgit_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE zcl_abapgit_comparison_null.
   ENDMETHOD.
 
 
@@ -72,7 +68,7 @@ CLASS zcl_abapgit_object_enqu IMPLEMENTATION.
     io_xml->read( EXPORTING iv_name = 'DD27P_TABLE'
                   CHANGING cg_data = lt_dd27p ).
 
-    corr_insert( iv_package ).
+    corr_insert( iv_package = iv_package iv_object_class = 'DICT' ).
 
     lv_name = ms_item-obj_name.
 
@@ -113,28 +109,24 @@ CLASS zcl_abapgit_object_enqu IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD zif_abapgit_object~get_comparator.
+    RETURN.
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_object~get_deserialize_steps.
+    APPEND zif_abapgit_object=>gc_step_id-ddic TO rt_steps.
+  ENDMETHOD.
+
+
   METHOD zif_abapgit_object~get_metadata.
     rs_metadata = get_metadata( ).
     rs_metadata-ddic = abap_true.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_object~has_changed_since.
-
-    DATA: lv_date TYPE dats,
-          lv_time TYPE tims.
-
-    SELECT SINGLE as4date as4time FROM dd25l
-      INTO (lv_date, lv_time)
-      WHERE viewname = ms_item-obj_name
-      AND as4local = 'A'
-      AND as4vers  = '0000'.
-
-    rv_changed = check_timestamp(
-      iv_timestamp = iv_timestamp
-      iv_date      = lv_date
-      iv_time      = lv_time ).
-
+  METHOD zif_abapgit_object~is_active.
+    rv_active = is_active( ).
   ENDMETHOD.
 
 
@@ -184,7 +176,9 @@ CLASS zcl_abapgit_object_enqu IMPLEMENTATION.
 
     CLEAR: ls_dd25v-as4user,
            ls_dd25v-as4date,
-           ls_dd25v-as4time.
+           ls_dd25v-as4time,
+           ls_dd25v-as4local,
+           ls_dd25v-as4vers.
 
     _clear_dd27p_fields( CHANGING ct_dd27p = lt_dd27p ).
 
@@ -226,10 +220,5 @@ CLASS zcl_abapgit_object_enqu IMPLEMENTATION.
       CLEAR <ls_dd27p>-signflag.
     ENDLOOP.
 
-  ENDMETHOD.
-
-
-  METHOD zif_abapgit_object~is_active.
-    rv_active = is_active( ).
   ENDMETHOD.
 ENDCLASS.

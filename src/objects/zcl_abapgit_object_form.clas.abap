@@ -270,11 +270,6 @@ CLASS ZCL_ABAPGIT_OBJECT_FORM IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE zcl_abapgit_comparison_null.
-  ENDMETHOD.
-
-
   METHOD zif_abapgit_object~delete.
 
     CALL FUNCTION 'DELETE_FORM'
@@ -330,25 +325,20 @@ CLASS ZCL_ABAPGIT_OBJECT_FORM IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD zif_abapgit_object~get_comparator.
+    RETURN.
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_object~get_deserialize_steps.
+    APPEND zif_abapgit_object=>gc_step_id-abap TO rt_steps.
+  ENDMETHOD.
+
+
   METHOD zif_abapgit_object~get_metadata.
 
     rs_metadata = get_metadata( ).
     rs_metadata-delete_tadir = abap_true.
-
-  ENDMETHOD.
-
-
-  METHOD zif_abapgit_object~has_changed_since.
-
-    DATA: ls_last_changed    TYPE tys_form_header.
-    DATA: lv_last_changed_ts TYPE timestamp.
-
-    ls_last_changed = get_last_changes( ms_item-obj_name ).
-
-    CONVERT DATE ls_last_changed-tdldate TIME ls_last_changed-tdltime
-            INTO TIME STAMP lv_last_changed_ts TIME ZONE sy-zonlo.
-
-    rv_changed = boolc( sy-subrc <> 0 OR lv_last_changed_ts > iv_timestamp ).
 
   ENDMETHOD.
 

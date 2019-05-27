@@ -3,12 +3,21 @@
     "version": "v702",
     "skipGeneratedGatewayClasses": true,
     "skipGeneratedPersistentClasses": true,
-    "skipGeneratedFunctionGroups": true
+    "skipGeneratedFunctionGroups": true,
+    "applyUnspecifiedRules": false
   },
   "rules": {
     "7bit_ascii": {
       "enabled": true,
       "exclude": []
+    },
+    "avoid_use": {
+      "enabled": true,
+      "exclude": [],
+      "define": false,
+      "endselect": true,
+      "execSQL": true,
+      "kernelCall": true
     },
     "breakpoint": {
       "enabled": true,
@@ -37,6 +46,10 @@
       "enabled": true,
       "exclude": []
     },
+    "constructor_visibility_public": {
+      "enabled": true,
+      "exclude": []
+    },    
     "contains_tab": {
       "enabled": true,
       "exclude": []
@@ -48,6 +61,20 @@
     "description_empty": {
       "enabled": true,
       "exclude": []
+    },
+    "double_space": {
+      "enabled": true,
+      "exclude": []
+    },
+    "empty_line_in_statement": {
+      "enabled": true,
+      "exclude": [],
+      "allowChained": true
+    },
+    "empty_loop": {
+      "enabled": true,
+      "exclude": [],
+      "length": 120
     },
     "empty_statement": {
       "enabled": true,
@@ -74,10 +101,18 @@
       "enabled": true,
       "exclude": []
     },
+    "if_in_if": {
+      "enabled": true,
+      "exclude": []
+    },
     "indentation": {
       "enabled": true,
       "exclude": [],
-      "ignoreExceptions": true
+      "ignoreExceptions": true,
+      "alignTryCatch": false,
+      "globalClassSkipFirst": false,
+      "ignoreGlobalClassDefinition": false,
+      "ignoreGlobalInterface": false
     },
     "inline_data_old_versions": {
       "enabled": true,
@@ -87,7 +122,10 @@
       "enabled": true,
       "exclude": [],
       "ignoreExceptions": true,
-      "ignoreLowerClassImplmentationStatement": true
+      "ignoreLowerClassImplmentationStatement": true,
+      "ignoreGlobalClassDefinition": false,
+      "ignoreGlobalInterface": false,
+      "ignoreFunctionModuleName": false
     },
     "line_length": {
       "enabled": true,
@@ -116,12 +154,8 @@
       "enabled": true,
       "exclude": []
     },
-    "message": {
+    "message_exists": {
       "enabled": false,
-      "exclude": []
-    },
-    "message_text_empty": {
-      "enabled": true,
       "exclude": []
     },
     "method_length": {
@@ -154,13 +188,17 @@
       "exclude": [],
       "depth": 5
     },
+    "no_public_attributes": {
+      "enabled": true,
+      "exclude": []
+    },
     "object_naming": {
       "enabled": true,
       "exclude": [],
-      "clas": "^ZC(L|X)\\_",
-      "intf": "^ZIF\\_",
-      "prog": "^Z",
-      "fugr": "^Z",
+      "clas": "^ZC(L|X)\\_ABAPGIT\\_",
+      "intf": "^ZIF\\_ABAPGIT\\_",
+      "prog": "^ZABAPGIT",
+      "fugr": "^ZABAPGIT",
       "tabl": "^Z",
       "ttyp": "^Z",
       "dtel": "^Z",
@@ -187,10 +225,34 @@
       "enabled": true,
       "exclude": []
     },
+    "preferred_compare_operator": {
+      "enabled": true,
+      "exclude": [],
+      "badOperators": [
+        "EQ",
+        "><",
+        "NE",
+        "GE",
+        "GT",
+        "LT",
+        "LE"
+      ]
+    },
+    "remove_descriptions": {
+      "enabled": true,
+      "exclude": [],
+      "ignoreExceptions": true
+    },
     "sequential_blank": {
       "enabled": true,
       "exclude": [],
       "lines": 4
+    },
+    "short_case": {
+      "enabled": true,
+      "exclude": [],
+      "length": 1,
+      "allow": ["iv_action", "sy"]
     },
     "space_before_colon": {
       "enabled": true,
@@ -202,6 +264,18 @@
     },
     "superclass_final": {
       "enabled": false,
+      "exclude": []
+    },
+    "tabl_enhancement_category": {
+      "enabled": true,
+      "exclude": []
+    },
+    "unreachable_code": {
+      "enabled": true,
+      "exclude": []
+    },
+    "when_others_last": {
+      "enabled": true,
       "exclude": []
     },
     "whitespace_end": {

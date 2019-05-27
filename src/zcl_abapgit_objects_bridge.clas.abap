@@ -11,6 +11,7 @@ CLASS zcl_abapgit_objects_bridge DEFINITION PUBLIC FINAL CREATE PUBLIC INHERITIN
     INTERFACES zif_abapgit_object.
     ALIASES mo_files FOR zif_abapgit_object~mo_files.
 
+  PROTECTED SECTION.
   PRIVATE SECTION.
     DATA: mo_plugin TYPE REF TO object.
 
@@ -26,7 +27,7 @@ ENDCLASS.
 
 
 
-CLASS zcl_abapgit_objects_bridge IMPLEMENTATION.
+CLASS ZCL_ABAPGIT_OBJECTS_BRIDGE IMPLEMENTATION.
 
 
   METHOD class_constructor.
@@ -120,11 +121,6 @@ CLASS zcl_abapgit_objects_bridge IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE zcl_abapgit_comparison_null.
-  ENDMETHOD.
-
-
   METHOD zif_abapgit_object~delete.
     DATA lx_plugin TYPE REF TO cx_static_check.
 
@@ -161,6 +157,28 @@ CLASS zcl_abapgit_objects_bridge IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD zif_abapgit_object~get_comparator.
+    RETURN.
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_object~get_deserialize_steps.
+
+    DATA: ls_meta TYPE zif_abapgit_definitions=>ty_metadata.
+
+    ls_meta = zif_abapgit_object~get_metadata( ).
+
+    IF ls_meta-late_deser = abap_true.
+      APPEND zif_abapgit_object=>gc_step_id-late TO rt_steps.
+    ELSEIF ls_meta-ddic = abap_true.
+      APPEND zif_abapgit_object=>gc_step_id-ddic TO rt_steps.
+    ELSE.
+      APPEND zif_abapgit_object=>gc_step_id-abap TO rt_steps.
+    ENDIF.
+
+  ENDMETHOD.
+
+
   METHOD zif_abapgit_object~get_metadata.
 
     CALL METHOD mo_plugin->('ZIF_ABAPGITP_PLUGIN~GET_METADATA')
@@ -170,8 +188,8 @@ CLASS zcl_abapgit_objects_bridge IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_object~has_changed_since.
-    rv_changed = abap_true.
+  METHOD zif_abapgit_object~is_active.
+    rv_active = abap_true.
   ENDMETHOD.
 
 
@@ -195,9 +213,5 @@ CLASS zcl_abapgit_objects_bridge IMPLEMENTATION.
       EXPORTING
         io_xml = io_xml.
 
-  ENDMETHOD.
-
-  METHOD zif_abapgit_object~is_active.
-    rv_active = abap_true.
   ENDMETHOD.
 ENDCLASS.

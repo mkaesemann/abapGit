@@ -16,9 +16,9 @@ CLASS zcl_abapgit_news DEFINITION
     TYPES:
       tt_log TYPE STANDARD TABLE OF ty_log WITH DEFAULT KEY .
 
-    CONSTANTS c_tail_length TYPE i VALUE 5 ##NO_TEXT.   " Number of versions to display if no updates
+    CONSTANTS c_tail_length TYPE i VALUE 5 ##NO_TEXT.     " Number of versions to display if no updates
 
-    CLASS-METHODS create   " TODO REFACTOR
+    CLASS-METHODS create     " TODO REFACTOR
       IMPORTING
         !io_repo           TYPE REF TO zcl_abapgit_repo
       RETURNING
@@ -40,6 +40,12 @@ CLASS zcl_abapgit_news DEFINITION
     METHODS has_unseen
       RETURNING
         VALUE(rv_boolean) TYPE abap_bool .
+    METHODS constructor
+      IMPORTING
+        !iv_rawdata          TYPE xstring
+        !iv_lastseen_version TYPE string
+        !iv_current_version  TYPE string .
+  PROTECTED SECTION.
   PRIVATE SECTION.
 
     DATA mt_log TYPE tt_log .
@@ -55,11 +61,6 @@ CLASS zcl_abapgit_news DEFINITION
     METHODS latest_version
       RETURNING
         VALUE(rv_version) TYPE string .
-    METHODS constructor
-      IMPORTING
-        !iv_rawdata          TYPE xstring
-        !iv_lastseen_version TYPE string
-        !iv_current_version  TYPE string .
     CLASS-METHODS version_to_numeric
       IMPORTING
         !iv_version       TYPE string
@@ -323,9 +324,9 @@ CLASS ZCL_ABAPGIT_NEWS IMPLEMENTATION.
 
   METHOD version_to_numeric.
 
-    DATA: lv_major   TYPE numc4,
-          lv_minor   TYPE numc4,
-          lv_release TYPE numc4.
+    DATA: lv_major   TYPE n LENGTH 4,
+          lv_minor   TYPE n LENGTH 4,
+          lv_release TYPE n LENGTH 4.
 
     SPLIT iv_version AT '.' INTO lv_major lv_minor lv_release.
 

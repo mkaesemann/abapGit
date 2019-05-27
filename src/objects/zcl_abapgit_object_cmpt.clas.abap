@@ -9,6 +9,7 @@ CLASS zcl_abapgit_object_cmpt DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
 
     INTERFACES zif_abapgit_object.
 
+  PROTECTED SECTION.
   PRIVATE SECTION.
     DATA: mo_cmp_db TYPE REF TO object,
           mv_name   TYPE c LENGTH 30.
@@ -17,7 +18,7 @@ ENDCLASS.
 
 
 
-CLASS zcl_abapgit_object_cmpt IMPLEMENTATION.
+CLASS ZCL_ABAPGIT_OBJECT_CMPT IMPLEMENTATION.
 
 
   METHOD constructor.
@@ -57,13 +58,6 @@ CLASS zcl_abapgit_object_cmpt IMPLEMENTATION.
       CATCH cx_root.
         zcx_abapgit_exception=>raise( 'CMPT not supported' ).
     ENDTRY.
-
-  ENDMETHOD.
-
-
-  METHOD zif_abapgit_object~compare_to_remote_version.
-
-    CREATE OBJECT ro_comparison_result TYPE zcl_abapgit_comparison_null.
 
   ENDMETHOD.
 
@@ -126,6 +120,7 @@ CLASS zcl_abapgit_object_cmpt IMPLEMENTATION.
         global_lock         = abap_true
         devclass            = iv_package
         master_language     = mv_language
+        suppress_dialog     = abap_true
       EXCEPTIONS
         cancelled           = 1
         permission_failure  = 2
@@ -156,6 +151,16 @@ CLASS zcl_abapgit_object_cmpt IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD zif_abapgit_object~get_comparator.
+    RETURN.
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_object~get_deserialize_steps.
+    APPEND zif_abapgit_object=>gc_step_id-abap TO rt_steps.
+  ENDMETHOD.
+
+
   METHOD zif_abapgit_object~get_metadata.
 
     rs_metadata = get_metadata( ).
@@ -164,9 +169,14 @@ CLASS zcl_abapgit_object_cmpt IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_object~has_changed_since.
+  METHOD zif_abapgit_object~is_active.
+    rv_active = is_active( ).
+  ENDMETHOD.
 
-    rv_changed = abap_true.
+
+  METHOD zif_abapgit_object~is_locked.
+
+    rv_is_locked = abap_false.
 
   ENDMETHOD.
 
@@ -213,16 +223,5 @@ CLASS zcl_abapgit_object_cmpt IMPLEMENTATION.
         zcx_abapgit_exception=>raise( 'CMPT not supported' ).
     ENDTRY.
 
-  ENDMETHOD.
-
-  METHOD zif_abapgit_object~is_locked.
-
-    rv_is_locked = abap_false.
-
-  ENDMETHOD.
-
-
-  METHOD zif_abapgit_object~is_active.
-    rv_active = is_active( ).
   ENDMETHOD.
 ENDCLASS.

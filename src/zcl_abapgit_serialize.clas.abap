@@ -10,12 +10,12 @@ CLASS zcl_abapgit_serialize DEFINITION
         !p_task TYPE clike .
     METHODS serialize
       IMPORTING
-        !it_tadir            TYPE zif_abapgit_definitions=>ty_tadir_tt
-        !iv_language         TYPE langu DEFAULT sy-langu
-        !io_log              TYPE REF TO zcl_abapgit_log OPTIONAL
-        !iv_force_sequential TYPE abap_bool DEFAULT abap_false
+        it_tadir            TYPE zif_abapgit_definitions=>ty_tadir_tt
+        iv_language         TYPE langu DEFAULT sy-langu
+        ii_log              TYPE REF TO zif_abapgit_log OPTIONAL
+        iv_force_sequential TYPE abap_bool DEFAULT abap_false
       RETURNING
-        VALUE(rt_files)      TYPE zif_abapgit_definitions=>ty_files_item_tt
+        VALUE(rt_files)     TYPE zif_abapgit_definitions=>ty_files_item_tt
       RAISING
         zcx_abapgit_exception .
 
@@ -24,7 +24,8 @@ CLASS zcl_abapgit_serialize DEFINITION
     CLASS-DATA gv_max_threads TYPE i .
     DATA mt_files TYPE zif_abapgit_definitions=>ty_files_item_tt .
     DATA mv_free TYPE i .
-    DATA mo_log TYPE REF TO zcl_abapgit_log .
+    DATA mi_log TYPE REF TO zif_abapgit_log .
+    DATA mv_group TYPE rzlli_apcl .
 
     METHODS add_to_return
       IMPORTING
@@ -32,7 +33,6 @@ CLASS zcl_abapgit_serialize DEFINITION
         !is_fils_item TYPE zcl_abapgit_objects=>ty_serialization .
     METHODS run_parallel
       IMPORTING
-        !iv_group    TYPE rzlli_apcl
         !is_tadir    TYPE zif_abapgit_definitions=>ty_tadir
         !iv_language TYPE langu
         !iv_task     TYPE sychar32
@@ -52,7 +52,7 @@ CLASS zcl_abapgit_serialize DEFINITION
       RAISING
         zcx_abapgit_exception .
   PRIVATE SECTION.
-    METHODS is_merged RETURNING VALUE(rv_result) TYPE abap_bool .
+
 
 ENDCLASS.
 
@@ -78,9 +78,18 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
 
 
   METHOD constructor.
-    IF is_merged( ) = abap_true.
+
+    DATA lo_settings TYPE REF TO zcl_abapgit_settings.
+
+    lo_settings = zcl_abapgit_persist_settings=>get_instance( )->read( ).
+
+    IF zcl_abapgit_environment=>is_merged( ) = abap_true
+        OR lo_settings->get_parallel_proc_disabled( ) = abap_true.
       gv_max_threads = 1.
     ENDIF.
+
+    mv_group = 'parallel_generators' ##NO_TEXT.
+
   ENDMETHOD.
 
 
@@ -110,7 +119,7 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
 * todo, add possibility to set group name in user exit
       CALL FUNCTION 'SPBT_INITIALIZE'
         EXPORTING
-          group_name                     = 'parallel_generators'
+          group_name                     = mv_group
         IMPORTING
           free_pbt_wps                   = gv_max_threads
         EXCEPTIONS
@@ -134,22 +143,12 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
 
     ASSERT gv_max_threads >= 1.
 
+    IF gv_max_threads > 32.
+* https://en.wikipedia.org/wiki/Amdahl%27s_law
+      gv_max_threads = 32.
+    ENDIF.
+
     rv_threads = gv_max_threads.
-
-  ENDMETHOD.
-
-
-  METHOD is_merged.
-
-    DATA lo_marker TYPE REF TO data.
-
-    TRY.
-        CREATE DATA lo_marker TYPE REF TO ('LIF_ABAPMERGE_MARKER')  ##no_text.
-        "No exception --> marker found
-        rv_result = abap_true.
-
-      CATCH cx_sy_create_data_error  ##no_handler.
-    ENDTRY.
 
   ENDMETHOD.
 
@@ -158,6 +157,7 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
 
     DATA: lv_result    TYPE xstring,
           lv_path      TYPE string,
+          lv_mess      TYPE c LENGTH 200,
           ls_fils_item TYPE zcl_abapgit_objects=>ty_serialization.
 
 
@@ -167,10 +167,16 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
         ev_path   = lv_path
       EXCEPTIONS
         error     = 1
-        OTHERS    = 2.
+        system_failure = 2 MESSAGE lv_mess
+        communication_failure = 3 MESSAGE lv_mess
+        OTHERS = 4.
     IF sy-subrc <> 0.
-      IF NOT mo_log IS INITIAL.
-        mo_log->add_error( |{ sy-msgv1 }{ sy-msgv2 }{ sy-msgv3 }{ sy-msgv3 }| ).
+      IF NOT mi_log IS INITIAL.
+        IF NOT lv_mess IS INITIAL.
+          mi_log->add_error( lv_mess ).
+        ELSE.
+          mi_log->add_error( |{ sy-msgv1 }{ sy-msgv2 }{ sy-msgv3 }{ sy-msgv3 }, { sy-subrc }| ).
+        ENDIF.
       ENDIF.
     ELSE.
       IMPORT data = ls_fils_item FROM DATA BUFFER lv_result. "#EC CI_SUBRC
@@ -195,7 +201,7 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
     DO.
       CALL FUNCTION 'Z_ABAPGIT_SERIALIZE_PARALLEL'
         STARTING NEW TASK iv_task
-        DESTINATION IN GROUP iv_group
+        DESTINATION IN GROUP mv_group
         CALLING on_end_of_task ON END OF TASK
         EXPORTING
           iv_obj_type           = is_tadir-object
@@ -241,8 +247,8 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
         add_to_return( is_fils_item = ls_fils_item
                        iv_path      = is_tadir-path ).
       CATCH zcx_abapgit_exception INTO lx_error.
-        IF NOT mo_log IS INITIAL.
-          mo_log->add_error( lx_error->get_text( ) ).
+        IF NOT mi_log IS INITIAL.
+          mi_log->add_error( lx_error->get_text( ) ).
         ENDIF.
     ENDTRY.
 
@@ -261,7 +267,7 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
 
     lv_max = determine_max_threads( iv_force_sequential ).
     mv_free = lv_max.
-    mo_log = io_log.
+    mi_log = ii_log.
 
     li_progress = zcl_abapgit_progress=>get_instance( lines( it_tadir ) ).
 
@@ -277,7 +283,6 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
           iv_language = iv_language ).
       ELSE.
         run_parallel(
-          iv_group    = 'parallel_generators'    " todo
           is_tadir    = <ls_tadir>
           iv_task     = |{ sy-tabix }|
           iv_language = iv_language ).

@@ -15,8 +15,8 @@ CLASS zcl_abapgit_gui_page_merge DEFINITION
       RAISING
         zcx_abapgit_exception .
 
-    METHODS zif_abapgit_gui_page~on_event
-        REDEFINITION.
+    METHODS zif_abapgit_gui_event_handler~on_event
+         REDEFINITION.
   PROTECTED SECTION.
     METHODS render_content REDEFINITION.
 
@@ -48,7 +48,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_MERGE IMPLEMENTATION.
 
     ro_menu->add( iv_txt = 'Merge' iv_act = c_actions-merge iv_cur = abap_false ) ##NO_TEXT.
 
-    IF iv_with_conflict EQ abap_true.
+    IF iv_with_conflict = abap_true.
       ro_menu->add( iv_txt = 'Resolve Conflicts' iv_act = c_actions-res_conflicts ) ##NO_TEXT.
     ENDIF.
 
@@ -179,15 +179,15 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_MERGE IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_gui_page~on_event.
+  METHOD zif_abapgit_gui_event_handler~on_event.
 
     CASE iv_action.
       WHEN c_actions-merge.
-        IF mo_merge->has_conflicts( ) EQ abap_true.
+        IF mo_merge->has_conflicts( ) = abap_true.
           zcx_abapgit_exception=>raise( 'conflicts exists' ).
         ENDIF.
 
-        IF mo_merge->get_result( )-stage->count( ) EQ 0.
+        IF mo_merge->get_result( )-stage->count( ) = 0.
           zcx_abapgit_exception=>raise( 'nothing to merge' ).
         ENDIF.
 
@@ -207,7 +207,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_MERGE IMPLEMENTATION.
 
         ENDIF.
 
-        ev_state = zif_abapgit_definitions=>c_event_state-new_page.
+        ev_state = zcl_abapgit_gui=>c_event_state-new_page.
 
       WHEN c_actions-res_conflicts.
 
@@ -216,7 +216,18 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_MERGE IMPLEMENTATION.
             io_repo       = mo_repo
             io_merge_page = me
             io_merge      = mo_merge.
-        ev_state = zif_abapgit_definitions=>c_event_state-new_page.
+        ev_state = zcl_abapgit_gui=>c_event_state-new_page.
+
+      WHEN OTHERS.
+        super->zif_abapgit_gui_event_handler~on_event(
+          EXPORTING
+            iv_action    = iv_action
+            iv_prev_page = iv_prev_page
+            iv_getdata   = iv_getdata
+            it_postdata  = it_postdata
+          IMPORTING
+            ei_page      = ei_page
+            ev_state     = ev_state  ).
 
     ENDCASE.
 

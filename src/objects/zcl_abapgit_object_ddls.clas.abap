@@ -9,6 +9,7 @@ CLASS zcl_abapgit_object_ddls DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
       IMPORTING iv_ddls_name TYPE tadir-obj_name
       RAISING   zcx_abapgit_exception.
 
+  PRIVATE SECTION.
 ENDCLASS.
 
 
@@ -117,11 +118,6 @@ CLASS ZCL_ABAPGIT_OBJECT_DDLS IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE zcl_abapgit_comparison_null.
-  ENDMETHOD.
-
-
   METHOD zif_abapgit_object~delete.
 
     DATA: lo_ddl   TYPE REF TO object,
@@ -137,8 +133,9 @@ CLASS ZCL_ABAPGIT_OBJECT_DDLS IMPLEMENTATION.
           EXPORTING
             name = ms_item-obj_name.
       CATCH cx_root INTO lx_error.
-        zcx_abapgit_exception=>raise( iv_text     = lx_error->get_text( )
-                                      ix_previous = lx_error ).
+        zcx_abapgit_exception=>raise(
+          iv_text     = |DDLS, { ms_item-obj_name } { lx_error->get_text( ) }|
+          ix_previous = lx_error ).
     ENDTRY.
 
   ENDMETHOD.
@@ -220,16 +217,21 @@ CLASS ZCL_ABAPGIT_OBJECT_DDLS IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD zif_abapgit_object~get_comparator.
+    RETURN.
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_object~get_deserialize_steps.
+    APPEND zif_abapgit_object=>gc_step_id-ddic TO rt_steps.
+  ENDMETHOD.
+
+
   METHOD zif_abapgit_object~get_metadata.
     rs_metadata = get_metadata( ).
 
     rs_metadata-ddic         = abap_true.
     rs_metadata-delete_tadir = abap_true.
-  ENDMETHOD.
-
-
-  METHOD zif_abapgit_object~has_changed_since.
-    rv_changed = abap_true.
   ENDMETHOD.
 
 
@@ -305,6 +307,7 @@ CLASS ZCL_ABAPGIT_OBJECT_DDLS IMPLEMENTATION.
     APPEND 'AS4TIME' TO lt_clr_comps.
     APPEND 'ACTFLAG' TO lt_clr_comps.
     APPEND 'CHGFLAG' TO lt_clr_comps.
+    APPEND 'ABAP_LANGUAGE_VERSION' TO lt_clr_comps.
 
     LOOP AT lt_clr_comps ASSIGNING <lv_comp>.
       ASSIGN COMPONENT <lv_comp> OF STRUCTURE <lg_data> TO <lg_field>.

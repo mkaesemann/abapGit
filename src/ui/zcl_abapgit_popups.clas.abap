@@ -67,11 +67,14 @@ CLASS zcl_abapgit_popups DEFINITION
           !e_salv_function .
     METHODS extract_field_values
       IMPORTING
-        it_fields  TYPE ty_sval_tt
+        it_fields       TYPE ty_sval_tt
       EXPORTING
-        ev_url     TYPE abaptxt255-line
-        ev_package TYPE tdevc-devclass
-        ev_branch  TYPE textl-line .
+        ev_url          TYPE abaptxt255-line
+        ev_package      TYPE tdevc-devclass
+        ev_branch       TYPE textl-line
+        ev_display_name TYPE trm255-text
+        ev_folder_logic TYPE string
+        ev_ign_subpkg   TYPE abap_bool.
     TYPES:
       ty_lt_fields TYPE STANDARD TABLE OF sval WITH DEFAULT KEY.
     METHODS _popup_2_get_values
@@ -80,14 +83,12 @@ CLASS zcl_abapgit_popups DEFINITION
       EXPORTING ev_value_1        TYPE spo_value
                 ev_value_2        TYPE spo_value
       CHANGING  ct_fields         TYPE ty_lt_fields
-      RAISING   zcx_abapgit_exception
-                zcx_abapgit_cancel.
+      RAISING   zcx_abapgit_exception.
     METHODS validate_folder_logic
       IMPORTING
         iv_folder_logic TYPE string
       RAISING
         zcx_abapgit_exception.
-
 ENDCLASS.
 
 
@@ -161,7 +162,10 @@ CLASS ZCL_ABAPGIT_POPUPS IMPLEMENTATION.
 
     CLEAR: ev_url,
            ev_package,
-           ev_branch.
+           ev_branch,
+           ev_display_name,
+           ev_folder_logic,
+           ev_ign_subpkg.
 
     READ TABLE it_fields INDEX 1 ASSIGNING <ls_field>.
     ASSERT sy-subrc = 0.
@@ -175,6 +179,20 @@ CLASS ZCL_ABAPGIT_POPUPS IMPLEMENTATION.
     READ TABLE it_fields INDEX 3 ASSIGNING <ls_field>.
     ASSERT sy-subrc = 0.
     ev_branch = <ls_field>-value.
+
+    READ TABLE it_fields INDEX 4 ASSIGNING <ls_field>.
+    ASSERT sy-subrc = 0.
+    ev_display_name = <ls_field>-value.
+
+    READ TABLE it_fields INDEX 5 ASSIGNING <ls_field>.
+    ASSERT sy-subrc = 0.
+    ev_folder_logic = <ls_field>-value.
+    TRANSLATE ev_folder_logic TO UPPER CASE.
+
+    READ TABLE it_fields INDEX 6 ASSIGNING <ls_field>.
+    ASSERT sy-subrc = 0.
+    ev_ign_subpkg = <ls_field>-value.
+    TRANSLATE ev_ign_subpkg TO UPPER CASE.
 
   ENDMETHOD.
 
@@ -299,8 +317,8 @@ CLASS ZCL_ABAPGIT_POPUPS IMPLEMENTATION.
 
   METHOD validate_folder_logic.
 
-    IF  iv_folder_logic <> zif_abapgit_dot_abapgit=>c_folder_logic-prefix
-    AND iv_folder_logic <> zif_abapgit_dot_abapgit=>c_folder_logic-full.
+    IF iv_folder_logic <> zif_abapgit_dot_abapgit=>c_folder_logic-prefix
+        AND iv_folder_logic <> zif_abapgit_dot_abapgit=>c_folder_logic-full.
 
       zcx_abapgit_exception=>raise( |Invalid folder logic { iv_folder_logic }. |
                                  && |Choose either { zif_abapgit_dot_abapgit=>c_folder_logic-prefix } |
@@ -717,7 +735,6 @@ CLASS ZCL_ABAPGIT_POPUPS IMPLEMENTATION.
       SELECT SINGLE as4text FROM e07t INTO lv_desc_as_text  WHERE
         trkorr = ls_transport_header-trkorr AND
         langu = sy-langu.
-
     ELSE.   " Else set branch name and commit message to 'Transport(s)_TRXXXXXX_TRXXXXX'
       lv_transports_as_text = 'Transport(s)'.
       LOOP AT it_transport_headers INTO ls_transport_header.
@@ -1004,19 +1021,22 @@ CLASS ZCL_ABAPGIT_POPUPS IMPLEMENTATION.
 
   METHOD zif_abapgit_popups~repo_popup.
 
-    DATA: lv_returncode TYPE c,
-          lv_icon_ok    TYPE icon-name,
-          lv_icon_br    TYPE icon-name,
-          lt_fields     TYPE TABLE OF sval,
-          lv_uattr      TYPE spo_fattr,
-          lv_pattr      TYPE spo_fattr,
-          lv_button2    TYPE svalbutton-buttontext,
-          lv_icon2      TYPE icon-name,
-          lv_package    TYPE tdevc-devclass,
-          lv_url        TYPE abaptxt255-line,
-          lv_branch     TYPE textl-line,
-          lv_finished   TYPE abap_bool,
-          lx_error      TYPE REF TO zcx_abapgit_exception.
+    DATA: lv_returncode   TYPE c,
+          lv_icon_ok      TYPE icon-name,
+          lv_icon_br      TYPE icon-name,
+          lt_fields       TYPE TABLE OF sval,
+          lv_uattr        TYPE spo_fattr,
+          lv_pattr        TYPE spo_fattr,
+          lv_button2      TYPE svalbutton-buttontext,
+          lv_icon2        TYPE icon-name,
+          lv_package      TYPE tdevc-devclass,
+          lv_url          TYPE abaptxt255-line,
+          lv_branch       TYPE textl-line,
+          lv_display_name TYPE trm255-text,
+          lv_folder_logic TYPE string,
+          lv_ign_subpkg   TYPE abap_bool,
+          lv_finished     TYPE abap_bool,
+          lx_error        TYPE REF TO zcx_abapgit_exception.
 
     IF iv_freeze_url = abap_true.
       lv_uattr = '05'.
@@ -1031,6 +1051,7 @@ CLASS ZCL_ABAPGIT_POPUPS IMPLEMENTATION.
       lv_icon2   = icon_folder.
     ENDIF.
 
+    lv_display_name = iv_display_name.
     lv_package = iv_package.
     lv_url     = iv_url.
     lv_branch  = iv_branch.
@@ -1058,6 +1079,25 @@ CLASS ZCL_ABAPGIT_POPUPS IMPLEMENTATION.
                            iv_fieldtext  = 'Branch'
                            iv_value      = lv_branch
                            iv_field_attr = '05'
+                 CHANGING ct_fields      = lt_fields ).
+
+      add_field( EXPORTING iv_tabname    = 'TRM255'
+                           iv_fieldname  = 'TEXT'
+                           iv_fieldtext  = 'Display name (opt.)'
+                           iv_value      = lv_display_name
+                 CHANGING ct_fields      = lt_fields ).
+
+      add_field( EXPORTING iv_tabname    = 'ZABAPGIT'
+                           iv_fieldname  = 'VALUE'
+                           iv_fieldtext  = 'Folder logic'
+                           iv_obligatory = abap_true
+                           iv_value      = zif_abapgit_dot_abapgit=>c_folder_logic-prefix
+                 CHANGING ct_fields      = lt_fields ).
+
+      add_field( EXPORTING iv_tabname    = 'TDEVC'
+                           iv_fieldname  = 'IS_ENHANCEABLE'
+                           iv_fieldtext  = 'Ignore subpackages'
+                           iv_value      = abap_false
                  CHANGING ct_fields      = lt_fields ).
 
       lv_icon_ok  = icon_okay.
@@ -1093,19 +1133,24 @@ CLASS ZCL_ABAPGIT_POPUPS IMPLEMENTATION.
 
       extract_field_values(
         EXPORTING
-          it_fields  = lt_fields
+          it_fields       = lt_fields
         IMPORTING
-          ev_url     = lv_url
-          ev_package = lv_package
-          ev_branch  = lv_branch ).
+          ev_url          = lv_url
+          ev_package      = lv_package
+          ev_branch       = lv_branch
+          ev_display_name = lv_display_name
+          ev_folder_logic = lv_folder_logic
+          ev_ign_subpkg   = lv_ign_subpkg ).
 
       lv_finished = abap_true.
 
       TRY.
           zcl_abapgit_url=>validate( |{ lv_url }| ).
           IF iv_freeze_package = abap_false.
-            zcl_abapgit_repo_srv=>get_instance( )->validate_package( lv_package ).
+            zcl_abapgit_repo_srv=>get_instance( )->validate_package( iv_package    = lv_package
+                                                                     iv_ign_subpkg = lv_ign_subpkg ).
           ENDIF.
+          validate_folder_logic( lv_folder_logic ).
         CATCH zcx_abapgit_exception INTO lx_error.
           MESSAGE lx_error TYPE 'S' DISPLAY LIKE 'E'.
           " in case of validation errors we display the popup again
@@ -1114,9 +1159,12 @@ CLASS ZCL_ABAPGIT_POPUPS IMPLEMENTATION.
 
     ENDWHILE.
 
-    rs_popup-url         = lv_url.
-    rs_popup-package     = lv_package.
-    rs_popup-branch_name = lv_branch.
+    rs_popup-url          = lv_url.
+    rs_popup-package      = lv_package.
+    rs_popup-branch_name  = lv_branch.
+    rs_popup-display_name = lv_display_name.
+    rs_popup-folder_logic = lv_folder_logic.
+    rs_popup-ign_subpkg   = lv_ign_subpkg.
 
   ENDMETHOD.
 

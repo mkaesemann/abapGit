@@ -3,6 +3,7 @@ CLASS zcl_abapgit_object_dial DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
   PUBLIC SECTION.
     INTERFACES zif_abapgit_object.
 
+  PROTECTED SECTION.
   PRIVATE SECTION.
     TYPES: BEGIN OF ty_dialog_module,
              tdct     TYPE tdct,
@@ -19,19 +20,12 @@ ENDCLASS.
 
 
 
-CLASS zcl_abapgit_object_dial IMPLEMENTATION.
+CLASS ZCL_ABAPGIT_OBJECT_DIAL IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~changed_by.
 
     rv_user = c_user_unknown.
-
-  ENDMETHOD.
-
-
-  METHOD zif_abapgit_object~compare_to_remote_version.
-
-    CREATE OBJECT ro_comparison_result TYPE zcl_abapgit_comparison_null.
 
   ENDMETHOD.
 
@@ -144,6 +138,16 @@ CLASS zcl_abapgit_object_dial IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD zif_abapgit_object~get_comparator.
+    RETURN.
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_object~get_deserialize_steps.
+    APPEND zif_abapgit_object=>gc_step_id-abap TO rt_steps.
+  ENDMETHOD.
+
+
   METHOD zif_abapgit_object~get_metadata.
 
     rs_metadata = get_metadata( ).
@@ -151,10 +155,13 @@ CLASS zcl_abapgit_object_dial IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_object~has_changed_since.
+  METHOD zif_abapgit_object~is_active.
+    rv_active = is_active( ).
+  ENDMETHOD.
 
-    rv_changed = abap_true.
 
+  METHOD zif_abapgit_object~is_locked.
+    rv_is_locked = abap_false.
   ENDMETHOD.
 
 
@@ -205,14 +212,5 @@ CLASS zcl_abapgit_object_dial IMPLEMENTATION.
            INTO rs_tdct
            WHERE dnam = lv_dnam.
 
-  ENDMETHOD.
-
-  METHOD zif_abapgit_object~is_locked.
-    rv_is_locked = abap_false.
-  ENDMETHOD.
-
-
-  METHOD zif_abapgit_object~is_active.
-    rv_active = is_active( ).
   ENDMETHOD.
 ENDCLASS.

@@ -4,6 +4,7 @@ CLASS zcl_abapgit_object_tobj DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
     INTERFACES zif_abapgit_object.
     ALIASES mo_files FOR zif_abapgit_object~mo_files.
 
+  PROTECTED SECTION.
   PRIVATE SECTION.
     TYPES: BEGIN OF ty_tobj,
              tddat TYPE tddat,
@@ -19,7 +20,19 @@ CLASS zcl_abapgit_object_tobj DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
 
 ENDCLASS.
 
-CLASS zcl_abapgit_object_tobj IMPLEMENTATION.
+
+
+CLASS ZCL_ABAPGIT_OBJECT_TOBJ IMPLEMENTATION.
+
+
+  METHOD delete_extra.
+
+    DELETE FROM tddat WHERE tabname = iv_tabname.
+    DELETE FROM tvdir WHERE tabname = iv_tabname.
+    DELETE FROM tvimf WHERE tabname = iv_tabname.
+
+  ENDMETHOD.
+
 
   METHOD read_extra.
 
@@ -31,6 +44,7 @@ CLASS zcl_abapgit_object_tobj IMPLEMENTATION.
     SELECT * FROM tvimf INTO TABLE rs_tobj-tvimf WHERE tabname = iv_tabname.
 
   ENDMETHOD.
+
 
   METHOD update_extra.
     DATA: lt_current_tvimf TYPE STANDARD TABLE OF tvimf.
@@ -56,17 +70,6 @@ CLASS zcl_abapgit_object_tobj IMPLEMENTATION.
     MODIFY tvimf FROM TABLE is_tobj-tvimf.
   ENDMETHOD.
 
-  METHOD delete_extra.
-
-    DELETE FROM tddat WHERE tabname = iv_tabname.
-    DELETE FROM tvdir WHERE tabname = iv_tabname.
-    DELETE FROM tvimf WHERE tabname = iv_tabname.
-
-  ENDMETHOD.
-
-  METHOD zif_abapgit_object~has_changed_since.
-    rv_changed = abap_true.
-  ENDMETHOD.
 
   METHOD zif_abapgit_object~changed_by.
 
@@ -83,33 +86,10 @@ CLASS zcl_abapgit_object_tobj IMPLEMENTATION.
 
   ENDMETHOD.
 
-  METHOD zif_abapgit_object~get_metadata.
-    rs_metadata = get_metadata( ).
-    rs_metadata-late_deser = abap_true.
-  ENDMETHOD.
 
-  METHOD zif_abapgit_object~exists.
-
-    DATA: lv_objectname TYPE objh-objectname,
-          lv_type_pos   TYPE i.
-
-    lv_type_pos = strlen( ms_item-obj_name ) - 1.
-
-    SELECT SINGLE objectname FROM objh INTO lv_objectname
-      WHERE objectname = ms_item-obj_name(lv_type_pos)
-      AND objecttype = ms_item-obj_name+lv_type_pos.    "#EC CI_GENBUFF
-    rv_bool = boolc( sy-subrc = 0 ).
-
-  ENDMETHOD.
-
-  METHOD zif_abapgit_object~serialize.
+  METHOD zif_abapgit_object~delete.
 
     DATA: ls_objh     TYPE objh,
-          ls_objt     TYPE objt,
-          lt_objs     TYPE tt_objs,
-          lt_objsl    TYPE tt_objsl,
-          lt_objm     TYPE tt_objm,
-          ls_tobj     TYPE ty_tobj,
           lv_type_pos TYPE i.
 
     lv_type_pos = strlen( ms_item-obj_name ) - 1.
@@ -117,51 +97,26 @@ CLASS zcl_abapgit_object_tobj IMPLEMENTATION.
     ls_objh-objectname = ms_item-obj_name(lv_type_pos).
     ls_objh-objecttype = ms_item-obj_name+lv_type_pos.
 
-    CALL FUNCTION 'CTO_OBJECT_GET'
+    CALL FUNCTION 'OBJ_GENERATE'
       EXPORTING
-        iv_objectname      = ls_objh-objectname
-        iv_objecttype      = ls_objh-objecttype
-        iv_language        = mv_language
-        iv_sel_objt        = abap_true
-        iv_sel_objs        = abap_true
-        iv_sel_objsl       = abap_true
-        iv_sel_objm        = abap_true
-      IMPORTING
-        es_objh            = ls_objh
-        es_objt            = ls_objt
-      TABLES
-        tt_objs            = lt_objs
-        tt_objsl           = lt_objsl
-        tt_objm            = lt_objm
+        iv_objectname         = ls_objh-objectname
+        iv_objecttype         = ls_objh-objecttype
+        iv_maint_mode         = 'D'
       EXCEPTIONS
-        object_not_defined = 1
-        OTHERS             = 2.
-    IF sy-subrc = 1.
-      RETURN.
-    ELSEIF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'error from CTO_OBJECT_GET' ).
+        illegal_call          = 1
+        object_not_found      = 2
+        generate_error        = 3
+        transport_error       = 4
+        object_enqueue_failed = 5
+        OTHERS                = 6.
+    IF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise( 'error from OBJ_GENERATE' ).
     ENDIF.
 
-    CLEAR: ls_objh-luser,
-           ls_objh-ldate.
-
-    io_xml->add( iv_name = 'OBJH'
-                 ig_data = ls_objh ).
-    io_xml->add( iv_name = 'OBJT'
-                 ig_data = ls_objt ).
-    io_xml->add( iv_name = 'OBJS'
-                 ig_data = lt_objs ).
-    io_xml->add( iv_name = 'OBJSL'
-                 ig_data = lt_objsl ).
-    io_xml->add( iv_name = 'OBJM'
-                 ig_data = lt_objm ).
-
-    ls_tobj = read_extra( ls_objh-objectname ).
-
-    io_xml->add( iv_name = 'TOBJ'
-                 ig_data = ls_tobj ).
+    delete_extra( ls_objh-objectname ).
 
   ENDMETHOD.
+
 
   METHOD zif_abapgit_object~deserialize.
 
@@ -240,9 +195,79 @@ CLASS zcl_abapgit_object_tobj IMPLEMENTATION.
 
   ENDMETHOD.
 
-  METHOD zif_abapgit_object~delete.
+
+  METHOD zif_abapgit_object~exists.
+
+    DATA: lv_objectname TYPE objh-objectname,
+          lv_type_pos   TYPE i.
+
+    lv_type_pos = strlen( ms_item-obj_name ) - 1.
+
+    SELECT SINGLE objectname FROM objh INTO lv_objectname
+      WHERE objectname = ms_item-obj_name(lv_type_pos)
+      AND objecttype = ms_item-obj_name+lv_type_pos.    "#EC CI_GENBUFF
+    rv_bool = boolc( sy-subrc = 0 ).
+
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_object~get_comparator.
+    RETURN.
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_object~get_deserialize_steps.
+    APPEND zif_abapgit_object=>gc_step_id-late TO rt_steps.
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_object~get_metadata.
+    rs_metadata = get_metadata( ).
+    rs_metadata-late_deser = abap_true.
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_object~is_active.
+    rv_active = is_active( ).
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_object~is_locked.
+    rv_is_locked = abap_false.
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_object~jump.
+
+    DATA: lv_object_name TYPE e071-obj_name.
+
+    lv_object_name = ms_item-obj_name.
+
+    CALL FUNCTION 'TR_OBJECT_JUMP_TO_TOOL'
+      EXPORTING
+        iv_pgmid          = 'R3TR'
+        iv_object         = ms_item-obj_type
+        iv_obj_name       = lv_object_name
+      EXCEPTIONS
+        jump_not_possible = 1
+        OTHERS            = 2.
+
+    IF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise( |Jump not possible. Subrc={ sy-subrc } |
+                                 && |from TR_OBJECT_JUMP_TO_TOOL| ).
+    ENDIF.
+
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_object~serialize.
 
     DATA: ls_objh     TYPE objh,
+          ls_objt     TYPE objt,
+          lt_objs     TYPE tt_objs,
+          lt_objsl    TYPE tt_objsl,
+          lt_objm     TYPE tt_objm,
+          ls_tobj     TYPE ty_tobj,
           lv_type_pos TYPE i.
 
     lv_type_pos = strlen( ms_item-obj_name ) - 1.
@@ -250,78 +275,49 @@ CLASS zcl_abapgit_object_tobj IMPLEMENTATION.
     ls_objh-objectname = ms_item-obj_name(lv_type_pos).
     ls_objh-objecttype = ms_item-obj_name+lv_type_pos.
 
-    CALL FUNCTION 'OBJ_GENERATE'
+    CALL FUNCTION 'CTO_OBJECT_GET'
       EXPORTING
-        iv_objectname         = ls_objh-objectname
-        iv_objecttype         = ls_objh-objecttype
-        iv_maint_mode         = 'D'
-      EXCEPTIONS
-        illegal_call          = 1
-        object_not_found      = 2
-        generate_error        = 3
-        transport_error       = 4
-        object_enqueue_failed = 5
-        OTHERS                = 6.
-    IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'error from OBJ_GENERATE' ).
-    ENDIF.
-
-    delete_extra( ls_objh-objectname ).
-
-  ENDMETHOD.
-
-  METHOD zif_abapgit_object~jump.
-
-    DATA: ls_bcdata TYPE bdcdata,
-          lt_bcdata TYPE STANDARD TABLE OF bdcdata.
-
-    ls_bcdata-program  = 'SAPMSVIM'.
-    ls_bcdata-dynpro   = '0050'.
-    ls_bcdata-dynbegin = 'X'.
-    APPEND ls_bcdata TO lt_bcdata.
-
-    CLEAR ls_bcdata.
-    ls_bcdata-fnam = 'VIMDYNFLDS-VIEWNAME'.
-    ls_bcdata-fval = substring( val = ms_item-obj_name
-                                len = strlen( ms_item-obj_name ) - 1 ).
-    APPEND ls_bcdata TO lt_bcdata.
-
-    CLEAR ls_bcdata.
-    ls_bcdata-fnam = 'VIMDYNFLDS-ELEM_GEN'.
-    ls_bcdata-fval = abap_true.
-    APPEND ls_bcdata TO lt_bcdata.
-
-    CLEAR ls_bcdata.
-    ls_bcdata-fnam = 'BDC_OKCODE'.
-    ls_bcdata-fval = '=SHOW'.
-    APPEND ls_bcdata TO lt_bcdata.
-
-    CALL FUNCTION 'ABAP4_CALL_TRANSACTION'
-      STARTING NEW TASK 'GIT'
-      EXPORTING
-        tcode     = 'SE54'
-        mode_val  = 'E'
+        iv_objectname      = ls_objh-objectname
+        iv_objecttype      = ls_objh-objecttype
+        iv_language        = mv_language
+        iv_sel_objt        = abap_true
+        iv_sel_objs        = abap_true
+        iv_sel_objsl       = abap_true
+        iv_sel_objm        = abap_true
+      IMPORTING
+        es_objh            = ls_objh
+        es_objt            = ls_objt
       TABLES
-        using_tab = lt_bcdata
+        tt_objs            = lt_objs
+        tt_objsl           = lt_objsl
+        tt_objm            = lt_objm
       EXCEPTIONS
-        OTHERS    = 1.
-
-    IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'error from ABAP4_CALL_TRANSACTION, TOBJ' ).
+        object_not_defined = 1
+        OTHERS             = 2.
+    IF sy-subrc = 1.
+      RETURN.
+    ELSEIF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise( 'error from CTO_OBJECT_GET' ).
     ENDIF.
 
-  ENDMETHOD.
+    CLEAR: ls_objh-luser,
+           ls_objh-ldate.
 
-  METHOD zif_abapgit_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE zcl_abapgit_comparison_null.
-  ENDMETHOD.
+    io_xml->add( iv_name = 'OBJH'
+                 ig_data = ls_objh ).
+    io_xml->add( iv_name = 'OBJT'
+                 ig_data = ls_objt ).
+    io_xml->add( iv_name = 'OBJS'
+                 ig_data = lt_objs ).
+    io_xml->add( iv_name = 'OBJSL'
+                 ig_data = lt_objsl ).
+    io_xml->add( iv_name = 'OBJM'
+                 ig_data = lt_objm ).
 
-  METHOD zif_abapgit_object~is_locked.
-    rv_is_locked = abap_false.
-  ENDMETHOD.
+    ls_tobj = read_extra( ls_objh-objectname ).
 
+    io_xml->add( iv_name = 'TOBJ'
+                 ig_data = ls_tobj ).
 
-  METHOD zif_abapgit_object~is_active.
-    rv_active = is_active( ).
   ENDMETHOD.
 ENDCLASS.

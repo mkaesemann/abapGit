@@ -4,6 +4,7 @@ CLASS zcl_abapgit_object_ddlx DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
     INTERFACES zif_abapgit_object.
     ALIASES mo_files FOR zif_abapgit_object~mo_files.
 
+  PROTECTED SECTION.
     DATA: mo_persistence TYPE REF TO if_wb_object_persist.
 
   PRIVATE SECTION.
@@ -28,7 +29,7 @@ ENDCLASS.
 
 
 
-CLASS zcl_abapgit_object_ddlx IMPLEMENTATION.
+CLASS ZCL_ABAPGIT_OBJECT_DDLX IMPLEMENTATION.
 
 
   METHOD clear_field.
@@ -75,6 +76,15 @@ CLASS zcl_abapgit_object_ddlx IMPLEMENTATION.
     clear_field( EXPORTING iv_fieldname = 'CONTAINER_REF-PACKAGE_NAME'
                  CHANGING  cs_metadata  = <lg_metadata> ).
 
+    clear_field( EXPORTING iv_fieldname = 'VERSION'
+                 CHANGING  cs_metadata  = <lg_metadata> ).
+
+    clear_field( EXPORTING iv_fieldname = 'RESPONSIBLE'
+                 CHANGING  cs_metadata  = <lg_metadata> ).
+
+    clear_field( EXPORTING iv_fieldname = 'MASTER_SYSTEM'
+                 CHANGING  cs_metadata  = <lg_metadata> ).
+
   ENDMETHOD.
 
 
@@ -102,11 +112,6 @@ CLASS zcl_abapgit_object_ddlx IMPLEMENTATION.
 
   METHOD zif_abapgit_object~changed_by.
     rv_user = c_user_unknown.
-  ENDMETHOD.
-
-
-  METHOD zif_abapgit_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE zcl_abapgit_comparison_null.
   ENDMETHOD.
 
 
@@ -210,14 +215,19 @@ CLASS zcl_abapgit_object_ddlx IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_object~get_metadata.
-    rs_metadata = get_metadata( ).
-    rs_metadata-delete_tadir = abap_true.
+  METHOD zif_abapgit_object~get_comparator.
+    RETURN.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_object~has_changed_since.
-    rv_changed = abap_true.
+  METHOD zif_abapgit_object~get_deserialize_steps.
+    APPEND zif_abapgit_object=>gc_step_id-abap TO rt_steps.
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_object~get_metadata.
+    rs_metadata = get_metadata( ).
+    rs_metadata-delete_tadir = abap_true.
   ENDMETHOD.
 
 

@@ -493,7 +493,7 @@ CheckListWrapper.prototype.onClick = function(e) { // eslint-disable-line no-unu
   var nodeA    = target;
   var nodeLi   = target.parentNode;
   var nodeIcon = target.children[0];
-  if (!nodeIcon.classList.contains("octicon")) return;
+  if (!nodeIcon.classList.contains("icon")) return;
 
   // Node updates
   var option   = nodeA.innerText;
@@ -730,10 +730,10 @@ function LinkHints(sLinkHintKey, sColor){
   this.oTooltipMap = {};
   this.bTooltipsOn = false;
   this.sPending = "";
-  this.aTooltipElements = document.querySelectorAll("a span");
+  this.aTooltipElements = document.querySelectorAll("span.tooltiptext");
 }
 
-LinkHints.prototype.fnRenderTooltip = function (oTooltip, iTooltipCounter) {
+LinkHints.prototype.renderTooltip = function (oTooltip, iTooltipCounter) {
   if (this.bTooltipsOn) {
     oTooltip.classList.remove("hidden");
   } else {
@@ -751,7 +751,7 @@ LinkHints.prototype.getTooltipStartValue = function(iToolTipCount){
 
 };
 
-LinkHints.prototype.fnRenderTooltips = function () {
+LinkHints.prototype.renderTooltips = function () {
 
   // all possible links which should be accessed via tooltip have
   // sub span which is hidden by default. If we like to show the
@@ -767,23 +767,27 @@ LinkHints.prototype.fnRenderTooltips = function () {
 
   [].forEach.call(this.aTooltipElements, function(oTooltip){
     iTooltipCounter += 1;
-    this.fnRenderTooltip(oTooltip, iTooltipCounter);
+    this.renderTooltip(oTooltip, iTooltipCounter);
   }.bind(this));
 
 };
 
-LinkHints.prototype.fnToggleAllTooltips = function () {
+LinkHints.prototype.toggleAllTooltips = function () {
 
   this.sPending = "";
   this.bTooltipsOn = !this.bTooltipsOn;
-  this.fnRenderTooltips();
+  this.renderTooltips();
 
 };
 
-LinkHints.prototype.fnRemoveAllTooltips = function () {
-
+LinkHints.prototype.disableTooltips = function(){
   this.sPending = "";
   this.bTooltipsOn = false;
+};
+
+LinkHints.prototype.removeAllTooltips = function () {
+
+  this.disableTooltips();
 
   [].forEach.call(this.aTooltipElements, function (oTooltip) {
     oTooltip.classList.add("hidden");
@@ -791,7 +795,7 @@ LinkHints.prototype.fnRemoveAllTooltips = function () {
 
 };
 
-LinkHints.prototype.fnFilterTooltips = function (sPending) { // eslint-disable-line no-unused-vars
+LinkHints.prototype.filterTooltips = function () {
 
   Object
     .keys(this.oTooltipMap)
@@ -813,22 +817,36 @@ LinkHints.prototype.fnFilterTooltips = function (sPending) { // eslint-disable-l
 
 };
 
-LinkHints.prototype.fnActivateDropDownMenu = function (oTooltip) {
+LinkHints.prototype.activateDropDownMenu = function (oTooltip) {
   // to enable link hint navigation for drop down menu, we must expand
   // like if they were hovered
   oTooltip.parentElement.parentElement.classList.toggle("block");
 };
 
 
-LinkHints.prototype.fnTooltipActivate = function (oTooltip) {
+LinkHints.prototype.tooltipActivate = function (oTooltip) {
 
   // a tooltips was successfully specified, so we try to trigger the link
   // and remove all tooltips
-  this.fnRemoveAllTooltips();
-  oTooltip.parentElement.click();
+  this.removeAllTooltips();
+
+  // we have technically 2 scenarios
+  // 1) hint to a checkbox: as input field cannot include tags
+  //    we place the span after input
+  // 2) hint to a link: the span in included in the anchor tag
+
+  var elInput = oTooltip.parentElement.querySelector("input");
+
+  if (elInput) {
+    // case 1) toggle the checkbox
+    elInput.click();
+  } else {
+    // case 2) click the link
+    oTooltip.parentElement.click();
+  }
 
   // in case it is a dropdownmenu we have to expand and focus it
-  this.fnActivateDropDownMenu(oTooltip);
+  this.activateDropDownMenu(oTooltip);
   oTooltip.parentElement.focus();
 
 };
@@ -845,7 +863,7 @@ LinkHints.prototype.onkeypress = function(oEvent){
   // Maybe we must add other types here in the future
   if (oEvent.key === this.sLinkHintKey && activeElementType !== "INPUT" && activeElementType !== "TEXTAREA") {
 
-    this.fnToggleAllTooltips();
+    this.toggleAllTooltips();
 
   } else if (this.bTooltipsOn === true) {
 
@@ -855,14 +873,32 @@ LinkHints.prototype.onkeypress = function(oEvent){
 
     if (oTooltip) {
       // we are there, we have a fully specified tooltip. Let's activate it
-      this.fnTooltipActivate(oTooltip);
+      this.tooltipActivate(oTooltip);
     } else {
       // we are not there yet, but let's filter the link so that only
       // the partially matched are shown
-      this.fnFilterTooltips(this.sPending);
+      this.filterTooltips();
+      this.disableTooltipsIfNoTooltipIsVisible();
     }
 
   }
+
+};
+
+LinkHints.prototype.disableTooltipsIfNoTooltipIsVisible = function(){
+
+  if (!this.isAnyTooltipVisible()) {
+    this.disableTooltips();
+  }
+};
+
+LinkHints.prototype.isAnyTooltipVisible = function(){
+
+  return (Object
+    .keys(this.oTooltipMap)
+    .filter(function (key) {
+      return !this.oTooltipMap[key].classList.contains("hidden");
+    }.bind(this)).length > 0);
 
 };
 
@@ -985,109 +1021,96 @@ function setKeyBindings(oKeyMap){
   Patch / git add -p
   */
 
-function CSSPatchClassCombination(sClassLinkClicked, sClassCorrespondingLink){
-  this.sClassLinkClicked = sClassLinkClicked;
-  this.sClassCorrespondingLink = sClassCorrespondingLink;
+/*
+  We have three type of cascading checkboxes.
+  Which means that by clicking a file or section checkbox all corresponding line checkboxes are checked.
+
+  The id of the checkbox indicates its semantics and its membership.
+
+  */
+
+/*
+  1) file links
+
+      example id of file link
+
+      patch_file_zcl_abapgit_user_exit.clas.abap
+      \________/ \_____________________________/
+          |                   |
+          |                   |____ file name
+          |
+          |
+          |
+      constant prefix
+
+  */
+
+function PatchFile(sId){
+  var oRegex = new RegExp("(" + this.ID + ")_(.*$)");
+  var oMatch = sId.match(oRegex);
+  this.id        = sId;
+  this.prefix    = oMatch[1];
+  this.file_name = oMatch[2];
 }
 
-function Patch() {
+PatchFile.prototype.ID = "patch_file";
 
-  this.CSS_CLASS = {
-    ADD:          "add",
-    REMOVE:       "remove",
-    PATCH:        "patch",
-    PATCH_ACTIVE: "patch-active"
-  };
+/*
+  2) section links within a file
 
-  this.ID = {
-    STAGE:            "stage",
-    PATCH_ADD_ALL:    "patch_add_all",
-    PATCH_REMOVE_ALL: "patch_remove_all"
-  };
+      example id of section link
 
-  this.ACTION = {
-    PATCH_STAGE: "patch_stage"
-  };
+      patch_section_zcl_abapgit_user_exit.clas.abap_1
+      \___________/ \_____________________________/ ^
+            |                   |                   |
+            |               file name               |
+            |                                       |
+            |                                       ------ section
+            |
+      constant prefix
 
-  this.ADD_REMOVE = new CSSPatchClassCombination(this.CSS_CLASS.ADD, this.CSS_CLASS.REMOVE);
-  this.REMOVE_ADD = new CSSPatchClassCombination(this.CSS_CLASS.REMOVE, this.CSS_CLASS.ADD);
+    */
 
+function PatchSection(sId){
+  var oRegex = new RegExp("(" + this.ID + ")_(.*)_(\\d+$)");
+  var oMatch = sId.match(oRegex);
+  this.id        = sId;
+  this.prefix    = oMatch[1];
+  this.file_name = oMatch[2];
+  this.section   = oMatch[3];
 }
 
-Patch.prototype.preparePatch = function(){
+PatchSection.prototype.ID = "patch_section";
 
-  this.registerClickHandlerSingleLine();
-  this.registerClickHandlerAllFile();
+/*
+  3) line links within a section
 
+      example id of line link
+
+      patch_line_zcl_abapgit_user_exit.clas.abap_1_25
+      \________/ \_____________________________/ ^  ^
+            ^                  ^                 |  |
+            |                  |                 |  ------- line number
+            |               file name            |
+            |                                 section
+            |
+            |
+      constant prefix
+
+  */
+function PatchLine(){
+}
+
+PatchLine.prototype.ID = "patch_line";
+
+function Patch() { }
+
+Patch.prototype.ID = {
+  STAGE: "stage"
 };
 
-Patch.prototype.registerClickHandlerSingleLine = function(){
-
-  // registers the link handlers for add and remove single lines
-
-  this.registerClickHandlerForPatchLink(this.ADD_REMOVE);
-  this.registerClickHandlerForPatchLink(this.REMOVE_ADD);
-
-};
-
-Patch.prototype.registerClickHandlerAllFile = function(){
-
-  // registers the link handlers for add and remove all changes for a file
-
-  this.registerClickHandlerForPatchLinkAll("#" + this.ID.PATCH_ADD_ALL, this.ADD_REMOVE);
-  this.registerClickHandlerForPatchLinkAll("#" + this.ID.PATCH_REMOVE_ALL, this.REMOVE_ADD);
-
-};
-
-Patch.prototype.registerClickHandlerForPatchLink = function(oClassCombination) {
-  // register onclick handler. When a link is clicked it is
-  // deactivated and its corresponding link gets active
-  //
-  // e.g. if you click on 'add' add is deactivated and 'remove'
-  // is activated.
-
-  var elLinkAll = document.querySelectorAll("." + this.CSS_CLASS.PATCH + " a." + oClassCombination.sClassLinkClicked);
-
-  [].forEach.call(elLinkAll,function(elLink){
-
-    elLink.addEventListener("click",function(oEvent){
-      this.togglePatchActiveForClassLink(oEvent, elLink, oClassCombination);
-    }.bind(this));
-
-  }.bind(this));
-
-};
-
-Patch.prototype.togglePatchActive = function(oEvent, elClicked, elCorrespondingLink){
-
-  if (!elClicked.classList.contains(this.CSS_CLASS.PATCH_ACTIVE)){
-    elClicked.classList.toggle(this.CSS_CLASS.PATCH_ACTIVE);
-    elCorrespondingLink.classList.toggle(this.CSS_CLASS.PATCH_ACTIVE);
-  }
-
-  oEvent.preventDefault();
-};
-
-
-Patch.prototype.togglePatchActiveForClassLink = function(oEvent, elClicked, oClassCombination) {
-
-  var sCorrespondingLinkId = this.getCorrespodingLinkId(elClicked.id, oClassCombination);
-  var elCorrespondingLink = document.querySelector('[ID="' + this.escape(sCorrespondingLinkId) + '"]');
-
-  this.togglePatchActive(oEvent, elClicked, elCorrespondingLink);
-};
-
-Patch.prototype.getCorrespodingLinkId = function(sClickedLinkId, oClassCombination){
-
-  // e.g.
-  //
-  //   add_patch_z_test_git_add_p.prog.abap_28 => remove_patch_z_test_git_add_p.prog.abap_28
-  //
-  // and vice versa
-
-  var oRegexPatchClassPrefix = new RegExp("^" + oClassCombination.sClassLinkClicked );
-  return sClickedLinkId.replace(oRegexPatchClassPrefix, oClassCombination.sClassCorrespondingLink);
-
+Patch.prototype.ACTION = {
+  PATCH_STAGE: "patch_stage"
 };
 
 Patch.prototype.escape = function(sFileName){
@@ -1096,27 +1119,119 @@ Patch.prototype.escape = function(sFileName){
     .replace(/#/g, "\\#");
 };
 
-Patch.prototype.patchLinkClickAll = function(oClassCombination) {
-  return function(oEvent) {
+Patch.prototype.preparePatch = function(){
 
-    var sTableId = oEvent.srcElement.parentElement.parentElement.parentElement.parentElement.id;
-    var elAddAll = document.querySelectorAll('[ID="' + this.escape(sTableId) + '"] a.' + oClassCombination.sClassLinkClicked);
+  this.registerClickHandlerForFiles();
+  this.registerClickHandlerForSections();
+  this.registerClickHandlerForLines();
 
-    [].forEach.call(elAddAll,function(elem){
-      this.togglePatchActiveForClassLink(oEvent, elem, oClassCombination);
-    }.bind(this));
-
-    oEvent.preventDefault();
-
-  };
 };
 
-Patch.prototype.registerClickHandlerForPatchLinkAll = function(sSelector, oClassCombination){
+Patch.prototype.buildSelectorInputStartsWithId = function(sId){
+  return "input[id^='" + sId + "']";
+};
+
+Patch.prototype.registerClickHandlerForFiles = function(){
+  this.registerClickHandlerForSelectorParent(this.buildSelectorInputStartsWithId(PatchFile.prototype.ID), this.onClickFileCheckbox);
+};
+
+Patch.prototype.registerClickHandlerForSections = function(){
+  this.registerClickHandlerForSelectorParent(this.buildSelectorInputStartsWithId(PatchSection.prototype.ID), this.onClickSectionCheckbox);
+};
+
+Patch.prototype.registerClickHandlerForLines = function(){
+  this.registerClickHandlerForSelectorParent(this.buildSelectorInputStartsWithId(PatchLine.prototype.ID), this.onClickLineCheckbox);
+};
+
+Patch.prototype.registerClickHandlerForSelectorParent = function(sSelector, fnCallback){
 
   var elAll = document.querySelectorAll(sSelector);
 
   [].forEach.call(elAll, function(elem){
-    elem.addEventListener("click", this.patchLinkClickAll(oClassCombination).bind(this));
+    elem.parentElement.addEventListener("click", fnCallback.bind(this));
+  }.bind(this));
+
+};
+
+Patch.prototype.getAllLineCheckboxesForFile = function(oFile){
+  return this.getAllLineCheckboxesForId(oFile.id, PatchFile.prototype.ID);
+};
+
+Patch.prototype.getAllSectionCheckboxesForFile = function(oFile){
+  return this.getAllSectionCheckboxesForId(oFile.id, PatchFile.prototype.ID);
+};
+
+Patch.prototype.getAllLineCheckboxesForSection = function(oSection){
+  return this.getAllLineCheckboxesForId(oSection.id, PatchSection.prototype.ID);
+};
+
+Patch.prototype.getAllLineCheckboxesForId = function(sId, sIdPrefix){
+  return this.getAllCheckboxesForId(sId, sIdPrefix,PatchLine.prototype.ID);
+};
+
+Patch.prototype.getAllSectionCheckboxesForId = function(sId, sIdPrefix){
+  return this.getAllCheckboxesForId(sId, sIdPrefix, PatchSection.prototype.ID);
+};
+
+Patch.prototype.getAllCheckboxesForId = function(sId, sIdPrefix, sNewIdPrefix){
+  var oRegex = new RegExp("^" + sIdPrefix);
+  sId = sId.replace(oRegex, sNewIdPrefix);
+  return document.querySelectorAll(this.buildSelectorInputStartsWithId(this.escape(sId)));
+};
+
+Patch.prototype.getToggledCheckbox = function(oEvent){
+
+  var elCheckbox = null;
+
+  // We have either an input element or any element with input child
+  // in the latter case we have to toggle the checkbox manually
+  if (oEvent.srcElement.nodeName === "INPUT"){
+    elCheckbox = oEvent.srcElement;
+  } else {
+    elCheckbox = this.toggleCheckbox(oEvent.srcElement.querySelector("INPUT"));
+  }
+
+  return elCheckbox;
+};
+
+Patch.prototype.toggleCheckbox = function(elCheckbox) {
+  elCheckbox.checked = !elCheckbox.checked;
+  return elCheckbox;
+};
+
+Patch.prototype.onClickFileCheckbox = function(oEvent) {
+
+  var elCheckbox = this.getToggledCheckbox(oEvent);
+  var oFile = new PatchFile(elCheckbox.id);
+  var elAllLineCheckboxesOfFile = this.getAllLineCheckboxesForFile(oFile);
+  var elAllSectionCheckboxesOfFile = this.getAllSectionCheckboxesForFile(oFile);
+
+  [].forEach.call(elAllLineCheckboxesOfFile,function(elem){
+    elem.checked = elCheckbox.checked;
+  }.bind(this));
+
+  [].forEach.call(elAllSectionCheckboxesOfFile,function(elem){
+    elem.checked = elCheckbox.checked;
+  }.bind(this));
+
+};
+
+Patch.prototype.onClickSectionCheckbox = function(oEvent){
+  var elSrcElement = this.getToggledCheckbox(oEvent);
+  var oSection = new PatchSection(elSrcElement.id);
+  this.clickAllLineCheckboxesInSection(oSection, elSrcElement.checked);
+};
+
+Patch.prototype.onClickLineCheckbox = function(oEvent){
+  this.getToggledCheckbox(oEvent);
+};
+
+Patch.prototype.clickAllLineCheckboxesInSection = function(oSection, bChecked){
+
+  var elAllLineCheckboxesOfSection = this.getAllLineCheckboxesForSection(oSection);
+
+  [].forEach.call(elAllLineCheckboxesOfSection,function(elem){
+    elem.checked = bChecked;
   }.bind(this));
 
 };
@@ -1137,37 +1252,34 @@ Patch.prototype.stagePatch = function() {
 
   // Collect add and remove info and submit to backend
 
-  var aAddPatch = this.collectActiveElementsForSelector("." + this.CSS_CLASS.PATCH +" a." + this.CSS_CLASS.ADD);
-  var aRemovePatch = this.collectActiveElementsForSelector("." + this.CSS_CLASS.PATCH + " a." + this.CSS_CLASS.REMOVE);
+  var aAddPatch = this.collectElementsForCheckboxId(PatchLine.prototype.ID, true);
+  var aRemovePatch = this.collectElementsForCheckboxId(PatchLine.prototype.ID, false);
 
   submitSapeventForm({"add": aAddPatch, "remove": aRemovePatch}, this.ACTION.PATCH_STAGE, "post");
 
 };
 
-Patch.prototype.collectActiveElementsForSelector = function(sSelector){
+Patch.prototype.collectElementsForCheckboxId = function(sId, bChecked){
+
+  var sSelector = this.buildSelectorInputStartsWithId(sId);
 
   return [].slice.call(document.querySelectorAll(sSelector))
     .filter(function(elem){
-      return elem.classList.contains(this.CSS_CLASS.PATCH_ACTIVE);
-    }.bind(this))
-    .map(function(elem){
+      return (elem.checked === bChecked);
+    }).map(function(elem){
       return elem.id;
     });
 
 };
 
 function preparePatch(){
-
   var oPatch = new Patch();
   oPatch.preparePatch();
-
 }
 
 function registerStagePatch(){
-
   var oPatch = new Patch();
   oPatch.registerStagePatch();
-
 }
 
 /**********************************************************
@@ -1225,6 +1337,26 @@ BranchOverview.prototype.showCommit = function(event){
 };
 
 // Called by commit:mouseout
-BranchOverview.prototype.hideCommit = function (event){ // eslint-disable-line no-unused-vars
+BranchOverview.prototype.hideCommit = function (){
   this.toggleCommit();
 };
+
+// Initialize Top Horizontal Scroller on GitGraph
+function setGitGraphScroller(){ // eslint-disable-line no-unused-vars
+
+  // Get gitGraph Element Canvas Width
+  var gitGraphEl = document.getElementById("gitGraph");
+  var gitGraphWidth = gitGraphEl.offsetWidth;
+
+  // Initialize gitGraph-HTopScroller Element width as gitGraph
+  var HTopScrollerEl = document.querySelector(".gitGraph-HTopScroller");
+  HTopScrollerEl.style.width = gitGraphWidth + "px";
+
+}
+
+// Setup Top Horizontal Scroller on GitGraph event
+function GitGraphScroller() { // eslint-disable-line no-unused-vars
+  var gitGraphWrapperEl = document.querySelector(".gitGraph-Wrapper");
+  var gitGraphscrollWrapperEl = document.querySelector(".gitGraph-scrollWrapper");
+  gitGraphWrapperEl.scrollLeft = gitGraphscrollWrapperEl.scrollLeft;
+}

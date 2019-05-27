@@ -4,6 +4,8 @@ CLASS zcl_abapgit_object_dcls DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
     INTERFACES zif_abapgit_object.
     ALIASES mo_files FOR zif_abapgit_object~mo_files.
 
+  PROTECTED SECTION.
+  PRIVATE SECTION.
 ENDCLASS.
 
 
@@ -13,11 +15,6 @@ CLASS ZCL_ABAPGIT_OBJECT_DCLS IMPLEMENTATION.
 
   METHOD zif_abapgit_object~changed_by.
     rv_user = c_user_unknown.
-  ENDMETHOD.
-
-
-  METHOD zif_abapgit_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE zcl_abapgit_comparison_null.
   ENDMETHOD.
 
 
@@ -115,16 +112,21 @@ CLASS ZCL_ABAPGIT_OBJECT_DCLS IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD zif_abapgit_object~get_comparator.
+    RETURN.
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_object~get_deserialize_steps.
+    APPEND zif_abapgit_object=>gc_step_id-late TO rt_steps.
+  ENDMETHOD.
+
+
   METHOD zif_abapgit_object~get_metadata.
     rs_metadata = get_metadata( ).
 
     rs_metadata-delete_tadir = abap_true.
     rs_metadata-late_deser   = abap_true.
-  ENDMETHOD.
-
-
-  METHOD zif_abapgit_object~has_changed_since.
-    rv_changed = abap_true.
   ENDMETHOD.
 
 
@@ -198,6 +200,15 @@ CLASS ZCL_ABAPGIT_OBJECT_DCLS IMPLEMENTATION.
         ASSIGN COMPONENT 'CREATED_DATE' OF STRUCTURE <lg_data> TO <lg_field>.
         ASSERT sy-subrc = 0.
         CLEAR <lg_field>.
+
+        ASSIGN COMPONENT 'AS4LOCAL' OF STRUCTURE <lg_data> TO <lg_field>.
+        ASSERT sy-subrc = 0.
+        CLEAR <lg_field>.
+
+        ASSIGN COMPONENT 'ABAP_LANGUAGE_VERSION' OF STRUCTURE <lg_data> TO <lg_field>.
+        IF sy-subrc = 0.
+          CLEAR <lg_field>.
+        ENDIF.
 
         ASSIGN COMPONENT 'SOURCE' OF STRUCTURE <lg_data> TO <lg_field>.
         ASSERT sy-subrc = 0.

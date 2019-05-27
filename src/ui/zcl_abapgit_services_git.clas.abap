@@ -19,60 +19,50 @@ CLASS zcl_abapgit_services_git DEFINITION
       IMPORTING
         !iv_key TYPE zif_abapgit_persistence=>ty_repo-key
       RAISING
-        zcx_abapgit_exception
-        zcx_abapgit_cancel .
+        zcx_abapgit_exception.
     CLASS-METHODS reset
       IMPORTING
         !iv_key TYPE zif_abapgit_persistence=>ty_repo-key
       RAISING
-        zcx_abapgit_exception
-        zcx_abapgit_cancel .
+        zcx_abapgit_exception.
     CLASS-METHODS create_branch
       IMPORTING
         !iv_key TYPE zif_abapgit_persistence=>ty_repo-key
       RAISING
-        zcx_abapgit_exception
-        zcx_abapgit_cancel .
+        zcx_abapgit_exception.
     CLASS-METHODS switch_branch
       IMPORTING
         !iv_key TYPE zif_abapgit_persistence=>ty_repo-key
       RAISING
-        zcx_abapgit_exception
-        zcx_abapgit_cancel .
+        zcx_abapgit_exception.
     CLASS-METHODS delete_branch
       IMPORTING
         !iv_key TYPE zif_abapgit_persistence=>ty_repo-key
       RAISING
-        zcx_abapgit_exception
-        zcx_abapgit_cancel .
+        zcx_abapgit_exception.
 
     CLASS-METHODS delete_tag
       IMPORTING
         !iv_key TYPE zif_abapgit_persistence=>ty_repo-key
       RAISING
-        zcx_abapgit_exception
-        zcx_abapgit_cancel .
+        zcx_abapgit_exception.
     CLASS-METHODS switch_tag
       IMPORTING
         !iv_key TYPE zif_abapgit_persistence=>ty_repo-key
       RAISING
-        zcx_abapgit_exception
-        zcx_abapgit_cancel .
+        zcx_abapgit_exception.
     CLASS-METHODS tag_overview
       IMPORTING
         !iv_key TYPE zif_abapgit_persistence=>ty_repo-key
       RAISING
-        zcx_abapgit_exception
-        zcx_abapgit_cancel .
+        zcx_abapgit_exception.
     CLASS-METHODS commit
       IMPORTING
         !io_repo   TYPE REF TO zcl_abapgit_repo_online
         !is_commit TYPE ty_commit_fields
         !io_stage  TYPE REF TO zcl_abapgit_stage
       RAISING
-        zcx_abapgit_exception
-        zcx_abapgit_cancel.
-
+        zcx_abapgit_exception.
   PROTECTED SECTION.
 
     CLASS-METHODS get_unnecessary_local_objs
@@ -201,7 +191,7 @@ CLASS ZCL_ABAPGIT_SERVICES_GIT IMPLEMENTATION.
       iv_url = lo_repo->get_url( )
       is_tag = ls_tag ).
 
-    lv_text = |Tag { zcl_abapgit_tag=>remove_tag_prefix( ls_tag-name ) } deleted| ##NO_TEXT.
+    lv_text = |Tag { zcl_abapgit_git_tag=>remove_tag_prefix( ls_tag-name ) } deleted| ##NO_TEXT.
 
     MESSAGE lv_text TYPE 'S'.
 
@@ -213,8 +203,6 @@ CLASS ZCL_ABAPGIT_SERVICES_GIT IMPLEMENTATION.
     DATA: lt_tadir        TYPE zif_abapgit_definitions=>ty_tadir_tt,
           lt_tadir_unique TYPE HASHED TABLE OF zif_abapgit_definitions=>ty_tadir
                                WITH UNIQUE KEY pgmid object obj_name,
-          lt_local        TYPE zif_abapgit_definitions=>ty_files_item_tt,
-          lt_remote       TYPE zif_abapgit_definitions=>ty_files_tt,
           lt_status       TYPE zif_abapgit_definitions=>ty_results_tt,
           lv_package      TYPE zif_abapgit_persistence=>ty_repo-package.
 
@@ -224,8 +212,6 @@ CLASS ZCL_ABAPGIT_SERVICES_GIT IMPLEMENTATION.
 
 
     " delete objects which are added locally but are not in remote repo
-    lt_local  = io_repo->get_files_local( ).
-    lt_remote = io_repo->get_files_remote( ).
     lt_status = io_repo->status( ).
 
     lv_package = io_repo->get_package( ).

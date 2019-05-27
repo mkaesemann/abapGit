@@ -39,7 +39,7 @@ ENDCLASS.
 
 
 
-CLASS zcl_abapgit_object_avas IMPLEMENTATION.
+CLASS ZCL_ABAPGIT_OBJECT_AVAS IMPLEMENTATION.
 
 
   METHOD insert_assignments.
@@ -91,7 +91,7 @@ CLASS zcl_abapgit_object_avas IMPLEMENTATION.
   METHOD instantiate.
 
     DATA: lv_id  TYPE guid_32,
-          lo_err TYPE REF TO cx_root.
+          lx_err TYPE REF TO cx_root.
 
     lv_id = ms_item-obj_name.
 
@@ -99,14 +99,14 @@ CLASS zcl_abapgit_object_avas IMPLEMENTATION.
         CREATE OBJECT ro_avas
           EXPORTING
             im_assignment_id = lv_id.
-      CATCH cx_pak_wb_object_locked INTO lo_err.
-        zcx_abapgit_exception=>raise( |AVAS { lv_id }: locked: { lo_err->get_longtext( ) }| ).
-      CATCH cx_pak_not_authorized INTO lo_err.
-        zcx_abapgit_exception=>raise( |AVAS { lv_id }: not authorized: { lo_err->get_longtext( ) }| ).
-      CATCH cx_pak_invalid_state INTO lo_err.
-        zcx_abapgit_exception=>raise( |AVAS { lv_id }: invalid state: { lo_err->get_longtext( ) }| ).
-      CATCH cx_pak_invalid_data INTO lo_err.
-        zcx_abapgit_exception=>raise( |AVAS { lv_id }: invalid data: { lo_err->get_longtext( ) }| ).
+      CATCH cx_pak_wb_object_locked INTO lx_err.
+        zcx_abapgit_exception=>raise( |AVAS { lv_id }: locked: { lx_err->get_longtext( ) }| ).
+      CATCH cx_pak_not_authorized INTO lx_err.
+        zcx_abapgit_exception=>raise( |AVAS { lv_id }: not authorized: { lx_err->get_longtext( ) }| ).
+      CATCH cx_pak_invalid_state INTO lx_err.
+        zcx_abapgit_exception=>raise( |AVAS { lv_id }: invalid state: { lx_err->get_longtext( ) }| ).
+      CATCH cx_pak_invalid_data INTO lx_err.
+        zcx_abapgit_exception=>raise( |AVAS { lv_id }: invalid data: { lx_err->get_longtext( ) }| ).
     ENDTRY.
 
   ENDMETHOD.
@@ -127,11 +127,6 @@ CLASS zcl_abapgit_object_avas IMPLEMENTATION.
       rv_user = c_user_unknown.
     ENDIF.
 
-  ENDMETHOD.
-
-
-  METHOD zif_abapgit_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE zcl_abapgit_comparison_null.
   ENDMETHOD.
 
 
@@ -194,6 +189,16 @@ CLASS zcl_abapgit_object_avas IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD zif_abapgit_object~get_comparator.
+    RETURN.
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_object~get_deserialize_steps.
+    APPEND zif_abapgit_object=>gc_step_id-abap TO rt_steps.
+  ENDMETHOD.
+
+
   METHOD zif_abapgit_object~get_metadata.
 
     rs_metadata = get_metadata( ).
@@ -201,8 +206,8 @@ CLASS zcl_abapgit_object_avas IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_object~has_changed_since.
-    rv_changed = abap_true.
+  METHOD zif_abapgit_object~is_active.
+    rv_active = is_active( ).
   ENDMETHOD.
 
 
@@ -257,10 +262,5 @@ CLASS zcl_abapgit_object_avas IMPLEMENTATION.
       iv_name = 'AVAS'
       ig_data = ls_avas ).
 
-  ENDMETHOD.
-
-
-  METHOD zif_abapgit_object~is_active.
-    rv_active = is_active( ).
   ENDMETHOD.
 ENDCLASS.

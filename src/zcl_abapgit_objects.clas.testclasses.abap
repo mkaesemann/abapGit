@@ -382,11 +382,15 @@ CLASS ltcl_object_ddls_mock IMPLEMENTATION.
 
   ENDMETHOD.
 
+  METHOD zif_abapgit_object~get_deserialize_steps. "##needed
+
+  ENDMETHOD.
+
   METHOD zif_abapgit_object~changed_by. "##needed
 
   ENDMETHOD.
 
-  METHOD zif_abapgit_object~compare_to_remote_version. "##needed
+  METHOD zif_abapgit_object~get_comparator. "##needed
 
   ENDMETHOD.
 
@@ -403,10 +407,6 @@ CLASS ltcl_object_ddls_mock IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD zif_abapgit_object~get_metadata. "##needed
-
-  ENDMETHOD.
-
-  METHOD zif_abapgit_object~has_changed_since. "##needed
 
   ENDMETHOD.
 

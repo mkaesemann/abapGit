@@ -4,16 +4,11 @@ CLASS zcl_abapgit_ecatt_script_downl DEFINITION
   CREATE PUBLIC .
 
   PUBLIC SECTION.
+    INTERFACES:
+      zif_abapgit_ecatt_download.
+
     METHODS:
-      download REDEFINITION,
-
-      get_xml_stream
-        RETURNING
-          VALUE(rv_xml_stream) TYPE xstring,
-
-      get_xml_stream_size
-        RETURNING
-          VALUE(rv_xml_stream_size) TYPE int4.
+      download REDEFINITION.
 
   PROTECTED SECTION.
     METHODS:
@@ -21,9 +16,8 @@ CLASS zcl_abapgit_ecatt_script_downl DEFINITION
 
   PRIVATE SECTION.
     DATA:
-      mv_xml_stream      TYPE xstring,
-      mv_xml_stream_size TYPE int4,
-      mi_script_node     TYPE REF TO if_ixml_element.
+      mv_xml_stream  TYPE xstring,
+      mi_script_node TYPE REF TO if_ixml_element.
 
     METHODS:
       set_script_to_template
@@ -82,7 +76,7 @@ CLASS ZCL_ABAPGIT_ECATT_SCRIPT_DOWNL IMPLEMENTATION.
     toolname = ecatt_object->attrib->get_tool_name( ).
     set_attributes_to_template( ).
 
-    IF toolname EQ cl_apl_ecatt_const=>toolname_ecatt.
+    IF toolname = cl_apl_ecatt_const=>toolname_ecatt.
 
       ecatt_script ?= ecatt_object.
 
@@ -103,7 +97,7 @@ CLASS ZCL_ABAPGIT_ECATT_SCRIPT_DOWNL IMPLEMENTATION.
             IF NOT wa_parm-pstruc_typ IS INITIAL.
               set_deep_stru_to_dom( ecatt_script->params ).
               set_deep_data_to_dom( ecatt_script->params ).
-              IF wa_parm-xmlref_typ EQ cl_apl_ecatt_const=>ref_type_c_tcd.
+              IF wa_parm-xmlref_typ = cl_apl_ecatt_const=>ref_type_c_tcd.
                 set_control_data_for_tcd( is_param  =  wa_parm
                                           io_params = ecatt_script->params ).
 
@@ -130,12 +124,7 @@ CLASS ZCL_ABAPGIT_ECATT_SCRIPT_DOWNL IMPLEMENTATION.
 
     " Downport
 
-    zcl_abapgit_ecatt_helper=>download_data(
-      EXPORTING
-        ii_template_over_all = template_over_all
-      IMPORTING
-        ev_xml_stream        = mv_xml_stream
-        ev_xml_stream_size   = mv_xml_stream_size ).
+    mv_xml_stream = zcl_abapgit_ecatt_helper=>download_data( template_over_all ).
 
   ENDMETHOD.
 
@@ -166,7 +155,7 @@ CLASS ZCL_ABAPGIT_ECATT_SCRIPT_DOWNL IMPLEMENTATION.
       WHILE li_elem IS NOT INITIAL.
         li_list = li_elem->get_children( ).
 
-        li_textit = li_list->create_rev_iterator_filtered( li_filter  ).
+        li_textit = li_list->create_rev_iterator_filtered( li_filter ).
         li_text ?= li_textit->get_next( ).
         IF li_text IS NOT INITIAL.
           lv_value = li_text->get_data( ).
@@ -181,20 +170,6 @@ CLASS ZCL_ABAPGIT_ECATT_SCRIPT_DOWNL IMPLEMENTATION.
       CLEAR: li_abapctrl, li_elem, li_iter.
 
     ENDIF.
-
-  ENDMETHOD.
-
-
-  METHOD get_xml_stream.
-
-    rv_xml_stream = mv_xml_stream.
-
-  ENDMETHOD.
-
-
-  METHOD get_xml_stream_size.
-
-    rv_xml_stream_size = mv_xml_stream_size.
 
   ENDMETHOD.
 
@@ -471,6 +446,13 @@ CLASS ZCL_ABAPGIT_ECATT_SCRIPT_DOWNL IMPLEMENTATION.
             previous      = ex_ecatt
             called_method = 'CL_APL_ECATT_SCRIPT_DOWNLOAD->SET_SCRIPT_TO_TEMPLATE' ).
     ENDIF.
+
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_ecatt_download~get_xml_stream.
+
+    rv_xml_stream = mv_xml_stream.
 
   ENDMETHOD.
 ENDCLASS.

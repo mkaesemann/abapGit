@@ -141,7 +141,7 @@ div.log {
   border-radius: 4px;
 }
 div.log > span   { display:block; }
-div.log .octicon { padding-right: 6px; }
+div.log .icon { padding-right: 6px; }
 
 /* REPOSITORY */
 div.repo {
@@ -165,9 +165,8 @@ div.repo {
   font-size: 12pt;
   margin-left: 0.5em;
 }
-.repo_name img {
-  vertical-align: baseline;
-  margin: 0 5px 0 5px;
+.repo_name .icon {
+  padding-right: 4px;
 }
 .repo_attr {
   color: grey;
@@ -532,7 +531,7 @@ table.diff_tab td.num, th.num {
 }
 table.diff_tab td.patch, th.patch {
   width: 1%;
-  min-width: 6em;
+  min-width: 1.5em;
   padding-right: 8px;
   padding-left:  8px;
   text-align: right !important;
@@ -541,6 +540,7 @@ table.diff_tab td.patch, th.patch {
   border-right: 1px solid #eee;
   -ms-user-select: none;
   user-select: none;
+  cursor: pointer;
 }
 table.diff_tab td.num::before {
   content: attr(line-num);
@@ -691,6 +691,8 @@ div.tutorial h2 {
   float: left;
   margin: 0;
   padding: 0;
+  white-space: nowrap;
+  text-align: left;
 }
 .nav-container.float-right ul { float: right; }
 
@@ -784,7 +786,7 @@ div.tutorial h2 {
 /* icons - text-align strictly left - otherwise look ugly
    + bite a bit of left padding for nicer look 
    + forbids item text wrapping (maybe can be done differently) */
-.nav-container ul ul li a .octicon {
+.nav-container ul ul li a .icon {
   padding-right: 10px;
   margin-left: -3px;
 }
@@ -932,12 +934,6 @@ div.info-panel div.info-list td {
     border-color: #555 transparent transparent transparent;
 }
 
-/* diff-patch */
-.patch-active {
-  color: lightgrey !important; 
-}
-
-
 /* HOTKEYS */
 ul.hotkeys {
   list-style-type: none;
@@ -992,4 +988,87 @@ table.commit tr .title {
 
 .ro-detail {
   display: none;
+}
+
+/* Branch Overview Page */
+.gitGraph-scrollWrapper, .gitGraph-Wrapper{
+  overflow-y:hidden;
+}
+
+.gitGraph-scrollWrapper{
+  overflow-x: auto; 
+  height: 20px; 
+}
+
+.gitGraph-Wrapper{
+  overflow-x: hidden; 
+}
+ 
+.gitGraph-HTopScroller {
+  width:1000px; 
+  height: 20px; 
+}
+
+/* code inspector */
+.ci-head {
+  background-color: #f2f2f2;
+  padding: 0.5em 1em;
+}
+.ci-head .package-name span {
+  margin-left: 0.3em;
+  color: grey;
+}
+.ci-variant {
+  font-weight: bold;
+  color: #444;
+}
+.ci-result {
+  background-color: #f6f6f6;
+  padding: 6px;
+  margin-top: 4px;
+}
+.ci-result li {
+  list-style-type: none;
+  padding: 0.3em 0.8em;
+  margin-top: 6px;
+  color: #444;
+}
+.ci-result li:first-child {
+  margin-top: 0px;
+}
+.ci-result li.ci-error {
+  border-left: 4px solid #cd5353;
+}
+.ci-result li.ci-warning {
+  border-left: 4px solid #ecd227;
+}
+.ci-result li.ci-info {
+  border-left: 4px solid #acacac;
+}
+.ci-result li span {
+  display: block;
+}
+
+/* Floating buttons and color sets */
+
+.floating-button {
+  position: fixed;
+  top: 6em;
+  right: 2.8em;
+  padding: 1em 1.8em;
+  border-radius: 4px;
+  border-width: 1px;
+  border-style: solid;
+  box-shadow: 2px 2px 6px 0px #ccc;
+  cursor: pointer;
+}
+.blue-set {
+  border-color: #abc3e3;
+  color: #5e8dc9;
+  background-color: #d9e4f2;
+}
+.grey-set {
+  border-color: #c7c7c7;
+  color: #808080;
+  background-color: #e6e6e6;
 }

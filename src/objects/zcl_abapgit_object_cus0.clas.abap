@@ -9,6 +9,7 @@ CLASS zcl_abapgit_object_cus0 DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
         is_item     TYPE zif_abapgit_definitions=>ty_item
         iv_language TYPE spras.
 
+  PROTECTED SECTION.
   PRIVATE SECTION.
     TYPES: tty_img_activity_texts TYPE STANDARD TABLE OF cus_imgact
                                        WITH NON-UNIQUE DEFAULT KEY,
@@ -37,11 +38,6 @@ CLASS ZCL_ABAPGIT_OBJECT_CUS0 IMPLEMENTATION.
 
   METHOD zif_abapgit_object~changed_by.
     rv_user = c_user_unknown.
-  ENDMETHOD.
-
-
-  METHOD zif_abapgit_object~compare_to_remote_version.
-    CREATE OBJECT ro_comparison_result TYPE zcl_abapgit_comparison_null.
   ENDMETHOD.
 
 
@@ -93,6 +89,7 @@ CLASS ZCL_ABAPGIT_OBJECT_CUS0 IMPLEMENTATION.
         global_lock         = abap_true
         devclass            = iv_package
         master_language     = sy-langu
+        suppress_dialog     = abap_true
       EXCEPTIONS
         cancelled           = 1
         permission_failure  = 2
@@ -120,14 +117,24 @@ CLASS ZCL_ABAPGIT_OBJECT_CUS0 IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD zif_abapgit_object~get_comparator.
+    RETURN.
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_object~get_deserialize_steps.
+    APPEND zif_abapgit_object=>gc_step_id-abap TO rt_steps.
+  ENDMETHOD.
+
+
   METHOD zif_abapgit_object~get_metadata.
     rs_metadata = get_metadata( ).
     rs_metadata-delete_tadir = abap_true.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_object~has_changed_since.
-    rv_changed = abap_true.
+  METHOD zif_abapgit_object~is_active.
+    rv_active = abap_true.
   ENDMETHOD.
 
 
@@ -176,10 +183,4 @@ CLASS ZCL_ABAPGIT_OBJECT_CUS0 IMPLEMENTATION.
                  ig_data = ls_img_activity ).
 
   ENDMETHOD.
-
-
-  METHOD zif_abapgit_object~is_active.
-    rv_active = abap_true.
-  ENDMETHOD.
-
 ENDCLASS.
