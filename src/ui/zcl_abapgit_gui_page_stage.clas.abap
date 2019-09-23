@@ -23,6 +23,7 @@ CLASS zcl_abapgit_gui_page_stage DEFINITION
   PROTECTED SECTION.
     METHODS:
       render_content REDEFINITION,
+      get_events     REDEFINITION,
       scripts        REDEFINITION.
 
   PRIVATE SECTION.
@@ -147,7 +148,6 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_STAGE IMPLEMENTATION.
 
   ENDMETHOD.
 
-
   METHOD find_transports.
     DATA: li_cts_api TYPE REF TO zif_abapgit_cts_api,
           ls_new     LIKE LINE OF rt_transports.
@@ -183,6 +183,17 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_STAGE IMPLEMENTATION.
       CATCH zcx_abapgit_exception.
         ASSERT 1 = 2.
     ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD get_events.
+
+    FIELD-SYMBOLS: <ls_event> TYPE zcl_abapgit_gui_page=>ty_event.
+
+    APPEND INITIAL LINE TO rt_events ASSIGNING <ls_event>.
+    <ls_event>-method = 'post'.
+    <ls_event>-name = 'stage_commit'.
+
   ENDMETHOD.
 
 
@@ -246,15 +257,15 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_STAGE IMPLEMENTATION.
             zcx_abapgit_exception=>raise( |process_stage_list: unknown file { ls_file-path }{ ls_file-filename }| ).
           ENDIF.
 
-          io_stage->add(    iv_path     = <ls_file>-file-path
-                            iv_filename = <ls_file>-file-filename
-                            iv_data     = <ls_file>-file-data ).
+          io_stage->add( iv_path     = <ls_file>-file-path
+                         iv_filename = <ls_file>-file-filename
+                         iv_data     = <ls_file>-file-data ).
         WHEN zcl_abapgit_stage=>c_method-ignore.
           io_stage->ignore( iv_path     = ls_file-path
                             iv_filename = ls_file-filename ).
         WHEN zcl_abapgit_stage=>c_method-rm.
-          io_stage->rm(     iv_path     = ls_file-path
-                            iv_filename = ls_file-filename ).
+          io_stage->rm( iv_path     = ls_file-path
+                        iv_filename = ls_file-filename ).
         WHEN zcl_abapgit_stage=>c_method-skip.
           " Do nothing
         WHEN OTHERS.
@@ -487,18 +498,6 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_STAGE IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_gui_page_hotkey~get_hotkey_actions.
-
-    DATA: ls_hotkey_action TYPE zif_abapgit_gui_page_hotkey=>ty_hotkey_with_name.
-
-    ls_hotkey_action-name   = |Patch|.
-    ls_hotkey_action-action = zif_abapgit_definitions=>c_action-go_patch.
-    ls_hotkey_action-hotkey = |p|.
-    INSERT ls_hotkey_action INTO TABLE rt_hotkey_actions.
-
-  ENDMETHOD.
-
-
   METHOD zif_abapgit_gui_event_handler~on_event.
 
     DATA: lo_stage  TYPE REF TO zcl_abapgit_stage,
@@ -567,8 +566,20 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_STAGE IMPLEMENTATION.
             it_postdata  = it_postdata
           IMPORTING
             ei_page      = ei_page
-            ev_state     = ev_state  ).
+            ev_state     = ev_state ).
     ENDCASE.
+
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_gui_page_hotkey~get_hotkey_actions.
+
+    DATA: ls_hotkey_action TYPE zif_abapgit_gui_page_hotkey=>ty_hotkey_with_name.
+
+    ls_hotkey_action-name   = |Patch|.
+    ls_hotkey_action-action = zif_abapgit_definitions=>c_action-go_patch.
+    ls_hotkey_action-hotkey = |p|.
+    INSERT ls_hotkey_action INTO TABLE rt_hotkey_actions.
 
   ENDMETHOD.
 ENDCLASS.

@@ -16,15 +16,14 @@ CLASS zcl_abapgit_html DEFINITION
 
     CONSTANTS c_indent_size TYPE i VALUE 2 ##NO_TEXT.
 
-    CLASS-METHODS class_constructor .
+    CLASS-METHODS class_constructor.
     METHODS add_icon
       IMPORTING
         !iv_name  TYPE string
         !iv_hint  TYPE string OPTIONAL
-        !iv_class TYPE string OPTIONAL .
+        !iv_class TYPE string OPTIONAL.
   PROTECTED SECTION.
   PRIVATE SECTION.
-    CONSTANTS: co_span_link_hint TYPE string VALUE `<span class="tooltiptext hidden"></span>`.
     CLASS-DATA: go_single_tags_re TYPE REF TO cl_abap_regex.
 
     DATA: mt_buffer TYPE string_table.
@@ -83,6 +82,13 @@ CLASS ZCL_ABAPGIT_HTML IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD checkbox.
+
+    rv_html = |<input type="checkbox" id="{ iv_id }">|.
+
+  ENDMETHOD.
+
+
   METHOD class_constructor.
     CREATE OBJECT go_single_tags_re
       EXPORTING
@@ -101,11 +107,11 @@ CLASS ZCL_ABAPGIT_HTML IMPLEMENTATION.
       iv_line    = cv_line ).
 
     " First closing tag - shift back exceptionally
-    IF (  ls_study-script_close = abap_true
-       OR ls_study-style_close = abap_true
-       OR ls_study-curly_close = abap_true
-       OR ls_study-tag_close = abap_true )
-       AND cs_context-indent > 0.
+    IF ( ls_study-script_close = abap_true
+        OR ls_study-style_close = abap_true
+        OR ls_study-curly_close = abap_true
+        OR ls_study-tag_close = abap_true )
+        AND cs_context-indent > 0.
       lv_x_str = repeat( val = ` ` occ = ( cs_context-indent - 1 ) * c_indent_size ).
       cv_line  = lv_x_str && cv_line.
     ELSE.
@@ -204,7 +210,8 @@ CLASS ZCL_ABAPGIT_HTML IMPLEMENTATION.
           lv_href  TYPE string,
           lv_click TYPE string,
           lv_id    TYPE string,
-          lv_style TYPE string.
+          lv_style TYPE string,
+          lv_title TYPE string.
 
     lv_class = iv_class.
 
@@ -245,7 +252,12 @@ CLASS ZCL_ABAPGIT_HTML IMPLEMENTATION.
       lv_style = | style="{ iv_style }"|.
     ENDIF.
 
-    rv_str = |<a{ lv_id }{ lv_class }{ lv_href }{ lv_click }{ lv_style }>{ iv_txt }{ co_span_link_hint }</a>|.
+    IF iv_title IS NOT INITIAL.
+      lv_title = | title="{ iv_title }"|.
+    ENDIF.
+
+    rv_str = |<a{ lv_id }{ lv_class }{ lv_href }{ lv_click }{ lv_style }{ lv_title }>|
+          && |{ iv_txt }</a>|.
 
   ENDMETHOD.
 
@@ -288,7 +300,15 @@ CLASS ZCL_ABAPGIT_HTML IMPLEMENTATION.
             iv_opt   = iv_opt
             iv_class = iv_class
             iv_id    = iv_id
-            iv_style = iv_style ) ).
+            iv_style = iv_style
+            iv_title = iv_title ) ).
+
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_html~add_checkbox.
+
+    add( checkbox( iv_id ) ).
 
   ENDMETHOD.
 
@@ -347,19 +367,4 @@ CLASS ZCL_ABAPGIT_HTML IMPLEMENTATION.
     CONCATENATE LINES OF lt_temp INTO rv_html SEPARATED BY cl_abap_char_utilities=>newline.
 
   ENDMETHOD.
-
-  METHOD zif_abapgit_html~add_checkbox.
-
-    add( checkbox( iv_id ) ).
-
-  ENDMETHOD.
-
-
-  METHOD checkbox.
-
-    rv_html = |<input type="checkbox" id="{ iv_id }">|
-           && |{ co_span_link_hint }|.
-
-  ENDMETHOD.
-
 ENDCLASS.

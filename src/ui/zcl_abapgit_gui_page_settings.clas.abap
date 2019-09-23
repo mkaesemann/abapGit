@@ -44,6 +44,9 @@ CLASS zcl_abapgit_gui_page_settings DEFINITION
     METHODS render_icon_scaling
       RETURNING
         VALUE(ro_html) TYPE REF TO zcl_abapgit_html .
+    METHODS render_ui_theme
+      RETURNING
+        VALUE(ro_html) TYPE REF TO zcl_abapgit_html .
     METHODS render_adt_jump_enabled
       RETURNING
         VALUE(ro_html) TYPE REF TO zcl_abapgit_html .
@@ -108,7 +111,7 @@ ENDCLASS.
 
 
 
-CLASS zcl_abapgit_gui_page_settings IMPLEMENTATION.
+CLASS ZCL_ABAPGIT_GUI_PAGE_SETTINGS IMPLEMENTATION.
 
 
   METHOD constructor.
@@ -227,11 +230,6 @@ CLASS zcl_abapgit_gui_page_settings IMPLEMENTATION.
       mo_settings->set_link_hint_key( |{ <ls_post_field>-value }| ).
     ENDIF.
 
-    READ TABLE mt_post_fields ASSIGNING <ls_post_field> WITH KEY name = 'link_hint_background_color'.
-    IF sy-subrc = 0.
-      mo_settings->set_link_hint_background_color( |{ <ls_post_field>-value }| ).
-    ENDIF.
-
     IF is_post_field_checked( 'parallel_proc_disabled' ) = abap_true.
       mo_settings->set_parallel_proc_disabled( abap_true ).
     ELSE.
@@ -244,6 +242,13 @@ CLASS zcl_abapgit_gui_page_settings IMPLEMENTATION.
       mo_settings->set_icon_scaling( lv_c_param_value ).
     ELSE.
       mo_settings->set_icon_scaling( '' ).
+    ENDIF.
+
+    READ TABLE mt_post_fields ASSIGNING <ls_post_field> WITH KEY name = 'ui_theme'.
+    IF sy-subrc = 0.
+      mo_settings->set_ui_theme( <ls_post_field>-value ).
+    ELSE.
+      mo_settings->set_ui_theme( zcl_abapgit_settings=>c_ui_theme-default ).
     ENDIF.
 
     post_hotkeys( ).
@@ -421,6 +426,7 @@ CLASS zcl_abapgit_gui_page_settings IMPLEMENTATION.
     ro_html->add( render_start_up( ) ).
     ro_html->add( render_max_lines( ) ).
     ro_html->add( render_icon_scaling( ) ).
+    ro_html->add( render_ui_theme( ) ).
     ro_html->add( |<hr>| ).
     ro_html->add( render_adt_jump_enabled( ) ).
     ro_html->add( |<hr>| ).
@@ -598,7 +604,6 @@ CLASS zcl_abapgit_gui_page_settings IMPLEMENTATION.
     ENDIF.
 
     lv_link_hint_key = mo_settings->get_link_hint_key( ).
-    lv_link_background_color = mo_settings->get_link_hint_background_color( ).
 
     CREATE OBJECT ro_html.
     ro_html->add( |<h2>Vimium like link hints</h2>| ).
@@ -608,11 +613,6 @@ CLASS zcl_abapgit_gui_page_settings IMPLEMENTATION.
     ro_html->add( |<br>| ).
     ro_html->add( |<input type="text" name="link_hint_key" size="1" maxlength="1" value="{ lv_link_hint_key }" |
                && |> Single key to activate links| ).
-    ro_html->add( |<br>| ).
-    ro_html->add( |<br>| ).
-    ro_html->add( |<input type="text" name="link_hint_background_color" size="20" maxlength="20"|
-               && | value="{ lv_link_background_color }"|
-               && |> Background Color (HTML colors e.g. lightgreen or #42f47a)| ).
 
     ro_html->add( |<br>| ).
     ro_html->add( |<br>| ).
@@ -710,6 +710,46 @@ CLASS zcl_abapgit_gui_page_settings IMPLEMENTATION.
                    && lv_checked && ` > Show last repo` ).
     ro_html->add( |<br>| ).
     ro_html->add( |<br>| ).
+  ENDMETHOD.
+
+
+  METHOD render_ui_theme.
+
+    " TODO: unify with render_icon_scaling, make list component
+
+    DATA:
+      BEGIN OF ls_sel,
+        default TYPE string,
+        dark TYPE string,
+        belize TYPE string,
+      END OF ls_sel.
+
+    CASE mo_settings->get_ui_theme( ).
+      WHEN zcl_abapgit_settings=>c_ui_theme-default.
+        ls_sel-default = ' selected'.
+      WHEN zcl_abapgit_settings=>c_ui_theme-dark.
+        ls_sel-dark = ' selected'.
+      WHEN zcl_abapgit_settings=>c_ui_theme-belize.
+        ls_sel-belize = ' selected'.
+    ENDCASE.
+
+    CREATE OBJECT ro_html.
+
+    ro_html->add( |<h2>UI Theme</h2>| ).
+    ro_html->add( |<label for="ui_theme">UI Theme</label>| ).
+    ro_html->add( |<br>| ).
+    ro_html->add( |<select name="ui_theme" size="3">| ).
+    ro_html->add( |<option value="{ zcl_abapgit_settings=>c_ui_theme-default }"{
+      ls_sel-default }>{ zcl_abapgit_settings=>c_ui_theme-default }</option>| ).
+    ro_html->add( |<option value="{ zcl_abapgit_settings=>c_ui_theme-dark }"{
+      ls_sel-dark }>{ zcl_abapgit_settings=>c_ui_theme-dark }</option>| ).
+    ro_html->add( |<option value="{ zcl_abapgit_settings=>c_ui_theme-belize }"{
+      ls_sel-belize }>{ zcl_abapgit_settings=>c_ui_theme-belize }</option>| ).
+    ro_html->add( |</select>| ).
+
+    ro_html->add( |<br>| ).
+    ro_html->add( |<br>| ).
+
   ENDMETHOD.
 
 

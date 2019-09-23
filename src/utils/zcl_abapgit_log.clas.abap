@@ -13,28 +13,29 @@ CLASS zcl_abapgit_log DEFINITION
         text TYPE string,
         type TYPE symsgty,
       END OF ty_msg .
-
     TYPES:
       BEGIN OF ty_log, "in order of occurrence
-        msg      TYPE ty_msg,
-        rc       TYPE balsort,
-        item     TYPE zif_abapgit_definitions=>ty_item,
+        msg       TYPE ty_msg,
+        rc        TYPE balsort,
+        item      TYPE zif_abapgit_definitions=>ty_item,
+        exception TYPE REF TO cx_root,
       END OF ty_log .
 
     DATA:
       mt_log TYPE STANDARD TABLE OF ty_log WITH DEFAULT KEY .
+    DATA mv_title TYPE string .
 
     METHODS get_messages_status
       IMPORTING
-        it_msg   TYPE zif_abapgit_log=>tty_msg
+        !it_msg          TYPE zif_abapgit_log=>tty_msg
       RETURNING
-        VALUE(rv_status) TYPE symsgty.
+        VALUE(rv_status) TYPE symsgty .
   PRIVATE SECTION.
 ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_LOG IMPLEMENTATION.
+CLASS zcl_abapgit_log IMPLEMENTATION.
 
 
   METHOD get_messages_status.
@@ -50,7 +51,9 @@ CLASS ZCL_ABAPGIT_LOG IMPLEMENTATION.
           rv_status = 'W'. "maybe
           CONTINUE.
         WHEN 'S' OR 'I'.
-          rv_status = 'S'. "okay
+          IF rv_status <> 'W'.
+            rv_status = 'S'. "okay
+          ENDIF.
           CONTINUE.
         WHEN OTHERS. "unknown
           CONTINUE.
@@ -65,10 +68,11 @@ CLASS ZCL_ABAPGIT_LOG IMPLEMENTATION.
     FIELD-SYMBOLS: <ls_log> LIKE LINE OF mt_log.
 
     APPEND INITIAL LINE TO mt_log ASSIGNING <ls_log>.
-    <ls_log>-msg-text = iv_msg.
-    <ls_log>-msg-type = iv_type.
-    <ls_log>-rc       = iv_rc.
-    <ls_log>-item     = is_item.
+    <ls_log>-msg-text  = iv_msg.
+    <ls_log>-msg-type  = iv_type.
+    <ls_log>-rc        = iv_rc.
+    <ls_log>-item      = is_item.
+    <ls_log>-exception = ix_exc.
 
   ENDMETHOD.
 
@@ -76,9 +80,9 @@ CLASS ZCL_ABAPGIT_LOG IMPLEMENTATION.
   METHOD zif_abapgit_log~add_error.
 
     zif_abapgit_log~add(
-     iv_msg  = iv_msg
-     iv_type = 'E'
-     is_item = is_item ).
+      iv_msg  = iv_msg
+      iv_type = 'E'
+      is_item = is_item ).
 
   ENDMETHOD.
 
@@ -92,7 +96,8 @@ CLASS ZCL_ABAPGIT_LOG IMPLEMENTATION.
       lv_msg = lx_exc->get_text( ).
       zif_abapgit_log~add( iv_msg  = lv_msg
                            iv_type = 'E'
-                           is_item = is_item ).
+                           is_item = is_item
+                           ix_exc  = lx_exc ).
       IF lx_exc->previous IS BOUND.
         lx_exc = lx_exc->previous.
       ELSE.
@@ -187,10 +192,11 @@ CLASS ZCL_ABAPGIT_LOG IMPLEMENTATION.
     DATA ls_msg TYPE zif_abapgit_log~ty_log_out.
     FIELD-SYMBOLS <ls_log> TYPE ty_log.
     LOOP AT mt_log ASSIGNING <ls_log>.
-      ls_msg-type     = <ls_log>-msg-type.
-      ls_msg-text     = <ls_log>-msg-text.
-      ls_msg-obj_type = <ls_log>-item-obj_type.
-      ls_msg-obj_name = <ls_log>-item-obj_name.
+      ls_msg-type      = <ls_log>-msg-type.
+      ls_msg-text      = <ls_log>-msg-text.
+      ls_msg-obj_type  = <ls_log>-item-obj_type.
+      ls_msg-obj_name  = <ls_log>-item-obj_name.
+      ls_msg-exception = <ls_log>-exception.
       APPEND ls_msg TO rt_msg.
     ENDLOOP.
   ENDMETHOD.
@@ -209,7 +215,9 @@ CLASS ZCL_ABAPGIT_LOG IMPLEMENTATION.
           rv_status = 'W'. "maybe
           CONTINUE.
         WHEN 'S' OR 'I'.
-          rv_status = 'S'. "okay
+          IF rv_status <> 'W'.
+            rv_status = 'S'. "okay
+          ENDIF.
           CONTINUE.
         WHEN OTHERS. "unknown
           CONTINUE.
@@ -219,10 +227,23 @@ CLASS ZCL_ABAPGIT_LOG IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD zif_abapgit_log~get_title.
+    rv_title = mv_title.
+    IF rv_title IS INITIAL.
+      rv_title = 'Log'.
+    ENDIF.
+  ENDMETHOD.
+
+
   METHOD zif_abapgit_log~has_rc.
 * todo, this method is only used in unit tests
 
     READ TABLE mt_log WITH KEY rc = iv_rc TRANSPORTING NO FIELDS.
     rv_yes = boolc( sy-subrc = 0 ).
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_log~set_title.
+    mv_title = iv_title.
   ENDMETHOD.
 ENDCLASS.

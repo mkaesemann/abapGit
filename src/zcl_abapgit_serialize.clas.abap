@@ -83,7 +83,7 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
 
     lo_settings = zcl_abapgit_persist_settings=>get_instance( )->read( ).
 
-    IF zcl_abapgit_environment=>is_merged( ) = abap_true
+    IF zcl_abapgit_factory=>get_environment( )->is_merged( ) = abap_true
         OR lo_settings->get_parallel_proc_disabled( ) = abap_true.
       gv_max_threads = 1.
     ENDIF.
@@ -248,7 +248,9 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
                        iv_path      = is_tadir-path ).
       CATCH zcx_abapgit_exception INTO lx_error.
         IF NOT mi_log IS INITIAL.
-          mi_log->add_error( lx_error->get_text( ) ).
+          mi_log->add_exception(
+              ix_exc  = lx_error
+              is_item = ls_fils_item-item ).
         ENDIF.
     ENDTRY.
 
@@ -286,11 +288,11 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
           is_tadir    = <ls_tadir>
           iv_task     = |{ sy-tabix }|
           iv_language = iv_language ).
-        WAIT UNTIL mv_free > 0 UP TO 10 SECONDS.
+        WAIT UNTIL mv_free > 0 UP TO 120 SECONDS.
       ENDIF.
     ENDLOOP.
 
-    WAIT UNTIL mv_free = lv_max UP TO 10 SECONDS.
+    WAIT UNTIL mv_free = lv_max UP TO 120 SECONDS.
     rt_files = mt_files.
 
   ENDMETHOD.

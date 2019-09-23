@@ -63,7 +63,9 @@ CLASS ZCL_ABAPGIT_OBJECT_TOBJ IMPLEMENTATION.
                                         event   = <ls_tvimf>-event
                                TRANSPORTING NO FIELDS.
       IF sy-subrc <> 0.
-        DELETE tvimf FROM <ls_tvimf>.
+        DELETE FROM tvimf
+          WHERE tabname = <ls_tvimf>-tabname
+          AND event = <ls_tvimf>-event.
       ENDIF.
     ENDLOOP.
 
@@ -224,6 +226,7 @@ CLASS ZCL_ABAPGIT_OBJECT_TOBJ IMPLEMENTATION.
   METHOD zif_abapgit_object~get_metadata.
     rs_metadata = get_metadata( ).
     rs_metadata-late_deser = abap_true.
+    rs_metadata-delete_tadir = abap_true.
   ENDMETHOD.
 
 

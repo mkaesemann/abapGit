@@ -145,9 +145,10 @@ CLASS ZCL_ABAPGIT_GUI_VIEW_REPO IMPLEMENTATION.
           lv_key         TYPE zif_abapgit_persistence=>ty_value,
           lv_wp_opt      LIKE zif_abapgit_html=>c_html_opt-crossout,
           lv_crossout    LIKE zif_abapgit_html=>c_html_opt-crossout,
-          lv_pull_opt    LIKE zif_abapgit_html=>c_html_opt-crossout.
+          lv_pull_opt    LIKE zif_abapgit_html=>c_html_opt-crossout,
+          li_log         TYPE REF TO zif_abapgit_log.
 
-    CREATE OBJECT ro_toolbar.
+    CREATE OBJECT ro_toolbar EXPORTING iv_id = 'toolbar-repo'.
     CREATE OBJECT lo_tb_branch.
     CREATE OBJECT lo_tb_advanced.
     CREATE OBJECT lo_tb_tag.
@@ -262,6 +263,11 @@ CLASS ZCL_ABAPGIT_GUI_VIEW_REPO IMPLEMENTATION.
                          iv_act = |{ zif_abapgit_definitions=>c_action-go_diff }?key={ lv_key }|
                          iv_opt = zif_abapgit_html=>c_html_opt-strong ).
       ENDIF.
+      li_log = mo_repo->get_log( ).
+      IF li_log IS BOUND AND li_log->count( ) > 0.
+        ro_toolbar->add( iv_txt = 'Log'
+                         iv_act = |{ zif_abapgit_definitions=>c_action-repo_log }?{ lv_key }| ).
+      ENDIF.
       ro_toolbar->add( iv_txt = 'Branch'
                        io_sub = lo_tb_branch ) ##NO_TEXT.
       ro_toolbar->add( iv_txt = 'Tag'
@@ -281,6 +287,11 @@ CLASS ZCL_ABAPGIT_GUI_VIEW_REPO IMPLEMENTATION.
       ro_toolbar->add( iv_txt = 'Export <sup>zip</sup>'
                        iv_act = |{ zif_abapgit_definitions=>c_action-zip_export }?{ lv_key }|
                        iv_opt = zif_abapgit_html=>c_html_opt-strong ).
+      li_log = mo_repo->get_log( ).
+      IF li_log IS BOUND AND li_log->count( ) > 0.
+        ro_toolbar->add( iv_txt = 'Log'
+                         iv_act = |{ zif_abapgit_definitions=>c_action-repo_log }?{ lv_key }| ).
+      ENDIF.
     ENDIF.
 
     ro_toolbar->add( iv_txt = 'Advanced'
@@ -740,8 +751,9 @@ CLASS ZCL_ABAPGIT_GUI_VIEW_REPO IMPLEMENTATION.
         ro_html->add( '<div class="repo_container">' ).
 
         " Offline match banner
-        IF mo_repo->is_offline( ) = abap_true AND mo_repo->has_remote_source( ) = abap_true
-          AND lv_lstate IS INITIAL AND lv_rstate IS INITIAL.
+        IF mo_repo->is_offline( ) = abap_true
+            AND mo_repo->has_remote_source( ) = abap_true
+            AND lv_lstate IS INITIAL AND lv_rstate IS INITIAL.
           ro_html->add(
             |<div class="repo_banner panel success">|
             && |ZIP source is attached and completely <b>matches</b> to the local state|

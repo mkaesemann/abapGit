@@ -46,15 +46,22 @@ ENQU | Lock Object | Yes
 ENSC | Composite Enhancement Spot | Yes
 FORM | SAPscript form | Yes
 FUGR | Function Group | Yes
-G4BA | SAP Gateway OData V4 Backend Service Group & Assigments | [#2704](https://github.com/larshp/abapGit/issues/2704)
-G4BS | SAP Gateway OData V4 Backend Service | [#2704](https://github.com/larshp/abapGit/issues/2704)
+FUGS | Function Group with Customer Include: SAP Part | [#2851](https://github.com/larshp/abapGit/issues/2851)
+FUGX | Function Group with Customer Include: Customer Part | [#2851](https://github.com/larshp/abapGit/issues/2851)
+G4BA | SAP Gateway OData V4 Backend Service Group & Assigments | Yes
+G4BS | SAP Gateway OData V4 Backend Service | Yes
 IAMU | Language-Independent IAC Binary Data | Yes
 IARP | Parameters of IAC Language Resource | Yes
 IASP | Parameters of an IAC service | Yes
 IATU | Language-Independent IAC Templates | Yes
 IDOC | IDoc Type | Yes
 IEXT | Enhancement | Yes
-IWPR | Gateway Business Suite Enablement - Service Builder Project | [#75](https://github.com/larshp/abapGit/issues/75)
+INTF | Interface (ABAP objects) | Yes
+IWMO | Gateway Business Suite Enablement - Model | Yes
+IWOM | Gateway: Model Metadata | Yes
+IWPR | Gateway Business Suite Enablement - Service Builder Project | Yes
+IWSG | Gateway: Service Groups Metadata | Yes
+IWSV | Gateway Business Suite Enablement - Service | Yes
 JOBD | Technical Job Definition | Yes
 LPDC | Launchpad short texts | [#107](https://github.com/larshp/abapGit/issues/107)
 MSAG | Message Class | Yes
@@ -63,6 +70,7 @@ OTGR | Object type group | [#1515](https://github.com/larshp/abapGit/issues/1515
 PARA | SPA/GPA Parameters | Yes
 PDTS | Standard Task | [#153](https://github.com/larshp/abapGit/issues/153)
 PDWS | Workflow templates | [#154](https://github.com/larshp/abapGit/issues/154)
+PERS | Personalization object | Yes
 PINF | Package interface | Yes
 PRAG | Pragma in ABAP Source Code | Yes
 PROG | Program | Yes
@@ -103,7 +111,7 @@ TTYP | Table Type | Yes
 TYPE | Type Group | Yes
 UCSA | Unified Connectivity Service Assembly | Yes
 UDMO | Data model | Yes
-UENO | Entity type | [#1906](https://github.com/larshp/abapGit/issues/1906)
+UENO | Entity type | Yes
 VCLS | View cluster | Yes
 VIEW | View | Yes
 W3HT | Web Reporting/Internet Transaction Server HTML Templates | Yes

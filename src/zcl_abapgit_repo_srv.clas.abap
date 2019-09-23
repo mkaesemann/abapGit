@@ -64,7 +64,7 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_REPO_SRV IMPLEMENTATION.
+CLASS zcl_abapgit_repo_srv IMPLEMENTATION.
 
 
   METHOD add.
@@ -231,7 +231,6 @@ CLASS ZCL_ABAPGIT_REPO_SRV IMPLEMENTATION.
   METHOD zif_abapgit_repo_srv~get.
 
     FIELD-SYMBOLS: <lo_list> LIKE LINE OF mt_list.
-
 
     IF mv_init = abap_false.
       refresh( ).
@@ -427,7 +426,7 @@ CLASS ZCL_ABAPGIT_REPO_SRV IMPLEMENTATION.
     ENDIF.
 
     IF is_sap_object_allowed( ) = abap_false AND lv_as4user = 'SAP'.
-      zcx_abapgit_exception=>raise( |Package { iv_package } not allowed| ).
+      zcx_abapgit_exception=>raise( |Package { iv_package } not allowed, responsible user = 'SAP'| ).
     ENDIF.
 
     " make sure its not already in use for a different repository

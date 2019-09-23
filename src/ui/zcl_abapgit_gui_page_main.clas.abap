@@ -20,6 +20,7 @@ CLASS zcl_abapgit_gui_page_main DEFINITION
                  changed_by    TYPE string VALUE 'changed_by',
                  overview      TYPE string VALUE 'overview',
                  documentation TYPE string VALUE 'documentation',
+                 changelog     TYPE string VALUE 'changelog',
                END OF c_actions.
 
     DATA: mv_show         TYPE zif_abapgit_persistence=>ty_value,
@@ -52,7 +53,7 @@ CLASS zcl_abapgit_gui_page_main IMPLEMENTATION.
     DATA: lo_advsub  TYPE REF TO zcl_abapgit_html_toolbar,
           lo_helpsub TYPE REF TO zcl_abapgit_html_toolbar.
 
-    CREATE OBJECT ro_menu.
+    CREATE OBJECT ro_menu EXPORTING iv_id = 'toolbar-main'.
     CREATE OBJECT lo_advsub.
     CREATE OBJECT lo_helpsub.
 
@@ -79,6 +80,8 @@ CLASS zcl_abapgit_gui_page_main IMPLEMENTATION.
                      iv_act = zif_abapgit_definitions=>c_action-go_tutorial ) ##NO_TEXT.
     lo_helpsub->add( iv_txt = 'Documentation'
                      iv_act = c_actions-documentation ) ##NO_TEXT.
+    lo_helpsub->add( iv_txt = 'Changelog'
+                     iv_act = c_actions-changelog ) ##NO_TEXT.
 
     ro_menu->add( iv_txt = '+ Online'
                   iv_act = zif_abapgit_definitions=>c_action-repo_newonline ) ##NO_TEXT.
@@ -106,7 +109,7 @@ CLASS zcl_abapgit_gui_page_main IMPLEMENTATION.
 
     DATA: lt_repos    TYPE zif_abapgit_definitions=>ty_repo_ref_tt,
           lx_error    TYPE REF TO zcx_abapgit_exception,
-          lo_tutorial TYPE REF TO zcl_abapgit_gui_view_tutorial,
+          li_tutorial TYPE REF TO zif_abapgit_gui_renderable,
           lo_repo     LIKE LINE OF lt_repos.
 
     retrieve_active_repo( ). " Get and validate key of user default repo
@@ -123,8 +126,8 @@ CLASS zcl_abapgit_gui_page_main IMPLEMENTATION.
     ro_html->add( render_toc( lt_repos ) ).
 
     IF mv_show IS INITIAL OR lines( lt_repos ) = 0.
-      CREATE OBJECT lo_tutorial.
-      ro_html->add( lo_tutorial->render( ) ).
+      CREATE OBJECT li_tutorial TYPE zcl_abapgit_gui_view_tutorial.
+      ro_html->add( li_tutorial->render( ) ).
     ELSE.
       lo_repo = zcl_abapgit_repo_srv=>get_instance( )->get( mv_show ).
       ro_html->add( render_repo( lo_repo ) ).
@@ -170,7 +173,7 @@ CLASS zcl_abapgit_gui_page_main IMPLEMENTATION.
 
     CREATE OBJECT ro_html.
     CREATE OBJECT lo_favbar.
-    CREATE OBJECT lo_allbar.
+    CREATE OBJECT lo_allbar EXPORTING iv_id = 'toc-all-repos'.
     CREATE OBJECT lo_pback.
 
     lt_favorites = zcl_abapgit_persistence_user=>get_instance( )->get_favorites( ).
@@ -307,6 +310,66 @@ CLASS zcl_abapgit_gui_page_main IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD zif_abapgit_gui_event_handler~on_event.
+
+    DATA: lv_key           TYPE zif_abapgit_persistence=>ty_repo-key,
+          li_repo_overview TYPE REF TO zif_abapgit_gui_renderable.
+
+
+    IF NOT mo_repo_content IS INITIAL.
+      mo_repo_content->zif_abapgit_gui_event_handler~on_event(
+        EXPORTING
+          iv_action    = iv_action
+          iv_prev_page = iv_prev_page
+          iv_getdata   = iv_getdata
+          it_postdata  = it_postdata
+        IMPORTING
+          ei_page      = ei_page
+          ev_state     = ev_state ).
+
+      IF ev_state <> zcl_abapgit_gui=>c_event_state-not_handled.
+        RETURN.
+      ENDIF.
+    ENDIF.
+
+    lv_key = iv_getdata.
+
+    CASE iv_action.
+      WHEN c_actions-show.
+        zcl_abapgit_persistence_user=>get_instance( )->set_repo_show( lv_key ).
+        TRY.
+            zcl_abapgit_repo_srv=>get_instance( )->get( lv_key )->refresh( ).
+          CATCH zcx_abapgit_exception ##NO_HANDLER.
+        ENDTRY.
+        ev_state = zcl_abapgit_gui=>c_event_state-re_render.
+      WHEN c_actions-changed_by.
+        test_changed_by( ).
+        ev_state = zcl_abapgit_gui=>c_event_state-no_more_act.
+      WHEN c_actions-documentation.
+        zcl_abapgit_services_abapgit=>open_abapgit_wikipage( ).
+        ev_state = zcl_abapgit_gui=>c_event_state-no_more_act.
+      WHEN c_actions-changelog.
+        zcl_abapgit_services_abapgit=>open_abapgit_changelog( ).
+        ev_state = zcl_abapgit_gui=>c_event_state-no_more_act.
+      WHEN c_actions-overview.
+        CREATE OBJECT li_repo_overview TYPE zcl_abapgit_gui_page_repo_over.
+        ei_page = li_repo_overview.
+        ev_state = zcl_abapgit_gui=>c_event_state-new_page.
+      WHEN OTHERS.
+        super->zif_abapgit_gui_event_handler~on_event(
+          EXPORTING
+            iv_action    = iv_action
+            iv_prev_page = iv_prev_page
+            iv_getdata   = iv_getdata
+            it_postdata  = it_postdata
+          IMPORTING
+            ei_page      = ei_page
+            ev_state     = ev_state ).
+    ENDCASE.
+
+  ENDMETHOD.
+
+
   METHOD zif_abapgit_gui_page_hotkey~get_hotkey_actions.
 
     DATA: ls_hotkey_action TYPE zif_abapgit_gui_page_hotkey=>ty_hotkey_with_name.
@@ -361,62 +424,10 @@ CLASS zcl_abapgit_gui_page_main IMPLEMENTATION.
     ls_hotkey_action-hotkey = |i|.
     INSERT ls_hotkey_action INTO TABLE rt_hotkey_actions.
 
-  ENDMETHOD.
-
-
-  METHOD zif_abapgit_gui_event_handler~on_event.
-
-    DATA: lv_key           TYPE zif_abapgit_persistence=>ty_repo-key,
-          li_repo_overview TYPE REF TO zif_abapgit_gui_renderable.
-
-
-    IF NOT mo_repo_content IS INITIAL.
-      mo_repo_content->zif_abapgit_gui_event_handler~on_event(
-        EXPORTING
-          iv_action    = iv_action
-          iv_prev_page = iv_prev_page
-          iv_getdata   = iv_getdata
-          it_postdata  = it_postdata
-        IMPORTING
-          ei_page      = ei_page
-          ev_state     = ev_state ).
-
-      IF ev_state <> zcl_abapgit_gui=>c_event_state-not_handled.
-        RETURN.
-      ENDIF.
-    ENDIF.
-
-    lv_key = iv_getdata.
-
-    CASE iv_action.
-      WHEN c_actions-show.
-        zcl_abapgit_persistence_user=>get_instance( )->set_repo_show( lv_key ).
-        TRY.
-            zcl_abapgit_repo_srv=>get_instance( )->get( lv_key )->refresh( ).
-          CATCH zcx_abapgit_exception ##NO_HANDLER.
-        ENDTRY.
-        ev_state = zcl_abapgit_gui=>c_event_state-re_render.
-      WHEN c_actions-changed_by.
-        test_changed_by( ).
-        ev_state = zcl_abapgit_gui=>c_event_state-no_more_act.
-      WHEN c_actions-documentation.
-        zcl_abapgit_services_abapgit=>open_abapgit_wikipage( ).
-        ev_state = zcl_abapgit_gui=>c_event_state-no_more_act.
-      WHEN c_actions-overview.
-        CREATE OBJECT li_repo_overview TYPE zcl_abapgit_gui_page_repo_over.
-        ei_page = li_repo_overview.
-        ev_state = zcl_abapgit_gui=>c_event_state-new_page.
-      WHEN OTHERS.
-        super->zif_abapgit_gui_event_handler~on_event(
-          EXPORTING
-            iv_action    = iv_action
-            iv_prev_page = iv_prev_page
-            iv_getdata   = iv_getdata
-            it_postdata  = it_postdata
-          IMPORTING
-            ei_page      = ei_page
-            ev_state     = ev_state  ).
-    ENDCASE.
+    ls_hotkey_action-name   = |Show log|.
+    ls_hotkey_action-action = zif_abapgit_definitions=>c_action-repo_log.
+    ls_hotkey_action-hotkey = |l|.
+    INSERT ls_hotkey_action INTO TABLE rt_hotkey_actions.
 
   ENDMETHOD.
 ENDCLASS.

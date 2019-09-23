@@ -50,12 +50,17 @@ CLASS zcl_abapgit_gui_chunk_lib DEFINITION
         zcx_abapgit_exception .
     CLASS-METHODS render_commit_popup
       IMPORTING
-        !iv_content    TYPE csequence
-        !iv_id         TYPE csequence
+        iv_content     TYPE csequence
+        iv_id          TYPE csequence
       RETURNING
         VALUE(ro_html) TYPE REF TO zcl_abapgit_html
       RAISING
         zcx_abapgit_exception .
+    CLASS-METHODS render_error_message_box
+      IMPORTING
+        ix_error       TYPE REF TO zcx_abapgit_exception
+      RETURNING
+        VALUE(ro_html) TYPE REF TO zcl_abapgit_html.
   PROTECTED SECTION.
   PRIVATE SECTION.
 
@@ -70,21 +75,41 @@ CLASS zcl_abapgit_gui_chunk_lib DEFINITION
         zcx_abapgit_exception .
     CLASS-METHODS render_infopanel
       IMPORTING
-        !iv_div_id     TYPE string
-        !iv_title      TYPE string
-        !iv_hide       TYPE abap_bool DEFAULT abap_true
-        !iv_hint       TYPE string OPTIONAL
-        !iv_scrollable TYPE abap_bool DEFAULT abap_true
-        !io_content    TYPE REF TO zcl_abapgit_html
+        iv_div_id      TYPE string
+        iv_title       TYPE string
+        iv_hide        TYPE abap_bool DEFAULT abap_true
+        iv_hint        TYPE string OPTIONAL
+        iv_scrollable  TYPE abap_bool DEFAULT abap_true
+        io_content     TYPE REF TO zcl_abapgit_html
       RETURNING
         VALUE(ro_html) TYPE REF TO zcl_abapgit_html
       RAISING
         zcx_abapgit_exception .
+    CLASS-METHODS get_t100_text
+      IMPORTING
+        iv_msgid       TYPE scx_t100key-msgid
+        iv_msgno       TYPE scx_t100key-msgno
+      RETURNING
+        VALUE(rv_text) TYPE string.
+    CLASS-METHODS normalize_program_name
+      IMPORTING
+        iv_program_name                   TYPE syrepid
+      RETURNING
+        VALUE(rv_normalized_program_name) TYPE string.
 ENDCLASS.
 
 
 
 CLASS zcl_abapgit_gui_chunk_lib IMPLEMENTATION.
+
+
+  METHOD normalize_program_name.
+
+    rv_normalized_program_name = substring_before(
+                                     val   = iv_program_name
+                                     regex = `(=+CP)?$` ).
+
+  ENDMETHOD.
 
 
   METHOD render_branch_span.
@@ -149,6 +174,96 @@ CLASS zcl_abapgit_gui_chunk_lib IMPLEMENTATION.
     ro_html->add( '<div class="dummydiv error">' ).
     ro_html->add( |{ zcl_abapgit_html=>icon( 'exclamation-circle/red' ) } Error: { lv_error }| ).
     ro_html->add( '</div>' ).
+
+  ENDMETHOD.
+
+
+  METHOD render_error_message_box.
+
+    DATA:
+      lv_error_text   TYPE string,
+      lv_longtext     TYPE string,
+      lv_program_name TYPE syrepid,
+      lv_title        TYPE string,
+      lv_text         TYPE string.
+
+
+    CREATE OBJECT ro_html.
+
+    lv_error_text = ix_error->get_text( ).
+    lv_longtext = ix_error->get_longtext( abap_true ).
+
+    REPLACE FIRST OCCURRENCE OF REGEX |(<br>{ zcl_abapgit_message_helper=>gc_section_text-cause }<br>)|
+            IN lv_longtext
+            WITH |<h3>$1</h3>|.
+
+    REPLACE FIRST OCCURRENCE OF REGEX |(<br>{ zcl_abapgit_message_helper=>gc_section_text-system_response }<br>)|
+            IN lv_longtext
+            WITH |<h3>$1</h3>|.
+
+    REPLACE FIRST OCCURRENCE OF REGEX |(<br>{ zcl_abapgit_message_helper=>gc_section_text-what_to_do }<br>)|
+            IN lv_longtext
+            WITH |<h3>$1</h3>|.
+
+    REPLACE FIRST OCCURRENCE OF REGEX |(<br>{ zcl_abapgit_message_helper=>gc_section_text-sys_admin }<br>)|
+            IN lv_longtext
+            WITH |<h3>$1</h3>|.
+
+    ro_html->add( |<div id="message" class="message-panel">| ).
+    ro_html->add( |{ lv_error_text }| ).
+    ro_html->add( |<div class="float-right">| ).
+
+    ro_html->add_a(
+        iv_txt   = `&#x274c;`
+        iv_act   = `toggleDisplay('message')`
+        iv_class = `close-btn`
+        iv_typ   = zif_abapgit_html=>c_action_type-onclick ).
+
+    ro_html->add( |</div>| ).
+
+    ro_html->add( |<div class="float-right message-panel-commands">| ).
+
+    IF ix_error->if_t100_message~t100key-msgid IS NOT INITIAL.
+
+      lv_title = get_t100_text(
+                    iv_msgid = ix_error->if_t100_message~t100key-msgid
+                    iv_msgno = ix_error->if_t100_message~t100key-msgno ).
+
+      lv_text = |Message ({ ix_error->if_t100_message~t100key-msgid }/{ ix_error->if_t100_message~t100key-msgno })|.
+
+      ro_html->add_a(
+          iv_txt   = lv_text
+          iv_typ   = zif_abapgit_html=>c_action_type-sapevent
+          iv_act   = zif_abapgit_definitions=>c_action-goto_message
+          iv_title = lv_title
+          iv_id    = `a_goto_message` ).
+
+    ENDIF.
+
+    ix_error->get_source_position(
+      IMPORTING
+        program_name = lv_program_name ).
+
+    lv_title = normalize_program_name( lv_program_name ).
+
+    ro_html->add_a(
+        iv_txt   = `Goto source`
+        iv_act   = zif_abapgit_definitions=>c_action-goto_source
+        iv_typ   = zif_abapgit_html=>c_action_type-sapevent
+        iv_title = lv_title
+        iv_id    = `a_goto_source` ).
+
+    ro_html->add_a(
+        iv_txt = `Callstack`
+        iv_act = zif_abapgit_definitions=>c_action-show_callstack
+        iv_typ = zif_abapgit_html=>c_action_type-sapevent
+        iv_id  = `a_callstack` ).
+
+    ro_html->add( |</div>| ).
+    ro_html->add( |<div class="message-panel-commands">| ).
+    ro_html->add( |{ lv_longtext }| ).
+    ro_html->add( |</div>| ).
+    ro_html->add( |</div>| ).
 
   ENDMETHOD.
 
@@ -373,11 +488,11 @@ CLASS zcl_abapgit_gui_chunk_lib IMPLEMENTATION.
 
   METHOD render_repo_top.
 
-    DATA: lo_repo_online TYPE REF TO zcl_abapgit_repo_online,
-          lo_pback       TYPE REF TO zcl_abapgit_persist_background,
-          lv_hint        TYPE string,
-          lv_icon        TYPE string.
-
+    DATA: lo_repo_online       TYPE REF TO zcl_abapgit_repo_online,
+          lo_pback             TYPE REF TO zcl_abapgit_persist_background,
+          lv_hint              TYPE string,
+          lv_icon              TYPE string,
+          lv_package_jump_data TYPE string.
 
     CREATE OBJECT ro_html.
     CREATE OBJECT lo_pback.
@@ -465,8 +580,13 @@ CLASS zcl_abapgit_gui_chunk_lib IMPLEMENTATION.
     IF iv_show_package = abap_true.
       ro_html->add_icon( iv_name = 'box/grey70' iv_hint = 'SAP package' ).
       ro_html->add( '<span>' ).
+
+      lv_package_jump_data = zcl_abapgit_html_action_utils=>jump_encode(
+        iv_obj_type = 'DEVC'
+        iv_obj_name = io_repo->get_package( ) ).
+
       ro_html->add_a( iv_txt = io_repo->get_package( )
-                      iv_act = |{ zif_abapgit_definitions=>c_action-jump_pkg }?{ io_repo->get_package( ) }| ).
+                      iv_act = |{ zif_abapgit_definitions=>c_action-jump }?{ lv_package_jump_data }| ).
       ro_html->add( '</span>' ).
     ENDIF.
 
@@ -474,4 +594,16 @@ CLASS zcl_abapgit_gui_chunk_lib IMPLEMENTATION.
     ro_html->add( '</tr></table>' ).
 
   ENDMETHOD.
+
+  METHOD get_t100_text.
+
+    SELECT SINGLE text
+           FROM t100
+           INTO rv_text
+           WHERE arbgb = iv_msgid
+           AND   msgnr = iv_msgno
+           AND   sprsl = sy-langu.
+
+  ENDMETHOD.
+
 ENDCLASS.
