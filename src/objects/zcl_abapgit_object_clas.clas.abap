@@ -305,6 +305,8 @@ CLASS zcl_abapgit_object_clas IMPLEMENTATION.
         AND prog     = mv_classpool_name
         AND language <> mv_language.
 
+    SORT lt_langu_additional ASCENDING.
+
     io_xml->add( iv_name = 'VSEOCLASS'
                  ig_data = ls_vseoclass ).
 

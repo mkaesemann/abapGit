@@ -140,6 +140,8 @@ CLASS ZCL_ABAPGIT_OBJECT_DOMA IMPLEMENTATION.
       WHERE domname = lv_name
       AND ddlanguage <> mv_language.                      "#EC CI_SUBRC
 
+    SORT lt_i18n_langs ASCENDING.
+
     LOOP AT lt_i18n_langs ASSIGNING <lv_lang>.
       lv_index = sy-tabix.
 
