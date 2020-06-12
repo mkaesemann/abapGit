@@ -693,6 +693,8 @@ CLASS ZCL_ABAPGIT_OBJECT_FUGR IMPLEMENTATION.
             ENDIF.
           ENDIF.
 
+        ENDIF.
+
       ENDIF.
 
     ENDLOOP.
