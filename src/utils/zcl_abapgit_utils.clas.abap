@@ -1,31 +1,52 @@
-CLASS zcl_abapgit_utils DEFINITION
-  PUBLIC
-  FINAL
-  CREATE PUBLIC .
+class ZCL_ABAPGIT_UTILS definition
+  public
+  final
+  create public .
 
-  PUBLIC SECTION.
+public section.
 
-    CLASS-METHODS is_binary
-      IMPORTING
-        !iv_data      TYPE xstring
-      RETURNING
-        VALUE(rv_yes) TYPE abap_bool .
-    CLASS-METHODS extract_author_data
-      IMPORTING
-        !iv_author TYPE string
-      EXPORTING
-        !ev_author  TYPE zif_abapgit_definitions=>ty_commit-author
-        !ev_email   TYPE zif_abapgit_definitions=>ty_commit-email
-        !ev_time    TYPE zif_abapgit_definitions=>ty_commit-time
-      RAISING
-        zcx_abapgit_exception .
+  class-methods IS_BINARY
+    importing
+      !IV_DATA type XSTRING
+    returning
+      value(RV_YES) type ABAP_BOOL .
+  class-methods EXTRACT_AUTHOR_DATA
+    importing
+      !IV_AUTHOR type STRING
+    exporting
+      !EV_AUTHOR type ZIF_ABAPGIT_DEFINITIONS=>TY_COMMIT-AUTHOR
+      !EV_EMAIL type ZIF_ABAPGIT_DEFINITIONS=>TY_COMMIT-EMAIL
+      !EV_TIME type ZIF_ABAPGIT_DEFINITIONS=>TY_COMMIT-TIME
+    raising
+      ZCX_ABAPGIT_EXCEPTION .
+  class-methods TRANSLATE_POSTDATA
+    importing
+      !IT_POSTDATA type CNHT_POST_DATA_TAB
+    returning
+      value(R_STRING) type STRING .
   PROTECTED SECTION.
   PRIVATE SECTION.
 ENDCLASS.
 
 
 
-CLASS zcl_abapgit_utils IMPLEMENTATION.
+CLASS ZCL_ABAPGIT_UTILS IMPLEMENTATION.
+
+
+  METHOD extract_author_data.
+
+    " unix time stamps are in same time zone, so ignore the zone
+    FIND REGEX zif_abapgit_definitions=>c_author_regex IN iv_author
+      SUBMATCHES
+      ev_author
+      ev_email
+      ev_time ##NO_TEXT.
+
+    IF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise( |Error author regex value='{ iv_author }'| ).
+    ENDIF.
+
+  ENDMETHOD.
 
 
   METHOD is_binary.
@@ -58,18 +79,28 @@ CLASS zcl_abapgit_utils IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD extract_author_data.
+  METHOD translate_postdata.
 
-    " unix time stamps are in same time zone, so ignore the zone
-    FIND REGEX zif_abapgit_definitions=>c_author_regex IN iv_author
-      SUBMATCHES
-      ev_author
-      ev_email
-      ev_time ##NO_TEXT.
+    DATA: lt_post_data       TYPE cnht_post_data_tab,
+          ls_last_line       TYPE cnht_post_data_line,
+          lv_last_line_index TYPE i.
 
-    IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( |Error author regex value='{ iv_author }'| ).
+    IF it_postdata IS INITIAL.
+      "Nothing to do
+      RETURN.
     ENDIF.
+
+    lt_post_data = it_postdata.
+    lv_last_line_index = lines( lt_post_data ).
+
+    "Save the last line for separate merge, because we don't need its trailing spaces
+    READ TABLE it_postdata INTO ls_last_line INDEX lv_last_line_index.
+    DELETE lt_post_data INDEX lv_last_line_index.
+
+    CONCATENATE LINES OF lt_post_data INTO r_string
+      IN CHARACTER MODE RESPECTING BLANKS.
+    CONCATENATE r_string ls_last_line INTO r_string
+      IN CHARACTER MODE.
 
   ENDMETHOD.
 ENDCLASS.

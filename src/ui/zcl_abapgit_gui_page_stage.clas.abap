@@ -581,7 +581,8 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_STAGE IMPLEMENTATION.
                    <ls_status> LIKE LINE OF ms_files-status,
                    <ls_item>   LIKE LINE OF lt_fields.
 
-    CONCATENATE LINES OF it_postdata INTO lv_string.
+    lv_string = zcl_abapgit_utils=>translate_postdata( it_postdata ).
+
     lt_fields = zcl_abapgit_html_action_utils=>parse_fields( lv_string ).
 
     IF lines( lt_fields ) = 0.
@@ -590,7 +591,8 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_STAGE IMPLEMENTATION.
 
     CREATE OBJECT ro_stage.
 
-    LOOP AT lt_fields ASSIGNING <ls_item>.
+    LOOP AT lt_fields ASSIGNING <ls_item>
+      WHERE value <> zif_abapgit_definitions=>c_method-skip. "Ignore Files that we don't want to stage
 
       zcl_abapgit_path=>split_file_location(
         EXPORTING
