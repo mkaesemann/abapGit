@@ -367,7 +367,8 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_COMMIT IMPLEMENTATION.
         WHERE e07t~trkorr     = @lt_requests-table_line
           AND e07t~langu      = 'E'
           AND e070~trfunction = 'S'  "We only use texts of tasks
-          AND e07t~as4text IS NOT INITIAL
+          AND e07t~as4text IS NOT NULL
+          AND e07t~as4text <> ''
         INTO CORRESPONDING FIELDS OF TABLE @lt_docu.
     ENDIF.
 
