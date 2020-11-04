@@ -7,8 +7,7 @@
 *&---------------------------------------------------------------------*
 FORM run.
 
-  DATA: lx_exception TYPE REF TO zcx_abapgit_exception,
-        lv_ind       TYPE t000-ccnocliind.
+  DATA: lx_exception TYPE REF TO zcx_abapgit_exception.
 
   TRY.
       zcl_abapgit_migrations=>run( ).
@@ -73,32 +72,6 @@ FORM branch_popup TABLES   tt_fields TYPE zif_abapgit_definitions=>ty_sval_tt
 
 ENDFORM.                    "branch_popup
 
-FORM package_popup TABLES   tt_fields TYPE zif_abapgit_definitions=>ty_sval_tt
-                   USING    pv_code TYPE clike
-                   CHANGING cs_error TYPE svale
-                            cv_show_popup TYPE c
-                   RAISING  zcx_abapgit_exception ##called ##needed.
-* called dynamically from function module POPUP_GET_VALUES_USER_BUTTONS
-
-  DATA: lx_error  TYPE REF TO zcx_abapgit_exception,
-        li_popups TYPE REF TO zif_abapgit_popups.
-
-  TRY.
-      li_popups = zcl_abapgit_ui_factory=>get_popups( ).
-      li_popups->package_popup_callback(
-        EXPORTING
-          iv_code       = pv_code
-        CHANGING
-          ct_fields     = tt_fields[]
-          cs_error      = cs_error
-          cv_show_popup = cv_show_popup ).
-
-    CATCH zcx_abapgit_exception INTO lx_error.
-      MESSAGE lx_error TYPE 'S' DISPLAY LIKE 'E'.
-  ENDTRY.
-
-ENDFORM.                    "package_popup
-
 FORM output.
   DATA: lt_ucomm TYPE TABLE OF sy-ucomm.
 
@@ -116,12 +89,20 @@ FORM output.
 ENDFORM.
 
 FORM exit RAISING zcx_abapgit_exception.
+
+  " The exit logic should only be applied for our 'main' selection screen 1001.
+  " All other selection-screens are called as popups and shouldn't influence
+  " the gui navigation as it would lead to inpredictable behaviour like dumps.
+  IF sy-dynnr <> 1001.
+    RETURN.
+  ENDIF.
+
   CASE sy-ucomm.
-    WHEN 'CBAC'.  "Back
+    WHEN 'CBAC' OR 'CCAN'.  "Back & Escape
       IF zcl_abapgit_ui_factory=>get_gui( )->back( ) = abap_true. " end of stack
         zcl_abapgit_ui_factory=>get_gui( )->free( ). " Graceful shutdown
       ELSE.
-        LEAVE TO SCREEN 1001.
+        CALL SELECTION-SCREEN 1001.
       ENDIF.
   ENDCASE.
 ENDFORM.

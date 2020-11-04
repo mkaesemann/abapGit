@@ -110,7 +110,7 @@ CLASS lcl_transport_zipper DEFINITION FINAL.
     TYPES ty_filename TYPE string.
 
 * File extension
-    CONSTANTS gc_zip_ext TYPE string VALUE '.zip' ##NO_TEXT.
+    CONSTANTS gc_zip_ext TYPE string VALUE '.zip'.
 
     METHODS constructor  IMPORTING iv_folder TYPE ty_folder
                          RAISING   zcx_abapgit_exception.
@@ -143,9 +143,9 @@ CLASS lcl_transport_zipper IMPLEMENTATION.
 
   METHOD constructor.
 
-    CONCATENATE sy-datlo sy-timlo INTO me->mv_timestamp SEPARATED BY '_'.
+    CONCATENATE sy-datlo sy-timlo INTO mv_timestamp SEPARATED BY '_'.
 
-    me->mv_full_folder = get_full_folder( iv_folder = iv_folder ).
+    mv_full_folder = get_full_folder( iv_folder = iv_folder ).
 
     cl_gui_frontend_services=>get_file_separator(
       CHANGING

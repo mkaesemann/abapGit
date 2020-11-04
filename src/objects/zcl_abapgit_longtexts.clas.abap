@@ -15,17 +15,17 @@ CLASS zcl_abapgit_longtexts DEFINITION
         lines TYPE tline_tab,
       END OF ty_longtext .
     TYPES:
-      tty_longtexts TYPE STANDARD TABLE OF ty_longtext
+      ty_longtexts TYPE STANDARD TABLE OF ty_longtext
                            WITH NON-UNIQUE DEFAULT KEY .
 
     METHODS read
       IMPORTING
         !iv_object_name      TYPE sobj_name
         !iv_longtext_id      TYPE dokil-id
-        !it_dokil            TYPE zif_abapgit_definitions=>tty_dokil
+        !it_dokil            TYPE zif_abapgit_definitions=>ty_dokil_tt
         !iv_master_lang_only TYPE abap_bool DEFAULT abap_false
       RETURNING
-        VALUE(rt_longtexts)  TYPE tty_longtexts
+        VALUE(rt_longtexts)  TYPE ty_longtexts
       RAISING
         zcx_abapgit_exception .
   PRIVATE SECTION.
@@ -41,7 +41,7 @@ CLASS ZCL_ABAPGIT_LONGTEXTS IMPLEMENTATION.
   METHOD read.
 
     DATA: ls_longtext TYPE ty_longtext,
-          lt_dokil    TYPE zif_abapgit_definitions=>tty_dokil.
+          lt_dokil    TYPE zif_abapgit_definitions=>ty_dokil_tt.
 
     FIELD-SYMBOLS: <ls_dokil> LIKE LINE OF lt_dokil.
 
@@ -54,14 +54,14 @@ CLASS ZCL_ABAPGIT_LONGTEXTS IMPLEMENTATION.
         SELECT * FROM dokil
                  INTO TABLE lt_dokil
                  WHERE id     = iv_longtext_id
-                 AND   object = iv_object_name
+                 AND object = iv_object_name
                  AND masterlang = abap_true
                  ORDER BY PRIMARY KEY.
       ELSE.
         SELECT * FROM dokil
                  INTO TABLE lt_dokil
                  WHERE id     = iv_longtext_id
-                 AND   object = iv_object_name
+                 AND object = iv_object_name
                  ORDER BY PRIMARY KEY.
       ENDIF.
     ELSE.
@@ -107,7 +107,7 @@ CLASS ZCL_ABAPGIT_LONGTEXTS IMPLEMENTATION.
 
   METHOD zif_abapgit_longtexts~changed_by.
 
-    DATA: lt_longtexts TYPE tty_longtexts.
+    DATA: lt_longtexts TYPE ty_longtexts.
     FIELD-SYMBOLS: <ls_longtext> TYPE ty_longtext.
 
     lt_longtexts = read( iv_object_name = iv_object_name
@@ -124,7 +124,7 @@ CLASS ZCL_ABAPGIT_LONGTEXTS IMPLEMENTATION.
 
   METHOD zif_abapgit_longtexts~delete.
 
-    DATA: lt_dokil TYPE zif_abapgit_definitions=>tty_dokil.
+    DATA: lt_dokil TYPE zif_abapgit_definitions=>ty_dokil_tt.
     FIELD-SYMBOLS: <ls_dokil> TYPE dokil.
 
     SELECT * FROM dokil
@@ -155,11 +155,11 @@ CLASS ZCL_ABAPGIT_LONGTEXTS IMPLEMENTATION.
 
   METHOD zif_abapgit_longtexts~deserialize.
 
-    DATA: lt_longtexts     TYPE tty_longtexts,
+    DATA: lt_longtexts     TYPE ty_longtexts,
           lv_no_masterlang TYPE dokil-masterlang.
     FIELD-SYMBOLS: <ls_longtext> TYPE ty_longtext.
 
-    io_xml->read(
+    ii_xml->read(
       EXPORTING
         iv_name = iv_longtext_name
       CHANGING
@@ -186,12 +186,12 @@ CLASS ZCL_ABAPGIT_LONGTEXTS IMPLEMENTATION.
 
   METHOD zif_abapgit_longtexts~serialize.
 
-    DATA lt_longtexts TYPE tty_longtexts.
+    DATA lt_longtexts TYPE ty_longtexts.
     DATA lt_dokil LIKE it_dokil.
     DATA lv_master_lang_only TYPE abap_bool.
 
     lt_dokil = it_dokil.
-    lv_master_lang_only = io_xml->i18n_params( )-serialize_master_lang_only.
+    lv_master_lang_only = ii_xml->i18n_params( )-serialize_master_lang_only.
     IF lv_master_lang_only = abap_true.
       DELETE lt_dokil WHERE masterlang <> abap_true.
     ENDIF.
@@ -201,7 +201,7 @@ CLASS ZCL_ABAPGIT_LONGTEXTS IMPLEMENTATION.
                          it_dokil       = lt_dokil
                          iv_master_lang_only = lv_master_lang_only ).
 
-    io_xml->add( iv_name = iv_longtext_name
+    ii_xml->add( iv_name = iv_longtext_name
                  ig_data = lt_longtexts ).
 
   ENDMETHOD.

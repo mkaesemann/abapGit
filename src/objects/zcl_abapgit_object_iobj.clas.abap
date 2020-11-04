@@ -17,7 +17,21 @@ ENDCLASS.
 
 
 
-CLASS zcl_abapgit_object_iobj IMPLEMENTATION.
+CLASS ZCL_ABAPGIT_OBJECT_IOBJ IMPLEMENTATION.
+
+
+  METHOD clear_field.
+
+    FIELD-SYMBOLS: <lg_field> TYPE data.
+
+    ASSIGN COMPONENT iv_fieldname
+           OF STRUCTURE cg_metadata
+           TO <lg_field>.
+    ASSERT sy-subrc = 0.
+
+    CLEAR: <lg_field>.
+
+  ENDMETHOD.
 
 
   METHOD zif_abapgit_object~changed_by.
@@ -55,11 +69,12 @@ CLASS zcl_abapgit_object_iobj IMPLEMENTATION.
 
   METHOD zif_abapgit_object~delete.
 
-    TYPES: BEGIN OF t_iobj,
+    TYPES: BEGIN OF ty_iobj,
              objnm TYPE c LENGTH 30.
-    TYPES END OF t_iobj.
+    TYPES END OF ty_iobj.
 
-    DATA: lt_iobjname     TYPE STANDARD TABLE OF t_iobj,
+    DATA: lt_iobjname     TYPE STANDARD TABLE OF ty_iobj,
+          lv_subrc        TYPE sy-subrc,
           lv_object       TYPE string,
           lv_object_class TYPE string,
           lv_transp_pkg   TYPE abap_bool.
@@ -70,10 +85,12 @@ CLASS zcl_abapgit_object_iobj IMPLEMENTATION.
 
     CALL FUNCTION 'RSDG_IOBJ_MULTI_DELETE'
       EXPORTING
-        i_t_iobjnm = lt_iobjname.
+        i_t_iobjnm = lt_iobjname
+      IMPORTING
+        e_subrc    = lv_subrc.
 
-    IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( |Error when deleting infoObject | ).
+    IF lv_subrc <> 0.
+      zcx_abapgit_exception=>raise( |Error when deleting InfoObject { ms_item-obj_name }| ).
     ENDIF.
 
     IF lv_transp_pkg = abap_true.
@@ -185,6 +202,10 @@ CLASS zcl_abapgit_object_iobj IMPLEMENTATION.
     io_xml->read( EXPORTING iv_name = 'XXL_ATTRIBUTES'
                   CHANGING  cg_data = <lt_xxlattributes> ).
 
+    " Number ranges are local (should not have been serialized)
+    clear_field( EXPORTING iv_fieldname = 'NUMBRANR'
+                 CHANGING  cg_metadata  = <lg_details> ).
+
     TRY.
 
         CALL FUNCTION 'BAPI_IOBJ_CREATE'
@@ -237,12 +258,12 @@ CLASS zcl_abapgit_object_iobj IMPLEMENTATION.
 
   METHOD zif_abapgit_object~exists.
 
-    DATA: lv_iobjnm TYPE char30.
+    DATA: lv_iobjnm TYPE c LENGTH 30.
 
     SELECT SINGLE iobjnm
-    FROM ('RSDIOBJ')
-    INTO lv_iobjnm
-    WHERE iobjnm = ms_item-obj_name.
+      FROM ('RSDIOBJ')
+      INTO lv_iobjnm
+      WHERE iobjnm = ms_item-obj_name.
 
     rv_bool = boolc( sy-subrc = 0 ).
 
@@ -315,7 +336,7 @@ CLASS zcl_abapgit_object_iobj IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~jump.
-    zcx_abapgit_exception=>raise( |Jump to infoObjects is not yet supported| ).
+    zcx_abapgit_exception=>raise( |Jump to InfoObjects is not yet supported| ).
   ENDMETHOD.
 
 
@@ -388,7 +409,7 @@ CLASS zcl_abapgit_object_iobj IMPLEMENTATION.
         xxlattributes            = <lt_xxlattributes>.
 
     IF ls_return-type = 'E'.
-      zcx_abapgit_exception=>raise( |Error when geting getails of iobj: { ls_return-message }| ).
+      zcx_abapgit_exception=>raise( |Error getting details of InfoObject: { ls_return-message }| ).
     ENDIF.
 
     clear_field( EXPORTING iv_fieldname = 'TSTPNM'
@@ -398,6 +419,10 @@ CLASS zcl_abapgit_object_iobj IMPLEMENTATION.
                  CHANGING  cg_metadata  = <lg_details> ).
 
     clear_field( EXPORTING iv_fieldname = 'DBROUTID'
+                 CHANGING  cg_metadata  = <lg_details> ).
+
+    " Number ranges are local
+    clear_field( EXPORTING iv_fieldname = 'NUMBRANR'
                  CHANGING  cg_metadata  = <lg_details> ).
 
     io_xml->add( iv_name = 'IOBJ'
@@ -428,19 +453,4 @@ CLASS zcl_abapgit_object_iobj IMPLEMENTATION.
                  ig_data = <lt_xxlattributes> ).
 
   ENDMETHOD.
-
-
-  METHOD clear_field.
-
-    FIELD-SYMBOLS: <lg_field> TYPE data.
-
-    ASSIGN COMPONENT iv_fieldname
-           OF STRUCTURE cg_metadata
-           TO <lg_field>.
-    ASSERT sy-subrc = 0.
-
-    CLEAR: <lg_field>.
-
-  ENDMETHOD.
-
 ENDCLASS.

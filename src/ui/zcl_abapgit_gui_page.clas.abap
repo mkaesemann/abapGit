@@ -22,71 +22,62 @@ CLASS zcl_abapgit_gui_page DEFINITION PUBLIC ABSTRACT
     DATA ms_control TYPE ty_control .
 
     METHODS render_content
-      ABSTRACT
+          ABSTRACT
       RETURNING
         VALUE(ri_html) TYPE REF TO zif_abapgit_html
       RAISING
         zcx_abapgit_exception .
   PRIVATE SECTION.
-    DATA:
-      mo_settings         TYPE REF TO zcl_abapgit_settings,
-      mx_error            TYPE REF TO zcx_abapgit_exception,
-      mo_exception_viewer TYPE REF TO zcl_abapgit_exception_viewer.
+
+    DATA mo_settings TYPE REF TO zcl_abapgit_settings .
+    DATA mx_error TYPE REF TO zcx_abapgit_exception .
+    DATA mo_exception_viewer TYPE REF TO zcl_abapgit_exception_viewer .
 
     METHODS render_deferred_parts
       IMPORTING
-        ii_html          TYPE REF TO zif_abapgit_html
-        iv_part_category TYPE string
+        !ii_html          TYPE REF TO zif_abapgit_html
+        !iv_part_category TYPE string
       RAISING
-        zcx_abapgit_exception.
-
+        zcx_abapgit_exception .
     METHODS html_head
-      RETURNING VALUE(ri_html) TYPE REF TO zif_abapgit_html.
-
+      RETURNING
+        VALUE(ri_html) TYPE REF TO zif_abapgit_html .
     METHODS title
-      RETURNING VALUE(ri_html) TYPE REF TO zif_abapgit_html.
-
+      RETURNING
+        VALUE(ri_html) TYPE REF TO zif_abapgit_html .
     METHODS footer
-      RETURNING VALUE(ri_html) TYPE REF TO zif_abapgit_html.
-
+      RETURNING
+        VALUE(ri_html) TYPE REF TO zif_abapgit_html .
     METHODS render_link_hints
       IMPORTING
-        ii_html TYPE REF TO zif_abapgit_html
+        !ii_html TYPE REF TO zif_abapgit_html
       RAISING
-        zcx_abapgit_exception.
-
+        zcx_abapgit_exception .
     METHODS render_command_palettes
       IMPORTING
-        ii_html TYPE REF TO zif_abapgit_html
+        !ii_html TYPE REF TO zif_abapgit_html
       RAISING
-        zcx_abapgit_exception.
-
+        zcx_abapgit_exception .
     METHODS render_hotkey_overview
       RETURNING
         VALUE(ro_html) TYPE REF TO zif_abapgit_html
       RAISING
-        zcx_abapgit_exception.
-
+        zcx_abapgit_exception .
     METHODS render_error_message_box
       RETURNING
-        VALUE(ro_html) TYPE REF TO zcl_abapgit_html
+        VALUE(ri_html) TYPE REF TO zif_abapgit_html
       RAISING
-        zcx_abapgit_exception.
-
+        zcx_abapgit_exception .
     METHODS scripts
       RETURNING
-        VALUE(ro_html) TYPE REF TO zcl_abapgit_html
+        VALUE(ri_html) TYPE REF TO zif_abapgit_html
       RAISING
-        zcx_abapgit_exception.
-
-    METHODS test_changed_by
-      RAISING zcx_abapgit_exception.
-
+        zcx_abapgit_exception .
 ENDCLASS.
 
 
 
-CLASS zcl_abapgit_gui_page IMPLEMENTATION.
+CLASS ZCL_ABAPGIT_GUI_PAGE IMPLEMENTATION.
 
 
   METHOD constructor.
@@ -126,12 +117,12 @@ CLASS zcl_abapgit_gui_page IMPLEMENTATION.
 
     CREATE OBJECT ri_html TYPE zcl_abapgit_html.
 
-    ri_html->add( '<head>' ).                               "#EC NOTEXT
+    ri_html->add( '<head>' ).
 
-    ri_html->add( '<meta http-equiv="content-type" content="text/html; charset=utf-8">' ). "#EC NOTEXT
-    ri_html->add( '<meta http-equiv="X-UA-Compatible" content="IE=11,10,9,8" />' ). "#EC NOTEXT
+    ri_html->add( '<meta http-equiv="content-type" content="text/html; charset=utf-8">' ).
+    ri_html->add( '<meta http-equiv="X-UA-Compatible" content="IE=11,10,9,8" />' ).
 
-    ri_html->add( '<title>abapGit</title>' ).               "#EC NOTEXT
+    ri_html->add( '<title>abapGit</title>' ).
     ri_html->add( '<link rel="stylesheet" type="text/css" href="css/common.css">' ).
     ri_html->add( '<link rel="stylesheet" type="text/css" href="css/ag-icons.css">' ).
 
@@ -144,7 +135,7 @@ CLASS zcl_abapgit_gui_page IMPLEMENTATION.
         ri_html->add( '<link rel="stylesheet" type="text/css" href="css/theme-belize-blue.css">' ).
     ENDCASE.
 
-    ri_html->add( '<script type="text/javascript" src="js/common.js"></script>' ). "#EC NOTEXT
+    ri_html->add( '<script type="text/javascript" src="js/common.js"></script>' ).
 
     CASE mo_settings->get_icon_scaling( ). " Enforce icon scaling
       WHEN mo_settings->c_icon_scaling-large.
@@ -153,7 +144,7 @@ CLASS zcl_abapgit_gui_page IMPLEMENTATION.
         ri_html->add( '<style>.icon.large { font-size: inherit }</style>' ).
     ENDCASE.
 
-    ri_html->add( '</head>' ).                              "#EC NOTEXT
+    ri_html->add( '</head>' ).
 
   ENDMETHOD.
 
@@ -170,7 +161,7 @@ CLASS zcl_abapgit_gui_page IMPLEMENTATION.
 
   METHOD render_deferred_parts.
 
-    DATA lt_parts TYPE zif_abapgit_html=>tty_table_of.
+    DATA lt_parts TYPE zif_abapgit_html=>ty_table_of.
     DATA li_part LIKE LINE OF lt_parts.
 
     lt_parts = gui_services( )->get_html_parts( )->get_parts( iv_part_category ).
@@ -186,7 +177,7 @@ CLASS zcl_abapgit_gui_page IMPLEMENTATION.
     " You should remember that the we have to instantiate ro_html even
     " it's overwritten further down. Because ADD checks whether it's
     " bound.
-    CREATE OBJECT ro_html.
+    CREATE OBJECT ri_html TYPE zcl_abapgit_html.
 
     " You should remember that we render the message panel only
     " if we have an error.
@@ -194,7 +185,7 @@ CLASS zcl_abapgit_gui_page IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    ro_html = zcl_abapgit_gui_chunk_lib=>render_error_message_box( mx_error ).
+    ri_html = zcl_abapgit_gui_chunk_lib=>render_error_message_box( mx_error ).
 
     " You should remember that the exception viewer dispatches the events of
     " error message panel
@@ -222,7 +213,7 @@ CLASS zcl_abapgit_gui_page IMPLEMENTATION.
 
   METHOD render_link_hints.
 
-    DATA: lv_link_hint_key TYPE char01.
+    DATA: lv_link_hint_key TYPE c LENGTH 1.
 
     lv_link_hint_key = mo_settings->get_link_hint_key( ).
 
@@ -239,14 +230,14 @@ CLASS zcl_abapgit_gui_page IMPLEMENTATION.
 
   METHOD scripts.
 
-    CREATE OBJECT ro_html.
+    CREATE OBJECT ri_html TYPE zcl_abapgit_html.
 
     render_deferred_parts(
-      ii_html          = ro_html
+      ii_html          = ri_html
       iv_part_category = c_html_parts-scripts ).
 
-    render_link_hints( ro_html ).
-    render_command_palettes( ro_html ).
+    render_link_hints( ri_html ).
+    render_command_palettes( ri_html ).
 
   ENDMETHOD.
 
@@ -285,43 +276,27 @@ CLASS zcl_abapgit_gui_page IMPLEMENTATION.
 
   METHOD zif_abapgit_gui_event_handler~on_event.
 
-    CASE iv_action.
+    CASE ii_event->mv_action.
       WHEN zif_abapgit_definitions=>c_action-goto_source.
 
         IF mo_exception_viewer IS BOUND.
           mo_exception_viewer->goto_source( ).
         ENDIF.
-        ev_state = zcl_abapgit_gui=>c_event_state-no_more_act.
+        rs_handled-state = zcl_abapgit_gui=>c_event_state-no_more_act.
 
       WHEN zif_abapgit_definitions=>c_action-show_callstack.
 
         IF mo_exception_viewer IS BOUND.
           mo_exception_viewer->show_callstack( ).
         ENDIF.
-        ev_state = zcl_abapgit_gui=>c_event_state-no_more_act.
+        rs_handled-state = zcl_abapgit_gui=>c_event_state-no_more_act.
 
       WHEN zif_abapgit_definitions=>c_action-goto_message.
 
         IF mo_exception_viewer IS BOUND.
           mo_exception_viewer->goto_message( ).
         ENDIF.
-        ev_state = zcl_abapgit_gui=>c_event_state-no_more_act.
-
-      WHEN zif_abapgit_definitions=>c_action-changed_by.
-        test_changed_by( ).
-        ev_state = zcl_abapgit_gui=>c_event_state-no_more_act.
-
-      WHEN zif_abapgit_definitions=>c_action-documentation.
-        zcl_abapgit_services_abapgit=>open_abapgit_wikipage( ).
-        ev_state = zcl_abapgit_gui=>c_event_state-no_more_act.
-
-      WHEN zif_abapgit_definitions=>c_action-go_explore.
-        zcl_abapgit_services_abapgit=>open_dotabap_homepage( ).
-        ev_state = zcl_abapgit_gui=>c_event_state-no_more_act.
-
-      WHEN zif_abapgit_definitions=>c_action-changelog.
-        zcl_abapgit_services_abapgit=>open_abapgit_changelog( ).
-        ev_state = zcl_abapgit_gui=>c_event_state-no_more_act.
+        rs_handled-state = zcl_abapgit_gui=>c_event_state-no_more_act.
 
     ENDCASE.
 
@@ -337,10 +312,10 @@ CLASS zcl_abapgit_gui_page IMPLEMENTATION.
     " Real page
     CREATE OBJECT ri_html TYPE zcl_abapgit_html.
 
-    ri_html->add( '<!DOCTYPE html>' ).                      "#EC NOTEXT
-    ri_html->add( '<html>' ).                               "#EC NOTEXT
+    ri_html->add( '<!DOCTYPE html>' ).
+    ri_html->add( '<html>' ).
     ri_html->add( html_head( ) ).
-    ri_html->add( '<body>' ).                               "#EC NOTEXT
+    ri_html->add( '<body>' ).
     ri_html->add( title( ) ).
 
     ri_html->add( render_content( ) ). " TODO -> render child
@@ -353,7 +328,6 @@ CLASS zcl_abapgit_gui_page IMPLEMENTATION.
       iv_part_category = c_html_parts-hidden_forms ).
 
     ri_html->add( footer( ) ).
-    ri_html->add( '</body>' ).                              "#EC NOTEXT
 
     li_script = scripts( ).
 
@@ -364,28 +338,8 @@ CLASS zcl_abapgit_gui_page IMPLEMENTATION.
       ri_html->add( '</script>' ).
     ENDIF.
 
-    ri_html->add( '</html>' ).                              "#EC NOTEXT
-
-  ENDMETHOD.
-
-  METHOD test_changed_by.
-
-    DATA: ls_tadir TYPE zif_abapgit_definitions=>ty_tadir,
-          lv_user  TYPE xubname,
-          ls_item  TYPE zif_abapgit_definitions=>ty_item.
-
-
-    ls_tadir = zcl_abapgit_ui_factory=>get_popups( )->popup_object( ).
-    IF ls_tadir IS INITIAL.
-      RETURN.
-    ENDIF.
-
-    ls_item-obj_type = ls_tadir-object.
-    ls_item-obj_name = ls_tadir-obj_name.
-
-    lv_user = zcl_abapgit_objects=>changed_by( ls_item ).
-
-    MESSAGE lv_user TYPE 'S'.
+    ri_html->add( '</body>' ).
+    ri_html->add( '</html>' ).
 
   ENDMETHOD.
 ENDCLASS.

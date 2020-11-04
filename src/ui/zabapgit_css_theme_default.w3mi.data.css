@@ -57,6 +57,20 @@ input:focus, textarea:focus { border-color: #8cadd9; }
   background-color: #e6e6e6;
 }
 
+/* ABAPGIT OBJECTS */
+span.user {
+  border-color: #c2d4ea;
+  background-color: #d9e4f2;
+}
+span.package {
+  border-color: #d3ccd2;
+  background-color: #ebe3ea;
+}
+span.transport {
+  border-color: #a7e3cf;
+  background-color: #dbf3eb;
+}
+
 /* PANELS */
 /* TODO: add warning and error colors */
 div.panel.success {
@@ -94,15 +108,18 @@ div.repo { background-color: var(--theme-container-background-color); }
   background-color: #d8d8d8;
   color: #fff;
 }
-.repo_attr span.branch {
-  border-color: #d9d9d9;
-  background-color: #e2e2e2;
-}
+
 .repo_attr span.branch_head {
   border-color: #d8dff3;
   background-color: #eceff9;
 }
-.repo_attr span.branch_branch {
+
+span.branch {
+  border-color: #d9d9d9;
+  background-color: #e2e2e2;
+}
+
+span.branch_branch {
   border-color: #e7d9b1;
   background-color: #f8f0d8;
 }
@@ -323,7 +340,10 @@ table.diff_tab td.patch, th.patch {
 .syntax-hl span.variables    { color:purple; }
 
 /* DEBUG INFO STYLES */
-div.debug_container { color: #444; }
+div.debug_container { 
+  color: #444; 
+  background-color: var(--theme-container-background-color);
+}
 
 /* DB ENTRIES */
 div.db_list { background-color: #fff; }

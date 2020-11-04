@@ -9,12 +9,9 @@ CLASS zcl_abapgit_sap_package DEFINITION
 
     INTERFACES: zif_abapgit_sap_package.
 
+  PROTECTED SECTION.
   PRIVATE SECTION.
     DATA: mv_package TYPE devclass.
-
-    ALIASES:
-      create FOR zif_abapgit_sap_package~create,
-      create_local FOR zif_abapgit_sap_package~create_local.
 
 ENDCLASS.
 
@@ -46,7 +43,7 @@ CLASS ZCL_ABAPGIT_SAP_PACKAGE IMPLEMENTATION.
         OTHERS                     = 6 ).
 
     IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( |Error from CL_PACKAGE_FACTORY=>LOAD_PACKAGE { sy-subrc }| ).
+      zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
 
     rv_are_changes_rec_in_tr_req = li_package->wbo_korr_flag.
@@ -118,7 +115,7 @@ CLASS ZCL_ABAPGIT_SAP_PACKAGE IMPLEMENTATION.
 *        error_in_cts_checks        = 21
         OTHERS                     = 18 ).
     IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( |Package { is_package-devclass } could not be created| ).
+      zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
 
     li_package->save(
@@ -175,7 +172,7 @@ CLASS ZCL_ABAPGIT_SAP_PACKAGE IMPLEMENTATION.
         no_access                  = 4
         object_locked_and_modified = 5 ).
     IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'error reading parent package' ).
+      zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
 
     ls_child-devclass  = iv_child.
@@ -186,7 +183,7 @@ CLASS ZCL_ABAPGIT_SAP_PACKAGE IMPLEMENTATION.
     ls_child-pdevclass = li_parent->transport_layer.
     ls_child-as4user   = sy-uname.
 
-    create( ls_child ).
+    zif_abapgit_sap_package~create( ls_child ).
 
   ENDMETHOD.
 
@@ -202,7 +199,7 @@ CLASS ZCL_ABAPGIT_SAP_PACKAGE IMPLEMENTATION.
     ls_package-dlvunit   = 'LOCAL'.
     ls_package-as4user   = sy-uname.
 
-    create( ls_package ).
+    zif_abapgit_sap_package~create( ls_package ).
 
   ENDMETHOD.
 
@@ -308,7 +305,7 @@ CLASS ZCL_ABAPGIT_SAP_PACKAGE IMPLEMENTATION.
   METHOD zif_abapgit_sap_package~read_parent.
 
     SELECT SINGLE parentcl FROM tdevc INTO rv_parentcl
-      WHERE devclass = mv_package.        "#EC CI_GENBUFF
+      WHERE devclass = mv_package.                      "#EC CI_GENBUFF
     IF sy-subrc <> 0.
       zcx_abapgit_exception=>raise( |Inconsistent package structure! Cannot find parent for { mv_package }| ).
     ENDIF.

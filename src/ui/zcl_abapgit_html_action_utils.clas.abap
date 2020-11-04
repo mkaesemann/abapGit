@@ -4,14 +4,16 @@ CLASS zcl_abapgit_html_action_utils DEFINITION
 
   PUBLIC SECTION.
 
-    CLASS-METHODS parse_post_data
+    CLASS-METHODS parse_post_form_data
       IMPORTING
         !it_post_data TYPE cnht_post_data_tab
+        !iv_upper_cased TYPE abap_bool DEFAULT abap_false
       RETURNING
         VALUE(rt_fields) TYPE tihttpnvp .
     CLASS-METHODS parse_fields
       IMPORTING
         !iv_string       TYPE clike
+        !iv_upper_cased  TYPE abap_bool DEFAULT abap_false
       RETURNING
         VALUE(rt_fields) TYPE tihttpnvp .
     CLASS-METHODS parse_fields_upper_case_name
@@ -19,6 +21,12 @@ CLASS zcl_abapgit_html_action_utils DEFINITION
         !iv_string       TYPE clike
       RETURNING
         VALUE(rt_fields) TYPE tihttpnvp .
+    CLASS-METHODS translate_postdata
+      IMPORTING
+        !it_postdata TYPE cnht_post_data_tab
+      RETURNING
+        VALUE(rv_string) TYPE string .
+
     CLASS-METHODS get_field
       IMPORTING
         !iv_name   TYPE string
@@ -32,26 +40,12 @@ CLASS zcl_abapgit_html_action_utils DEFINITION
         !iv_obj_name     TYPE tadir-obj_name
       RETURNING
         VALUE(rv_string) TYPE string .
-    CLASS-METHODS jump_decode
-      IMPORTING
-        !iv_string   TYPE clike
-      EXPORTING
-        !ev_obj_type TYPE tadir-object
-        !ev_obj_name TYPE tadir-obj_name
-      RAISING
-        zcx_abapgit_exception .
     CLASS-METHODS dir_encode
       IMPORTING
         !iv_path         TYPE string
       RETURNING
         VALUE(rv_string) TYPE string .
-    CLASS-METHODS dir_decode
-      IMPORTING
-        !iv_string     TYPE clike
-      RETURNING
-        VALUE(rv_path) TYPE string
-      RAISING
-        zcx_abapgit_exception .
+
     CLASS-METHODS file_encode
       IMPORTING
         !iv_key          TYPE zif_abapgit_persistence=>ty_repo-key
@@ -64,33 +58,13 @@ CLASS zcl_abapgit_html_action_utils DEFINITION
         !ig_object       TYPE any
       RETURNING
         VALUE(rv_string) TYPE string .
-    CLASS-METHODS file_obj_decode
-      IMPORTING
-        !iv_string TYPE clike
-      EXPORTING
-        !ev_key    TYPE zif_abapgit_persistence=>ty_repo-key
-        !eg_file   TYPE any                                    "assuming ty_file
-        !eg_object TYPE any                      "assuming ty_item
-      RAISING
-        zcx_abapgit_exception .
+
     CLASS-METHODS dbkey_encode
       IMPORTING
         !is_key          TYPE zif_abapgit_persistence=>ty_content
       RETURNING
         VALUE(rv_string) TYPE string .
-    CLASS-METHODS dbkey_decode
-      IMPORTING
-        !iv_string    TYPE clike
-      RETURNING
-        VALUE(rs_key) TYPE zif_abapgit_persistence=>ty_content .
-    CLASS-METHODS stage_decode
-      IMPORTING
-        !iv_getdata TYPE clike
-      EXPORTING
-        !ev_key     TYPE zif_abapgit_persistence=>ty_repo-key
-        !ev_seed    TYPE string
-      RAISING
-        zcx_abapgit_exception .
+
   PROTECTED SECTION.
   PRIVATE SECTION.
 
@@ -139,20 +113,6 @@ CLASS ZCL_ABAPGIT_HTML_ACTION_UTILS IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD dbkey_decode.
-
-    DATA: lt_fields TYPE tihttpnvp.
-
-    lt_fields = parse_fields_upper_case_name( cl_http_utility=>unescape_url( |{ iv_string }| ) ).
-
-    get_field( EXPORTING iv_name = 'TYPE'
-                         it_field = lt_fields CHANGING cg_field = rs_key-type ).
-    get_field( EXPORTING iv_name = 'VALUE'
-                         it_field = lt_fields CHANGING cg_field = rs_key-value ).
-
-  ENDMETHOD.
-
-
   METHOD dbkey_encode.
 
     DATA: lt_fields TYPE tihttpnvp.
@@ -163,17 +123,6 @@ CLASS ZCL_ABAPGIT_HTML_ACTION_UTILS IMPLEMENTATION.
                          ig_field = is_key-value CHANGING ct_field = lt_fields ).
 
     rv_string = cl_http_utility=>if_http_utility~fields_to_string( lt_fields ).
-
-  ENDMETHOD.
-
-
-  METHOD dir_decode.
-
-    DATA: lt_fields TYPE tihttpnvp.
-
-    lt_fields = parse_fields( iv_string ).
-    get_field( EXPORTING iv_name = 'PATH'
-                         it_field = lt_fields CHANGING cg_field = rv_path ).
 
   ENDMETHOD.
 
@@ -216,39 +165,6 @@ CLASS ZCL_ABAPGIT_HTML_ACTION_UTILS IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD file_obj_decode.
-
-    DATA: lt_fields TYPE tihttpnvp.
-
-    ASSERT eg_file IS SUPPLIED OR eg_object IS SUPPLIED OR ev_key IS SUPPLIED.
-
-    CLEAR: ev_key, eg_file, eg_object.
-    lt_fields = parse_fields_upper_case_name( iv_string ).
-
-    get_field( EXPORTING iv_name = 'KEY'
-                         it_field = lt_fields CHANGING cg_field = ev_key ).
-
-    IF eg_file IS SUPPLIED.
-      get_field( EXPORTING iv_name = 'PATH'
-                           it_field = lt_fields CHANGING cg_field = eg_file ).
-      get_field( EXPORTING iv_name = 'FILENAME'
-                           it_field = lt_fields
-                           iv_decode = abap_true
-                 CHANGING cg_field = eg_file  ).
-    ENDIF.
-
-    IF eg_object IS SUPPLIED.
-      get_field( EXPORTING iv_name = 'OBJ_TYPE'
-                           it_field = lt_fields CHANGING cg_field = eg_object ).
-      get_field( EXPORTING iv_name = 'OBJ_NAME'
-                           it_field = lt_fields
-                           iv_decode = abap_true
-                 CHANGING cg_field = eg_object ).
-    ENDIF.
-
-  ENDMETHOD.
-
-
   METHOD get_field.
 
     DATA: lv_value TYPE string.
@@ -278,20 +194,6 @@ CLASS ZCL_ABAPGIT_HTML_ACTION_UTILS IMPLEMENTATION.
       WHEN OTHERS.
         ASSERT 0 = 1.
     ENDCASE.
-
-  ENDMETHOD.
-
-
-  METHOD jump_decode.
-
-    DATA: lt_fields TYPE tihttpnvp.
-
-    lt_fields = parse_fields( iv_string ).
-
-    get_field( EXPORTING iv_name = 'TYPE'
-                         it_field = lt_fields CHANGING cg_field = ev_obj_type ).
-    get_field( EXPORTING iv_name = 'NAME'
-                         it_field = lt_fields CHANGING cg_field = ev_obj_name ).
 
   ENDMETHOD.
 
@@ -330,63 +232,89 @@ CLASS ZCL_ABAPGIT_HTML_ACTION_UTILS IMPLEMENTATION.
 
   METHOD parse_fields.
 
-    DATA: lt_substrings TYPE STANDARD TABLE OF string WITH DEFAULT KEY,
-          ls_field      LIKE LINE OF rt_fields.
+    DATA:
+      lt_substrings TYPE string_table,
+      ls_field      LIKE LINE OF rt_fields.
 
-    FIELD-SYMBOLS: <lv_substring> LIKE LINE OF lt_substrings.
-
+    FIELD-SYMBOLS <lv_substring> LIKE LINE OF lt_substrings.
 
     SPLIT iv_string AT '&' INTO TABLE lt_substrings.
 
     LOOP AT lt_substrings ASSIGNING <lv_substring>.
 
-      CLEAR: ls_field.
+      CLEAR ls_field.
+      <lv_substring> = unescape( <lv_substring> ).
+      " On attempt to change unescaping -> run unit tests to check !
 
-      ls_field-name = substring_before( val = <lv_substring>
-                                     sub = '=' ).
-      ls_field-name = unescape( ls_field-name ).
+      ls_field-name = substring_before(
+        val = <lv_substring>
+        sub = '=' ).
 
-      ls_field-value = substring_after( val = <lv_substring>
-                                     sub = '=' ).
-      ls_field-value = unescape( ls_field-value ).
+      ls_field-value = substring_after(
+        val = <lv_substring>
+        sub = '=' ).
 
-      INSERT ls_field INTO TABLE rt_fields.
+      IF ls_field IS INITIAL. " Not a field with proper structure
+        CONTINUE.
+      ENDIF.
+
+      APPEND ls_field TO rt_fields.
 
     ENDLOOP.
+
+    IF iv_upper_cased = abap_true.
+      field_keys_to_upper( CHANGING ct_fields = rt_fields ).
+    ENDIF.
 
   ENDMETHOD.
 
 
   METHOD parse_fields_upper_case_name.
 
-    rt_fields = parse_fields( iv_string ).
-    field_keys_to_upper( CHANGING ct_fields = rt_fields ).
+    rt_fields = parse_fields(
+      iv_string      = iv_string
+      iv_upper_cased = abap_true ).
 
   ENDMETHOD.
 
 
-  METHOD parse_post_data.
+  METHOD parse_post_form_data.
 
     DATA lv_serialized_post_data TYPE string.
 
-    CONCATENATE LINES OF it_post_data INTO lv_serialized_post_data.
-    rt_fields = parse_fields( lv_serialized_post_data ).
+    lv_serialized_post_data = translate_postdata( it_post_data ).
+    IF iv_upper_cased = abap_true.
+      rt_fields = parse_fields_upper_case_name( lv_serialized_post_data ).
+    ELSE.
+      rt_fields = parse_fields( lv_serialized_post_data ).
+    ENDIF.
 
   ENDMETHOD.
 
 
-  METHOD stage_decode.
+  METHOD translate_postdata.
 
-    DATA: lt_fields TYPE tihttpnvp.
+    DATA: lt_post_data       TYPE cnht_post_data_tab,
+          ls_last_line       TYPE cnht_post_data_line,
+          lv_last_line_index TYPE i.
 
-    lt_fields = parse_fields_upper_case_name( iv_getdata ).
+    IF it_postdata IS INITIAL.
+      RETURN. "Nothing to do
+    ENDIF.
 
-    get_field( EXPORTING iv_name = 'KEY'
-                         it_field = lt_fields CHANGING cg_field = ev_key ).
-    get_field( EXPORTING iv_name = 'SEED'
-                         it_field = lt_fields CHANGING cg_field = ev_seed ).
+    lt_post_data = it_postdata.
 
-    ASSERT NOT ev_key IS INITIAL.
+    "Save the last line for separate merge, because we don't need its trailing spaces
+    WHILE ls_last_line IS INITIAL.
+      lv_last_line_index = lines( lt_post_data ).
+      READ TABLE lt_post_data INTO ls_last_line INDEX lv_last_line_index.
+      DELETE lt_post_data INDEX lv_last_line_index.
+    ENDWHILE.
+
+    CONCATENATE LINES OF lt_post_data INTO rv_string
+      IN CHARACTER MODE RESPECTING BLANKS.
+    CONCATENATE rv_string ls_last_line INTO rv_string
+      IN CHARACTER MODE.
 
   ENDMETHOD.
 

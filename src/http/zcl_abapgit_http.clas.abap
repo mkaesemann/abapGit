@@ -70,7 +70,7 @@ CLASS ZCL_ABAPGIT_HTTP IMPLEMENTATION.
         cv_pass         = lv_pass ).
 
     IF lv_user IS INITIAL.
-      zcx_abapgit_exception=>raise( 'HTTP 401, unauthorized' ).
+      zcx_abapgit_exception=>raise( 'Unauthorized access. Check your credentials' ).
     ENDIF.
 
     IF lv_user <> lv_default_user.
@@ -78,14 +78,6 @@ CLASS ZCL_ABAPGIT_HTTP IMPLEMENTATION.
         iv_url   = iv_url
         iv_login = lv_user ).
     ENDIF.
-
-    " Offer two factor authentication if it is available and required
-    zcl_abapgit_2fa_auth_registry=>use_2fa_if_required(
-      EXPORTING
-        iv_url      = iv_url
-      CHANGING
-        cv_username = lv_user
-        cv_password = lv_pass ).
 
     rv_scheme = ii_client->response->get_header_field( 'www-authenticate' ).
     FIND REGEX '^(\w+)' IN rv_scheme SUBMATCHES rv_scheme.
@@ -158,7 +150,7 @@ CLASS ZCL_ABAPGIT_HTTP IMPLEMENTATION.
             " a) SSL is setup properly in STRUST
             lv_text = 'HTTPS ARGUMENT_NOT_FOUND | STRUST/SSL Setup correct?'.
           WHEN OTHERS.
-            lv_text = 'While creating HTTP Client'.         "#EC NOTEXT
+            lv_text = 'While creating HTTP Client'.
 
         ENDCASE.
         zcx_abapgit_exception=>raise( lv_text ).
@@ -184,7 +176,7 @@ CLASS ZCL_ABAPGIT_HTTP IMPLEMENTATION.
         value = 'GET' ).
     li_client->request->set_header_field(
         name  = 'user-agent'
-        value = get_agent( ) ).                             "#EC NOTEXT
+        value = get_agent( ) ).
     lv_uri = zcl_abapgit_url=>path_name( iv_url ) &&
              '/info/refs?service=git-' &&
              iv_service &&
@@ -224,7 +216,7 @@ CLASS ZCL_ABAPGIT_HTTP IMPLEMENTATION.
   METHOD get_agent.
 
 * bitbucket require agent prefix = "git/"
-* also see https://github.com/larshp/abapGit/issues/1432
+* also see https://github.com/abapGit/abapGit/issues/1432
     rv_agent = |git/2.0 (abapGit { zif_abapgit_version=>gc_abap_version })|.
 
   ENDMETHOD.

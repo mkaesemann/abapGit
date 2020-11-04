@@ -18,7 +18,7 @@ INTERFACE zif_abapgit_popups
 
   METHODS popup_search_help
     IMPORTING
-      !iv_tab_field TYPE string
+      !iv_tab_field   TYPE string
     RETURNING
       VALUE(rv_value) TYPE ddshretval-fieldval
     RAISING
@@ -41,14 +41,11 @@ INTERFACE zif_abapgit_popups
     RAISING
       zcx_abapgit_exception .
   METHODS create_branch_popup
+    IMPORTING
+      !iv_source_branch_name TYPE string
     EXPORTING
-      !ev_name   TYPE string
-      !ev_cancel TYPE abap_bool
-    RAISING
-      zcx_abapgit_exception .
-  METHODS repo_new_offline
-    RETURNING
-      VALUE(rs_popup) TYPE ty_popup
+      !ev_name               TYPE string
+      !ev_cancel             TYPE abap_bool
     RAISING
       zcx_abapgit_exception .
   METHODS branch_list_popup
@@ -66,7 +63,7 @@ INTERFACE zif_abapgit_popups
     IMPORTING
       !iv_url            TYPE string
       !iv_package        TYPE devclass OPTIONAL
-      !iv_branch         TYPE string DEFAULT 'refs/heads/master'
+      !iv_branch         TYPE string DEFAULT zif_abapgit_definitions=>c_git_branch-master
       !iv_freeze_package TYPE abap_bool OPTIONAL
       !iv_freeze_url     TYPE abap_bool OPTIONAL
       !iv_title          TYPE clike DEFAULT 'New Online Project'
@@ -107,23 +104,23 @@ INTERFACE zif_abapgit_popups
     RETURNING
       VALUE(rs_transport_branch) TYPE zif_abapgit_definitions=>ty_transport_to_branch
     RAISING
-      zcx_abapgit_exception.
+      zcx_abapgit_exception .
   METHODS popup_to_select_transports
     RETURNING
       VALUE(rt_trkorr) TYPE trwbo_request_headers .
   METHODS popup_to_select_from_list
     IMPORTING
       !it_list               TYPE STANDARD TABLE
-      !iv_title              TYPE lvc_title        DEFAULT space
-      !iv_header_text        TYPE csequence        DEFAULT space
-      !iv_start_column       TYPE i                DEFAULT 2
-      !iv_end_column         TYPE i                DEFAULT 65
-      !iv_start_line         TYPE i                DEFAULT 8
-      !iv_end_line           TYPE i                DEFAULT 20
-      !iv_striped_pattern    TYPE abap_bool        DEFAULT abap_false
-      !iv_optimize_col_width TYPE abap_bool        DEFAULT abap_true
+      !iv_title              TYPE lvc_title DEFAULT space
+      !iv_header_text        TYPE csequence DEFAULT space
+      !iv_start_column       TYPE i DEFAULT 2
+      !iv_end_column         TYPE i DEFAULT 65
+      !iv_start_line         TYPE i DEFAULT 8
+      !iv_end_line           TYPE i DEFAULT 20
+      !iv_striped_pattern    TYPE abap_bool DEFAULT abap_false
+      !iv_optimize_col_width TYPE abap_bool DEFAULT abap_true
       !iv_selection_mode     TYPE salv_de_constant DEFAULT if_salv_c_selection_mode=>multiple
-      !iv_select_column_text TYPE csequence        DEFAULT space
+      !iv_select_column_text TYPE csequence DEFAULT space
       !it_columns_to_display TYPE zif_abapgit_definitions=>ty_alv_column_tt
     EXPORTING
       VALUE(et_list)         TYPE STANDARD TABLE
@@ -138,27 +135,35 @@ INTERFACE zif_abapgit_popups
       !cv_show_popup TYPE char01
     RAISING
       zcx_abapgit_exception .
-  METHODS package_popup_callback
-    IMPORTING
-      !iv_code       TYPE clike
-    CHANGING
-      !ct_fields     TYPE zif_abapgit_definitions=>ty_sval_tt
-      !cs_error      TYPE svale
-      !cv_show_popup TYPE char01
-    RAISING
-      zcx_abapgit_exception .
   METHODS popup_transport_request
     IMPORTING
       !is_transport_type  TYPE zif_abapgit_definitions=>ty_transport_type
     RETURNING
       VALUE(rv_transport) TYPE trkorr
     RAISING
-      zcx_abapgit_exception.
+      zcx_abapgit_exception .
   METHODS popup_proxy_bypass
     IMPORTING
       !it_proxy_bypass       TYPE zif_abapgit_definitions=>ty_range_proxy_bypass_url
     RETURNING
       VALUE(rt_proxy_bypass) TYPE zif_abapgit_definitions=>ty_range_proxy_bypass_url
     RAISING
-      zcx_abapgit_exception.
+      zcx_abapgit_exception .
+  METHODS choose_pr_popup
+    IMPORTING
+      !it_pulls      TYPE zif_abapgit_pr_enum_provider=>ty_pull_requests
+    RETURNING
+      VALUE(rs_pull) TYPE zif_abapgit_pr_enum_provider=>ty_pull_request
+    RAISING
+      zcx_abapgit_exception .
+  METHODS popup_perf_test_parameters
+    EXPORTING
+      !et_object_type_filter         TYPE zif_abapgit_definitions=>ty_object_type_range
+      !et_object_name_filter         TYPE zif_abapgit_definitions=>ty_object_name_range
+    CHANGING
+      !cv_package                    TYPE devclass
+      !cv_include_sub_packages       TYPE abap_bool
+      !cv_serialize_master_lang_only TYPE abap_bool
+    RAISING
+      zcx_abapgit_exception .
 ENDINTERFACE.

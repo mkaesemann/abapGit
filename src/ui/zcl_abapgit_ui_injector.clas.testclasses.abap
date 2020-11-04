@@ -40,10 +40,6 @@ CLASS ltcl_abapgit_popups_mock IMPLEMENTATION.
 
   ENDMETHOD.
 
-  METHOD zif_abapgit_popups~package_popup_callback.
-
-  ENDMETHOD.
-
   METHOD zif_abapgit_popups~popup_folder_logic.
 
   ENDMETHOD.
@@ -84,10 +80,6 @@ CLASS ltcl_abapgit_popups_mock IMPLEMENTATION.
 
   ENDMETHOD.
 
-  METHOD zif_abapgit_popups~repo_new_offline.
-
-  ENDMETHOD.
-
   METHOD zif_abapgit_popups~repo_popup.
 
   ENDMETHOD.
@@ -100,6 +92,13 @@ CLASS ltcl_abapgit_popups_mock IMPLEMENTATION.
 
   ENDMETHOD.
 
+  METHOD zif_abapgit_popups~choose_pr_popup.
+
+  ENDMETHOD.
+
+  METHOD zif_abapgit_popups~popup_perf_test_parameters.
+
+  ENDMETHOD.
 ENDCLASS.
 
 CLASS ltcl_no_dependency_injection IMPLEMENTATION.

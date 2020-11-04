@@ -64,14 +64,14 @@ CLASS zcl_abapgit_objects_super DEFINITION PUBLIC ABSTRACT.
         !iv_package TYPE devclass .
     METHODS serialize_longtexts
       IMPORTING
-        !io_xml         TYPE REF TO zcl_abapgit_xml_output
+        !ii_xml         TYPE REF TO zif_abapgit_xml_output
         !iv_longtext_id TYPE dokil-id OPTIONAL
-        !it_dokil       TYPE zif_abapgit_definitions=>tty_dokil OPTIONAL
+        !it_dokil       TYPE zif_abapgit_definitions=>ty_dokil_tt OPTIONAL
       RAISING
         zcx_abapgit_exception .
     METHODS deserialize_longtexts
       IMPORTING
-        !io_xml TYPE REF TO zcl_abapgit_xml_input
+        !ii_xml TYPE REF TO zif_abapgit_xml_input
       RAISING
         zcx_abapgit_exception .
     METHODS delete_longtexts
@@ -226,7 +226,7 @@ CLASS ZCL_ABAPGIT_OBJECTS_SUPER IMPLEMENTATION.
   METHOD deserialize_longtexts.
 
     zcl_abapgit_factory=>get_longtexts( )->deserialize(
-        io_xml             = io_xml
+        ii_xml             = ii_xml
         iv_master_language = mv_language ).
 
   ENDMETHOD.
@@ -269,7 +269,7 @@ CLASS ZCL_ABAPGIT_OBJECTS_SUPER IMPLEMENTATION.
     REPLACE FIRST OCCURRENCE OF 'ZCL_ABAPGIT' IN lv_class WITH 'LCL'.
 
     rs_metadata-class = lv_class.
-    rs_metadata-version = 'v1.0.0' ##no_text.
+    rs_metadata-version = 'v1.0.0'.
 
   ENDMETHOD.
 
@@ -359,7 +359,7 @@ CLASS ZCL_ABAPGIT_OBJECTS_SUPER IMPLEMENTATION.
         iv_object_name = ms_item-obj_name
         iv_longtext_id = iv_longtext_id
         it_dokil       = it_dokil
-        io_xml         = io_xml  ).
+        ii_xml         = ii_xml  ).
 
   ENDMETHOD.
 

@@ -5,12 +5,11 @@
    <VSEOCLASS>
     <CLSNAME>ZCL_ABAPGIT_OBJECT_SCVI</CLSNAME>
     <LANGU>E</LANGU>
-    <DESCRIPT>Object: Screen Variants</DESCRIPT>
+    <DESCRIPT>SCVI - Screen variants</DESCRIPT>
     <STATE>1</STATE>
     <CLSCCINCL>X</CLSCCINCL>
     <FIXPT>X</FIXPT>
     <UNICODE>X</UNICODE>
-    <RSTAT>K</RSTAT>
    </VSEOCLASS>
   </asx:values>
  </asx:abap>

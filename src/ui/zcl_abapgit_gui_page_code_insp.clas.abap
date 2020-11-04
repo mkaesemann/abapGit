@@ -24,13 +24,6 @@ CLASS zcl_abapgit_gui_page_code_insp DEFINITION PUBLIC FINAL CREATE PUBLIC
       render_content   REDEFINITION.
 
   PRIVATE SECTION.
-    CONSTANTS:
-      BEGIN OF c_actions,
-        stage  TYPE string VALUE 'stage' ##NO_TEXT,
-        commit TYPE string VALUE 'commit' ##NO_TEXT,
-        rerun  TYPE string VALUE 'rerun' ##NO_TEXT,
-      END OF c_actions.
-
     DATA:
       mo_stage         TYPE REF TO zcl_abapgit_stage,
       mv_check_variant TYPE sci_chkv.
@@ -63,7 +56,6 @@ CLASS zcl_abapgit_gui_page_code_insp DEFINITION PUBLIC FINAL CREATE PUBLIC
       determine_check_variant
         RAISING
           zcx_abapgit_exception.
-
 ENDCLASS.
 
 
@@ -109,11 +101,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_CODE_INSP IMPLEMENTATION.
 
     DATA: lv_opt TYPE c LENGTH 1.
 
-    CREATE OBJECT ro_menu.
-
-    ro_menu->add( iv_txt = 'Re-Run'
-                  iv_act = c_actions-rerun
-                  iv_cur = abap_false ) ##NO_TEXT.
+    ro_menu = build_base_menu( ).
 
     IF is_stage_allowed( ) = abap_false.
       lv_opt = zif_abapgit_html=>c_html_opt-crossout.
@@ -131,14 +119,14 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_CODE_INSP IMPLEMENTATION.
       ro_menu->add( iv_txt = 'Commit'
                     iv_act = c_actions-commit
                     iv_cur = abap_false
-                    iv_opt = lv_opt ) ##NO_TEXT.
+                    iv_opt = lv_opt ).
 
     ELSE.
 
       ro_menu->add( iv_txt = 'Stage'
                     iv_act = c_actions-stage
                     iv_cur = abap_false
-                    iv_opt = lv_opt ) ##NO_TEXT.
+                    iv_opt = lv_opt ).
 
     ENDIF.
 
@@ -187,6 +175,11 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_CODE_INSP IMPLEMENTATION.
 
     CREATE OBJECT ri_html TYPE zcl_abapgit_html.
 
+    ri_html->add( `<div class="repo">` ).
+    ri_html->add( zcl_abapgit_gui_chunk_lib=>render_repo_top( io_repo        = mo_repo
+                                                              iv_show_commit = abap_false ) ).
+    ri_html->add( `</div>` ).
+
     IF mv_check_variant IS INITIAL.
       ri_html->add( zcl_abapgit_gui_chunk_lib=>render_error( iv_error = 'No check variant supplied.' ) ).
       RETURN.
@@ -194,16 +187,11 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_CODE_INSP IMPLEMENTATION.
 
     gui_services( )->get_hotkeys_ctl( )->register_hotkeys( me ).
 
-    ri_html->add( '<div class="ci-head">' ).
-    ri_html->add( |Code inspector check variant: <span class="ci-variant">{ mv_check_variant }</span>| ).
-    ri_html->add( |<div class="float-right package-name">{
-      zcl_abapgit_html=>icon( 'box/grey70' ) }<span>{
-      mo_repo->get_package( ) }</span></div>| ).
-    ri_html->add( '</div>' ).
+    ri_html->add( render_variant( mv_check_variant ) ).
 
     IF lines( mt_result ) = 0.
       ri_html->add( '<div class="dummydiv success">' ).
-      ri_html->add( zcl_abapgit_html=>icon( 'check' ) ).
+      ri_html->add( ri_html->icon( 'check' ) ).
       ri_html->add( 'No code inspector findings' ).
       ri_html->add( '</div>' ).
     ELSE.
@@ -234,7 +222,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_CODE_INSP IMPLEMENTATION.
 
     DATA: lo_repo_online TYPE REF TO zcl_abapgit_repo_online.
 
-    CASE iv_action.
+    CASE ii_event->mv_action.
       WHEN c_actions-stage.
 
         lo_repo_online ?= mo_repo.
@@ -243,15 +231,14 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_CODE_INSP IMPLEMENTATION.
           " we need to refresh as the source might have changed
           lo_repo_online->refresh( ).
 
-          CREATE OBJECT ei_page TYPE zcl_abapgit_gui_page_stage
+          CREATE OBJECT rs_handled-page TYPE zcl_abapgit_gui_page_stage
             EXPORTING
               io_repo = lo_repo_online.
-          ev_state = zcl_abapgit_gui=>c_event_state-new_page.
+          rs_handled-state = zcl_abapgit_gui=>c_event_state-new_page.
 
         ELSE.
 
-          ei_page = me.
-          ev_state = zcl_abapgit_gui=>c_event_state-no_more_act.
+          rs_handled-state = zcl_abapgit_gui=>c_event_state-no_more_act.
 
         ENDIF.
 
@@ -261,34 +248,25 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_CODE_INSP IMPLEMENTATION.
 
         IF is_stage_allowed( ) = abap_true.
 
-          CREATE OBJECT ei_page TYPE zcl_abapgit_gui_page_commit
+          CREATE OBJECT rs_handled-page TYPE zcl_abapgit_gui_page_commit
             EXPORTING
               io_repo  = lo_repo_online
               io_stage = mo_stage.
-          ev_state = zcl_abapgit_gui=>c_event_state-new_page.
+          rs_handled-state = zcl_abapgit_gui=>c_event_state-new_page.
 
         ELSE.
 
-          ei_page = me.
-          ev_state = zcl_abapgit_gui=>c_event_state-no_more_act.
+          rs_handled-state = zcl_abapgit_gui=>c_event_state-no_more_act.
 
         ENDIF.
 
       WHEN c_actions-rerun.
 
         run_code_inspector( ).
+        rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
 
-        ei_page = me.
-        ev_state = zcl_abapgit_gui=>c_event_state-re_render.
       WHEN OTHERS.
-        super->zif_abapgit_gui_event_handler~on_event(
-          EXPORTING
-            iv_action             = iv_action
-            iv_getdata            = iv_getdata
-            it_postdata           = it_postdata
-          IMPORTING
-            ei_page               = ei_page
-            ev_state              = ev_state ).
+        rs_handled = super->zif_abapgit_gui_event_handler~on_event( ii_event ).
     ENDCASE.
 
   ENDMETHOD.

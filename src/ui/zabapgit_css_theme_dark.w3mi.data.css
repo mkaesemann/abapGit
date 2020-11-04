@@ -47,6 +47,20 @@ table.repo_tab {
     background-color: var(--theme-background-color);
 }
 
+/* ABAPGIT OBJECTS */
+span.user {
+  background-color: #4c6782;
+  border-color: #7491b2;
+}
+span.package {
+  background-color: #705a6d;
+  border-color: #987095;
+}
+span.transport {
+  background-color: #456d5d;
+  border-color: #60a087;
+}
+
 /* PANELS */
 #debug-output { color: var(--theme-greyscale-dark); }
 
@@ -64,7 +78,8 @@ div.repo { background-color: var(--theme-container-background-color); }
 .repo_name span.url  { color: var(--theme-greyscale-medium); }
 .repo_name a.url { color: var(--theme-greyscale-medium); }
 .repo_attr { color: var(--theme-primary-font-color); }
-.repo_attr span.branch_branch {
+
+span.branch_branch {
   border-color: var(--theme-greyscale-medium);
   background-color: #777777;
 }

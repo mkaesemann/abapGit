@@ -39,12 +39,12 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_OBJECT_SSFO IMPLEMENTATION.
+CLASS zcl_abapgit_object_ssfo IMPLEMENTATION.
 
 
   METHOD code_item_section_handling.
-    CONSTANTS: lc_node_item TYPE string VALUE 'item' ##NO_TEXT.
-    CONSTANTS: lc_node_text TYPE string VALUE '#text' ##NO_TEXT.
+    CONSTANTS: lc_node_item TYPE string VALUE 'item'.
+    CONSTANTS: lc_node_text TYPE string VALUE '#text'.
 
     IF iv_name IN get_range_node_codes( ).
       cv_within_code_section = abap_true.
@@ -82,7 +82,7 @@ CLASS ZCL_ABAPGIT_OBJECT_SSFO IMPLEMENTATION.
         old TYPE string,
         new TYPE string,
       END OF ty_id_mapping,
-      tty_id_mapping TYPE HASHED TABLE OF ty_id_mapping
+      ty_id_mappings TYPE HASHED TABLE OF ty_id_mapping
                           WITH UNIQUE KEY old.
 
     DATA: lv_name       TYPE string,
@@ -90,7 +90,7 @@ CLASS ZCL_ABAPGIT_OBJECT_SSFO IMPLEMENTATION.
           li_node       TYPE REF TO if_ixml_node,
           li_attr       TYPE REF TO if_ixml_named_node_map,
           li_iterator   TYPE REF TO if_ixml_node_iterator,
-          lt_id_mapping TYPE tty_id_mapping,
+          lt_id_mapping TYPE ty_id_mappings,
           ls_id_mapping LIKE LINE OF lt_id_mapping.
 
     li_iterator = ii_xml_doc->create_iterator( ).
@@ -146,20 +146,20 @@ CLASS ZCL_ABAPGIT_OBJECT_SSFO IMPLEMENTATION.
 
     DATA: ls_range_node_code TYPE LINE OF ty_string_range.
 
-    IF me->gt_range_node_codes IS INITIAL.
+    IF gt_range_node_codes IS INITIAL.
       ls_range_node_code-sign   = 'I'.
       ls_range_node_code-option = 'EQ'.
       ls_range_node_code-low    = 'CODE'.
-      INSERT ls_range_node_code INTO TABLE me->gt_range_node_codes.
+      INSERT ls_range_node_code INTO TABLE gt_range_node_codes.
       ls_range_node_code-low    = 'GTYPES'.
-      INSERT ls_range_node_code INTO TABLE me->gt_range_node_codes.
+      INSERT ls_range_node_code INTO TABLE gt_range_node_codes.
       ls_range_node_code-low    = 'GCODING'.
-      INSERT ls_range_node_code INTO TABLE me->gt_range_node_codes.
+      INSERT ls_range_node_code INTO TABLE gt_range_node_codes.
       ls_range_node_code-low    = 'FCODING'.
-      INSERT ls_range_node_code INTO TABLE me->gt_range_node_codes.
+      INSERT ls_range_node_code INTO TABLE gt_range_node_codes.
     ENDIF.
 
-    rt_range_node_codes = me->gt_range_node_codes.
+    rt_range_node_codes = gt_range_node_codes.
 
   ENDMETHOD.
 
@@ -410,8 +410,7 @@ CLASS ZCL_ABAPGIT_OBJECT_SSFO IMPLEMENTATION.
           li_iterator            TYPE REF TO if_ixml_node_iterator,
           lv_formname            TYPE tdsfname,
           li_ixml                TYPE REF TO if_ixml,
-          li_xml_doc             TYPE REF TO if_ixml_document,
-          lv_within_code_section TYPE abap_bool.
+          li_xml_doc             TYPE REF TO if_ixml_document.
 
     li_ixml = cl_ixml=>create( ).
     li_xml_doc = li_ixml->create_document( ).
@@ -452,10 +451,10 @@ CLASS ZCL_ABAPGIT_OBJECT_SSFO IMPLEMENTATION.
     li_element->set_attribute(
       name      = 'sf'
       namespace = 'xmlns'
-      value     = 'urn:sap-com:SmartForms:2000:internal-structure' ). "#EC NOTEXT
+      value     = 'urn:sap-com:SmartForms:2000:internal-structure' ).
     li_element->set_attribute(
       name  = 'xmlns'
-      value = 'urn:sap-com:sdixml-ifr:2000' ).              "#EC NOTEXT
+      value = 'urn:sap-com:sdixml-ifr:2000' ).
 
     io_xml->set_raw( li_xml_doc->get_root_element( ) ).
 

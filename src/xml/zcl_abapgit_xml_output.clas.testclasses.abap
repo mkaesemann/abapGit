@@ -10,18 +10,18 @@ CLASS ltcl_xml_output DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS.
       add_simple_object FOR TESTING
         RAISING zcx_abapgit_exception.
 
-    TYPES: BEGIN OF st_old,
+    TYPES: BEGIN OF ty_old,
              foo TYPE i,
              bar TYPE c LENGTH 1,
-           END OF st_old.
+           END OF ty_old.
 
 ENDCLASS.
 CLASS ltcl_xml_output IMPLEMENTATION.
 
   METHOD add_simple_object.
 
-    DATA: ls_input       TYPE st_old,
-          ls_result      TYPE st_old,
+    DATA: ls_input       TYPE ty_old,
+          ls_result      TYPE ty_old,
           lv_value       TYPE string,
           li_xml_element TYPE REF TO if_ixml_element,
           lo_output      TYPE REF TO zcl_abapgit_xml_output.
@@ -30,7 +30,7 @@ CLASS ltcl_xml_output IMPLEMENTATION.
     ls_input-bar = 'A'.
 
     CREATE OBJECT lo_output.
-    lo_output->add( iv_name = 'DATA'
+    lo_output->zif_abapgit_xml_output~add( iv_name = 'DATA'
                     ig_data = ls_input ).
 
     li_xml_element = lo_output->mi_xml_doc->find_from_name( 'FOO' ).
@@ -47,7 +47,7 @@ CLASS ltcl_xml_output IMPLEMENTATION.
   ENDMETHOD.
   METHOD render_xml_string.
 
-    DATA: ls_input          TYPE st_old,
+    DATA: ls_input          TYPE ty_old,
           lv_value          TYPE string,
           lv_xml            TYPE string,
           lo_output         TYPE REF TO zcl_abapgit_xml_output,
@@ -67,10 +67,10 @@ CLASS ltcl_xml_output IMPLEMENTATION.
     REPLACE ALL OCCURRENCES OF '#' IN lv_value WITH cl_abap_char_utilities=>newline.
 
     CREATE OBJECT lo_output.
-    lo_output->add( iv_name = 'DATA'
-                    ig_data = ls_input ).
+    lo_output->zif_abapgit_xml_output~add( iv_name = 'DATA'
+                                           ig_data = ls_input ).
 
-    lv_xml = lo_output->render( ).
+    lv_xml = lo_output->zif_abapgit_xml_output~render( ).
 
     lv_encoding = cl_abap_codepage=>sap_codepage( `UTF-16LE` ).
 

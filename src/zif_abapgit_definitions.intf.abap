@@ -8,6 +8,7 @@ INTERFACE zif_abapgit_definitions
     ty_bitbyte TYPE c LENGTH 8 .
   TYPES:
     ty_sha1    TYPE c LENGTH 40 .
+  TYPES: ty_sha1_tt TYPE STANDARD TABLE OF ty_sha1 WITH DEFAULT KEY .
   TYPES:
     ty_adler32 TYPE x LENGTH 4 .
   TYPES:
@@ -65,7 +66,7 @@ INTERFACE zif_abapgit_definitions
       hotkey       TYPE string,
     END OF ty_hotkey .
   TYPES:
-    tty_hotkey TYPE STANDARD TABLE OF ty_hotkey
+    ty_hotkey_tt TYPE STANDARD TABLE OF ty_hotkey
                     WITH NON-UNIQUE DEFAULT KEY
                     WITH NON-UNIQUE SORTED KEY action
                          COMPONENTS ui_component action.
@@ -159,7 +160,7 @@ INTERFACE zif_abapgit_definitions
       lstate     TYPE c LENGTH 1,
     END OF ty_repo_file .
   TYPES:
-    tt_repo_files TYPE STANDARD TABLE OF ty_repo_file WITH DEFAULT KEY .
+    ty_repo_file_tt TYPE STANDARD TABLE OF ty_repo_file WITH DEFAULT KEY .
   TYPES:
     ty_chmod TYPE c LENGTH 6 .
   TYPES:
@@ -228,6 +229,8 @@ INTERFACE zif_abapgit_definitions
     END OF ty_sotr .
   TYPES:
     ty_sotr_tt TYPE STANDARD TABLE OF ty_sotr WITH DEFAULT KEY .
+  TYPES:
+    ty_sotr_use_tt TYPE STANDARD TABLE OF sotr_use WITH DEFAULT KEY .
   TYPES:
     BEGIN OF ty_obj_attribute,
       cmpname   TYPE seocmpname,
@@ -325,7 +328,7 @@ INTERFACE zif_abapgit_definitions
       result_data TYPE xstring,
     END OF ty_merge_conflict .
   TYPES:
-    tt_merge_conflict TYPE STANDARD TABLE OF ty_merge_conflict WITH DEFAULT KEY .
+    ty_merge_conflict_tt TYPE STANDARD TABLE OF ty_merge_conflict WITH DEFAULT KEY .
   TYPES:
     BEGIN OF ty_repo_item,
       obj_type TYPE tadir-object,
@@ -337,10 +340,10 @@ INTERFACE zif_abapgit_definitions
       changes  TYPE i,
       lstate   TYPE c LENGTH 1,
       rstate   TYPE c LENGTH 1,
-      files    TYPE tt_repo_files,
+      files    TYPE ty_repo_file_tt,
     END OF ty_repo_item .
   TYPES:
-    tt_repo_items TYPE STANDARD TABLE OF ty_repo_item WITH DEFAULT KEY .
+    ty_repo_item_tt TYPE STANDARD TABLE OF ty_repo_item WITH DEFAULT KEY .
   TYPES:
     BEGIN OF ty_s_user_settings,
       max_lines              TYPE i,
@@ -348,27 +351,26 @@ INTERFACE zif_abapgit_definitions
       show_default_repo      TYPE abap_bool,
       link_hints_enabled     TYPE abap_bool,
       link_hint_key          TYPE c LENGTH 1,
-      hotkeys                TYPE tty_hotkey,
+      hotkeys                TYPE ty_hotkey_tt,
       parallel_proc_disabled TYPE abap_bool,
       icon_scaling           TYPE c LENGTH 1,
       ui_theme               TYPE string,
       hide_sapgui_hint       TYPE abap_bool,
+      activate_wo_popup      TYPE abap_bool,
     END OF ty_s_user_settings .
   TYPES:
-    tty_dokil TYPE STANDARD TABLE OF dokil
+    ty_dokil_tt TYPE STANDARD TABLE OF dokil
                          WITH NON-UNIQUE DEFAULT KEY .
   TYPES:
-    tty_lines TYPE STANDARD TABLE OF i
-                        WITH NON-UNIQUE DEFAULT KEY .
-  TYPES:
     BEGIN OF ty_col_spec,
-      tech_name    TYPE string,
-      display_name TYPE string,
-      css_class    TYPE string,
-      add_tz       TYPE abap_bool,
-      title        TYPE string,
+      tech_name      TYPE string,
+      display_name   TYPE string,
+      css_class      TYPE string,
+      add_tz         TYPE abap_bool,
+      title          TYPE string,
+      allow_order_by TYPE abap_bool,
     END OF ty_col_spec,
-    tty_col_spec TYPE STANDARD TABLE OF ty_col_spec
+    ty_col_spec_tt TYPE STANDARD TABLE OF ty_col_spec
                       WITH NON-UNIQUE KEY tech_name.
   TYPES:
     ty_proxy_bypass_url       TYPE c LENGTH 255,
@@ -390,7 +392,7 @@ INTERFACE zif_abapgit_definitions
   TYPES:
     BEGIN OF ty_deserialization,
       obj     TYPE REF TO zif_abapgit_object,
-      xml     TYPE REF TO zcl_abapgit_xml_input,
+      xml     TYPE REF TO zif_abapgit_xml_input,
       package TYPE devclass,
       item    TYPE ty_item,
     END OF ty_deserialization .
@@ -413,6 +415,9 @@ INTERFACE zif_abapgit_definitions
   TYPES:
     ty_step_data_tt TYPE STANDARD TABLE OF ty_step_data
                                 WITH DEFAULT KEY .
+  TYPES:
+    ty_object_type_range TYPE RANGE OF trobjtype,
+    ty_object_name_range TYPE RANGE OF sobj_name.
   CONSTANTS:
     BEGIN OF c_git_branch_type,
       branch          TYPE ty_git_branch_type VALUE 'HD',
@@ -421,6 +426,15 @@ INTERFACE zif_abapgit_definitions
       other           TYPE ty_git_branch_type VALUE 'ZZ',
     END OF c_git_branch_type .
   CONSTANTS c_head_name TYPE string VALUE 'HEAD' ##NO_TEXT.
+  CONSTANTS:
+    BEGIN OF c_git_branch,
+      master       TYPE string VALUE 'refs/heads/master',
+      prefix       TYPE string VALUE 'refs/',
+      heads_prefix TYPE string VALUE 'refs/heads/',
+      heads        TYPE string VALUE 'refs/heads/*',
+      tags_prefix  TYPE string VALUE 'refs/tags/',
+      tags         TYPE string VALUE 'refs/tags/*',
+    END OF c_git_branch.
   CONSTANTS:
     BEGIN OF c_diff,
       insert TYPE c LENGTH 1 VALUE 'I',
@@ -440,7 +454,7 @@ INTERFACE zif_abapgit_definitions
       unchanged TYPE c LENGTH 1 VALUE '',
       added     TYPE c LENGTH 1 VALUE 'A',
       modified  TYPE c LENGTH 1 VALUE 'M',
-      deleted   TYPE c LENGTH 1 VALUE 'D', "For future use
+      deleted   TYPE c LENGTH 1 VALUE 'D',
       mixed     TYPE c LENGTH 1 VALUE '*',
     END OF c_state .
   CONSTANTS:
@@ -449,8 +463,8 @@ INTERFACE zif_abapgit_definitions
       executable TYPE ty_chmod VALUE '100755',
       dir        TYPE ty_chmod VALUE '40000 ',
     END OF c_chmod .
-  CONSTANTS c_crlf TYPE abap_cr_lf VALUE cl_abap_char_utilities=>cr_lf ##NO_TEXT.
-  CONSTANTS c_newline TYPE abap_char1 VALUE cl_abap_char_utilities=>newline ##NO_TEXT.
+  CONSTANTS c_crlf TYPE c LENGTH 2 VALUE cl_abap_char_utilities=>cr_lf ##NO_TEXT.
+  CONSTANTS c_newline TYPE c LENGTH 1 VALUE cl_abap_char_utilities=>newline ##NO_TEXT.
   CONSTANTS c_english TYPE spras VALUE 'E' ##NO_TEXT.
   CONSTANTS c_root_dir TYPE string VALUE '/' ##NO_TEXT.
   CONSTANTS c_dot_abapgit TYPE string VALUE '.abapgit.xml' ##NO_TEXT.
@@ -481,8 +495,11 @@ INTERFACE zif_abapgit_definitions
       zip_package                   TYPE string VALUE 'zip_package',
       zip_transport                 TYPE string VALUE 'zip_transport',
       zip_object                    TYPE string VALUE 'zip_object',
+      performance_test              TYPE string VALUE 'performance_test',
+      ie_devtools                   TYPE string VALUE 'ie_devtools',
       git_pull                      TYPE string VALUE 'git_pull',
       git_reset                     TYPE string VALUE 'git_reset',
+      git_checkout_commit           TYPE string VALUE 'git_checkout_commit',
       git_branch_create             TYPE string VALUE 'git_branch_create',
       git_branch_switch             TYPE string VALUE 'git_branch_switch',
       git_branch_delete             TYPE string VALUE 'git_branch_delete',
@@ -509,6 +526,7 @@ INTERFACE zif_abapgit_definitions
       go_patch                      TYPE string VALUE 'go_patch',
       jump                          TYPE string VALUE 'jump',
       jump_transport                TYPE string VALUE 'jump_transport',
+      jump_user                     TYPE string VALUE 'jump_user',
       url                           TYPE string VALUE 'url',
       goto_source                   TYPE string VALUE 'goto_source',
       show_callstack                TYPE string VALUE 'show_callstack',
@@ -519,7 +537,6 @@ INTERFACE zif_abapgit_definitions
       documentation                 TYPE string VALUE 'documentation',
       changelog                     TYPE string VALUE 'changelog',
     END OF c_action.
-  CONSTANTS c_tag_prefix TYPE string VALUE 'refs/tags/' ##NO_TEXT.
   CONSTANTS c_spagpa_param_repo_key TYPE c LENGTH 20 VALUE 'REPO_KEY' ##NO_TEXT.
   CONSTANTS c_spagpa_param_package TYPE c LENGTH 20 VALUE 'PACKAGE' ##NO_TEXT.
   CONSTANTS gc_yes TYPE ty_yes_no VALUE 'Y'.

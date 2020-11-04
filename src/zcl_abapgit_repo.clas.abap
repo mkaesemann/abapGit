@@ -5,6 +5,8 @@ CLASS zcl_abapgit_repo DEFINITION
 
   PUBLIC SECTION.
 
+    CONSTANTS c_new_repo_size TYPE i VALUE 3.
+
     METHODS bind_listener
       IMPORTING
         !ii_listener TYPE REF TO zif_abapgit_repo_listener .
@@ -159,19 +161,22 @@ CLASS zcl_abapgit_repo DEFINITION
         !it_checksums       TYPE zif_abapgit_persistence=>ty_local_checksum_tt OPTIONAL
         !iv_url             TYPE zif_abapgit_persistence=>ty_repo-url OPTIONAL
         !iv_branch_name     TYPE zif_abapgit_persistence=>ty_repo-branch_name OPTIONAL
+        !iv_selected_commit TYPE zif_abapgit_persistence=>ty_repo-selected_commit OPTIONAL
         !iv_head_branch     TYPE zif_abapgit_persistence=>ty_repo-head_branch OPTIONAL
         !iv_offline         TYPE zif_abapgit_persistence=>ty_repo-offline OPTIONAL
         !is_dot_abapgit     TYPE zif_abapgit_persistence=>ty_repo-dot_abapgit OPTIONAL
         !is_local_settings  TYPE zif_abapgit_persistence=>ty_repo-local_settings OPTIONAL
         !iv_deserialized_at TYPE zif_abapgit_persistence=>ty_repo-deserialized_at OPTIONAL
         !iv_deserialized_by TYPE zif_abapgit_persistence=>ty_repo-deserialized_by OPTIONAL
+        !iv_switched_origin TYPE zif_abapgit_persistence=>ty_repo-switched_origin OPTIONAL
       RAISING
         zcx_abapgit_exception .
     METHODS reset_remote .
+
   PRIVATE SECTION.
 
-    DATA mi_listener TYPE REF TO zif_abapgit_repo_listener.
-    DATA mo_apack_reader TYPE REF TO zcl_abapgit_apack_reader.
+    DATA mi_listener TYPE REF TO zif_abapgit_repo_listener .
+    DATA mo_apack_reader TYPE REF TO zcl_abapgit_apack_reader .
 
     METHODS get_local_checksums
       RETURNING
@@ -194,11 +199,18 @@ CLASS zcl_abapgit_repo DEFINITION
     METHODS update_last_deserialize
       RAISING
         zcx_abapgit_exception .
+    METHODS check_for_restart .
+    METHODS check_write_protect
+      RAISING
+        zcx_abapgit_exception .
+    METHODS check_language
+      RAISING
+        zcx_abapgit_exception .
 ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
+CLASS zcl_abapgit_repo IMPLEMENTATION.
 
 
   METHOD bind_listener.
@@ -231,6 +243,56 @@ CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
     rs_file-data     = get_dot_abapgit( )->serialize( ).
     rs_file-sha1     = zcl_abapgit_hash=>sha1( iv_type = zif_abapgit_definitions=>c_type-blob
                                                iv_data = rs_file-data ).
+
+  ENDMETHOD.
+
+
+  METHOD check_for_restart.
+
+    CONSTANTS:
+      lc_abapgit_prog TYPE progname VALUE `ZABAPGIT`.
+
+    " If abapGit was used to update itself, then restart to avoid LOAD_PROGRAM_&_MISMATCH dumps
+    " because abapGit code was changed at runtime
+    IF zcl_abapgit_ui_factory=>get_gui_functions( )->gui_is_available( ) = abap_true AND
+       zcl_abapgit_url=>is_abapgit_repo( ms_data-url ) = abap_true AND
+       sy-batch = abap_false AND
+       sy-cprog = lc_abapgit_prog.
+
+      IF zcl_abapgit_persist_settings=>get_instance( )->read( )->get_show_default_repo( ) = abap_false.
+        MESSAGE 'abapGit was updated and will restart itself' TYPE 'I'.
+      ENDIF.
+
+      SUBMIT (sy-cprog).
+
+    ENDIF.
+
+  ENDMETHOD.
+
+
+  METHOD check_language.
+
+    DATA lv_master_language TYPE spras.
+
+    " assumes find_remote_dot_abapgit has been called before
+    lv_master_language = get_dot_abapgit( )->get_master_language( ).
+
+    IF lv_master_language <> sy-langu.
+      zcx_abapgit_exception=>raise( |Current login language |
+                                 && |'{ zcl_abapgit_convert=>conversion_exit_isola_output( sy-langu ) }'|
+                                 && | does not match master language |
+                                 && |'{ zcl_abapgit_convert=>conversion_exit_isola_output( lv_master_language ) }'.|
+                                 && | Run 'Advanced' > 'Open in master language'| ).
+    ENDIF.
+
+  ENDMETHOD.
+
+
+  METHOD check_write_protect.
+
+    IF get_local_settings( )-write_protected = abap_true.
+      zcx_abapgit_exception=>raise( 'Cannot deserialize. Local code is write-protected by repo config' ).
+    ENDIF.
 
   ENDMETHOD.
 
@@ -270,7 +332,11 @@ CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
     DATA: lt_updated_files TYPE zif_abapgit_definitions=>ty_file_signatures_tt,
           lx_error         TYPE REF TO zcx_abapgit_exception.
 
-    deserialize_checks( ).
+    find_remote_dot_abapgit( ).
+    find_remote_dot_apack( ).
+
+    check_write_protect( ).
+    check_language( ).
 
     IF is_checks-requirements-met = zif_abapgit_definitions=>gc_no AND is_checks-requirements-decision IS INITIAL.
       zcx_abapgit_exception=>raise( 'Requirements not met and undecided' ).
@@ -305,32 +371,21 @@ CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
 
     COMMIT WORK AND WAIT.
 
+    check_for_restart( ).
+
   ENDMETHOD.
 
 
   METHOD deserialize_checks.
 
-    DATA: lt_requirements    TYPE zif_abapgit_dot_abapgit=>ty_requirement_tt,
-          lt_dependencies    TYPE zif_abapgit_apack_definitions=>tt_dependencies,
-          lv_master_language TYPE spras,
-          lv_logon_language  TYPE spras.
-
+    DATA: lt_requirements TYPE zif_abapgit_dot_abapgit=>ty_requirement_tt,
+          lt_dependencies TYPE zif_abapgit_apack_definitions=>ty_dependencies.
 
     find_remote_dot_abapgit( ).
     find_remote_dot_apack( ).
 
-    lv_master_language = get_dot_abapgit( )->get_master_language( ).
-    lv_logon_language  = sy-langu.
-
-    IF get_local_settings( )-write_protected = abap_true.
-      zcx_abapgit_exception=>raise( 'Cannot deserialize. Local code is write-protected by repo config' ).
-    ELSEIF lv_master_language <> lv_logon_language.
-      zcx_abapgit_exception=>raise( |Current login language |
-                                 && |'{ zcl_abapgit_convert=>conversion_exit_isola_output( lv_logon_language ) }'|
-                                 && | does not match master language |
-                                 && |'{ zcl_abapgit_convert=>conversion_exit_isola_output( lv_master_language ) }'.|
-                                 && | Run 'Advanced' > 'Open in master language'| ).
-    ENDIF.
+    check_write_protect( ).
+    check_language( ).
 
     rs_checks = zcl_abapgit_objects=>deserialize_checks( me ).
 
@@ -356,7 +411,7 @@ CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
       ro_dot = zcl_abapgit_dot_abapgit=>deserialize( <ls_remote>-data ).
       set_dot_abapgit( ro_dot ).
       COMMIT WORK AND WAIT. " to release lock
-    ELSEIF lines( mt_remote ) > 3.
+    ELSEIF lines( mt_remote ) > c_new_repo_size.
       " Less files means it's a new repo (with just readme and license, for example) which is ok
       zcx_abapgit_exception=>raise( |Cannot find .abapgit.xml - Is this an abapGit repo?| ).
     ENDIF.
@@ -645,7 +700,7 @@ CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
 
   METHOD set.
 
-* TODO: refactor
+* TODO: refactor, maybe use zcl_abapgit_string_map ?
 
     DATA: ls_mask TYPE zif_abapgit_persistence=>ty_repo_meta_mask.
 
@@ -653,12 +708,14 @@ CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
     ASSERT it_checksums IS SUPPLIED
       OR iv_url IS SUPPLIED
       OR iv_branch_name IS SUPPLIED
+      OR iv_selected_commit IS SUPPLIED
       OR iv_head_branch IS SUPPLIED
       OR iv_offline IS SUPPLIED
       OR is_dot_abapgit IS SUPPLIED
       OR is_local_settings IS SUPPLIED
       OR iv_deserialized_by IS SUPPLIED
-      OR iv_deserialized_at IS SUPPLIED.
+      OR iv_deserialized_at IS SUPPLIED
+      OR iv_switched_origin IS SUPPLIED.
 
 
     IF it_checksums IS SUPPLIED.
@@ -674,6 +731,11 @@ CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
     IF iv_branch_name IS SUPPLIED.
       ms_data-branch_name = iv_branch_name.
       ls_mask-branch_name = abap_true.
+    ENDIF.
+
+    IF iv_selected_commit IS SUPPLIED.
+      ms_data-selected_commit = iv_selected_commit.
+      ls_mask-selected_commit = abap_true.
     ENDIF.
 
     IF iv_head_branch IS SUPPLIED.
@@ -701,6 +763,11 @@ CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
       ms_data-deserialized_by = iv_deserialized_by.
       ls_mask-deserialized_at = abap_true.
       ls_mask-deserialized_by = abap_true.
+    ENDIF.
+
+    IF iv_switched_origin IS SUPPLIED.
+      ms_data-switched_origin = iv_switched_origin.
+      ls_mask-switched_origin = abap_true.
     ENDIF.
 
     notify_listener( ls_mask ).
@@ -754,11 +821,11 @@ CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
     ENDIF.
 
     IF iv_offline = abap_true. " On-line -> OFFline
-      set(
-        iv_url         = zcl_abapgit_url=>name( ms_data-url )
-        iv_branch_name = ''
-        iv_head_branch = ''
-        iv_offline     = abap_true ).
+      set( iv_url             = zcl_abapgit_url=>name( ms_data-url )
+           iv_branch_name     = ''
+           iv_selected_commit = ''
+           iv_head_branch     = ''
+           iv_offline         = abap_true ).
     ELSE. " OFFline -> On-line
       set( iv_offline = abap_false ).
     ENDIF.

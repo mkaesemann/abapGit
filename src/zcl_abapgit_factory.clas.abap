@@ -39,6 +39,9 @@ CLASS zcl_abapgit_factory DEFINITION
     CLASS-METHODS get_longtexts
       RETURNING
         VALUE(ri_longtexts) TYPE REF TO zif_abapgit_longtexts .
+    CLASS-METHODS get_http_agent
+      RETURNING
+        VALUE(ri_http_agent) TYPE REF TO zif_abapgit_http_agent .
   PROTECTED SECTION.
   PRIVATE SECTION.
 
@@ -48,32 +51,25 @@ CLASS zcl_abapgit_factory DEFINITION
         instance TYPE REF TO zif_abapgit_sap_package,
       END OF ty_sap_package .
     TYPES:
-      tty_sap_package TYPE HASHED TABLE OF ty_sap_package
+      ty_sap_packages TYPE HASHED TABLE OF ty_sap_package
                                     WITH UNIQUE KEY package .
     TYPES:
-      BEGIN OF ty_code_inspector,
+      BEGIN OF ty_code_inspector_pack,
         package  TYPE devclass,
         instance TYPE REF TO zif_abapgit_code_inspector,
-      END OF ty_code_inspector .
+      END OF ty_code_inspector_pack .
     TYPES:
-      tty_code_inspector TYPE HASHED TABLE OF ty_code_inspector
+      ty_code_inspector_packs TYPE HASHED TABLE OF ty_code_inspector_pack
                                        WITH UNIQUE KEY package .
-    TYPES:
-      BEGIN OF ty_longtexts,
-        longtexts_name TYPE string,
-        instance       TYPE REF TO zcl_abapgit_longtexts,
-      END OF ty_longtexts .
-    TYPES:
-      tty_longtexts TYPE HASHED TABLE OF ty_longtexts
-                           WITH UNIQUE KEY longtexts_name .
 
     CLASS-DATA gi_tadir TYPE REF TO zif_abapgit_tadir .
-    CLASS-DATA gt_sap_package TYPE tty_sap_package .
-    CLASS-DATA gt_code_inspector TYPE tty_code_inspector .
+    CLASS-DATA gt_sap_package TYPE ty_sap_packages .
+    CLASS-DATA gt_code_inspector TYPE ty_code_inspector_packs .
     CLASS-DATA gi_stage_logic TYPE REF TO zif_abapgit_stage_logic .
     CLASS-DATA gi_cts_api TYPE REF TO zif_abapgit_cts_api .
     CLASS-DATA gi_environment TYPE REF TO zif_abapgit_environment .
     CLASS-DATA gi_longtext TYPE REF TO zif_abapgit_longtexts .
+    CLASS-DATA gi_http_agent TYPE REF TO zif_abapgit_http_agent .
 ENDCLASS.
 
 
@@ -94,7 +90,7 @@ CLASS ZCL_ABAPGIT_FACTORY IMPLEMENTATION.
   METHOD get_code_inspector.
 
     DATA: ls_code_inspector LIKE LINE OF gt_code_inspector.
-    FIELD-SYMBOLS: <ls_code_inspector> TYPE ty_code_inspector.
+    FIELD-SYMBOLS: <ls_code_inspector> TYPE ty_code_inspector_pack.
 
     READ TABLE gt_code_inspector ASSIGNING <ls_code_inspector>
       WITH TABLE KEY package = iv_package.
@@ -130,6 +126,17 @@ CLASS ZCL_ABAPGIT_FACTORY IMPLEMENTATION.
       CREATE OBJECT gi_environment TYPE zcl_abapgit_environment.
     ENDIF.
     ri_environment = gi_environment.
+  ENDMETHOD.
+
+
+  METHOD get_http_agent.
+
+    IF gi_http_agent IS BOUND.
+      ri_http_agent = gi_http_agent.
+    ELSE.
+      ri_http_agent = zcl_abapgit_http_agent=>create( ).
+    ENDIF.
+
   ENDMETHOD.
 
 

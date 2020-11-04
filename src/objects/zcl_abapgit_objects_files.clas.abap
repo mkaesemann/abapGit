@@ -26,7 +26,7 @@ CLASS zcl_abapgit_objects_files DEFINITION
     METHODS add_xml
       IMPORTING
         !iv_extra     TYPE clike OPTIONAL
-        !io_xml       TYPE REF TO zcl_abapgit_xml_output
+        !ii_xml       TYPE REF TO zif_abapgit_xml_output
         !iv_normalize TYPE abap_bool DEFAULT abap_true
         !is_metadata  TYPE zif_abapgit_definitions=>ty_metadata OPTIONAL
       RAISING
@@ -35,7 +35,7 @@ CLASS zcl_abapgit_objects_files DEFINITION
       IMPORTING
         !iv_extra     TYPE clike OPTIONAL
       RETURNING
-        VALUE(ro_xml) TYPE REF TO zcl_abapgit_xml_input
+        VALUE(ri_xml) TYPE REF TO zif_abapgit_xml_input
       RAISING
         zcx_abapgit_exception .
     METHODS read_abap
@@ -111,7 +111,7 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_OBJECTS_FILES IMPLEMENTATION.
+CLASS zcl_abapgit_objects_files IMPLEMENTATION.
 
 
   METHOD add.
@@ -131,7 +131,7 @@ CLASS ZCL_ABAPGIT_OBJECTS_FILES IMPLEMENTATION.
 
     ls_file-path = '/'.
     ls_file-filename = filename( iv_extra = iv_extra
-                                 iv_ext   = 'abap' ).       "#EC NOTEXT
+                                 iv_ext   = 'abap' ).
     ls_file-data = zcl_abapgit_convert=>string_to_xstring_utf8( lv_source ).
 
     APPEND ls_file TO mt_files.
@@ -160,7 +160,7 @@ CLASS ZCL_ABAPGIT_OBJECTS_FILES IMPLEMENTATION.
 
     ls_file-path = '/'.
     ls_file-filename = filename( iv_extra = iv_extra
-                                 iv_ext   = iv_ext ).       "#EC NOTEXT
+                                 iv_ext   = iv_ext ).
     ls_file-data = zcl_abapgit_convert=>string_to_xstring_utf8( iv_string ).
 
     APPEND ls_file TO mt_files.
@@ -173,12 +173,12 @@ CLASS ZCL_ABAPGIT_OBJECTS_FILES IMPLEMENTATION.
     DATA: lv_xml  TYPE string,
           ls_file TYPE zif_abapgit_definitions=>ty_file.
 
-    lv_xml = io_xml->render( iv_normalize = iv_normalize
+    lv_xml = ii_xml->render( iv_normalize = iv_normalize
                              is_metadata = is_metadata ).
     ls_file-path = '/'.
 
     ls_file-filename = filename( iv_extra = iv_extra
-                                 iv_ext   = 'xml' ).        "#EC NOTEXT
+                                 iv_ext   = 'xml' ).
 
     REPLACE FIRST OCCURRENCE
       OF REGEX '<\?xml version="1\.0" encoding="[\w-]+"\?>'
@@ -239,14 +239,16 @@ CLASS ZCL_ABAPGIT_OBJECTS_FILES IMPLEMENTATION.
       REPLACE ALL OCCURRENCES OF `.` IN lv_obj_name WITH '%2e'.
       REPLACE ALL OCCURRENCES OF `=` IN lv_obj_name WITH '%3d'.
       REPLACE ALL OCCURRENCES OF `?` IN lv_obj_name WITH '%3f'.
+      REPLACE ALL OCCURRENCES OF `<` IN lv_obj_name WITH '%3c'.
+      REPLACE ALL OCCURRENCES OF `>` IN lv_obj_name WITH '%3e'.
     ENDIF.
 
     IF iv_extra IS INITIAL.
       CONCATENATE lv_obj_name '.' ms_item-obj_type
-        INTO rv_filename.                                   "#EC NOTEXT
+        INTO rv_filename.
     ELSE.
       CONCATENATE lv_obj_name '.' ms_item-obj_type '.' iv_extra
-        INTO rv_filename.                                   "#EC NOTEXT
+        INTO rv_filename.
     ENDIF.
 
     IF iv_ext IS NOT INITIAL.
@@ -279,7 +281,7 @@ CLASS ZCL_ABAPGIT_OBJECTS_FILES IMPLEMENTATION.
 
 
     lv_filename = filename( iv_extra = iv_extra
-                            iv_ext   = 'abap' ).            "#EC NOTEXT
+                            iv_ext   = 'abap' ).
 
     lv_data = read_file( iv_filename = lv_filename
                          iv_error    = iv_error ).
@@ -347,7 +349,7 @@ CLASS ZCL_ABAPGIT_OBJECTS_FILES IMPLEMENTATION.
           lv_data     TYPE xstring.
 
     lv_filename = filename( iv_extra = iv_extra
-                            iv_ext   = iv_ext ).            "#EC NOTEXT
+                            iv_ext   = iv_ext ).
 
     lv_data = read_file( lv_filename ).
 
@@ -363,13 +365,14 @@ CLASS ZCL_ABAPGIT_OBJECTS_FILES IMPLEMENTATION.
           lv_xml      TYPE string.
 
     lv_filename = filename( iv_extra = iv_extra
-                            iv_ext   = 'xml' ).             "#EC NOTEXT
+                            iv_ext   = 'xml' ).
 
     lv_data = read_file( lv_filename ).
 
     lv_xml = zcl_abapgit_convert=>xstring_to_string_utf8( lv_data ).
 
-    CREATE OBJECT ro_xml
+    CREATE OBJECT ri_xml
+      TYPE zcl_abapgit_xml_input
       EXPORTING
         iv_xml      = lv_xml
         iv_filename = lv_filename.

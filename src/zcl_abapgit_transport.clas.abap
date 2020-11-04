@@ -129,7 +129,7 @@ CLASS ZCL_ABAPGIT_TRANSPORT IMPLEMENTATION.
 
     LOOP AT it_requests ASSIGNING <ls_request>.
       LOOP AT <ls_request>-objects ASSIGNING <ls_object>.
-        " VARX, see https://github.com/larshp/abapGit/issues/3107
+        " VARX, see https://github.com/abapGit/abapGit/issues/3107
         IF <ls_object>-pgmid = 'LIMU' AND <ls_object>-object <> 'VARX'.
           CALL FUNCTION 'GET_R3TR_OBJECT_FROM_LIMU_OBJ'
             EXPORTING
@@ -286,8 +286,7 @@ CLASS ZCL_ABAPGIT_TRANSPORT IMPLEMENTATION.
     DATA:
       lt_objects     TYPE scts_tadir,
       lt_objects_all LIKE lt_objects,
-      lt_e071        TYPE tr_objects,
-      ls_e071        LIKE LINE OF lt_e071,
+      ls_e071        LIKE LINE OF rt_objects,
       lo_repo        TYPE REF TO zcl_abapgit_repo,
       lv_package     TYPE zif_abapgit_persistence=>ty_repo-package,
       lt_packages    TYPE zif_abapgit_sap_package=>ty_devclass_tt.

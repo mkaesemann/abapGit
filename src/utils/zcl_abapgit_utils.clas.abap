@@ -25,7 +25,23 @@ ENDCLASS.
 
 
 
-CLASS zcl_abapgit_utils IMPLEMENTATION.
+CLASS ZCL_ABAPGIT_UTILS IMPLEMENTATION.
+
+
+  METHOD extract_author_data.
+
+    " unix time stamps are in same time zone, so ignore the zone
+    FIND REGEX zif_abapgit_definitions=>c_author_regex IN iv_author
+      SUBMATCHES
+      ev_author
+      ev_email
+      ev_time.
+
+    IF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise( |Error author regex value='{ iv_author }'| ).
+    ENDIF.
+
+  ENDMETHOD.
 
 
   METHOD is_binary.
@@ -54,22 +70,6 @@ CLASS zcl_abapgit_utils IMPLEMENTATION.
         EXIT.
       ENDIF.
     ENDDO.
-
-  ENDMETHOD.
-
-
-  METHOD extract_author_data.
-
-    " unix time stamps are in same time zone, so ignore the zone
-    FIND REGEX zif_abapgit_definitions=>c_author_regex IN iv_author
-      SUBMATCHES
-      ev_author
-      ev_email
-      ev_time ##NO_TEXT.
-
-    IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( |Error author regex value='{ iv_author }'| ).
-    ENDIF.
 
   ENDMETHOD.
 ENDCLASS.

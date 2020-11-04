@@ -3,6 +3,7 @@ CLASS zcl_abapgit_gui_page_patch DEFINITION
   INHERITING FROM zcl_abapgit_gui_page_diff
   CREATE PUBLIC .
 
+
   PUBLIC SECTION.
     INTERFACES zif_abapgit_gui_hotkeys.
 
@@ -12,6 +13,7 @@ CLASS zcl_abapgit_gui_page_patch DEFINITION
           iv_key        TYPE zif_abapgit_persistence=>ty_repo-key
           is_file       TYPE zif_abapgit_definitions=>ty_file OPTIONAL
           is_object     TYPE zif_abapgit_definitions=>ty_item OPTIONAL
+          it_files      TYPE zif_abapgit_definitions=>ty_stage_tt OPTIONAL
           iv_patch_mode TYPE abap_bool OPTIONAL
         RAISING
           zcx_abapgit_exception,
@@ -41,8 +43,8 @@ CLASS zcl_abapgit_gui_page_patch DEFINITION
 
 
   PRIVATE SECTION.
-    TYPES:
-      ty_patch_action TYPE string .
+
+    TYPES ty_patch_action TYPE string .
 
     CONSTANTS:
       BEGIN OF c_actions,
@@ -50,132 +52,109 @@ CLASS zcl_abapgit_gui_page_patch DEFINITION
         refresh              TYPE string VALUE 'patch_refresh',
         refresh_local        TYPE string VALUE 'patch_refresh_local',
         refresh_local_object TYPE string VALUE 'patch_refresh_local_object',
-      END OF c_actions,
+      END OF c_actions .
+    CONSTANTS:
       BEGIN OF c_patch_action,
         add    TYPE ty_patch_action VALUE 'add',
         remove TYPE ty_patch_action VALUE 'remove',
       END OF c_patch_action .
+    DATA mo_stage TYPE REF TO zcl_abapgit_stage .
+    DATA mv_section_count TYPE i .
+    DATA mv_pushed TYPE abap_bool .
+    DATA mo_repo_online TYPE REF TO zcl_abapgit_repo_online .
 
-    DATA:
-      mo_stage         TYPE REF TO zcl_abapgit_stage,
-      mv_section_count TYPE i,
-      mv_pushed        TYPE abap_bool,
-      mo_repo_online   TYPE REF TO zcl_abapgit_repo_online.
-
-    METHODS:
-      render_patch
-        IMPORTING
-          io_html      TYPE REF TO zcl_abapgit_html
-          iv_filename  TYPE string
-          is_diff_line TYPE zif_abapgit_definitions=>ty_diff
-          iv_fstate    TYPE char1
-          iv_index     TYPE sy-tabix
-        RAISING
-          zcx_abapgit_exception,
-
-      render_patch_head
-        IMPORTING
-          io_html TYPE REF TO zcl_abapgit_html
-          is_diff TYPE ty_file_diff,
-
-      start_staging
-        IMPORTING
-          it_postdata TYPE cnht_post_data_tab
-        RAISING
-          zcx_abapgit_exception,
-
-      apply_patch_from_form_fields
-        IMPORTING
-          it_postdata TYPE cnht_post_data_tab
-        RAISING
-          zcx_abapgit_exception,
-
-      restore_patch_flags
-        IMPORTING
-          it_diff_files_old TYPE tt_file_diff
-        RAISING
-          zcx_abapgit_exception,
-
-      add_to_stage
-        RAISING
-          zcx_abapgit_exception,
-
-      refresh
-        IMPORTING
-          iv_action TYPE clike
-        RAISING
-          zcx_abapgit_exception,
-
-      refresh_full
-        RAISING
-          zcx_abapgit_exception,
-
-      refresh_local
-        RAISING
-          zcx_abapgit_exception,
-
-      refresh_local_object
-        IMPORTING
-          iv_action TYPE clike
-        RAISING
-          zcx_abapgit_exception,
-
-      apply_patch_all
-        IMPORTING
-          iv_patch      TYPE string
-          iv_patch_flag TYPE abap_bool
-        RAISING
-          zcx_abapgit_exception,
-
-      are_all_lines_patched
-        IMPORTING
-          it_diff                         TYPE zif_abapgit_definitions=>ty_diffs_tt
-        RETURNING
-          VALUE(rv_are_all_lines_patched) TYPE abap_bool,
-
-      apply_patch_for
-        IMPORTING
-          iv_filename   TYPE string
-          iv_line_index TYPE string
-          iv_patch_flag TYPE abap_bool
-        RAISING
-          zcx_abapgit_exception,
-
-      get_diff_object
-        IMPORTING
-          iv_filename    TYPE string
-        RETURNING
-          VALUE(ro_diff) TYPE REF TO zcl_abapgit_diff
-        RAISING
-          zcx_abapgit_exception,
-
-      get_diff_line
-        IMPORTING
-          io_diff        TYPE REF TO zcl_abapgit_diff
-          iv_line_index  TYPE string
-        RETURNING
-          VALUE(rs_diff) TYPE zif_abapgit_definitions=>ty_diff
-        RAISING
-          zcx_abapgit_exception,
-
-      is_every_changed_line_patched
-        RETURNING
-          VALUE(rv_everything_patched) TYPE abap_bool.
-
-    CLASS-METHODS:
-      is_patch_line_possible
-        IMPORTING
-          is_diff_line                     TYPE zif_abapgit_definitions=>ty_diff
-          iv_fstate                        TYPE char1
-        RETURNING
-          VALUE(rv_is_patch_line_possible) TYPE abap_bool.
-
+    METHODS render_patch
+      IMPORTING
+        !ii_html      TYPE REF TO zif_abapgit_html
+        !iv_filename  TYPE string
+        !is_diff_line TYPE zif_abapgit_definitions=>ty_diff
+        !iv_index     TYPE sy-tabix
+      RAISING
+        zcx_abapgit_exception .
+    METHODS render_patch_head
+      IMPORTING
+        !ii_html TYPE REF TO zif_abapgit_html
+        !is_diff TYPE ty_file_diff .
+    METHODS start_staging
+      IMPORTING
+        !ii_event TYPE REF TO zif_abapgit_gui_event
+      RAISING
+        zcx_abapgit_exception .
+    METHODS apply_patch_from_form_fields
+      IMPORTING
+        !ii_event TYPE REF TO zif_abapgit_gui_event
+      RAISING
+        zcx_abapgit_exception .
+    METHODS restore_patch_flags
+      IMPORTING
+        !it_diff_files_old TYPE ty_file_diffs
+      RAISING
+        zcx_abapgit_exception .
+    METHODS add_to_stage
+      RAISING
+        zcx_abapgit_exception .
+    METHODS refresh
+      IMPORTING
+        !iv_action TYPE clike
+      RAISING
+        zcx_abapgit_exception .
+    METHODS refresh_full
+      RAISING
+        zcx_abapgit_exception .
+    METHODS refresh_local
+      RAISING
+        zcx_abapgit_exception .
+    METHODS refresh_local_object
+      IMPORTING
+        !iv_action TYPE clike
+      RAISING
+        zcx_abapgit_exception .
+    METHODS apply_patch_all
+      IMPORTING
+        !iv_patch      TYPE string
+        !iv_patch_flag TYPE abap_bool
+      RAISING
+        zcx_abapgit_exception .
+    METHODS are_all_lines_patched
+      IMPORTING
+        !it_diff                        TYPE zif_abapgit_definitions=>ty_diffs_tt
+      RETURNING
+        VALUE(rv_are_all_lines_patched) TYPE abap_bool .
+    METHODS apply_patch_for
+      IMPORTING
+        !iv_filename   TYPE string
+        !iv_line_index TYPE string
+        !iv_patch_flag TYPE abap_bool
+      RAISING
+        zcx_abapgit_exception .
+    METHODS get_diff_object
+      IMPORTING
+        !iv_filename   TYPE string
+      RETURNING
+        VALUE(ro_diff) TYPE REF TO zcl_abapgit_diff
+      RAISING
+        zcx_abapgit_exception .
+    METHODS get_diff_line
+      IMPORTING
+        !io_diff       TYPE REF TO zcl_abapgit_diff
+        !iv_line_index TYPE string
+      RETURNING
+        VALUE(rs_diff) TYPE zif_abapgit_definitions=>ty_diff
+      RAISING
+        zcx_abapgit_exception .
+    METHODS is_every_changed_line_patched
+      RETURNING
+        VALUE(rv_everything_patched) TYPE abap_bool .
+    CLASS-METHODS is_patch_line_possible
+      IMPORTING
+        !is_diff_line                    TYPE zif_abapgit_definitions=>ty_diff
+      RETURNING
+        VALUE(rv_is_patch_line_possible) TYPE abap_bool .
     METHODS render_scripts
       RETURNING
-        VALUE(ro_html) TYPE REF TO zcl_abapgit_html
+        VALUE(ri_html) TYPE REF TO zif_abapgit_html
       RAISING
-        zcx_abapgit_exception.
-
+        zcx_abapgit_exception .
 ENDCLASS.
 
 
@@ -186,7 +165,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_PATCH IMPLEMENTATION.
   METHOD add_menu_begin.
 
     io_menu->add(
-        iv_txt   = |Refresh local|
+        iv_txt   = |Refresh Local|
         iv_typ   = zif_abapgit_html=>c_action_type-dummy
         iv_act   = c_actions-refresh_local
         iv_id    = c_actions-refresh_local
@@ -207,8 +186,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_PATCH IMPLEMENTATION.
     io_menu->add( iv_txt = 'Stage'
                   iv_act = c_actions-stage
                   iv_id  = 'stage'
-                  iv_typ = zif_abapgit_html=>c_action_type-dummy
-                   ) ##NO_TEXT.
+                  iv_typ = zif_abapgit_html=>c_action_type-dummy ).
 
   ENDMETHOD.
 
@@ -340,21 +318,12 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_PATCH IMPLEMENTATION.
 
   METHOD apply_patch_from_form_fields.
 
-    DATA: lv_string TYPE string,
-          lt_fields TYPE tihttpnvp,
-          lv_add    TYPE string,
-          lv_remove TYPE string.
+    DATA:
+      lv_add    TYPE string,
+      lv_remove TYPE string.
 
-    CONCATENATE LINES OF it_postdata INTO lv_string.
-    lt_fields = zcl_abapgit_html_action_utils=>parse_fields( lv_string ).
-
-    zcl_abapgit_html_action_utils=>get_field( EXPORTING iv_name  = c_patch_action-add
-                                                        it_field = lt_fields
-                                              CHANGING  cg_field = lv_add ).
-
-    zcl_abapgit_html_action_utils=>get_field( EXPORTING iv_name  = c_patch_action-remove
-                                                        it_field = lt_fields
-                                              CHANGING  cg_field = lv_remove ).
+    lv_add    = ii_event->form_data( )->get( c_patch_action-add ).
+    lv_remove = ii_event->form_data( )->get( c_patch_action-remove ).
 
     apply_patch_all( iv_patch      = lv_add
                      iv_patch_flag = abap_true ).
@@ -386,7 +355,8 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_PATCH IMPLEMENTATION.
     super->constructor(
       iv_key    = iv_key
       is_file   = is_file
-      is_object = is_object ).
+      is_object = is_object
+      it_files  = it_files ).
 
     IF mo_repo->is_offline( ) = abap_true.
       zcx_abapgit_exception=>raise( |Can't patch offline repos| ).
@@ -398,6 +368,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_PATCH IMPLEMENTATION.
     CLEAR: mv_unified.
     CREATE OBJECT mo_stage.
 
+    ms_control-page_title = 'Patch'.
     ms_control-page_menu = build_menu( ).
 
   ENDMETHOD.
@@ -506,7 +477,12 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_PATCH IMPLEMENTATION.
   METHOD refresh.
 
     DATA:
-      lt_diff_files_old TYPE tt_file_diff.
+      lt_diff_files_old TYPE ty_file_diffs,
+      lt_files          TYPE zif_abapgit_definitions=>ty_stage_tt,
+      ls_file           LIKE LINE OF lt_files.
+
+    FIELD-SYMBOLS: <ls_diff_file_old> TYPE zcl_abapgit_gui_page_diff=>ty_file_diff.
+
 
     lt_diff_files_old = mt_diff_files.
 
@@ -519,7 +495,17 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_PATCH IMPLEMENTATION.
         refresh_local_object( iv_action ).
     ENDCASE.
 
-    calculate_diff( ).
+    " We need to supply files again in calculate_diff. Because
+    " we only want to refresh the visible files. Otherwise all
+    " diff files would appear.
+    " Which is not wanted when we previously only selected particular files.
+    LOOP AT lt_diff_files_old ASSIGNING <ls_diff_file_old>.
+      CLEAR: ls_file.
+      MOVE-CORRESPONDING <ls_diff_file_old> TO ls_file-file.
+      INSERT ls_file INTO TABLE lt_files.
+    ENDLOOP.
+
+    calculate_diff( it_files = lt_files ).
     restore_patch_flags( lt_diff_files_old ).
 
   ENDMETHOD.
@@ -563,9 +549,9 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_PATCH IMPLEMENTATION.
 
     mv_section_count = mv_section_count + 1.
 
-    io_html->add( |<th class="patch">| ).
-    io_html->add_checkbox( iv_id = |patch_section_{ get_normalized_fname_with_path( is_diff ) }_{ mv_section_count }| ).
-    io_html->add( '</th>' ).
+    ii_html->add( |<th class="patch">| ).
+    ii_html->add_checkbox( iv_id = |patch_section_{ get_normalized_fname_with_path( is_diff ) }_{ mv_section_count }| ).
+    ii_html->add( '</th>' ).
 
   ENDMETHOD.
 
@@ -596,7 +582,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_PATCH IMPLEMENTATION.
 
       lv_act_id = |{ c_actions-refresh_local_object }_{ is_diff-obj_type }_{ is_diff-obj_name }|.
 
-      io_html->add_a(
+      ii_html->add_a(
           iv_txt   = |Refresh|
           iv_typ   = zif_abapgit_html=>c_action_type-dummy
           iv_act   = lv_act_id
@@ -606,7 +592,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_PATCH IMPLEMENTATION.
     ENDIF.
 
     super->render_diff_head_after_state(
-        io_html = io_html
+        ii_html = ii_html
         is_diff = is_diff ).
 
   ENDMETHOD.
@@ -614,14 +600,13 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_PATCH IMPLEMENTATION.
 
   METHOD render_line_split_row.
 
-    render_patch( io_html      = io_html
+    render_patch( ii_html      = ii_html
                   iv_filename  = iv_filename
                   is_diff_line = is_diff_line
-                  iv_fstate    = iv_fstate
                   iv_index     = iv_index ).
 
     super->render_line_split_row(
-        io_html      = io_html
+        ii_html      = ii_html
         iv_filename  = iv_filename
         is_diff_line = is_diff_line
         iv_index     = iv_index
@@ -636,7 +621,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_PATCH IMPLEMENTATION.
 
     CONSTANTS:
       BEGIN OF lc_css_class,
-        patch TYPE string VALUE `patch` ##NO_TEXT,
+        patch TYPE string VALUE `patch`,
       END OF lc_css_class.
 
     DATA:
@@ -646,24 +631,22 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_PATCH IMPLEMENTATION.
 
     lv_patched = get_diff_object( iv_filename )->is_line_patched( iv_index ).
 
-    lv_is_patch_possible = is_patch_line_possible(
-                               is_diff_line = is_diff_line
-                               iv_fstate    = iv_fstate ).
+    lv_is_patch_possible = is_patch_line_possible( is_diff_line ).
 
     IF lv_is_patch_possible = abap_true.
 
       lv_id = |{ iv_filename }_{ mv_section_count }_{ iv_index }|.
 
-      io_html->add( |<td class="{ lc_css_class-patch }">| ).
-      io_html->add_checkbox(
+      ii_html->add( |<td class="{ lc_css_class-patch }">| ).
+      ii_html->add_checkbox(
           iv_id      = |patch_line_{ lv_id }|
           iv_checked = lv_patched ).
-      io_html->add( |</td>| ).
+      ii_html->add( |</td>| ).
 
     ELSE.
 
-      io_html->add( |<td class="{ lc_css_class-patch }">| ).
-      io_html->add( |</td>| ).
+      ii_html->add( |<td class="{ lc_css_class-patch }">| ).
+      ii_html->add( |</td>| ).
 
     ENDIF.
 
@@ -672,31 +655,31 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_PATCH IMPLEMENTATION.
 
   METHOD render_patch_head.
 
-    io_html->add( |<th class="patch">| ).
-    io_html->add_checkbox( iv_id = |patch_file_{ get_normalized_fname_with_path( is_diff ) }| ).
-    io_html->add( '</th>' ).
+    ii_html->add( |<th class="patch">| ).
+    ii_html->add_checkbox( |patch_file_{ get_normalized_fname_with_path( is_diff ) }| ).
+    ii_html->add( '</th>' ).
 
   ENDMETHOD.
 
 
   METHOD render_scripts.
 
-    CREATE OBJECT ro_html.
+    CREATE OBJECT ri_html TYPE zcl_abapgit_html.
 
-    ro_html->zif_abapgit_html~set_title( cl_abap_typedescr=>describe_by_object_ref( me )->get_relative_name( ) ).
-    ro_html->add( 'preparePatch();' ).
-    ro_html->add( 'registerStagePatch();' ).
+    ri_html->set_title( cl_abap_typedescr=>describe_by_object_ref( me )->get_relative_name( ) ).
+    ri_html->add( 'preparePatch();' ).
+    ri_html->add( 'registerStagePatch();' ).
 
   ENDMETHOD.
 
 
   METHOD render_table_head_non_unified.
 
-    render_patch_head( io_html = io_html
+    render_patch_head( ii_html = ii_html
                        is_diff = is_diff ).
 
     super->render_table_head_non_unified(
-        io_html = io_html
+        ii_html = ii_html
         is_diff = is_diff ).
 
   ENDMETHOD.
@@ -740,7 +723,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_PATCH IMPLEMENTATION.
 
   METHOD start_staging.
 
-    apply_patch_from_form_fields( it_postdata ).
+    apply_patch_from_form_fields( ii_event ).
     add_to_stage( ).
 
   ENDMETHOD.
@@ -748,36 +731,29 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_PATCH IMPLEMENTATION.
 
   METHOD zif_abapgit_gui_event_handler~on_event.
 
-    CASE iv_action.
+    CASE ii_event->mv_action.
       WHEN c_actions-stage.
 
-        start_staging( it_postdata ).
+        start_staging( ii_event ).
 
-        CREATE OBJECT ei_page TYPE zcl_abapgit_gui_page_commit
+        CREATE OBJECT rs_handled-page TYPE zcl_abapgit_gui_page_commit
           EXPORTING
             io_repo  = mo_repo_online
             io_stage = mo_stage.
-        ev_state = zcl_abapgit_gui=>c_event_state-new_page.
+        rs_handled-state = zcl_abapgit_gui=>c_event_state-new_page.
 
       WHEN OTHERS.
 
-        FIND FIRST OCCURRENCE OF REGEX |^{ c_actions-refresh }| IN iv_action.
+        FIND FIRST OCCURRENCE OF REGEX |^{ c_actions-refresh }| IN ii_event->mv_action.
         IF sy-subrc = 0.
 
-          apply_patch_from_form_fields( it_postdata ).
-          refresh( iv_action ).
-          ev_state = zcl_abapgit_gui=>c_event_state-re_render.
+          apply_patch_from_form_fields( ii_event ).
+          refresh( ii_event->mv_action ).
+          rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
 
         ELSE.
 
-          super->zif_abapgit_gui_event_handler~on_event(
-             EXPORTING
-               iv_action    = iv_action
-               iv_getdata   = iv_getdata
-               it_postdata  = it_postdata
-             IMPORTING
-               ei_page      = ei_page
-               ev_state     = ev_state ).
+          rs_handled = super->zif_abapgit_gui_event_handler~on_event( ii_event ).
 
         ENDIF.
 

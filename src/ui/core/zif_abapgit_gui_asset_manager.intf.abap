@@ -4,17 +4,17 @@ INTERFACE zif_abapgit_gui_asset_manager
   TYPES:
     BEGIN OF ty_web_asset,
       url          TYPE w3url,
-      type         TYPE char50,
-      subtype      TYPE char50,
+      type         TYPE c LENGTH 50,
+      subtype      TYPE c LENGTH 50,
       content      TYPE xstring,
       is_cacheable TYPE abap_bool,
     END OF ty_web_asset .
   TYPES:
-    tt_web_assets TYPE STANDARD TABLE OF ty_web_asset WITH DEFAULT KEY .
+    ty_web_assets TYPE STANDARD TABLE OF ty_web_asset WITH DEFAULT KEY .
 
   METHODS get_all_assets
     RETURNING
-      VALUE(rt_assets) TYPE tt_web_assets
+      VALUE(rt_assets) TYPE ty_web_assets
     RAISING
       zcx_abapgit_exception.
 

@@ -14,42 +14,51 @@ CLASS zcl_abapgit_gui_page_debuginfo DEFINITION
       render_content REDEFINITION.
 
   PRIVATE SECTION.
+
     METHODS get_jump_class
-      IMPORTING iv_class       TYPE seoclsname
-      RETURNING VALUE(rv_html) TYPE string.
+      IMPORTING
+        !iv_class      TYPE seoclsname
+      RETURNING
+        VALUE(rv_html) TYPE string .
     METHODS render_debug_info
-      RETURNING VALUE(ro_html) TYPE REF TO zcl_abapgit_html
-      RAISING   zcx_abapgit_exception.
+      RETURNING
+        VALUE(ri_html) TYPE REF TO zif_abapgit_html
+      RAISING
+        zcx_abapgit_exception .
     METHODS render_supported_object_types
-      RETURNING VALUE(rv_html) TYPE string.
+      RETURNING
+        VALUE(rv_html) TYPE string .
     METHODS render_scripts
       RETURNING
-        VALUE(ro_html) TYPE REF TO zcl_abapgit_html
+        VALUE(ri_html) TYPE REF TO zif_abapgit_html
       RAISING
-        zcx_abapgit_exception.
-
+        zcx_abapgit_exception .
 ENDCLASS.
 
 
 
-CLASS zcl_abapgit_gui_page_debuginfo IMPLEMENTATION.
+CLASS ZCL_ABAPGIT_GUI_PAGE_DEBUGINFO IMPLEMENTATION.
 
 
   METHOD constructor.
     super->constructor( ).
-    ms_control-page_title = 'DEBUG INFO'.
+    ms_control-page_title = 'Debug Info'.
   ENDMETHOD.
 
 
   METHOD get_jump_class.
 
-    DATA: lv_encode TYPE string.
+    DATA lv_encode TYPE string.
+    DATA li_html TYPE REF TO zif_abapgit_html.
+
+    CREATE OBJECT li_html TYPE zcl_abapgit_html.
 
     lv_encode = zcl_abapgit_html_action_utils=>jump_encode( iv_obj_type = 'CLAS'
                                                             iv_obj_name = |{ iv_class }| ).
 
-    rv_html = zcl_abapgit_html=>a( iv_txt = |{ iv_class }|
-                                   iv_act = |{ zif_abapgit_definitions=>c_action-jump }?{ lv_encode }| ).
+    rv_html = li_html->a(
+      iv_txt = |{ iv_class }|
+      iv_act = |{ zif_abapgit_definitions=>c_action-jump }?{ lv_encode }| ).
 
   ENDMETHOD.
 
@@ -89,41 +98,41 @@ CLASS zcl_abapgit_gui_page_debuginfo IMPLEMENTATION.
     READ TABLE lt_ver_tab INTO ls_version INDEX 3. " gui patch
     lv_gui_version = |{ lv_gui_version }.{ ls_version-filename }|.
 
-    CREATE OBJECT ro_html.
+    CREATE OBJECT ri_html TYPE zcl_abapgit_html.
 
-    ro_html->add( |<table>| ).
-    ro_html->add( |<tr><td>abapGit version:</td><td>{ zif_abapgit_version=>gc_abap_version }</td></tr>| ).
-    ro_html->add( |<tr><td>XML version:    </td><td>{ zif_abapgit_version=>gc_xml_version }</td></tr>| ).
-    ro_html->add( |<tr><td>GUI version:    </td><td>{ lv_gui_version }</td></tr>| ).
-    ro_html->add( |<tr><td>APACK version:  </td><td>{
+    ri_html->add( |<table>| ).
+    ri_html->add( |<tr><td>abapGit version:</td><td>{ zif_abapgit_version=>gc_abap_version }</td></tr>| ).
+    ri_html->add( |<tr><td>XML version:    </td><td>{ zif_abapgit_version=>gc_xml_version }</td></tr>| ).
+    ri_html->add( |<tr><td>GUI version:    </td><td>{ lv_gui_version }</td></tr>| ).
+    ri_html->add( |<tr><td>APACK version:  </td><td>{
                   zcl_abapgit_apack_migration=>c_apack_interface_version }</td></tr>| ).
-    ro_html->add( |<tr><td>LCL_TIME:       </td><td>{ zcl_abapgit_time=>get_unix( ) }</td></tr>| ).
-    ro_html->add( |<tr><td>SY time:        </td><td>{ sy-datum } { sy-uzeit } { sy-tzone }</td></tr>| ).
-    ro_html->add( |</table>| ).
-    ro_html->add( |<br>| ).
+    ri_html->add( |<tr><td>LCL_TIME:       </td><td>{ zcl_abapgit_time=>get_unix( ) }</td></tr>| ).
+    ri_html->add( |<tr><td>SY time:        </td><td>{ sy-datum } { sy-uzeit } { sy-tzone }</td></tr>| ).
+    ri_html->add( |</table>| ).
+    ri_html->add( |<br>| ).
 
     lv_devclass = zcl_abapgit_services_abapgit=>is_installed( ).
     IF NOT lv_devclass IS INITIAL.
-      ro_html->add( 'abapGit installed in package&nbsp;' ).
-      ro_html->add( lv_devclass ).
+      ri_html->add( 'abapGit installed in package&nbsp;' ).
+      ri_html->add( lv_devclass ).
     ELSE.
-      ro_html->add_a( iv_txt = 'install abapGit repo'
+      ri_html->add_a( iv_txt = 'install abapGit repo'
                       iv_act = zif_abapgit_definitions=>c_action-abapgit_install ).
-      ro_html->add( ' - To keep abapGit up-to-date (or also to contribute) you need to' ).
-      ro_html->add( 'install it as a repository.' ).
+      ri_html->add( ' - To keep abapGit up-to-date (or also to contribute) you need to' ).
+      ri_html->add( 'install it as a repository.' ).
     ENDIF.
 
-    ro_html->add( |<br>| ).
+    ri_html->add( |<br>| ).
 
   ENDMETHOD.
 
 
   METHOD render_scripts.
 
-    CREATE OBJECT ro_html.
+    CREATE OBJECT ri_html TYPE zcl_abapgit_html.
 
-    ro_html->zif_abapgit_html~set_title( cl_abap_typedescr=>describe_by_object_ref( me )->get_relative_name( ) ).
-    ro_html->add( 'debugOutput("<table><tr><td>Browser:</td><td>" + navigator.userAgent + ' &&
+    ri_html->set_title( cl_abap_typedescr=>describe_by_object_ref( me )->get_relative_name( ) ).
+    ri_html->add( 'debugOutput("<table><tr><td>Browser:</td><td>" + navigator.userAgent + ' &&
       '"</td></tr><tr><td>Frontend time:</td><td>" + new Date() + "</td></tr></table>", "debug_info");' ).
 
   ENDMETHOD.
@@ -138,7 +147,6 @@ CLASS zcl_abapgit_gui_page_debuginfo IMPLEMENTATION.
           lv_class    TYPE seoclsname,
           li_object   TYPE REF TO zif_abapgit_object,
           ls_item     TYPE zif_abapgit_definitions=>ty_item,
-          lv_language TYPE spras,
           ls_metadata TYPE zif_abapgit_definitions=>ty_metadata,
           lv_step     TYPE zif_abapgit_definitions=>ty_deserialization_step,
           lt_steps    TYPE zif_abapgit_definitions=>ty_deserialization_step_tt.

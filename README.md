@@ -1,6 +1,6 @@
-![CI](https://github.com/larshp/abapGit/workflows/CI/badge.svg)
+![CI](https://github.com/abapGit/abapGit/workflows/CI/badge.svg)
 [![Slack](https://abapgit-slackinviter.herokuapp.com/badge.svg)](https://abapgit-slackinviter.herokuapp.com/)
-[![abap package version](https://img.shields.io/endpoint?url=https://shield.abap.space/version-shield-json/github/larshp/abapGit/src/zif_abapgit_version.intf.abap/gc_abap_version&label=version)](https://github.com/larshp/abapGit/blob/master/src/zif_abapgit_version.intf.abap)
+[![abap package version](https://img.shields.io/endpoint?url=https://shield.abap.space/version-shield-json/github/abapGit/abapGit/src/zif_abapgit_version.intf.abap/gc_abap_version&label=version)](https://github.com/abapGit/abapGit/blob/master/src/zif_abapgit_version.intf.abap)
 
 # abapGit
 
@@ -11,7 +11,6 @@ Works with: [GitHub](https://github.com/),
 [Assembla](https://www.assembla.com/git/),
 [Bitbucket](https://bitbucket.org/),
 [abapGitServer](https://github.com/larshp/abapGitServer),
-[SCP](http://go.sap.com/denmark/developer/tutorials/hcp-webide-commit-git.html),
 [AWS](https://aws.amazon.com/codecommit/),
 [TFS](https://www.visualstudio.com/team-services/git/),
 [Azure DevOps](https://azure.microsoft.com/en-us/services/devops) and more.
@@ -30,7 +29,7 @@ Recommend using SAP GUI for Windows, there are multiple issues related to runnin
 - Code readable in git repository
 
 ## Documentation/Guides
-http://docs.abapgit.org
+https://docs.abapgit.org
 
 ## Contributing
 
@@ -38,12 +37,12 @@ You can find the contribution guidelines [here](CONTRIBUTING.md).
 
 ## Projects using abapGit
 
-See [dotabap.org](http://dotabap.org) or [this page](https://docs.abapgit.org/other-where-used.html).
+See [dotabap.org](https://dotabap.org) or [this page](https://docs.abapgit.org/other-where-used.html).
 
 ## FAQ
-For questions/comments/bugs/feature requests/wishes please create an [issue](https://github.com/larshp/abapGit/issues)
+For questions/comments/bugs/feature requests/wishes please create an [issue](https://github.com/abapGit/abapGit/issues)
 
-![abapgit](http://docs.abapgit.org/img/abapgit_1_94_0.png)
+![abapgit](https://docs.abapgit.org/img/abapgit_1_99_0.png)
 
 ## Credits and references
 

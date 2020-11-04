@@ -14,7 +14,13 @@ CLASS ZCL_ABAPGIT_OBJECT_SHMA IMPLEMENTATION.
 
   METHOD zif_abapgit_object~changed_by.
 
-    rv_user = c_user_unknown.
+    SELECT SINGLE chg_user
+      FROM shma_attributes
+      INTO rv_user
+      WHERE area_name = ms_item-obj_name.
+    IF sy-subrc <> 0.
+      rv_user = c_user_unknown.
+    ENDIF.
 
   ENDMETHOD.
 
@@ -169,7 +175,7 @@ CLASS ZCL_ABAPGIT_OBJECT_SHMA IMPLEMENTATION.
             area_name           = lv_area_name
             attributes          = ls_area_attributes
             force_overwrite     = abap_true
-            no_class_generation = abap_true
+            no_class_generation = abap_false
             silent_mode         = abap_true.
 
       CATCH cx_root.

@@ -16,7 +16,7 @@ INTERFACE zif_abapgit_html PUBLIC.
     END OF c_html_opt .
 
   TYPES:
-    tty_table_of TYPE STANDARD TABLE OF REF TO zif_abapgit_html WITH DEFAULT KEY.
+    ty_table_of TYPE STANDARD TABLE OF REF TO zif_abapgit_html WITH DEFAULT KEY.
 
   DATA mv_chunk_title TYPE string READ-ONLY. " Primarily for debug of posponed html parts
 
@@ -48,7 +48,7 @@ INTERFACE zif_abapgit_html PUBLIC.
     IMPORTING
       iv_id      TYPE string
       iv_checked TYPE abap_bool OPTIONAL.
-  CLASS-METHODS a
+  METHODS a
     IMPORTING
       !iv_txt       TYPE string
       !iv_act       TYPE string
@@ -60,7 +60,7 @@ INTERFACE zif_abapgit_html PUBLIC.
       !iv_title     TYPE string OPTIONAL
     RETURNING
       VALUE(rv_str) TYPE string .
-  CLASS-METHODS icon
+  METHODS icon
     IMPORTING
       !iv_name      TYPE string
       !iv_hint      TYPE string OPTIONAL

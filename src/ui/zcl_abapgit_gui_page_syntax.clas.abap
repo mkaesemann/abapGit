@@ -17,16 +17,12 @@ CLASS zcl_abapgit_gui_page_syntax DEFINITION PUBLIC FINAL CREATE PUBLIC
         REDEFINITION.
 
   PROTECTED SECTION.
+    CONSTANTS: c_variant TYPE sci_chkv VALUE 'SYNTAX_CHECK'.
 
     METHODS:
       render_content REDEFINITION.
 
   PRIVATE SECTION.
-    CONSTANTS:
-      BEGIN OF c_actions,
-        rerun TYPE string VALUE 'rerun' ##NO_TEXT,
-      END OF c_actions.
-
     METHODS:
       build_menu
         RETURNING
@@ -37,7 +33,6 @@ CLASS zcl_abapgit_gui_page_syntax DEFINITION PUBLIC FINAL CREATE PUBLIC
       run_syntax_check
         RAISING
           zcx_abapgit_exception.
-
 ENDCLASS.
 
 
@@ -47,18 +42,14 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_SYNTAX IMPLEMENTATION.
 
   METHOD build_menu.
 
-    CREATE OBJECT ro_menu.
-
-    ro_menu->add( iv_txt = 'Re-Run'
-                  iv_act = c_actions-rerun
-                  iv_cur = abap_false ) ##NO_TEXT.
+    ro_menu = build_base_menu( ).
 
   ENDMETHOD.
 
 
   METHOD constructor.
     super->constructor( ).
-    ms_control-page_title = 'SYNTAX CHECK'.
+    ms_control-page_title = 'Syntax Check'.
     mo_repo = io_repo.
     run_syntax_check( ).
   ENDMETHOD.
@@ -67,18 +58,25 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_SYNTAX IMPLEMENTATION.
   METHOD render_content.
 
     CREATE OBJECT ri_html TYPE zcl_abapgit_html.
+
+    ri_html->add( `<div class="repo">` ).
+    ri_html->add( zcl_abapgit_gui_chunk_lib=>render_repo_top( io_repo        = mo_repo
+                                                              iv_show_commit = abap_false ) ).
+    ri_html->add( `</div>` ).
+
     ri_html->add( '<div class="toc">' ).
+
+    ri_html->add( render_variant( c_variant ) ).
 
     IF lines( mt_result ) = 0.
       ri_html->add( '<div class="dummydiv success">' ).
-      ri_html->add( zcl_abapgit_html=>icon( 'check' ) ).
+      ri_html->add( ri_html->icon( 'check' ) ).
       ri_html->add( 'No syntax errors' ).
+      ri_html->add( '</div>' ).
     ELSE.
       render_result( ii_html   = ri_html
                      it_result = mt_result ).
     ENDIF.
-
-    ri_html->add( '</div>' ).
 
   ENDMETHOD.
 
@@ -88,30 +86,27 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_SYNTAX IMPLEMENTATION.
     DATA: li_syntax_check TYPE REF TO zif_abapgit_code_inspector.
 
     li_syntax_check = zcl_abapgit_factory=>get_code_inspector( mo_repo->get_package( ) ).
-    mt_result = li_syntax_check->run( 'SYNTAX_CHECK' ).
+
+    TRY.
+        mt_result = li_syntax_check->run( c_variant ).
+      CATCH zcx_abapgit_exception.
+        " Variant SYNTAX_CHECK does not exist in 702
+        mt_result = li_syntax_check->run( 'VERI_' && c_variant ).
+    ENDTRY.
 
   ENDMETHOD.
 
 
   METHOD zif_abapgit_gui_event_handler~on_event.
 
-    CASE iv_action.
+    CASE ii_event->mv_action.
       WHEN c_actions-rerun.
 
         run_syntax_check( ).
-
-        ei_page = me.
-        ev_state = zcl_abapgit_gui=>c_event_state-re_render.
+        rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
 
       WHEN OTHERS.
-        super->zif_abapgit_gui_event_handler~on_event(
-          EXPORTING
-            iv_action             = iv_action
-            iv_getdata            = iv_getdata
-            it_postdata           = it_postdata
-          IMPORTING
-            ei_page               = ei_page
-            ev_state              = ev_state ).
+        rs_handled = super->zif_abapgit_gui_event_handler~on_event( ii_event ).
     ENDCASE.
 
   ENDMETHOD.

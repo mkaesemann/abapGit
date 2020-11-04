@@ -22,7 +22,7 @@ CLASS ltcl_test IMPLEMENTATION.
   METHOD repo_error.
 
     TRY.
-        zcl_abapgit_url=>host( 'not a real url' ).          "#EC NOTEXT
+        zcl_abapgit_url=>host( 'not a real url' ).
         cl_abap_unit_assert=>fail( ).
       CATCH zcx_abapgit_exception.                      "#EC NO_HANDLER
     ENDTRY.
@@ -104,8 +104,8 @@ CLASS ltcl_test IMPLEMENTATION.
   METHOD url_validate1.
 
     TRY.
-        zcl_abapgit_url=>validate( 'http://github.com/larshp/Foobar.git' ). "#EC NOTEXT
-      CATCH zcx_abapgit_exception.                      "#EC NO_HANDLER
+        zcl_abapgit_url=>validate( 'http://github.com/larshp/Foobar.git' ).
+      CATCH zcx_abapgit_exception.
         cl_abap_unit_assert=>fail( ).
     ENDTRY.
 
@@ -114,8 +114,8 @@ CLASS ltcl_test IMPLEMENTATION.
   METHOD url_validate2.
 
     TRY.
-        zcl_abapgit_url=>validate( 'https://github.com/larshp/Foobar.git' ). "#EC NOTEXT
-      CATCH zcx_abapgit_exception.                      "#EC NO_HANDLER
+        zcl_abapgit_url=>validate( 'https://github.com/larshp/Foobar.git' ).
+      CATCH zcx_abapgit_exception.
         cl_abap_unit_assert=>fail( ).
     ENDTRY.
 
@@ -124,7 +124,7 @@ CLASS ltcl_test IMPLEMENTATION.
   METHOD url_validate3.
 
     TRY.
-        zcl_abapgit_url=>validate( 'XYZ://github.com/larshp/Foobar.git' ). "#EC NOTEXT
+        zcl_abapgit_url=>validate( 'XYZ://github.com/larshp/Foobar.git' ).
         cl_abap_unit_assert=>fail( ).
       CATCH zcx_abapgit_exception.                      "#EC NO_HANDLER
     ENDTRY.

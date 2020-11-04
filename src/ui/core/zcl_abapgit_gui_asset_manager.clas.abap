@@ -9,7 +9,7 @@ CLASS zcl_abapgit_gui_asset_manager DEFINITION PUBLIC FINAL CREATE PUBLIC .
         INCLUDE TYPE zif_abapgit_gui_asset_manager~ty_web_asset.
     TYPES: mime_name TYPE wwwdatatab-objid,
            END OF ty_asset_entry ,
-           tt_asset_register TYPE STANDARD TABLE OF ty_asset_entry WITH KEY url.
+           ty_asset_register TYPE STANDARD TABLE OF ty_asset_entry WITH KEY url.
 
     METHODS register_asset
       IMPORTING
@@ -23,7 +23,7 @@ CLASS zcl_abapgit_gui_asset_manager DEFINITION PUBLIC FINAL CREATE PUBLIC .
   PROTECTED SECTION.
   PRIVATE SECTION.
 
-    DATA mt_asset_register TYPE tt_asset_register.
+    DATA mt_asset_register TYPE ty_asset_register.
 
     METHODS get_mime_asset
       IMPORTING
@@ -45,7 +45,7 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_GUI_ASSET_MANAGER IMPLEMENTATION.
+CLASS zcl_abapgit_gui_asset_manager IMPLEMENTATION.
 
 
   METHOD get_mime_asset.
@@ -156,7 +156,7 @@ CLASS ZCL_ABAPGIT_GUI_ASSET_MANAGER IMPLEMENTATION.
   METHOD zif_abapgit_gui_asset_manager~get_text_asset.
 
     DATA ls_asset TYPE zif_abapgit_gui_asset_manager~ty_web_asset.
-    ls_asset = me->zif_abapgit_gui_asset_manager~get_asset( iv_url ).
+    ls_asset = zif_abapgit_gui_asset_manager~get_asset( iv_url ).
 
     IF ls_asset-type <> 'text'.
       zcx_abapgit_exception=>raise( |Not a text asset: { iv_url }| ).

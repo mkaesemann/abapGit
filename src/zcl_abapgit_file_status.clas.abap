@@ -66,7 +66,7 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_FILE_STATUS IMPLEMENTATION.
+CLASS zcl_abapgit_file_status IMPLEMENTATION.
 
 
   METHOD build_existing.
@@ -206,6 +206,7 @@ CLASS ZCL_ABAPGIT_FILE_STATUS IMPLEMENTATION.
 
     FIELD-SYMBOLS: <ls_remote> LIKE LINE OF it_remote,
                    <ls_result> LIKE LINE OF rt_results,
+                   <ls_state>  LIKE LINE OF it_cur_state,
                    <ls_local>  LIKE LINE OF it_local.
 
 
@@ -237,6 +238,21 @@ CLASS ZCL_ABAPGIT_FILE_STATUS IMPLEMENTATION.
           WITH KEY filename = <ls_local>-file-filename.
         IF sy-subrc = 0 AND <ls_local>-file-sha1 = <ls_remote>-sha1.
           <ls_result>-packmove = abap_true.
+          CLEAR <ls_remote>-sha1. " Mark as processed
+        ELSEIF sy-subrc = 4.
+          " Check if file existed before and was deleted remotely
+          READ TABLE lt_state_idx ASSIGNING <ls_state>
+            WITH KEY path = <ls_local>-file-path filename = <ls_local>-file-filename
+            BINARY SEARCH.
+          IF sy-subrc = 0.
+            IF <ls_local>-file-sha1 = <ls_state>-sha1.
+              <ls_result>-lstate = zif_abapgit_definitions=>c_state-unchanged.
+            ELSE.
+              <ls_result>-lstate = zif_abapgit_definitions=>c_state-modified.
+            ENDIF.
+            <ls_result>-rstate = zif_abapgit_definitions=>c_state-deleted.
+            CLEAR <ls_remote>-sha1. " Mark as processed
+          ENDIF.
         ENDIF.
       ENDIF.
       <ls_result>-inactive = <ls_local>-item-inactive.
@@ -263,7 +279,7 @@ CLASS ZCL_ABAPGIT_FILE_STATUS IMPLEMENTATION.
           lv_sub_fetched = abap_true.
           SORT lt_sub_packages BY table_line. "Optimize Read Access
         ENDIF.
-* make sure the package is under the repo main package
+        " Make sure the package is under the repo main package
         READ TABLE lt_sub_packages TRANSPORTING NO FIELDS
           WITH KEY table_line = ls_item-devclass
           BINARY SEARCH.
@@ -292,6 +308,14 @@ CLASS ZCL_ABAPGIT_FILE_STATUS IMPLEMENTATION.
         WITH KEY file-filename = <ls_remote>-filename.
       IF sy-subrc = 0 AND <ls_local>-file-sha1 = <ls_remote>-sha1.
         <ls_result>-packmove = abap_true.
+      ELSEIF sy-subrc = 4.
+        " Check if file existed before and was deleted locally
+        READ TABLE lt_state_idx ASSIGNING <ls_state>
+          WITH KEY path = <ls_remote>-path filename = <ls_remote>-filename
+          BINARY SEARCH.
+        IF sy-subrc = 0.
+          <ls_result>-lstate = zif_abapgit_definitions=>c_state-deleted.
+        ENDIF.
       ENDIF.
     ENDLOOP.
 
@@ -314,7 +338,7 @@ CLASS ZCL_ABAPGIT_FILE_STATUS IMPLEMENTATION.
       " local packages usually have no tadir entry
       lv_name = iv_obj_name.
       li_package = zcl_abapgit_factory=>get_sap_package( lv_name ).
-      IF li_package->exists(  ) = abap_true.
+      IF li_package->exists( ) = abap_true.
         rv_devclass = lv_name.
       ENDIF.
     ENDIF.
@@ -370,9 +394,8 @@ CLASS ZCL_ABAPGIT_FILE_STATUS IMPLEMENTATION.
     FIELD-SYMBOLS: <ls_res1> LIKE LINE OF it_results,
                    <ls_res2> LIKE LINE OF it_results.
 
-
+    " This method just adds messages to the log. No log, nothing to do here
     IF ii_log IS INITIAL.
-* huh?
       RETURN.
     ENDIF.
 
@@ -385,7 +408,7 @@ CLASS ZCL_ABAPGIT_FILE_STATUS IMPLEMENTATION.
       IF sy-subrc <> 0.
         ii_log->add( iv_msg  = |Changed package assignment for object { <ls_res1>-obj_type } { <ls_res1>-obj_name }|
                      iv_type = 'W'
-                     iv_rc   = '5' ) ##no_text.
+                     iv_rc   = '5' ).
         APPEND INITIAL LINE TO lt_move_idx ASSIGNING <ls_res2>.
         <ls_res2>-obj_type = <ls_res1>-obj_type.
         <ls_res2>-obj_name = <ls_res1>-obj_name.
@@ -419,7 +442,7 @@ CLASS ZCL_ABAPGIT_FILE_STATUS IMPLEMENTATION.
         ii_log->add( iv_msg = |Files for object { <ls_res1>-obj_type } {
                        <ls_res1>-obj_name } are not placed in the same folder|
                      iv_type = 'W'
-                     iv_rc   = '1' ) ##no_text.
+                     iv_rc   = '1' ).
       ENDIF.
     ENDLOOP.
 
@@ -435,7 +458,7 @@ CLASS ZCL_ABAPGIT_FILE_STATUS IMPLEMENTATION.
         ii_log->add( iv_msg = |Package and path does not match for object, {
                        <ls_res1>-obj_type } { <ls_res1>-obj_name }|
                      iv_type = 'W'
-                     iv_rc   = '2' ) ##no_text.
+                     iv_rc   = '2' ).
       ENDIF.
     ENDLOOP.
 
@@ -446,13 +469,13 @@ CLASS ZCL_ABAPGIT_FILE_STATUS IMPLEMENTATION.
       IF <ls_res1>-filename IS NOT INITIAL AND <ls_res1>-filename = ls_file-filename.
         ii_log->add( iv_msg  = |Multiple files with same filename, { <ls_res1>-filename }|
                      iv_type = 'W'
-                     iv_rc   = '3' ) ##no_text.
+                     iv_rc   = '3' ).
       ENDIF.
 
       IF <ls_res1>-filename IS INITIAL.
         ii_log->add( iv_msg  = |Filename is empty for object { <ls_res1>-obj_type } { <ls_res1>-obj_name }|
                      iv_type = 'W'
-                     iv_rc   = '4' ) ##no_text.
+                     iv_rc   = '4' ).
       ENDIF.
 
       MOVE-CORRESPONDING <ls_res1> TO ls_file.

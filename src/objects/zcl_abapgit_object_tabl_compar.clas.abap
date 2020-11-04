@@ -8,26 +8,26 @@ CLASS zcl_abapgit_object_tabl_compar DEFINITION
 
     METHODS constructor
       IMPORTING
-        !io_local TYPE REF TO zcl_abapgit_xml_input .
+        !ii_local TYPE REF TO zif_abapgit_xml_input.
   PROTECTED SECTION.
 
     TYPES:
-      tty_founds  TYPE STANDARD TABLE OF rsfindlst
+      ty_founds  TYPE STANDARD TABLE OF rsfindlst
                            WITH NON-UNIQUE DEFAULT KEY .
     TYPES:
-      tty_seu_obj TYPE STANDARD TABLE OF seu_obj
+      ty_seu_obj TYPE STANDARD TABLE OF seu_obj
                            WITH NON-UNIQUE DEFAULT KEY .
 
-    DATA mo_local TYPE REF TO zcl_abapgit_xml_input .
+    DATA mi_local TYPE REF TO zif_abapgit_xml_input.
 
     METHODS get_where_used_recursive
       IMPORTING
         !iv_object_name      TYPE csequence
         !iv_depth            TYPE i
         !iv_object_type      TYPE euobj-id
-        !it_scope            TYPE tty_seu_obj
+        !it_scope            TYPE ty_seu_obj
       RETURNING
-        VALUE(rt_founds_all) TYPE tty_founds
+        VALUE(rt_founds_all) TYPE ty_founds
       RAISING
         zcx_abapgit_exception .
     METHODS is_structure_used_in_db_table
@@ -39,8 +39,8 @@ CLASS zcl_abapgit_object_tabl_compar DEFINITION
         zcx_abapgit_exception .
     METHODS validate
       IMPORTING
-        !io_remote_version TYPE REF TO zcl_abapgit_xml_input
-        !io_local_version  TYPE REF TO zcl_abapgit_xml_input
+        !ii_remote_version TYPE REF TO zif_abapgit_xml_input
+        !ii_local_version  TYPE REF TO zif_abapgit_xml_input
         !ii_log            TYPE REF TO zif_abapgit_log
       RETURNING
         VALUE(rv_message)  TYPE string
@@ -57,7 +57,7 @@ CLASS ZCL_ABAPGIT_OBJECT_TABL_COMPAR IMPLEMENTATION.
 
   METHOD constructor.
 
-    mo_local = io_local.
+    mi_local = ii_local.
 
   ENDMETHOD.
 
@@ -66,7 +66,7 @@ CLASS ZCL_ABAPGIT_OBJECT_TABL_COMPAR IMPLEMENTATION.
 
     DATA: lt_findstrings TYPE string_table,
           lt_founds      TYPE STANDARD TABLE OF rsfindlst,
-          lt_scope       TYPE tty_seu_obj,
+          lt_scope       TYPE ty_seu_obj,
           lv_findstring  LIKE LINE OF lt_findstrings.
 
     FIELD-SYMBOLS: <ls_found> TYPE rsfindlst.
@@ -123,8 +123,8 @@ CLASS ZCL_ABAPGIT_OBJECT_TABL_COMPAR IMPLEMENTATION.
 
   METHOD is_structure_used_in_db_table.
 
-    DATA: lt_scope  TYPE tty_seu_obj,
-          lt_founds TYPE tty_founds.
+    DATA: lt_scope  TYPE ty_seu_obj,
+          lt_founds TYPE ty_founds.
 
     APPEND 'TABL' TO lt_scope.
     APPEND 'STRU' TO lt_scope.
@@ -151,7 +151,7 @@ CLASS ZCL_ABAPGIT_OBJECT_TABL_COMPAR IMPLEMENTATION.
           ls_item                  TYPE zif_abapgit_definitions=>ty_item,
           lv_inconsistent          TYPE abap_bool.
 
-    io_remote_version->read(
+    ii_remote_version->read(
       EXPORTING
         iv_name = 'DD02V'
       CHANGING
@@ -162,13 +162,13 @@ CLASS ZCL_ABAPGIT_OBJECT_TABL_COMPAR IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    io_remote_version->read(
+    ii_remote_version->read(
       EXPORTING
         iv_name       = 'DD03P_TABLE'
       CHANGING
         cg_data       = lt_previous_table_fields ).
 
-    io_local_version->read(
+    ii_local_version->read(
       EXPORTING
         iv_name       = 'DD03P_TABLE'
       CHANGING
@@ -226,8 +226,8 @@ CLASS ZCL_ABAPGIT_OBJECT_TABL_COMPAR IMPLEMENTATION.
   METHOD zif_abapgit_comparator~compare.
 
     rs_result-text = validate(
-      io_remote_version = io_remote
-      io_local_version  = mo_local
+      ii_remote_version = ii_remote
+      ii_local_version  = mi_local
       ii_log            = ii_log ).
 
   ENDMETHOD.

@@ -1,9 +1,15 @@
-CLASS zcl_abapgit_object_wdyn DEFINITION PUBLIC INHERITING FROM zcl_abapgit_objects_super FINAL.
+CLASS zcl_abapgit_object_wdyn DEFINITION
+  PUBLIC
+  INHERITING FROM zcl_abapgit_objects_super
+  FINAL
+  CREATE PUBLIC .
 
   PUBLIC SECTION.
-    INTERFACES zif_abapgit_object.
-    ALIASES mo_files FOR zif_abapgit_object~mo_files.
 
+    INTERFACES zif_abapgit_object .
+
+    ALIASES mo_files
+      FOR zif_abapgit_object~mo_files .
   PROTECTED SECTION.
   PRIVATE SECTION.
 
@@ -63,7 +69,10 @@ CLASS zcl_abapgit_object_wdyn DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
       add_fm_exception
         IMPORTING iv_name      TYPE string
                   iv_value     TYPE i
-        CHANGING  ct_exception TYPE abap_func_excpbind_tab.
+        CHANGING  ct_exception TYPE abap_func_excpbind_tab,
+      add_with_inactive_parts
+        RAISING
+          zcx_abapgit_exception .
 
 ENDCLASS.
 
@@ -106,6 +115,39 @@ CLASS ZCL_ABAPGIT_OBJECT_WDYN IMPLEMENTATION.
     GET REFERENCE OF ct_value INTO ls_param-value.
 
     INSERT ls_param INTO TABLE ct_param.
+
+  ENDMETHOD.
+
+
+  METHOD add_with_inactive_parts.
+
+    DATA:
+      lv_obj_name TYPE trobj_name,
+      lv_object   TYPE trobjtype,
+      lt_objects  TYPE dwinactiv_tab.
+
+    FIELD-SYMBOLS: <ls_object> LIKE LINE OF lt_objects.
+
+    lv_obj_name = ms_item-obj_name.
+    lv_object = ms_item-obj_type.
+
+    CALL FUNCTION 'RS_INACTIVE_OBJECTS_IN_OBJECT'
+      EXPORTING
+        obj_name         = lv_obj_name
+        object           = lv_object
+      TABLES
+        inactive_objects = lt_objects
+      EXCEPTIONS
+        object_not_found = 1
+        OTHERS           = 2.
+    IF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise( 'Error from RS_INACTIVE_OBJECTS_IN_OBJECT' ).
+    ENDIF.
+
+    LOOP AT lt_objects ASSIGNING <ls_object>.
+      zcl_abapgit_objects_activation=>add( iv_type = <ls_object>-object
+                                           iv_name = <ls_object>-obj_name ).
+    ENDLOOP.
 
   ENDMETHOD.
 
@@ -748,12 +790,11 @@ CLASS ZCL_ABAPGIT_OBJECT_WDYN IMPLEMENTATION.
 
   METHOD zif_abapgit_object~deserialize.
 
-    DATA: lt_sotr      TYPE zif_abapgit_definitions=>ty_sotr_tt,
-          ls_component TYPE wdy_component_metadata.
+    DATA: ls_component   TYPE wdy_component_metadata,
+          ls_description TYPE wdy_ext_ctx_map.
 
     FIELD-SYMBOLS: <ls_view>       LIKE LINE OF ls_component-view_metadata,
                    <ls_controller> LIKE LINE OF ls_component-ctlr_metadata.
-
 
     io_xml->read( EXPORTING iv_name = 'COMPONENT'
                   CHANGING cg_data = ls_component ).
@@ -778,15 +819,14 @@ CLASS ZCL_ABAPGIT_OBJECT_WDYN IMPLEMENTATION.
       recover_view( <ls_view> ).
     ENDLOOP.
 
-    io_xml->read( EXPORTING iv_name = 'SOTR'
-                  CHANGING cg_data = lt_sotr ).
-
-    IF lines( lt_sotr ) > 0.
-      zcl_abapgit_sotr_handler=>create_sotr( it_sotr    = lt_sotr
-                                             iv_package = iv_package ).
+    READ TABLE ls_component-comp_metadata-descriptions INTO ls_description INDEX 1.
+    IF sy-subrc = 0.
+      zcl_abapgit_sotr_handler=>create_sotr(
+        iv_package = iv_package
+        io_xml     = io_xml ).
     ENDIF.
 
-    zcl_abapgit_objects_activation=>add_item( ms_item ).
+    add_with_inactive_parts( ).
 
   ENDMETHOD.
 
@@ -845,9 +885,7 @@ CLASS ZCL_ABAPGIT_OBJECT_WDYN IMPLEMENTATION.
   METHOD zif_abapgit_object~serialize.
 
     DATA: ls_component   TYPE wdy_component_metadata,
-          lt_sotr        TYPE zif_abapgit_definitions=>ty_sotr_tt,
-          ls_description TYPE wdy_ext_ctx_map,
-          lv_object_name TYPE sobj_name.
+          ls_description TYPE wdy_ext_ctx_map.
 
     ls_component = read( ).
 
@@ -860,12 +898,11 @@ CLASS ZCL_ABAPGIT_OBJECT_WDYN IMPLEMENTATION.
 
     READ TABLE ls_component-comp_metadata-descriptions INTO ls_description INDEX 1.
     IF sy-subrc = 0.
-      lv_object_name = ls_description-component_name.
-      lt_sotr = zcl_abapgit_sotr_handler=>read_sotr_wda( lv_object_name ).
-      IF lines( lt_sotr ) > 0.
-        io_xml->add( iv_name = 'SOTR'
-                     ig_data = lt_sotr ).
-      ENDIF.
+      zcl_abapgit_sotr_handler=>read_sotr(
+        iv_pgmid    = 'LIMU'
+        iv_object   = 'WDYV'
+        iv_obj_name = ms_item-obj_name
+        io_xml      = io_xml ).
     ENDIF.
 
   ENDMETHOD.

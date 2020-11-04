@@ -6,27 +6,17 @@ CLASS zcl_abapgit_html DEFINITION
 
     INTERFACES zif_abapgit_html .
 
-    ALIASES a
-      FOR zif_abapgit_html~a .
-    ALIASES add
-      FOR zif_abapgit_html~add .
-    ALIASES add_a
-      FOR zif_abapgit_html~add_a .
-    ALIASES add_checkbox
-      FOR zif_abapgit_html~add_checkbox .
-    ALIASES add_icon
-      FOR zif_abapgit_html~add_icon .
-    ALIASES icon
-      FOR zif_abapgit_html~icon .
-    ALIASES is_empty
-      FOR zif_abapgit_html~is_empty .
-
     CONSTANTS c_indent_size TYPE i VALUE 2 ##NO_TEXT.
 
     CLASS-METHODS class_constructor .
-    CLASS-METHODS create
+    CLASS-METHODS icon
+      IMPORTING
+        !iv_name      TYPE string
+        !iv_hint      TYPE string OPTIONAL
+        !iv_class     TYPE string OPTIONAL
+        !iv_onclick   TYPE string OPTIONAL
       RETURNING
-        VALUE(ro_html) TYPE REF TO zcl_abapgit_html .
+        VALUE(rv_str) TYPE string .
   PROTECTED SECTION.
   PRIVATE SECTION.
 
@@ -77,109 +67,6 @@ ENDCLASS.
 CLASS ZCL_ABAPGIT_HTML IMPLEMENTATION.
 
 
-  METHOD a.
-
-    DATA: lv_class TYPE string,
-          lv_href  TYPE string,
-          lv_click TYPE string,
-          lv_id    TYPE string,
-          lv_style TYPE string,
-          lv_title TYPE string.
-
-    lv_class = iv_class.
-
-    IF iv_opt CA zif_abapgit_html=>c_html_opt-strong.
-      lv_class = lv_class && ' emphasis' ##NO_TEXT.
-    ENDIF.
-    IF iv_opt CA zif_abapgit_html=>c_html_opt-cancel.
-      lv_class = lv_class && ' attention' ##NO_TEXT.
-    ENDIF.
-    IF iv_opt CA zif_abapgit_html=>c_html_opt-crossout.
-      lv_class = lv_class && ' crossout grey' ##NO_TEXT.
-    ENDIF.
-    IF lv_class IS NOT INITIAL.
-      SHIFT lv_class LEFT DELETING LEADING space.
-      lv_class = | class="{ lv_class }"|.
-    ENDIF.
-
-    lv_href  = ' href="#"'. " Default, dummy
-    IF ( iv_act IS NOT INITIAL OR iv_typ = zif_abapgit_html=>c_action_type-dummy )
-        AND iv_opt NA zif_abapgit_html=>c_html_opt-crossout.
-      CASE iv_typ.
-        WHEN zif_abapgit_html=>c_action_type-url.
-          lv_href  = | href="{ iv_act }"|.
-        WHEN zif_abapgit_html=>c_action_type-sapevent.
-          lv_href  = | href="sapevent:{ iv_act }"|.
-        WHEN zif_abapgit_html=>c_action_type-onclick.
-          lv_href  = ' href="#"'.
-          lv_click = | onclick="{ iv_act }"|.
-        WHEN zif_abapgit_html=>c_action_type-dummy.
-          lv_href  = ' href="#"'.
-      ENDCASE.
-    ENDIF.
-
-    IF iv_id IS NOT INITIAL.
-      lv_id = | id="{ iv_id }"|.
-    ENDIF.
-
-    IF iv_style IS NOT INITIAL.
-      lv_style = | style="{ iv_style }"|.
-    ENDIF.
-
-    IF iv_title IS NOT INITIAL.
-      lv_title = | title="{ iv_title }"|.
-    ENDIF.
-
-    rv_str = |<a{ lv_id }{ lv_class }{ lv_href }{ lv_click }{ lv_style }{ lv_title }>|
-          && |{ iv_txt }</a>|.
-
-  ENDMETHOD.
-
-
-  METHOD add.
-
-    DATA: lv_type TYPE c,
-          lo_html TYPE REF TO zcl_abapgit_html.
-
-    FIELD-SYMBOLS: <lt_tab> TYPE string_table.
-
-    DESCRIBE FIELD ig_chunk TYPE lv_type. " Describe is faster than RTTI classes
-
-    CASE lv_type.
-      WHEN 'C' OR 'g'.  " Char or string
-        APPEND ig_chunk TO mt_buffer.
-      WHEN 'h'.         " Table
-        ASSIGN ig_chunk TO <lt_tab>. " Assuming table of strings ! Will dump otherwise
-        APPEND LINES OF <lt_tab> TO mt_buffer.
-      WHEN 'r'.         " Object ref
-        ASSERT ig_chunk IS BOUND. " Dev mistake
-        TRY.
-            lo_html ?= ig_chunk.
-          CATCH cx_sy_move_cast_error.
-            ASSERT 1 = 0. " Dev mistake
-        ENDTRY.
-        APPEND LINES OF lo_html->mt_buffer TO mt_buffer.
-      WHEN OTHERS.
-        ASSERT 1 = 0. " Dev mistake
-    ENDCASE.
-
-  ENDMETHOD.
-
-
-  METHOD add_a.
-
-    add( a( iv_txt   = iv_txt
-            iv_act   = iv_act
-            iv_typ   = iv_typ
-            iv_opt   = iv_opt
-            iv_class = iv_class
-            iv_id    = iv_id
-            iv_style = iv_style
-            iv_title = iv_title ) ).
-
-  ENDMETHOD.
-
-
   METHOD checkbox.
 
     DATA: lv_checked TYPE string.
@@ -198,11 +85,6 @@ CLASS ZCL_ABAPGIT_HTML IMPLEMENTATION.
       EXPORTING
         pattern     = '<(AREA|BASE|BR|COL|COMMAND|EMBED|HR|IMG|INPUT|LINK|META|PARAM|SOURCE|!)'
         ignore_case = abap_false.
-  ENDMETHOD.
-
-
-  METHOD create.
-    CREATE OBJECT ro_html.
   ENDMETHOD.
 
 
@@ -293,11 +175,6 @@ CLASS ZCL_ABAPGIT_HTML IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD is_empty.
-    rv_yes = boolc( lines( mt_buffer ) = 0 ).
-  ENDMETHOD.
-
-
   METHOD study_line.
 
     DATA: lv_line TYPE string,
@@ -358,21 +235,143 @@ CLASS ZCL_ABAPGIT_HTML IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD zif_abapgit_html~a.
+
+    DATA: lv_class TYPE string,
+          lv_href  TYPE string,
+          lv_click TYPE string,
+          lv_id    TYPE string,
+          lv_style TYPE string,
+          lv_title TYPE string.
+
+    lv_class = iv_class.
+
+    IF iv_opt CA zif_abapgit_html=>c_html_opt-strong.
+      lv_class = lv_class && ' emphasis'.
+    ENDIF.
+    IF iv_opt CA zif_abapgit_html=>c_html_opt-cancel.
+      lv_class = lv_class && ' attention'.
+    ENDIF.
+    IF iv_opt CA zif_abapgit_html=>c_html_opt-crossout.
+      lv_class = lv_class && ' crossout grey'.
+    ENDIF.
+    IF lv_class IS NOT INITIAL.
+      SHIFT lv_class LEFT DELETING LEADING space.
+      lv_class = | class="{ lv_class }"|.
+    ENDIF.
+
+    lv_href  = ' href="#"'. " Default, dummy
+    IF ( iv_act IS NOT INITIAL OR iv_typ = zif_abapgit_html=>c_action_type-dummy )
+        AND iv_opt NA zif_abapgit_html=>c_html_opt-crossout.
+      CASE iv_typ.
+        WHEN zif_abapgit_html=>c_action_type-url.
+          lv_href  = | href="{ iv_act }"|.
+        WHEN zif_abapgit_html=>c_action_type-sapevent.
+          lv_href  = | href="sapevent:{ iv_act }"|.
+        WHEN zif_abapgit_html=>c_action_type-onclick.
+          lv_href  = ' href="#"'.
+          lv_click = | onclick="{ iv_act }"|.
+        WHEN zif_abapgit_html=>c_action_type-dummy.
+          lv_href  = ' href="#"'.
+      ENDCASE.
+    ENDIF.
+
+    IF iv_id IS NOT INITIAL.
+      lv_id = | id="{ iv_id }"|.
+    ENDIF.
+
+    IF iv_style IS NOT INITIAL.
+      lv_style = | style="{ iv_style }"|.
+    ENDIF.
+
+    IF iv_title IS NOT INITIAL.
+      lv_title = | title="{ iv_title }"|.
+    ENDIF.
+
+    rv_str = |<a{ lv_id }{ lv_class }{ lv_href }{ lv_click }{ lv_style }{ lv_title }>|
+          && |{ iv_txt }</a>|.
+
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_html~add.
+
+    DATA: lv_type TYPE c,
+          lo_html TYPE REF TO zcl_abapgit_html.
+
+    FIELD-SYMBOLS: <lt_tab> TYPE string_table.
+
+    DESCRIBE FIELD ig_chunk TYPE lv_type. " Describe is faster than RTTI classes
+
+    CASE lv_type.
+      WHEN 'C' OR 'g'.  " Char or string
+        APPEND ig_chunk TO mt_buffer.
+      WHEN 'h'.         " Table
+        ASSIGN ig_chunk TO <lt_tab>. " Assuming table of strings ! Will dump otherwise
+        APPEND LINES OF <lt_tab> TO mt_buffer.
+      WHEN 'r'.         " Object ref
+        ASSERT ig_chunk IS BOUND. " Dev mistake
+        TRY.
+            lo_html ?= ig_chunk.
+          CATCH cx_sy_move_cast_error.
+            ASSERT 1 = 0. " Dev mistake
+        ENDTRY.
+        APPEND LINES OF lo_html->mt_buffer TO mt_buffer.
+      WHEN OTHERS.
+        ASSERT 1 = 0. " Dev mistake
+    ENDCASE.
+
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_html~add_a.
+
+    zif_abapgit_html~add( zif_abapgit_html~a(
+      iv_txt   = iv_txt
+      iv_act   = iv_act
+      iv_typ   = iv_typ
+      iv_opt   = iv_opt
+      iv_class = iv_class
+      iv_id    = iv_id
+      iv_style = iv_style
+      iv_title = iv_title ) ).
+
+  ENDMETHOD.
+
+
   METHOD zif_abapgit_html~add_checkbox.
 
-    add( checkbox( iv_id      = iv_id
-                   iv_checked = iv_checked ) ).
+    zif_abapgit_html~add( checkbox(
+      iv_id      = iv_id
+      iv_checked = iv_checked ) ).
 
   ENDMETHOD.
 
 
   METHOD zif_abapgit_html~add_icon.
 
-    add( icon( iv_name    = iv_name
-               iv_class   = iv_class
-               iv_hint    = iv_hint
-               iv_onclick = iv_onclick  ) ).
+    zif_abapgit_html~add( icon(
+      iv_name    = iv_name
+      iv_class   = iv_class
+      iv_hint    = iv_hint
+      iv_onclick = iv_onclick ) ).
 
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_html~icon.
+
+    rv_str = icon(
+      iv_name    = iv_name
+      iv_hint    = iv_hint
+      iv_class   = iv_class
+      iv_onclick = iv_onclick ).
+
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_html~is_empty.
+    rv_yes = boolc( lines( mt_buffer ) = 0 ).
   ENDMETHOD.
 
 
