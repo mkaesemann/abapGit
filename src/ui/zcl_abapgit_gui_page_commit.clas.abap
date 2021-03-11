@@ -40,53 +40,61 @@ private section.
   data MS_COMMIT type ZIF_ABAPGIT_SERVICES_GIT=>TY_COMMIT_FIELDS .
 
   methods PROPOSE_DEFAULT_BODY
+    importing
+      !IT_TRANSPORTS type TRKORRS
     changing
       !C_BODY type STRING .
+  methods PROPOSE_DEFAULT_TEXTS
+    changing
+      !C_COMMENT type STRING
+      !C_BODY type STRING .
   methods PROPOSE_DEFAULT_COMMENT
+    importing
+      !IT_TRANSPORTS type TRKORRS
     changing
       !C_COMMENT type STRING .
   methods SUPPLEMENT_TRANSPORT_LOCKS
     changing
       !CS_COMMIT type ZIF_ABAPGIT_SERVICES_GIT=>TY_COMMIT_FIELDS .
-    METHODS render_menu
-      RETURNING
-        VALUE(ri_html) TYPE REF TO zif_abapgit_html .
-    METHODS render_stage
-      RETURNING
-        VALUE(ri_html) TYPE REF TO zif_abapgit_html
-      RAISING
-        zcx_abapgit_exception .
-    METHODS render_form
-      RETURNING
-        VALUE(ri_html) TYPE REF TO zif_abapgit_html
-      RAISING
-        zcx_abapgit_exception .
-    METHODS render_text_input
-      IMPORTING
-        !iv_name       TYPE string
-        !iv_label      TYPE string
-        !iv_value      TYPE string OPTIONAL
-        !iv_max_length TYPE string OPTIONAL
-      RETURNING
-        VALUE(ri_html) TYPE REF TO zif_abapgit_html .
-    METHODS get_comment_default
-      RETURNING
-        VALUE(rv_text) TYPE string .
-    METHODS get_comment_object
-      IMPORTING
-        !it_stage      TYPE zif_abapgit_definitions=>ty_stage_tt
-      RETURNING
-        VALUE(rv_text) TYPE string .
-    METHODS get_comment_file
-      IMPORTING
-        !it_stage      TYPE zif_abapgit_definitions=>ty_stage_tt
-      RETURNING
-        VALUE(rv_text) TYPE string .
-    METHODS render_scripts
-      RETURNING
-        VALUE(ri_html) TYPE REF TO zif_abapgit_html
-      RAISING
-        zcx_abapgit_exception .
+  methods RENDER_MENU
+    returning
+      value(RI_HTML) type ref to ZIF_ABAPGIT_HTML .
+  methods RENDER_STAGE
+    returning
+      value(RI_HTML) type ref to ZIF_ABAPGIT_HTML
+    raising
+      ZCX_ABAPGIT_EXCEPTION .
+  methods RENDER_FORM
+    returning
+      value(RI_HTML) type ref to ZIF_ABAPGIT_HTML
+    raising
+      ZCX_ABAPGIT_EXCEPTION .
+  methods RENDER_TEXT_INPUT
+    importing
+      !IV_NAME type STRING
+      !IV_LABEL type STRING
+      !IV_VALUE type STRING optional
+      !IV_MAX_LENGTH type STRING optional
+    returning
+      value(RI_HTML) type ref to ZIF_ABAPGIT_HTML .
+  methods GET_COMMENT_DEFAULT
+    returning
+      value(RV_TEXT) type STRING .
+  methods GET_COMMENT_OBJECT
+    importing
+      !IT_STAGE type ZIF_ABAPGIT_DEFINITIONS=>TY_STAGE_TT
+    returning
+      value(RV_TEXT) type STRING .
+  methods GET_COMMENT_FILE
+    importing
+      !IT_STAGE type ZIF_ABAPGIT_DEFINITIONS=>TY_STAGE_TT
+    returning
+      value(RV_TEXT) type STRING .
+  methods RENDER_SCRIPTS
+    returning
+      value(RI_HTML) type ref to ZIF_ABAPGIT_HTML
+    raising
+      ZCX_ABAPGIT_EXCEPTION .
 ENDCLASS.
 
 
@@ -202,46 +210,24 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_COMMIT IMPLEMENTATION.
 
   METHOD propose_default_body.
 
-    "Collect Requests of Staged Objects
-    DATA: lt_requests TYPE SORTED TABLE OF trkorr
-            WITH UNIQUE KEY table_line.
-    DATA: li_cts_api TYPE REF TO zif_abapgit_cts_api.
-
     DATA: lt_request_docu TYPE STANDARD TABLE OF tline
             WITH EMPTY KEY.
 
     DATA: lt_tasks TYPE SORTED TABLE OF e070
             WITH UNIQUE KEY trkorr.
 
-    li_cts_api = zcl_abapgit_factory=>get_cts_api( ).
-    LOOP AT mo_stage->get_all( ) INTO DATA(ls_object)
-      WHERE status-obj_type IS NOT INITIAL
-        AND status-obj_name IS NOT INITIAL
-        AND status-package  IS NOT INITIAL.
-
-      TRY.
-          DATA(transport) = li_cts_api->get_transport_for_object(
-                              is_item = value #( obj_type = ls_object-status-obj_type
-                                                 obj_name = ls_object-status-obj_name )
-                              iv_resolve_task_to_request = abap_false ).
-          INSERT transport INTO TABLE lt_requests.
-        CATCH zcx_abapgit_exception.
-          CONTINUE.
-      ENDTRY.
-
-    ENDLOOP.
 
     "Get Documentation of Requests
-    IF lt_requests IS NOT INITIAL.
+    IF it_transports IS NOT INITIAL.
       SELECT trkorr, trfunction
         FROM e070
-        FOR ALL ENTRIES IN @lt_requests
-        WHERE trkorr     = @lt_requests-table_line
+        FOR ALL ENTRIES IN @it_transports
+        WHERE trkorr     = @it_transports-table_line
           AND trfunction = 'S'  "We only use texts of tasks
         INTO CORRESPONDING FIELDS OF TABLE @lt_tasks.
     ENDIF.
 
-    LOOP AT lt_requests INTO DATA(request).
+    LOOP AT it_transports INTO DATA(request).
 
       IF NOT line_exists( lt_tasks[ trkorr = request ] ).
         CONTINUE.
@@ -285,41 +271,18 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_COMMIT IMPLEMENTATION.
 
   METHOD propose_default_comment.
 
-    "Collect Requests of Staged Objects
-    DATA: lt_requests TYPE SORTED TABLE OF trkorr
-            WITH UNIQUE KEY table_line.
-    DATA: li_cts_api TYPE REF TO zif_abapgit_cts_api.
-
     DATA: lt_request_docu TYPE STANDARD TABLE OF tline
             WITH EMPTY KEY.
 
     DATA: lt_docu TYPE SORTED TABLE OF e07t
             WITH UNIQUE KEY trkorr.
 
-    li_cts_api = zcl_abapgit_factory=>get_cts_api( ).
-    LOOP AT mo_stage->get_all( ) INTO DATA(ls_object)
-      WHERE status-obj_type IS NOT INITIAL
-        AND status-obj_name IS NOT INITIAL
-        AND status-package  IS NOT INITIAL.
-
-      TRY.
-          DATA(transport) = li_cts_api->get_transport_for_object(
-                              is_item = value #( obj_type = ls_object-status-obj_type
-                                                 obj_name = ls_object-status-obj_name )
-                              iv_resolve_task_to_request = abap_false ).
-          INSERT transport INTO TABLE lt_requests.
-        CATCH zcx_abapgit_exception.
-          CONTINUE.
-      ENDTRY.
-
-    ENDLOOP.
-
-    IF lt_requests IS NOT INITIAL.
+    IF it_transports IS NOT INITIAL.
       SELECT e07t~trkorr, as4text
         FROM e07t
         INNER JOIN e070 ON e070~trkorr = e07t~trkorr
-        FOR ALL ENTRIES IN @lt_requests
-        WHERE e07t~trkorr     = @lt_requests-table_line
+        FOR ALL ENTRIES IN @it_transports
+        WHERE e07t~trkorr     = @it_transports-table_line
           AND e07t~langu      = 'E'
           AND e070~trfunction = 'S'  "We only use texts of tasks
           AND e07t~as4text IS NOT NULL
@@ -330,6 +293,51 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_COMMIT IMPLEMENTATION.
     IF lines( lt_docu ) = 1.
       "There is exactly one match that we can use as a proposal for the comment
       c_comment = lt_docu[ 1 ]-as4text.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+  METHOD propose_default_texts.
+
+    "Collect Requests of Staged Objects
+    DATA: lt_requests TYPE SORTED TABLE OF trkorr
+            WITH UNIQUE KEY table_line.
+    DATA: li_cts_api TYPE REF TO zif_abapgit_cts_api.
+
+    DATA: lt_request_docu TYPE STANDARD TABLE OF tline
+            WITH EMPTY KEY.
+
+    DATA: lt_tasks TYPE SORTED TABLE OF e070
+            WITH UNIQUE KEY trkorr.
+
+    li_cts_api = zcl_abapgit_factory=>get_cts_api( ).
+    LOOP AT mo_stage->get_all( ) INTO DATA(ls_object)
+      WHERE status-obj_type IS NOT INITIAL
+        AND status-obj_name IS NOT INITIAL
+        AND status-package  IS NOT INITIAL.
+
+      TRY.
+          DATA(transport) = li_cts_api->get_transport_for_object(
+                              is_item = VALUE #( obj_type = ls_object-status-obj_type
+                                                 obj_name = ls_object-status-obj_name )
+                              iv_resolve_task_to_request = abap_false ).
+          INSERT transport INTO TABLE lt_requests.
+        CATCH zcx_abapgit_exception.
+          CONTINUE.
+      ENDTRY.
+
+    ENDLOOP.
+
+    DATA(lt_trkorrs) = VALUE trkorrs( ).
+    lt_trkorrs = lt_requests.
+
+    "Get Documentation of Requests
+    IF lt_requests IS NOT INITIAL.
+      propose_default_comment( EXPORTING it_transports = lt_trkorrs
+                               CHANGING c_comment = c_comment ).
+      propose_default_body( EXPORTING it_transports = lt_trkorrs
+                            CHANGING c_body = c_body ).
     ENDIF.
 
   ENDMETHOD.
@@ -406,8 +414,8 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_COMMIT IMPLEMENTATION.
       lv_comment = get_comment_default( ).
     ENDIF.
 
-    propose_default_comment( CHANGING c_comment = lv_comment ).
-    propose_default_body( CHANGING c_body = lv_body ).
+    propose_default_texts( CHANGING c_comment = lv_comment
+                                    c_body    = lv_body ).
 
     CREATE OBJECT ri_html TYPE zcl_abapgit_html.
 
