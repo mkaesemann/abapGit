@@ -122,7 +122,10 @@ CLASS ZCL_ABAPGIT_CTS_INTEGRATION IMPLEMENTATION.
     "Determine the transports/tasks for the staged objects that currently hold a lock in an open transport
     TRY.
         DATA(lt_transports) = zcl_abapgit_factory=>get_cts_api( )->get_transports_for_list( lt_items ).
-        rt_lock_info = CORRESPONDING #( lt_transports DISCARDING DUPLICATES ).
+        LOOP AT lt_transports INTO DATA(ls_transport).
+          INSERT CORRESPONDING ty_lock_info( ls_transport )
+            INTO TABLE rt_lock_info.
+        ENDLOOP.
       CATCH zcx_abapgit_exception.
         RETURN.
     ENDTRY.
