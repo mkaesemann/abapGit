@@ -1,24 +1,23 @@
-CLASS zcl_abapgit_cts_integration DEFINITION
-  PUBLIC
-  FINAL
-  CREATE PRIVATE .
+class ZCL_ABAPGIT_CTS_INTEGRATION definition
+  public
+  final
+  create private .
 
-  PUBLIC SECTION.
+public section.
 
-    CLASS-METHODS propose_default_texts
-      IMPORTING
-        !it_staged TYPE zif_abapgit_definitions=>ty_stage_tt
-        !it_status TYPE zif_abapgit_definitions=>ty_results_tt
-      CHANGING
-        !c_comment TYPE string
-        !c_body    TYPE string .
-    CLASS-METHODS supplement_task_info
-      IMPORTING
-        !it_staged TYPE zif_abapgit_definitions=>ty_stage_tt
-        !it_status TYPE zif_abapgit_definitions=>ty_results_tt
-      CHANGING
-        !cs_commit TYPE zif_abapgit_services_git=>ty_commit_fields .
-
+  class-methods PROPOSE_DEFAULT_TEXTS
+    importing
+      !IT_STAGED type ZIF_ABAPGIT_DEFINITIONS=>TY_STAGE_TT
+      !IT_STATUS type ZIF_ABAPGIT_DEFINITIONS=>TY_RESULTS_TT
+      !IO_FORM type ref to ZCL_ABAPGIT_STRING_MAP
+    changing
+      !CS_COMMIT type ZIF_ABAPGIT_SERVICES_GIT=>TY_COMMIT_FIELDS .
+  class-methods SUPPLEMENT_TASK_INFO
+    importing
+      !IT_STAGED type ZIF_ABAPGIT_DEFINITIONS=>TY_STAGE_TT
+      !IT_STATUS type ZIF_ABAPGIT_DEFINITIONS=>TY_RESULTS_TT
+    changing
+      !CS_COMMIT type ZIF_ABAPGIT_SERVICES_GIT=>TY_COMMIT_FIELDS .
   PROTECTED SECTION.
 
     TYPES: BEGIN OF ty_trkorr,
@@ -64,177 +63,36 @@ CLASS zcl_abapgit_cts_integration DEFINITION
                 !it_lock_info    TYPE tty_lock_info
       RETURNING VALUE(r_comment) TYPE string .
 
-  PRIVATE SECTION.
-    CLASS-METHODS get_lock_text
-      IMPORTING
-        is_lock_info  TYPE zcl_abapgit_cts_integration=>ty_lock_info
-      RETURNING
-        VALUE(r_text) TYPE string.
-    CLASS-METHODS get_task_docu
-      IMPORTING
-        i_trkorr      TYPE trkorr
-      RETURNING
-        VALUE(r_docu) TYPE string.
+PRIVATE SECTION.
+
+  CONSTANTS:
+    BEGIN OF cs_formid,
+      committer       TYPE string VALUE 'committer',
+      committer_name  TYPE string VALUE 'committer_name',
+      committer_email TYPE string VALUE 'committer_email',
+      message         TYPE string VALUE 'message',
+      comment         TYPE string VALUE 'comment',
+      body            TYPE string VALUE 'body',
+      author          TYPE string VALUE 'author',
+      author_name     TYPE string VALUE 'author_name',
+      author_email    TYPE string VALUE 'author_email',
+    END OF cs_formid.
+
+  CLASS-METHODS get_lock_text
+    IMPORTING
+      !is_lock_info TYPE zcl_abapgit_cts_integration=>ty_lock_info
+    RETURNING
+      VALUE(r_text) TYPE string .
+  CLASS-METHODS get_task_docu
+    IMPORTING
+      !i_trkorr     TYPE trkorr
+    RETURNING
+      VALUE(r_docu) TYPE string .
 ENDCLASS.
 
 
 
-CLASS zcl_abapgit_cts_integration IMPLEMENTATION.
-
-  METHOD propose_default_texts.
-
-    DATA(lt_lock_info) = get_lock_info(
-                           it_staged = it_staged
-                           it_status = it_status ).
-
-    IF lt_lock_info IS INITIAL.
-      RETURN.
-    ENDIF.
-
-    "Propose Comment
-    DATA(default_comment) = propose_default_comment( lt_lock_info ).
-    c_comment = COND #( WHEN c_comment IS NOT INITIAL AND default_comment IS NOT INITIAL
-                          THEN |{ default_comment } - { c_comment }|
-                        WHEN c_comment IS NOT INITIAL AND default_comment IS INITIAL
-                          THEN c_comment
-                        ELSE default_comment ).
-
-    "Propose Body
-    c_body = COND #( WHEN c_body IS NOT INITIAL
-                          THEN |{ c_body }| &
-                               |{ cl_abap_char_utilities=>cr_lf }| &
-                               |{ cl_abap_char_utilities=>cr_lf }| &
-                               |--------------------------------------------------------------------------------| &
-                               |{ cl_abap_char_utilities=>cr_lf }| &
-                               |{ cl_abap_char_utilities=>cr_lf }| &
-                               |{ propose_default_body( lt_lock_info ) }|
-                        ELSE propose_default_body( lt_lock_info ) ).
-
-  ENDMETHOD.
-
-  METHOD propose_default_comment.
-
-    DATA: lt_docu TYPE STANDARD TABLE OF ty_lock_info
-             WITH EMPTY KEY.
-
-    lt_docu = it_lock_info.
-    SORT lt_docu
-      BY current_user DESCENDING    "Own before foreign
-         status       ASCENDING     "Open before released
-         task         DESCENDING.   "Newest before oldest
-
-    READ TABLE lt_docu INTO DATA(ls_docu)
-      BINARY SEARCH
-      WITH KEY current_user = abap_true
-               status       = 'D'.
-    IF sy-subrc = 0.
-      "We found the latest open task of this user: Best Match
-      r_comment = get_lock_text( ls_docu ).
-      RETURN.
-    ENDIF.
-
-    READ TABLE lt_docu INTO ls_docu
-      BINARY SEARCH
-      WITH KEY current_user = abap_true.
-    IF sy-subrc = 0.
-      "We found the latest released task of this user: Propose
-      r_comment = get_lock_text( ls_docu ).
-      RETURN.
-    ENDIF.
-
-    r_comment = get_lock_text( lt_docu[ 1 ] ).
-
-  ENDMETHOD.
-
-  METHOD propose_default_body.
-
-    DATA: lt_docu TYPE STANDARD TABLE OF ty_lock_info
-             WITH EMPTY KEY.
-
-    lt_docu = it_lock_info.
-    SORT lt_docu
-      BY current_user DESCENDING    "Own before foreign
-         status       ASCENDING     "Open before released
-         task         DESCENDING.   "Newest before oldest
-    DELETE ADJACENT DUPLICATES FROM lt_docu
-      COMPARING current_user status task.
-
-    "We propose the task documentation of all tasks in the current staging
-    CLEAR: r_body.
-
-    LOOP AT lt_docu INTO DATA(ls_docu).
-
-      DATA(docu) = get_task_docu( ls_docu-task ).
-
-      r_body = COND #( WHEN r_body IS INITIAL AND docu IS INITIAL
-                         THEN space
-                       WHEN r_body IS INITIAL AND docu IS NOT INITIAL
-                         THEN docu
-                       WHEN r_body IS NOT INITIAL AND docu IS INITIAL
-                         THEN r_body
-                       WHEN r_body IS NOT INITIAL AND docu IS NOT INITIAL
-                         THEN r_body && cl_abap_char_utilities=>cr_lf && docu ).
-
-    ENDLOOP.
-
-  ENDMETHOD.
-
-  METHOD supplement_task_info.
-
-    DATA: lt_transports TYPE SORTED TABLE OF trkorr
-            WITH UNIQUE KEY table_line,
-          lt_tasks      TYPE STANDARD TABLE OF ty_lock_info
-            WITH EMPTY KEY.
-
-    "Supplement Transport Request/Task Lock Links in Comment
-
-    DATA(lt_lock_info) = get_lock_info(
-                           it_staged = it_staged
-                           it_status = it_status ).
-
-    IF lt_lock_info IS INITIAL.
-      RETURN.
-    ENDIF.
-
-    "Collect Distinct Transports
-    LOOP AT lt_lock_info INTO DATA(ls_lock_info).
-      INSERT ls_lock_info-transport INTO TABLE lt_transports.
-    ENDLOOP.
-
-    "Collect Distinct Tasks
-    lt_tasks = lt_lock_info.
-    SORT lt_tasks
-      BY task.
-    DELETE ADJACENT DUPLICATES FROM lt_tasks
-      COMPARING task.
-
-    IF lt_transports IS INITIAL AND lt_tasks IS INITIAL.
-      RETURN.
-    ENDIF.
-
-    "Add Transport Locks
-    DATA(tr_links) = VALUE string( ).
-    LOOP AT lt_transports INTO DATA(trkorr).
-      tr_links = SWITCH #( sy-tabix
-                           WHEN 1 THEN trkorr
-                           ELSE |, { trkorr }| ).
-    ENDLOOP.
-    SHIFT tr_links LEFT DELETING LEADING ', '.
-
-    "Add Task Locks
-    DATA(ta_links) = VALUE string( ).
-    LOOP AT lt_tasks INTO DATA(ls_task).
-      ta_links = SWITCH #( sy-tabix
-                           WHEN 1 THEN ls_task-task
-                           ELSE |, { ls_task-task }| ).
-    ENDLOOP.
-    SHIFT ta_links LEFT DELETING LEADING ', '.
-
-    "Supplement Information to Comment
-    cs_commit-comment = cs_commit-comment &&
-                        | ({ tr_links } // { ta_links } )|.
-
-  ENDMETHOD.
+CLASS ZCL_ABAPGIT_CTS_INTEGRATION IMPLEMENTATION.
 
 
   METHOD get_lock_info.
@@ -282,7 +140,7 @@ CLASS zcl_abapgit_cts_integration IMPLEMENTATION.
     SELECT DISTINCT
            'I' AS sign,
            'EQ' AS option,
-           CASE WHEN e070~strkorr IS INITIAL OR e070~strkorr IS NULL
+           CASE WHEN e070~strkorr IS NULL OR e070~strkorr = ' '
                   THEN e070~trkorr
                 ELSE e070~strkorr
            END AS low
@@ -428,4 +286,227 @@ CLASS zcl_abapgit_cts_integration IMPLEMENTATION.
 
   ENDMETHOD.
 
+
+  METHOD propose_default_body.
+
+    DATA: lt_docu TYPE STANDARD TABLE OF ty_lock_info
+             WITH EMPTY KEY.
+
+    lt_docu = it_lock_info.
+    SORT lt_docu
+      BY current_user DESCENDING    "Own before foreign
+         status       ASCENDING     "Open before released
+         task         DESCENDING.   "Newest before oldest
+    DELETE ADJACENT DUPLICATES FROM lt_docu
+      COMPARING current_user status task.
+
+    "We propose the task documentation of all tasks in the current staging
+    CLEAR: r_body.
+
+    LOOP AT lt_docu INTO DATA(ls_docu).
+
+      DATA(docu) = get_task_docu( ls_docu-task ).
+
+      r_body = COND #( WHEN r_body IS INITIAL AND docu IS INITIAL
+                         THEN space
+                       WHEN r_body IS INITIAL AND docu IS NOT INITIAL
+                         THEN docu
+                       WHEN r_body IS NOT INITIAL AND docu IS INITIAL
+                         THEN r_body
+                       WHEN r_body IS NOT INITIAL AND docu IS NOT INITIAL
+                         THEN r_body && cl_abap_char_utilities=>cr_lf && docu ).
+
+    ENDLOOP.
+
+  ENDMETHOD.
+
+
+  METHOD propose_default_comment.
+
+    DATA: lt_docu TYPE STANDARD TABLE OF ty_lock_info
+             WITH EMPTY KEY.
+
+    lt_docu = it_lock_info.
+    SORT lt_docu
+      BY current_user DESCENDING    "Own before foreign
+         status       ASCENDING     "Open before released
+         task         DESCENDING.   "Newest before oldest
+
+    READ TABLE lt_docu INTO DATA(ls_docu)
+      BINARY SEARCH
+      WITH KEY current_user = abap_true
+               status       = 'D'.
+    IF sy-subrc = 0.
+      "We found the latest open task of this user: Best Match
+      r_comment = get_lock_text( ls_docu ).
+      RETURN.
+    ENDIF.
+
+    READ TABLE lt_docu INTO ls_docu
+      BINARY SEARCH
+      WITH KEY current_user = abap_true.
+    IF sy-subrc = 0.
+      "We found the latest released task of this user: Propose
+      r_comment = get_lock_text( ls_docu ).
+      RETURN.
+    ENDIF.
+
+    r_comment = get_lock_text( lt_docu[ 1 ] ).
+
+  ENDMETHOD.
+
+
+  METHOD propose_default_texts.
+
+    TYPES: BEGIN OF ty_userdata,
+             bname      TYPE xubname,
+             name_first TYPE ad_namefir,
+             name_last  TYPE ad_namelas,
+             smtp_addr  TYPE ad_smtpadr,
+           END OF ty_userdata,
+           tty_user_data TYPE STANDARD TABLE OF ty_userdata
+                           WITH EMPTY KEY.
+
+    DATA: fixdate TYPE d VALUE '00010101'.
+
+    DATA(lt_lock_info) = get_lock_info(
+                           it_staged = it_staged
+                           it_status = it_status ).
+
+    IF lt_lock_info IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    "Propose Comment
+    DATA(default_comment) = propose_default_comment( lt_lock_info ).
+    cs_commit-comment = COND #( WHEN cs_commit-comment IS NOT INITIAL AND default_comment IS NOT INITIAL
+                          THEN |{ default_comment } - { cs_commit-comment }|
+                        WHEN cs_commit-comment IS NOT INITIAL AND default_comment IS INITIAL
+                          THEN cs_commit-comment
+                        ELSE default_comment ).
+    TRY.
+        io_form->set(
+          iv_key = cs_formid-comment
+          iv_val = cs_commit-comment ).
+      CATCH cx_root.
+    ENDTRY.
+
+    "Propose Body
+    cs_commit-body = COND #( WHEN cs_commit-body IS NOT INITIAL
+                          THEN |{ cs_commit-body }| &
+                               |{ cl_abap_char_utilities=>cr_lf }| &
+                               |{ cl_abap_char_utilities=>cr_lf }| &
+                               |--------------------------------------------------------------------------------| &
+                               |{ cl_abap_char_utilities=>cr_lf }| &
+                               |{ cl_abap_char_utilities=>cr_lf }| &
+                               |{ propose_default_body( lt_lock_info ) }|
+                        ELSE propose_default_body( lt_lock_info ) ).
+    TRY.
+        io_form->set(
+          iv_key = cs_formid-body
+          iv_val = cs_commit-body ).
+      CATCH cx_root.
+    ENDTRY.
+
+    DATA(lt_userdata) = VALUE tty_user_data( ).
+    SELECT
+           user~bname,
+           name~name_first,
+           name~name_last,
+           addr~smtp_addr
+      FROM usr21 AS user
+      INNER JOIN adrp AS name ON name~persnumber = user~persnumber
+                             AND name~date_from  = @fixdate
+                             AND name~nation     = ''
+      INNER JOIN adr6 AS addr ON addr~addrnumber = user~addrnumber
+                             AND addr~persnumber = user~persnumber
+                             AND addr~date_from  = @fixdate
+      WHERE user~bname = @sy-uname
+      ORDER BY consnumber DESCENDING
+      INTO CORRESPONDING FIELDS OF TABLE @lt_userdata.
+    DATA(ls_userdata) = VALUE #( lt_userdata[ 1 ]
+                                 DEFAULT VALUE ty_userdata( ) ).
+
+    "Propose Commiter Name
+    IF cs_commit-committer_name IS INITIAL OR
+       cs_commit-committer_name = sy-uname.
+      cs_commit-committer_name = |{ ls_userdata-name_first } { ls_userdata-name_last }|.
+      TRY.
+          io_form->set(
+            iv_key = cs_formid-committer_name
+            iv_val = cs_commit-committer_name ).
+        CATCH cx_root.
+      ENDTRY.
+    ENDIF.
+
+    "Propose Commiter eMail
+    IF cs_commit-committer_email IS INITIAL.
+      cs_commit-committer_email = to_lower( ls_userdata-smtp_addr ).
+      TRY.
+          io_form->set(
+            iv_key = cs_formid-committer_email
+            iv_val = cs_commit-committer_email ).
+        CATCH cx_root.
+      ENDTRY.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+  METHOD supplement_task_info.
+
+    DATA: lt_transports TYPE SORTED TABLE OF trkorr
+            WITH UNIQUE KEY table_line,
+          lt_tasks      TYPE STANDARD TABLE OF ty_lock_info
+            WITH EMPTY KEY.
+
+    "Supplement Transport Request/Task Lock Links in Comment
+
+    DATA(lt_lock_info) = get_lock_info(
+                           it_staged = it_staged
+                           it_status = it_status ).
+
+    IF lt_lock_info IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    "Collect Distinct Transports
+    LOOP AT lt_lock_info INTO DATA(ls_lock_info).
+      INSERT ls_lock_info-transport INTO TABLE lt_transports.
+    ENDLOOP.
+
+    "Collect Distinct Tasks
+    lt_tasks = lt_lock_info.
+    SORT lt_tasks
+      BY task.
+    DELETE ADJACENT DUPLICATES FROM lt_tasks
+      COMPARING task.
+
+    IF lt_transports IS INITIAL AND lt_tasks IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    "Add Transport Locks
+    DATA(tr_links) = VALUE string( ).
+    LOOP AT lt_transports INTO DATA(trkorr).
+      tr_links = SWITCH #( sy-tabix
+                           WHEN 1 THEN trkorr
+                           ELSE |, { trkorr }| ).
+    ENDLOOP.
+    SHIFT tr_links LEFT DELETING LEADING ', '.
+
+    "Add Task Locks
+    DATA(ta_links) = VALUE string( ).
+    LOOP AT lt_tasks INTO DATA(ls_task).
+      ta_links = SWITCH #( sy-tabix
+                           WHEN 1 THEN ls_task-task
+                           ELSE |, { ls_task-task }| ).
+    ENDLOOP.
+    SHIFT ta_links LEFT DELETING LEADING ', '.
+
+    "Supplement Information to Comment
+    cs_commit-comment = cs_commit-comment &&
+                        | ({ tr_links } // { ta_links } )|.
+
+  ENDMETHOD.
 ENDCLASS.

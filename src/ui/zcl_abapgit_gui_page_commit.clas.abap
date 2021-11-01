@@ -114,7 +114,7 @@ ENDCLASS.
 
 
 
-CLASS zcl_abapgit_gui_page_commit IMPLEMENTATION.
+CLASS ZCL_ABAPGIT_GUI_PAGE_COMMIT IMPLEMENTATION.
 
 
   METHOD constructor.
@@ -449,6 +449,7 @@ CLASS zcl_abapgit_gui_page_commit IMPLEMENTATION.
 
   ENDMETHOD.
 
+
   METHOD zif_abapgit_gui_event_handler~on_event.
 
     mo_form_data = mo_form_util->normalize( ii_event->form_data( ) ).
@@ -502,9 +503,9 @@ CLASS zcl_abapgit_gui_page_commit IMPLEMENTATION.
         EXPORTING
           it_staged = mo_stage->get_all( )
           it_status = mo_repo->status( )
+          io_form   = mo_form_data
         CHANGING
-          c_comment = ms_commit-comment
-          c_body    = ms_commit-body ).
+          cs_commit = ms_commit ).
 
     CREATE OBJECT ri_html TYPE zcl_abapgit_html.
 
