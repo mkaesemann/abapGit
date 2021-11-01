@@ -498,6 +498,14 @@ CLASS zcl_abapgit_gui_page_commit IMPLEMENTATION.
       get_defaults( ).
     ENDIF.
 
+    zcl_abapgit_cts_integration=>propose_default_texts(
+        EXPORTING
+          it_staged = mo_stage->get_all( )
+          it_status = mo_repo->status( )
+        CHANGING
+          c_comment = ms_commit-comment
+          c_body    = ms_commit-body ).
+
     CREATE OBJECT ri_html TYPE zcl_abapgit_html.
 
     ri_html->add( '<div id="stage-summary" class="dialog w800px">' ).
