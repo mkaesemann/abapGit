@@ -120,7 +120,7 @@ ENDCLASS.
 
 
 
-CLASS zcl_abapgit_serialize IMPLEMENTATION.
+CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
 
 
   METHOD add_apack.
@@ -518,6 +518,13 @@ CLASS zcl_abapgit_serialize IMPLEMENTATION.
     IF sy-subrc <> 0.
       IF NOT mi_log IS INITIAL.
         IF NOT lv_mess IS INITIAL.
+          DATA(gui_error) = 'Maximum number of GUI sessions reached'.
+          IF lv_mess = gui_error.
+            DATA(lt_msg) = mi_log->get_messages( ).
+            IF NOT line_exists( lt_msg[ text = gui_error ] ).
+              mi_log->add_error( 'Resource Issue during Serialization. Changes are NOT ACCURATE. Please Refresh!' ).
+            ENDIF.
+          ENDIF.
           mi_log->add_error( lv_mess ).
         ELSE.
           mi_log->add_error( |{ sy-msgv1 }{ sy-msgv2 }{ sy-msgv3 }{ sy-msgv3 }| ).
