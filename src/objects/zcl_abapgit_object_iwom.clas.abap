@@ -18,14 +18,15 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_OBJECT_IWOM IMPLEMENTATION.
+CLASS zcl_abapgit_object_iwom IMPLEMENTATION.
 
 
   METHOD get_generic.
 
     CREATE OBJECT ro_generic
       EXPORTING
-        is_item = ms_item.
+        is_item     = ms_item
+        iv_language = mv_language.
 
   ENDMETHOD.
 
@@ -37,7 +38,7 @@ CLASS ZCL_ABAPGIT_OBJECT_IWOM IMPLEMENTATION.
 
   METHOD zif_abapgit_object~delete.
 
-    get_generic( )->delete( ).
+    get_generic( )->delete( iv_package ).
 
   ENDMETHOD.
 
@@ -89,9 +90,6 @@ CLASS ZCL_ABAPGIT_OBJECT_IWOM IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~jump.
-
-    zcx_abapgit_exception=>raise( |TODO: Jump| ).
-
   ENDMETHOD.
 
 

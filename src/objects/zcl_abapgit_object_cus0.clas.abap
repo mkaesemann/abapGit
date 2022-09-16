@@ -2,13 +2,11 @@ CLASS zcl_abapgit_object_cus0 DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
 
   PUBLIC SECTION.
     INTERFACES zif_abapgit_object.
-    ALIASES mo_files FOR zif_abapgit_object~mo_files.
 
     METHODS constructor
       IMPORTING
         is_item     TYPE zif_abapgit_definitions=>ty_item
         iv_language TYPE spras.
-
   PROTECTED SECTION.
   PRIVATE SECTION.
     TYPES: ty_img_activity_texts TYPE STANDARD TABLE OF cus_imgact
@@ -23,7 +21,7 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_OBJECT_CUS0 IMPLEMENTATION.
+CLASS zcl_abapgit_object_cus0 IMPLEMENTATION.
 
 
   METHOD constructor.
@@ -96,7 +94,7 @@ CLASS ZCL_ABAPGIT_OBJECT_CUS0 IMPLEMENTATION.
         unknown_objectclass = 3
         OTHERS              = 4.
     IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'error from RS_CORR_INSERT, CUS0' ).
+      zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
 
   ENDMETHOD.
@@ -146,12 +144,17 @@ CLASS ZCL_ABAPGIT_OBJECT_CUS0 IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~jump.
+    DATA: lv_img_activity TYPE cus_img_ac.
 
-    zcx_abapgit_exception=>raise( |TODO: Jump| ).
+    lv_img_activity = mv_img_activity.
 
-*   doesn't work...
-*    CALL FUNCTION 'S_CUS_IMG_ACTIVITY_MAINTAIN'
+    CALL FUNCTION 'S_CUS_IMG_ACTIVITY_MAINTAIN'
+      EXPORTING
+        i_display    = abap_true
+      CHANGING
+        img_activity = lv_img_activity.
 
+    rv_exit = abap_true.
   ENDMETHOD.
 
 
@@ -174,7 +177,7 @@ CLASS ZCL_ABAPGIT_OBJECT_CUS0 IMPLEMENTATION.
            ls_img_activity-header-ldate,
            ls_img_activity-header-ltime.
 
-    IF io_xml->i18n_params( )-serialize_master_lang_only = abap_true.
+    IF io_xml->i18n_params( )-main_language_only = abap_true.
       DELETE ls_img_activity-texts WHERE spras <> mv_language.
     ENDIF.
 

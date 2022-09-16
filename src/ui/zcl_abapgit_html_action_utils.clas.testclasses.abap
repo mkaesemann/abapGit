@@ -8,9 +8,12 @@ CLASS ltcl_html_action_utils DEFINITION FOR TESTING RISK LEVEL HARMLESS
     METHODS parse_fields_simple_case FOR TESTING.
     METHODS parse_fields_advanced_case FOR TESTING.
     METHODS parse_fields_unescape FOR TESTING.
+    METHODS parse_fields_unescape_nbsp FOR TESTING.
     METHODS parse_fields_german_umlauts FOR TESTING.
     METHODS parse_fields_wrong_format FOR TESTING.
     METHODS parse_post_form_data FOR TESTING.
+    METHODS parse_fields_webgui FOR TESTING.
+    METHODS parse_fields_special_chars FOR TESTING.
 
   PRIVATE SECTION.
 
@@ -32,6 +35,7 @@ CLASS ltcl_html_action_utils DEFINITION FOR TESTING RISK LEVEL HARMLESS
     METHODS _given_string_is
       IMPORTING
         iv_string TYPE string.
+    METHODS _when_fields_are_parsed_upper.
     METHODS _when_fields_are_parsed.
     METHODS _then_fields_should_be
       IMPORTING
@@ -49,6 +53,8 @@ CLASS ltcl_html_action_utils DEFINITION FOR TESTING RISK LEVEL HARMLESS
         VALUE(rv_s) TYPE string.
 
 ENDCLASS.
+
+CLASS zcl_abapgit_html_action_utils DEFINITION LOCAL FRIENDS ltcl_html_action_utils.
 
 CLASS ltcl_html_action_utils IMPLEMENTATION.
 
@@ -96,7 +102,7 @@ CLASS ltcl_html_action_utils IMPLEMENTATION.
 
     _given_string_is( `committer_name=Gustav Gans` ).
 
-    _when_fields_are_parsed( ).
+    _when_fields_are_parsed_upper( ).
 
     _then_fields_should_be( iv_index = 1
                             iv_name = `COMMITTER_NAME`
@@ -113,7 +119,7 @@ CLASS ltcl_html_action_utils IMPLEMENTATION.
                    && `author_name=Karl Klammer&`
                    && `author_email=karl@klammer.com` ).
 
-    _when_fields_are_parsed( ).
+    _when_fields_are_parsed_upper( ).
 
     _then_fields_should_be( iv_index = 1
                             iv_name  = `COMMITTER_NAME`
@@ -146,13 +152,37 @@ CLASS ltcl_html_action_utils IMPLEMENTATION.
     " file status = '?', used in staging page
     _given_string_is( '/SRC/ZFOOBAR.PROG.ABAP=%3F' ).
 
-    _when_fields_are_parsed( ).
+    _when_fields_are_parsed_upper( ).
     _then_field_count_should_be( 1 ).
 
     _then_fields_should_be(
       iv_index = 1
       iv_name  = '/SRC/ZFOOBAR.PROG.ABAP'
       iv_value = '?' ).
+
+  ENDMETHOD.
+
+  METHOD parse_fields_unescape_nbsp.
+
+    " non-breaking space (&nbsp;)
+    _given_string_is( '/src/ztest_rfc.fugr.xml=%3F&/src/ztest_rfc'
+                   && zcl_abapgit_html_action_utils=>gv_non_breaking_space
+                   && zcl_abapgit_html_action_utils=>gv_non_breaking_space
+                   && zcl_abapgit_html_action_utils=>gv_non_breaking_space
+                   && 'rf.sush.xml=A' ).
+
+    _when_fields_are_parsed( ).
+    _then_field_count_should_be( 2 ).
+
+    _then_fields_should_be(
+      iv_index = 1
+      iv_name  = '/src/ztest_rfc.fugr.xml'
+      iv_value = '?' ).
+
+    _then_fields_should_be(
+      iv_index = 2
+      iv_name  = '/src/ztest_rfc   rf.sush.xml'
+      iv_value = 'A' ).
 
   ENDMETHOD.
 
@@ -177,7 +207,7 @@ CLASS ltcl_html_action_utils IMPLEMENTATION.
                    && |author_name=Gerd Schr{ lv_oe }der&|
                    && |author_email=gerd@schroeder.com| ).
 
-    _when_fields_are_parsed( ).
+    _when_fields_are_parsed_upper( ).
 
     _then_fields_should_be( iv_index = 1
                             iv_name  = `COMMITTER_NAME`
@@ -211,9 +241,15 @@ CLASS ltcl_html_action_utils IMPLEMENTATION.
 
   ENDMETHOD.
 
-  METHOD _when_fields_are_parsed.
+  METHOD _when_fields_are_parsed_upper.
 
     mt_parsed_fields = zcl_abapgit_html_action_utils=>parse_fields_upper_case_name( mv_given_parse_string ).
+
+  ENDMETHOD.
+
+  METHOD _when_fields_are_parsed.
+
+    mt_parsed_fields = zcl_abapgit_html_action_utils=>parse_fields( mv_given_parse_string ).
 
   ENDMETHOD.
 
@@ -260,11 +296,11 @@ CLASS ltcl_html_action_utils IMPLEMENTATION.
   METHOD parse_fields_wrong_format.
 
     _given_string_is( `some_query_string_without_param_structure` ).
-    _when_fields_are_parsed( ).
+    _when_fields_are_parsed_upper( ).
     _then_field_count_should_be( 0 ).
 
     _given_string_is( `some_query_string_without_param_structure&a=b` ).
-    _when_fields_are_parsed( ).
+    _when_fields_are_parsed_upper( ).
     _then_field_count_should_be( 1 ).
     _then_fields_should_be(
       iv_index = 1
@@ -275,7 +311,7 @@ CLASS ltcl_html_action_utils IMPLEMENTATION.
 
   METHOD parse_post_form_data.
 
-    DATA lt_post_data TYPE cnht_post_data_tab.
+    DATA lt_post_data TYPE zif_abapgit_html_viewer=>ty_post_data.
     DATA lv_line LIKE LINE OF lt_post_data.
     DATA lv_long_name LIKE LINE OF lt_post_data.
     DATA lv_size TYPE i.
@@ -312,6 +348,48 @@ CLASS ltcl_html_action_utils IMPLEMENTATION.
       iv_index = 2
       iv_name  = |{ to_upper( lv_long_name ) }|
       iv_value = 'y' ).
+
+  ENDMETHOD.
+
+
+  METHOD parse_fields_webgui.
+
+    _given_string_is( `KEY=000000000019&PATH=%2fsrc%2f&FILENAME=%2fnsp%2ftest_ddls_bug2.ddls.asddls` ).
+    _when_fields_are_parsed( ).
+    _then_field_count_should_be( 3 ).
+
+    _then_fields_should_be(
+      iv_index = 1
+      iv_name  = 'KEY'
+      iv_value = '000000000019' ).
+
+    _then_fields_should_be(
+      iv_index = 2
+      iv_name  = 'PATH'
+      iv_value = '/src/' ).
+
+    _then_fields_should_be(
+      iv_index = 3
+      iv_name  = 'FILENAME'
+      iv_value = '/nsp/test_ddls_bug2.ddls.asddls' ).
+
+  ENDMETHOD.
+
+  METHOD parse_fields_special_chars.
+
+    DATA lv_string TYPE string.
+
+    " URL encoded data
+    lv_string = `TEST=!"#$%25%26'()*+,-./09:;<%3d>?@AZ[\]^_``az{|}~¡¢£¤¥¦§¨©ª«¬­®¯°±²³´µ¶·¸¹º»¼½¾¿`.
+
+    _given_string_is( lv_string ).
+    _when_fields_are_parsed( ).
+    _then_field_count_should_be( 1 ).
+
+    _then_fields_should_be(
+      iv_index = 1
+      iv_name  = 'TEST'
+      iv_value = `!"#$%&'()*+,-./09:;<=>?@AZ[\]^_``az{|}~¡¢£¤¥¦§¨©ª«¬­®¯°±²³´µ¶·¸¹º»¼½¾¿` ).
 
   ENDMETHOD.
 

@@ -18,14 +18,15 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_OBJECT_IWVB IMPLEMENTATION.
+CLASS zcl_abapgit_object_iwvb IMPLEMENTATION.
 
 
   METHOD get_generic.
 
     CREATE OBJECT ro_generic
       EXPORTING
-        is_item = ms_item.
+        is_item     = ms_item
+        iv_language = mv_language.
 
   ENDMETHOD.
 
@@ -37,7 +38,7 @@ CLASS ZCL_ABAPGIT_OBJECT_IWVB IMPLEMENTATION.
 
   METHOD zif_abapgit_object~delete.
 
-    get_generic( )->delete( ).
+    get_generic( )->delete( iv_package ).
 
   ENDMETHOD.
 
@@ -94,6 +95,8 @@ CLASS ZCL_ABAPGIT_OBJECT_IWVB IMPLEMENTATION.
       WITH ip_aname = ms_item-obj_name
       WITH ip_avers = ms_item-obj_name+32(4)
       AND RETURN.
+
+    rv_exit = abap_true.
 
   ENDMETHOD.
 

@@ -3,13 +3,15 @@ CLASS zcl_abapgit_persistence_db DEFINITION
   CREATE PRIVATE .
 
   PUBLIC SECTION.
-    CONSTANTS c_tabname TYPE tabname VALUE 'ZABAPGIT' ##NO_TEXT.
-    CONSTANTS c_lock TYPE viewname VALUE 'EZABAPGIT' ##NO_TEXT.
+    CONSTANTS c_tabname TYPE c LENGTH 30 VALUE 'ZABAPGIT' ##NO_TEXT.
+    CONSTANTS c_lock TYPE c LENGTH 30 VALUE 'EZABAPGIT' ##NO_TEXT.
 
     CONSTANTS:
       c_type_settings   TYPE zif_abapgit_persistence=>ty_type VALUE 'SETTINGS' ##NO_TEXT,
       c_type_repo       TYPE zif_abapgit_persistence=>ty_type VALUE 'REPO' ##NO_TEXT,
+      c_type_repo_csum  TYPE zif_abapgit_persistence=>ty_type VALUE 'REPO_CS' ##NO_TEXT,
       c_type_background TYPE zif_abapgit_persistence=>ty_type VALUE 'BACKGROUND' ##NO_TEXT,
+      c_type_packages   TYPE zif_abapgit_persistence=>ty_type VALUE 'PACKAGES' ##NO_TEXT,
       c_type_user       TYPE zif_abapgit_persistence=>ty_type VALUE 'USER' ##NO_TEXT.
 
     CLASS-METHODS get_instance
@@ -36,6 +38,10 @@ CLASS zcl_abapgit_persistence_db DEFINITION
         !iv_type          TYPE zif_abapgit_persistence=>ty_type
       RETURNING
         VALUE(rt_content) TYPE zif_abapgit_persistence=>ty_contents .
+    METHODS list_by_keys
+      IMPORTING it_keys            TYPE zif_abapgit_persistence=>ty_repo_keys
+                iv_type            TYPE zif_abapgit_persistence=>ty_type
+      RETURNING VALUE(rt_contents) TYPE zif_abapgit_persistence=>ty_contents.
     METHODS lock
       IMPORTING
         !iv_mode  TYPE enqmode DEFAULT 'E'
@@ -85,7 +91,7 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_PERSISTENCE_DB IMPLEMENTATION.
+CLASS zcl_abapgit_persistence_db IMPLEMENTATION.
 
 
   METHOD add.
@@ -104,15 +110,15 @@ CLASS ZCL_ABAPGIT_PERSISTENCE_DB IMPLEMENTATION.
 
   METHOD delete.
 
+    DATA lv_data TYPE string.
+
     lock( iv_type  = iv_type
           iv_value = iv_value ).
 
+    " Ignore errors since record might not exist
     DELETE FROM (c_tabname)
       WHERE type = iv_type
       AND value = iv_value.
-    IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'DB Delete failed' ).
-    ENDIF.
 
   ENDMETHOD.
 
@@ -151,6 +157,17 @@ CLASS ZCL_ABAPGIT_PERSISTENCE_DB IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD list_by_keys.
+    FIELD-SYMBOLS: <ls_key> LIKE LINE OF it_keys.
+    LOOP AT it_keys ASSIGNING <ls_key>.
+      SELECT * FROM (c_tabname)
+      APPENDING TABLE rt_contents
+      WHERE value = <ls_key> AND
+            type  = iv_type.
+    ENDLOOP.
+  ENDMETHOD.
+
+
   METHOD list_by_type.
     SELECT * FROM (c_tabname)
       INTO TABLE rt_content
@@ -172,7 +189,7 @@ CLASS ZCL_ABAPGIT_PERSISTENCE_DB IMPLEMENTATION.
         system_failure = 2
         OTHERS         = 3.
     IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( |Could not aquire lock { iv_type } { iv_value }| ).
+      zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
 
     lv_dummy_update_function = get_update_function( ).

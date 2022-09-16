@@ -2,15 +2,13 @@ CLASS zcl_abapgit_object_shlp DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
 
   PUBLIC SECTION.
     INTERFACES zif_abapgit_object.
-    ALIASES mo_files FOR zif_abapgit_object~mo_files.
-
   PROTECTED SECTION.
   PRIVATE SECTION.
 ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_OBJECT_SHLP IMPLEMENTATION.
+CLASS zcl_abapgit_object_shlp IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~changed_by.
@@ -82,7 +80,7 @@ CLASS ZCL_ABAPGIT_OBJECT_SHLP IMPLEMENTATION.
         put_refused       = 5
         OTHERS            = 6.
     IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'error from DDIF_SHLP_PUT' ).
+      zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
 
     zcl_abapgit_objects_activation=>add_item( ms_item ).
@@ -114,7 +112,6 @@ CLASS ZCL_ABAPGIT_OBJECT_SHLP IMPLEMENTATION.
 
   METHOD zif_abapgit_object~get_metadata.
     rs_metadata = get_metadata( ).
-    rs_metadata-ddic = abap_true.
   ENDMETHOD.
 
 
@@ -129,16 +126,14 @@ CLASS ZCL_ABAPGIT_OBJECT_SHLP IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~jump.
-
-    jump_se11( iv_radio = 'RSRD1-SHMA'
-               iv_field = 'RSRD1-SHMA_VAL' ).
-
+    " Covered by ZCL_ABAPGIT_OBJECT=>JUMP
   ENDMETHOD.
 
 
   METHOD zif_abapgit_object~serialize.
 
     DATA: lv_name  TYPE ddobjname,
+          lv_state TYPE ddgotstate,
           ls_dd30v TYPE dd30v,
           lt_dd31v TYPE TABLE OF dd31v,
           lt_dd32p TYPE TABLE OF dd32p,
@@ -155,6 +150,7 @@ CLASS ZCL_ABAPGIT_OBJECT_SHLP IMPLEMENTATION.
         state         = 'A'
         langu         = mv_language
       IMPORTING
+        gotstate      = lv_state
         dd30v_wa      = ls_dd30v
       TABLES
         dd31v_tab     = lt_dd31v
@@ -164,10 +160,11 @@ CLASS ZCL_ABAPGIT_OBJECT_SHLP IMPLEMENTATION.
         illegal_input = 1
         OTHERS        = 2.
     IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'error from DDIF_SHLP_GET' ).
+      zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
-    IF ls_dd30v IS INITIAL.
-      RETURN. " does not exist in system
+
+    IF ls_dd30v IS INITIAL OR lv_state <> 'A'.
+      RETURN.
     ENDIF.
 
     CLEAR: ls_dd30v-as4user,

@@ -6,10 +6,14 @@ CLASS zcl_abapgit_objects_generic DEFINITION
 
     METHODS constructor
       IMPORTING
-        !is_item TYPE zif_abapgit_definitions=>ty_item
+        !is_item       TYPE zif_abapgit_definitions=>ty_item
+        !iv_language   TYPE spras DEFAULT sy-langu
+        io_field_rules TYPE REF TO zif_abapgit_field_rules OPTIONAL
       RAISING
         zcx_abapgit_exception .
     METHODS delete
+      IMPORTING
+        !iv_package TYPE devclass
       RAISING
         zcx_abapgit_exception .
     METHODS deserialize
@@ -40,10 +44,11 @@ CLASS zcl_abapgit_objects_generic DEFINITION
 
     DATA ms_object_header TYPE objh .
     DATA:
-      mt_object_table                TYPE STANDARD TABLE OF objsl WITH DEFAULT KEY .
+      mt_object_table TYPE STANDARD TABLE OF objsl WITH DEFAULT KEY .
     DATA:
-      mt_object_method               TYPE STANDARD TABLE OF objm WITH DEFAULT KEY .
+      mt_object_method TYPE STANDARD TABLE OF objm WITH DEFAULT KEY .
     DATA ms_item TYPE zif_abapgit_definitions=>ty_item .
+    DATA mv_language TYPE spras .
 
     METHODS after_import .
     METHODS before_export .
@@ -101,11 +106,23 @@ CLASS zcl_abapgit_objects_generic DEFINITION
       RAISING
         zcx_abapgit_exception .
   PRIVATE SECTION.
+    DATA mo_field_rules TYPE REF TO zif_abapgit_field_rules.
+
+    METHODS apply_clear_logic
+      IMPORTING
+        iv_table TYPE objsl-tobj_name
+      CHANGING
+        ct_data  TYPE STANDARD TABLE.
+    METHODS apply_fill_logic
+      IMPORTING
+        iv_table TYPE objsl-tobj_name
+      CHANGING
+        ct_data  TYPE STANDARD TABLE.
 ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_OBJECTS_GENERIC IMPLEMENTATION.
+CLASS zcl_abapgit_objects_generic IMPLEMENTATION.
 
 
   METHOD after_import.
@@ -208,6 +225,8 @@ CLASS ZCL_ABAPGIT_OBJECTS_GENERIC IMPLEMENTATION.
       ORDER BY PRIMARY KEY.
 
     ms_item = is_item.
+    mv_language = iv_language.
+    mo_field_rules = io_field_rules.
 
   ENDMETHOD.
 
@@ -222,7 +241,7 @@ CLASS ZCL_ABAPGIT_OBJECTS_GENERIC IMPLEMENTATION.
         mode                = 'I'
         global_lock         = abap_true
         devclass            = iv_package
-        master_language     = sy-langu
+        master_language     = mv_language
         suppress_dialog     = abap_true
       EXCEPTIONS
         cancelled           = 1
@@ -230,7 +249,7 @@ CLASS ZCL_ABAPGIT_OBJECTS_GENERIC IMPLEMENTATION.
         unknown_objectclass = 3
         OTHERS              = 4.
     IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'error from RS_CORR_INSERT, CMPT' ).
+      zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
 
   ENDMETHOD.
@@ -257,6 +276,8 @@ CLASS ZCL_ABAPGIT_OBJECTS_GENERIC IMPLEMENTATION.
       ENDIF.
     ENDLOOP.
 
+    corr_insert( iv_package ).
+
   ENDMETHOD.
 
 
@@ -264,7 +285,7 @@ CLASS ZCL_ABAPGIT_OBJECTS_GENERIC IMPLEMENTATION.
 
     validate( io_xml ).
 
-    delete( ).
+    delete( iv_package ).
 
     deserialize_data( io_xml ).
 
@@ -288,6 +309,8 @@ CLASS ZCL_ABAPGIT_OBJECTS_GENERIC IMPLEMENTATION.
       CREATE DATA lr_ref TYPE STANDARD TABLE OF (<ls_table>-tobj_name).
       ASSIGN lr_ref->* TO <lt_data>.
 
+      apply_fill_logic( EXPORTING iv_table = <ls_table>-tobj_name
+                        CHANGING  ct_data  = <lt_data> ).
       io_xml->read(
         EXPORTING
           iv_name = <ls_table>-tobj_name
@@ -505,7 +528,7 @@ CLASS ZCL_ABAPGIT_OBJECTS_GENERIC IMPLEMENTATION.
           lv_objkey_pos = lv_objkey_pos + 1.
 *       language
         ELSEIF <ls_object_table>-tobjkey+lv_next_objkey_pos(1) = 'L'.
-          ls_objkey-value = sy-langu.
+          ls_objkey-value = mv_language.
           INSERT ls_objkey INTO TABLE lt_objkey.
           CLEAR ls_objkey.
           lv_non_value_pos = lv_non_value_pos + 1.
@@ -602,6 +625,9 @@ CLASS ZCL_ABAPGIT_OBJECTS_GENERIC IMPLEMENTATION.
         WHERE (lv_where)
         ORDER BY PRIMARY KEY.
 
+      apply_clear_logic( EXPORTING iv_table = <ls_object_table>-tobj_name
+                         CHANGING  ct_data  = <lt_data> ).
+
       io_xml->add(
         iv_name = <ls_object_table>-tobj_name
         ig_data = <lt_data> ).
@@ -684,4 +710,20 @@ CLASS ZCL_ABAPGIT_OBJECTS_GENERIC IMPLEMENTATION.
     ENDIF.
 
   ENDMETHOD.
+
+  METHOD apply_clear_logic.
+    IF mo_field_rules IS BOUND.
+      mo_field_rules->apply_clear_logic( EXPORTING iv_table = |{ iv_table }|
+                                         CHANGING  ct_data  = ct_data ).
+    ENDIF.
+  ENDMETHOD.
+
+
+  METHOD apply_fill_logic.
+    IF mo_field_rules IS BOUND.
+      mo_field_rules->apply_fill_logic( EXPORTING iv_table = |{ iv_table }|
+                                        CHANGING  ct_data  = ct_data ).
+    ENDIF.
+  ENDMETHOD.
+
 ENDCLASS.

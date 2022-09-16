@@ -16,9 +16,9 @@ CLASS ltcl_xml DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS.
     METHODS setup.
 
     METHODS:
-      space_leading_trailing FOR TESTING
-        RAISING zcx_abapgit_exception,
-      bad_xml_without_gui_raises_exc FOR TESTING RAISING cx_static_check.
+      space_leading_trailing FOR TESTING RAISING zcx_abapgit_exception,
+      bad_version_raises_exc FOR TESTING RAISING cx_static_check,
+      bad_xml_raises_exc FOR TESTING RAISING cx_static_check.
 
     METHODS:
       parse_xml
@@ -48,7 +48,7 @@ CLASS ltcl_xml IMPLEMENTATION.
     DATA lv_xml TYPE string.
 
     lv_xml = |<?xml version="1.0"?>|
-          && |<{ mo_xml->c_abapgit_tag } { mo_xml->c_attr_version }="{ zif_abapgit_version=>gc_xml_version }">|
+          && |<{ mo_xml->c_abapgit_tag } { mo_xml->c_attr_version }="{ zif_abapgit_version=>c_xml_version }">|
           && iv_xml
           && |</{ mo_xml->c_abapgit_tag }>|.
 
@@ -60,7 +60,6 @@ CLASS ltcl_xml IMPLEMENTATION.
 
     DATA: lv_from_xml TYPE string,
           lv_to_xml   TYPE string.
-
 
     lv_from_xml = `<FOO> A </FOO>`.
 
@@ -90,17 +89,38 @@ CLASS ltcl_xml IMPLEMENTATION.
 
   ENDMETHOD.
 
-  METHOD bad_xml_without_gui_raises_exc.
+  METHOD bad_version_raises_exc.
+
     DATA: lv_xml TYPE string,
           lo_error TYPE REF TO zcx_abapgit_exception,
           lv_text TYPE string.
 
-    IF zcl_abapgit_ui_factory=>get_gui_functions( )->gui_is_available( ) = abap_true.
-      RETURN. "Can only test with ADT or in background
-    ENDIF.
+    lv_xml = |<?xml version="1.0"?>|
+          && |<{ mo_xml->c_abapgit_tag } { mo_xml->c_attr_version }="v9.8.7">|
+          && |<TEST>data</TEST>|
+          && |</{ mo_xml->c_abapgit_tag }>|.
+
+    TRY.
+        mo_xml->parse( iv_xml = lv_xml ).
+        cl_abap_unit_assert=>fail( msg = 'Exception not raised' ).
+
+      CATCH zcx_abapgit_exception INTO lo_error.
+        lv_text = lo_error->get_text( ).
+        cl_abap_unit_assert=>assert_char_cp(
+            act              = lv_text
+            exp              = '*XML version*' ).
+    ENDTRY.
+
+  ENDMETHOD.
+
+  METHOD bad_xml_raises_exc.
+
+    DATA: lv_xml TYPE string,
+          lo_error TYPE REF TO zcx_abapgit_exception,
+          lv_text TYPE string.
 
     lv_xml = |<?xml version="1.0"?>|
-          && |<{ mo_xml->c_abapgit_tag } { mo_xml->c_attr_version }="{ zif_abapgit_version=>gc_xml_version }">|
+          && |<{ mo_xml->c_abapgit_tag } { mo_xml->c_attr_version }="{ zif_abapgit_version=>c_xml_version }">|
           && |<open_tag>|
           && |</{ mo_xml->c_abapgit_tag }>|.
 

@@ -1,19 +1,36 @@
 CLASS zcl_abapgit_object_ensc DEFINITION PUBLIC INHERITING FROM zcl_abapgit_objects_super FINAL.
   PUBLIC SECTION.
     INTERFACES zif_abapgit_object.
-    ALIASES mo_files FOR zif_abapgit_object~mo_files.
-
   PROTECTED SECTION.
   PRIVATE SECTION.
 ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_OBJECT_ENSC IMPLEMENTATION.
+CLASS zcl_abapgit_object_ensc IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~changed_by.
-    rv_user = c_user_unknown. " todo
+
+    DATA: lv_spot_name TYPE enhspotcompositename,
+          li_spot_ref  TYPE REF TO if_enh_spot_composite,
+          lo_spot_ref  TYPE REF TO cl_enh_spot_composite.
+
+    lv_spot_name = ms_item-obj_name.
+
+    TRY.
+        li_spot_ref = cl_enh_factory=>get_enhancement_spot_comp(
+          lock     = ''
+          run_dark = abap_true
+          name     = lv_spot_name ).
+
+        lo_spot_ref ?= li_spot_ref.
+
+        lo_spot_ref->if_enh_spot_composite~get_change_attributes( IMPORTING changedby = rv_user ).
+      CATCH cx_root.
+        rv_user = c_user_unknown.
+    ENDTRY.
+
   ENDMETHOD.
 
 
@@ -27,13 +44,14 @@ CLASS ZCL_ABAPGIT_OBJECT_ENSC IMPLEMENTATION.
 
     TRY.
         li_spot_ref = cl_enh_factory=>get_enhancement_spot_comp(
-          lock = 'X'
-          name = lv_spot_name ).
+          lock     = abap_true
+          run_dark = abap_true
+          name     = lv_spot_name ).
 
         IF li_spot_ref IS BOUND.
           li_spot_ref->if_enh_object~delete(
-            nevertheless_delete = 'X'
-            run_dark            = 'X' ).
+            nevertheless_delete = abap_true
+            run_dark            = abap_true ).
         ENDIF.
         li_spot_ref->if_enh_object~unlock( ).
       CATCH cx_enh_root INTO lx_root.
@@ -69,7 +87,8 @@ CLASS ZCL_ABAPGIT_OBJECT_ENSC IMPLEMENTATION.
                   CHANGING  cg_data = lt_comp_spots ).
 
     IF zif_abapgit_object~exists( ) = abap_true.
-      zif_abapgit_object~delete( iv_package ).
+      zif_abapgit_object~delete( iv_package   = iv_package
+                                 iv_transport = iv_transport ).
     ENDIF.
 
     lv_package = iv_package.
@@ -122,8 +141,9 @@ CLASS ZCL_ABAPGIT_OBJECT_ENSC IMPLEMENTATION.
 
     TRY.
         cl_enh_factory=>get_enhancement_spot_comp(
-          lock = ''
-          name = lv_spot_name ).
+          lock     = ''
+          run_dark = abap_true
+          name     = lv_spot_name ).
         rv_bool = abap_true.
       CATCH cx_enh_root.
         rv_bool = abap_false.
@@ -160,14 +180,7 @@ CLASS ZCL_ABAPGIT_OBJECT_ENSC IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~jump.
-
-    CALL FUNCTION 'RS_TOOL_ACCESS'
-      EXPORTING
-        operation     = 'SHOW'
-        object_name   = ms_item-obj_name
-        object_type   = 'ENSC'
-        in_new_window = abap_true.
-
+    " Covered by ZCL_ABAPGIT_OBJECTS=>JUMP
   ENDMETHOD.
 
 
@@ -187,8 +200,9 @@ CLASS ZCL_ABAPGIT_OBJECT_ENSC IMPLEMENTATION.
 
     TRY.
         li_spot_ref = cl_enh_factory=>get_enhancement_spot_comp(
-          lock = ''
-          name = lv_spot_name ).
+          lock     = ''
+          run_dark = abap_true
+          name     = lv_spot_name ).
 
         lo_spot_ref ?= li_spot_ref.
 

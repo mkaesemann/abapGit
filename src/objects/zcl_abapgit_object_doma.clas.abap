@@ -2,8 +2,6 @@ CLASS zcl_abapgit_object_doma DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
 
   PUBLIC SECTION.
     INTERFACES zif_abapgit_object.
-    ALIASES mo_files FOR zif_abapgit_object~mo_files.
-
   PROTECTED SECTION.
   PRIVATE SECTION.
 
@@ -46,7 +44,7 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_OBJECT_DOMA IMPLEMENTATION.
+CLASS zcl_abapgit_object_doma IMPLEMENTATION.
 
 
   METHOD deserialize_texts.
@@ -120,7 +118,7 @@ CLASS ZCL_ABAPGIT_OBJECT_DOMA IMPLEMENTATION.
           put_refused       = 5
           OTHERS            = 6.
       IF sy-subrc <> 0.
-        zcx_abapgit_exception=>raise( 'error from DDIF_DOMA_PUT @TEXTS' ).
+        zcx_abapgit_exception=>raise_t100( ).
       ENDIF.
     ENDLOOP.
 
@@ -129,13 +127,14 @@ CLASS ZCL_ABAPGIT_OBJECT_DOMA IMPLEMENTATION.
 
   METHOD serialize_texts.
 
-    DATA: lv_name       TYPE ddobjname,
-          lv_index      TYPE i,
-          ls_dd01v      TYPE dd01v,
-          lt_dd07v      TYPE TABLE OF dd07v,
-          lt_i18n_langs TYPE TABLE OF langu,
-          lt_dd01_texts TYPE ty_dd01_texts,
-          lt_dd07_texts TYPE ty_dd07_texts.
+    DATA: lv_name            TYPE ddobjname,
+          lv_index           TYPE i,
+          ls_dd01v           TYPE dd01v,
+          lt_dd07v           TYPE TABLE OF dd07v,
+          lt_i18n_langs      TYPE TABLE OF langu,
+          lt_dd01_texts      TYPE ty_dd01_texts,
+          lt_dd07_texts      TYPE ty_dd07_texts,
+          lt_language_filter TYPE zif_abapgit_environment=>ty_system_language_filter.
 
     FIELD-SYMBOLS: <lv_lang>      LIKE LINE OF lt_i18n_langs,
                    <ls_dd07v>     LIKE LINE OF lt_dd07v,
@@ -143,19 +142,28 @@ CLASS ZCL_ABAPGIT_OBJECT_DOMA IMPLEMENTATION.
                    <ls_dd01_text> LIKE LINE OF lt_dd01_texts,
                    <ls_dd07_text> LIKE LINE OF lt_dd07_texts.
 
-    IF ii_xml->i18n_params( )-serialize_master_lang_only = abap_true.
+    IF ii_xml->i18n_params( )-main_language_only = abap_true.
       RETURN.
     ENDIF.
 
     lv_name = ms_item-obj_name.
 
-    " Collect additional languages, skip master lang - it was serialized already
+    " Collect additional languages, skip main lang - it was serialized already
+    lt_language_filter = zcl_abapgit_factory=>get_environment( )->get_system_language_filter( ).
     SELECT DISTINCT ddlanguage AS langu INTO TABLE lt_i18n_langs
       FROM dd01v
       WHERE domname = lv_name
+      AND ddlanguage IN lt_language_filter
       AND ddlanguage <> mv_language.                      "#EC CI_SUBRC
 
-    SORT lt_i18n_langs ASCENDING.
+    SELECT DISTINCT ddlanguage AS langu APPENDING TABLE lt_i18n_langs
+      FROM dd07v
+      WHERE domname = lv_name
+      AND ddlanguage IN lt_language_filter
+      AND ddlanguage <> mv_language.                      "#EC CI_SUBRC
+
+    SORT lt_i18n_langs.
+    DELETE ADJACENT DUPLICATES FROM lt_i18n_langs.
 
     LOOP AT lt_i18n_langs ASSIGNING <lv_lang>.
       lv_index = sy-tabix.
@@ -171,15 +179,19 @@ CLASS ZCL_ABAPGIT_OBJECT_DOMA IMPLEMENTATION.
         EXCEPTIONS
           illegal_input = 1
           OTHERS        = 2.
-      IF sy-subrc <> 0 OR ls_dd01v-ddlanguage IS INITIAL.
+      IF sy-subrc <> 0.
         DELETE lt_i18n_langs INDEX lv_index. " Don't save this lang
         CONTINUE.
+      ENDIF.
+
+      IF ls_dd01v-ddlanguage IS INITIAL.
+        ls_dd01v-ddlanguage = <lv_lang>.
       ENDIF.
 
       APPEND INITIAL LINE TO lt_dd01_texts ASSIGNING <ls_dd01_text>.
       MOVE-CORRESPONDING ls_dd01v TO <ls_dd01_text>.
 
-      " Process master language entries and find corresponding translation
+      " Process main language entries and find corresponding translation
       LOOP AT it_dd07v ASSIGNING <ls_dd07v> WHERE NOT ddlanguage IS INITIAL.
         APPEND INITIAL LINE TO lt_dd07_texts ASSIGNING <ls_dd07_text>.
         READ TABLE lt_dd07v ASSIGNING <ls_dd07v_tmp>
@@ -188,6 +200,7 @@ CLASS ZCL_ABAPGIT_OBJECT_DOMA IMPLEMENTATION.
           MOVE-CORRESPONDING <ls_dd07v_tmp> TO <ls_dd07_text>.
         ELSE.
           " no translation -> keep entry but clear texts
+          MOVE-CORRESPONDING <ls_dd07v> TO <ls_dd07_text>.
           <ls_dd07_text>-ddlanguage = <lv_lang>.
           CLEAR: <ls_dd07_text>-ddtext, <ls_dd07_text>-domval_ld, <ls_dd07_text>-domval_hd.
         ENDIF.
@@ -255,11 +268,11 @@ CLASS ZCL_ABAPGIT_OBJECT_DOMA IMPLEMENTATION.
     FIELD-SYMBOLS <ls_dd07v> TYPE dd07v.
 
     io_xml->read( EXPORTING iv_name = 'DD01V'
-                  CHANGING cg_data = ls_dd01v ).
+                  CHANGING  cg_data = ls_dd01v ).
     io_xml->read( EXPORTING iv_name = 'DD07V_TAB'
-                  CHANGING cg_data = lt_dd07v ).
+                  CHANGING  cg_data = lt_dd07v ).
 
-    corr_insert( iv_package = iv_package
+    corr_insert( iv_package      = iv_package
                  ig_object_class = 'DICT' ).
 
     lv_name = ms_item-obj_name. " type conversion
@@ -283,7 +296,7 @@ CLASS ZCL_ABAPGIT_OBJECT_DOMA IMPLEMENTATION.
         put_refused       = 5
         OTHERS            = 6.
     IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'error from DDIF_DOMA_PUT' ).
+      zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
 
     deserialize_texts( ii_xml   = io_xml
@@ -299,7 +312,7 @@ CLASS ZCL_ABAPGIT_OBJECT_DOMA IMPLEMENTATION.
 
   METHOD zif_abapgit_object~exists.
 
-    DATA: lv_domname TYPE dd01l-domname.
+    DATA lv_domname TYPE dd01l-domname.
 
     SELECT SINGLE domname FROM dd01l INTO lv_domname
       WHERE domname = ms_item-obj_name.
@@ -320,7 +333,6 @@ CLASS ZCL_ABAPGIT_OBJECT_DOMA IMPLEMENTATION.
 
   METHOD zif_abapgit_object~get_metadata.
     rs_metadata = get_metadata( ).
-    rs_metadata-ddic = abap_true.
   ENDMETHOD.
 
 
@@ -336,36 +348,41 @@ CLASS ZCL_ABAPGIT_OBJECT_DOMA IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~jump.
-
-    jump_se11( iv_radio = 'RSRD1-DOMA'
-               iv_field = 'RSRD1-DOMA_VAL' ).
-
+    " Covered by ZCL_ABAPGIT_OBJECT=>JUMP
   ENDMETHOD.
 
 
   METHOD zif_abapgit_object~serialize.
 
     DATA: lv_name    TYPE ddobjname,
+          lv_state   TYPE ddgotstate,
           ls_dd01v   TYPE dd01v,
           lv_masklen TYPE c LENGTH 4,
           lt_dd07v   TYPE TABLE OF dd07v.
 
+    FIELD-SYMBOLS <ls_dd07v> TYPE dd07v.
 
     lv_name = ms_item-obj_name.
 
     CALL FUNCTION 'DDIF_DOMA_GET'
       EXPORTING
         name          = lv_name
+        state         = 'A'
         langu         = mv_language
       IMPORTING
+        gotstate      = lv_state
         dd01v_wa      = ls_dd01v
       TABLES
         dd07v_tab     = lt_dd07v
       EXCEPTIONS
         illegal_input = 1
         OTHERS        = 2.
-    IF sy-subrc <> 0 OR ls_dd01v IS INITIAL.
-      zcx_abapgit_exception=>raise( 'error from DDIF_DOMA_GET' ).
+    IF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise_t100( ).
+    ENDIF.
+
+    IF ls_dd01v IS INITIAL OR lv_state <> 'A'.
+      RETURN.
     ENDIF.
 
     CLEAR: ls_dd01v-as4user,
@@ -388,6 +405,10 @@ CLASS ZCL_ABAPGIT_OBJECT_DOMA IMPLEMENTATION.
     SORT lt_dd07v BY
       valpos ASCENDING
       ddlanguage ASCENDING.
+
+    LOOP AT lt_dd07v ASSIGNING <ls_dd07v>.
+      CLEAR <ls_dd07v>-domname.
+    ENDLOOP.
 
     io_xml->add( iv_name = 'DD01V'
                  ig_data = ls_dd01v ).

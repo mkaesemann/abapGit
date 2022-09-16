@@ -30,7 +30,7 @@ CLASS zcl_abapgit_object_dsys DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
       RAISING
         zcx_abapgit_exception.
 
-    METHODS get_master_lang
+    METHODS get_main_lang
       RETURNING
         VALUE(rv_language) TYPE spras.
 
@@ -38,7 +38,7 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_OBJECT_DSYS IMPLEMENTATION.
+CLASS zcl_abapgit_object_dsys IMPLEMENTATION.
 
 
   METHOD constructor.
@@ -99,7 +99,7 @@ CLASS ZCL_ABAPGIT_OBJECT_DSYS IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD get_master_lang.
+  METHOD get_main_lang.
 
     SELECT SINGLE langu FROM dokil INTO rv_language
       WHERE id = c_id
@@ -128,6 +128,8 @@ CLASS ZCL_ABAPGIT_OBJECT_DSYS IMPLEMENTATION.
       iv_object_name = mv_doc_object
       iv_longtext_id = c_id ).
 
+    corr_insert( iv_package ).
+
   ENDMETHOD.
 
 
@@ -144,8 +146,8 @@ CLASS ZCL_ABAPGIT_OBJECT_DSYS IMPLEMENTATION.
 
       WHEN 'v2.0.0'.
         zcl_abapgit_factory=>get_longtexts( )->deserialize(
-          ii_xml             = io_xml
-          iv_master_language = mv_language ).
+          ii_xml           = io_xml
+          iv_main_language = mv_language ).
 
       WHEN OTHERS.
         zcx_abapgit_exception=>raise( 'unsupported DSYS version' ).
@@ -153,6 +155,8 @@ CLASS ZCL_ABAPGIT_OBJECT_DSYS IMPLEMENTATION.
     ENDCASE.
 
     tadir_insert( iv_package ).
+
+    corr_insert( iv_package ).
 
   ENDMETHOD.
 
@@ -201,21 +205,19 @@ CLASS ZCL_ABAPGIT_OBJECT_DSYS IMPLEMENTATION.
 
     DATA lv_lang TYPE sy-langu.
 
-    lv_lang = get_master_lang( ).
+    lv_lang = get_main_lang( ).
 
     CALL FUNCTION 'DSYS_EDIT'
       EXPORTING
-        dokclass         = mv_doc_object+0(4)
-        dokname          = mv_doc_object+4(*)
-        doklangu         = lv_lang
+        dokclass            = mv_doc_object+0(4)
+        dokname             = mv_doc_object+4(*)
+        doklangu            = lv_lang
       EXCEPTIONS
-        class_unknown    = 1
-        object_not_found = 2
-        OTHERS           = 3.
+        not_hypertext_class = 1
+        no_editor           = 2
+        OTHERS              = 3.
 
-    IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'error from DSYS_EDIT' ).
-    ENDIF.
+    rv_exit = boolc( sy-subrc = 0 ).
 
   ENDMETHOD.
 

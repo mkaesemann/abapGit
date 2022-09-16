@@ -8,15 +8,11 @@ CLASS zcl_abapgit_object_ecatt_super DEFINITION
 
     INTERFACES zif_abapgit_object .
 
-    ALIASES mo_files
-      FOR zif_abapgit_object~mo_files .
-
     METHODS:
       constructor
         IMPORTING
           !is_item     TYPE zif_abapgit_definitions=>ty_item
           !iv_language TYPE spras .
-
   PROTECTED SECTION.
     METHODS:
       get_object_type ABSTRACT
@@ -37,7 +33,7 @@ CLASS zcl_abapgit_object_ecatt_super DEFINITION
   PRIVATE SECTION.
     TYPES:
       BEGIN OF ty_last_changed,
-        luser TYPE xubname,
+        luser TYPE syuname,
         ldate TYPE d,
         ltime TYPE t,
       END OF ty_last_changed.
@@ -77,7 +73,7 @@ CLASS zcl_abapgit_object_ecatt_super DEFINITION
         IMPORTING
           ii_document               TYPE REF TO if_ixml_document
         RETURNING
-          VALUE(rv_changed_by_user) TYPE xubname,
+          VALUE(rv_changed_by_user) TYPE syuname,
 
       get_change_information
         IMPORTING
@@ -136,7 +132,7 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_OBJECT_ECATT_SUPER IMPLEMENTATION.
+CLASS zcl_abapgit_object_ecatt_super IMPLEMENTATION.
 
 
   METHOD clear_attributes.
@@ -215,7 +211,6 @@ CLASS ZCL_ABAPGIT_OBJECT_ECATT_SUPER IMPLEMENTATION.
           lo_upload   TYPE REF TO cl_apl_ecatt_upload,
           li_upload   TYPE REF TO zif_abapgit_ecatt_upload,
           lv_xml      TYPE xstring,
-          lv_text     TYPE string,
           li_document TYPE REF TO if_ixml_document,
           lv_version  TYPE string,
           lx_error    TYPE REF TO cx_ecatt.
@@ -246,8 +241,7 @@ CLASS ZCL_ABAPGIT_OBJECT_ECATT_SUPER IMPLEMENTATION.
         lo_upload->upload( CHANGING ch_object = ls_object ).
 
       CATCH cx_ecatt INTO lx_error.
-        lv_text = lx_error->get_text( ).
-        zcx_abapgit_exception=>raise( lv_text ).
+        zcx_abapgit_exception=>raise( lx_error->get_text( ) ).
     ENDTRY.
 
   ENDMETHOD.
@@ -414,7 +408,7 @@ CLASS ZCL_ABAPGIT_OBJECT_ECATT_SUPER IMPLEMENTATION.
     DATA: ls_last_changed      TYPE ty_last_changed,
           ls_currently_changed TYPE ty_last_changed,
           lt_version_info      TYPE etversinfo_tabtype,
-          lx_error             TYPE REF TO cx_ecatt,
+          lx_error             TYPE REF TO cx_static_check,
           lv_text              TYPE string,
           lv_object_type       TYPE etobj_type.
 
@@ -441,19 +435,15 @@ CLASS ZCL_ABAPGIT_OBJECT_ECATT_SUPER IMPLEMENTATION.
 
         ENDLOOP.
 
-      CATCH cx_ecatt INTO lx_error.
+      CATCH cx_static_check INTO lx_error.
         lv_text = lx_error->get_text( ).
         MESSAGE lv_text TYPE 'S' DISPLAY LIKE 'E'.
     ENDTRY.
 
     IF ls_last_changed-luser IS NOT INITIAL.
-
       rv_user = ls_last_changed-luser.
-
     ELSE.
-
       rv_user = c_user_unknown.
-
     ENDIF.
 
   ENDMETHOD.
@@ -566,22 +556,7 @@ CLASS ZCL_ABAPGIT_OBJECT_ECATT_SUPER IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~jump.
-
-    CALL FUNCTION 'RS_TOOL_ACCESS'
-      EXPORTING
-        operation           = 'SHOW'
-        object_name         = ms_item-obj_name
-        object_type         = ms_item-obj_type
-        in_new_window       = abap_true
-      EXCEPTIONS
-        not_executed        = 1
-        invalid_object_type = 2
-        OTHERS              = 3.
-
-    IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( |Error { sy-subrc } from RS_TOOL_ACCESS | ).
-    ENDIF.
-
+    " Covered by ZCL_ABAPGIT_OBJECTS=>JUMP
   ENDMETHOD.
 
 

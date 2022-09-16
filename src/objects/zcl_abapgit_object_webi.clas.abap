@@ -56,6 +56,9 @@ CLASS zcl_abapgit_object_webi DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
       RAISING
         zcx_abapgit_exception
         cx_ws_md_exception.
+    METHODS sort
+      CHANGING
+        cs_webi TYPE ty_webi.
 
 ENDCLASS.
 
@@ -317,7 +320,13 @@ CLASS zcl_abapgit_object_webi IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~changed_by.
-    rv_user = c_user_unknown. " todo
+
+    SELECT SINGLE changedby FROM vepheader INTO rv_user
+      WHERE vepname = ms_item-obj_name AND version = 'A'.
+    IF sy-subrc <> 0.
+      rv_user = c_user_unknown.
+    ENDIF.
+
   ENDMETHOD.
 
 
@@ -393,9 +402,9 @@ CLASS zcl_abapgit_object_webi IMPLEMENTATION.
       CATCH cx_ws_md_exception INTO lx_root.
         TRY.
             mi_vi->if_ws_md_lockable_object~unlock( ).
-          CATCH cx_ws_md_exception ##no_handler.
+          CATCH cx_ws_md_exception ##NO_HANDLER.
         ENDTRY.
-        zcx_abapgit_exception=>raise( lx_root->if_message~get_text( ) ).
+        zcx_abapgit_exception=>raise_with_text( lx_root ).
     ENDTRY.
 
     zcl_abapgit_objects_activation=>add_item( ms_item ).
@@ -416,7 +425,7 @@ CLASS zcl_abapgit_object_webi IMPLEMENTATION.
 
     rv_bool = cl_ws_md_vif_root=>check_existence_by_vif_name(
       name      = lv_name
-      i_version = sews_c_vif_version-active ).
+      i_version = sews_c_vif_version-all ).
 
   ENDMETHOD.
 
@@ -447,20 +456,14 @@ CLASS zcl_abapgit_object_webi IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~jump.
-
-    CALL FUNCTION 'RS_TOOL_ACCESS'
-      EXPORTING
-        operation     = 'SHOW'
-        object_name   = ms_item-obj_name
-        object_type   = ms_item-obj_type
-        in_new_window = abap_true.
-
+    " Covered by ZCL_ABAPGIT_OBJECTS=>JUMP
   ENDMETHOD.
 
 
   METHOD zif_abapgit_object~serialize.
 
     DATA: ls_webi    TYPE ty_webi,
+          lx_error   TYPE REF TO cx_ws_md_exception,
           lt_modilog TYPE STANDARD TABLE OF smodilog WITH DEFAULT KEY,
           li_vi      TYPE REF TO if_ws_md_vif,
           lv_name    TYPE vepname.
@@ -496,21 +499,21 @@ CLASS zcl_abapgit_object_webi IMPLEMENTATION.
         version_not_found = 1
         webi_not_exist    = 2
         OTHERS            = 3.
-    IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'error from WEBI_GET_OBJECT' ).
+    IF sy-subrc = 1.
+      " no active version
+      RETURN.
+    ELSEIF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
 
-    SORT ls_webi-pveptype BY
-      vepname ASCENDING
-      version ASCENDING
-      typename ASCENDING.
+    sort( CHANGING cs_webi = ls_webi ).
 
     lv_name = ms_item-obj_name.
     TRY.
         li_vi = cl_ws_md_factory=>get_vif_root( )->get_virtual_interface( lv_name ).
         ls_webi-veptext = li_vi->get_short_text( sews_c_vif_version-active ).
-      CATCH cx_ws_md_exception.
-        zcx_abapgit_exception=>raise( 'error serializing WEBI' ).
+      CATCH cx_ws_md_exception INTO lx_error.
+        zcx_abapgit_exception=>raise_with_text( lx_error ).
     ENDTRY.
 
     LOOP AT ls_webi-pvepheader ASSIGNING <ls_vepheader>.
@@ -550,4 +553,26 @@ CLASS zcl_abapgit_object_webi IMPLEMENTATION.
       io_xml      = io_xml ).
 
   ENDMETHOD.
+
+  METHOD sort.
+    SORT cs_webi-pvepheader BY vepname version.
+    SORT cs_webi-pvepfunction BY vepname version function.
+    SORT cs_webi-pvepfault BY vepname version function fault.
+    SORT cs_webi-pvepparameter BY vepname version function vepparam vepparamtype.
+    SORT cs_webi-pveptype BY vepname version typename.
+    SORT cs_webi-pvepelemtype BY vepname version typename.
+    SORT cs_webi-pveptabletype BY vepname version typename.
+    SORT cs_webi-pvepstrutype BY vepname version typename fieldpos.
+    SORT cs_webi-pveptypesoapext BY vepname version typename.
+    SORT cs_webi-pvepeletypsoap BY vepname version typename assign_type assign_data1 assign_data2.
+    SORT cs_webi-pveptabtypsoap BY vepname version typename.
+    SORT cs_webi-pvepfuncsoapext BY vepname version function.
+    SORT cs_webi-pvepfieldref BY vepname version function vepparam vepparamtype strucid fieldname.
+    SORT cs_webi-pvependpoint BY relid vepname version sortfield.
+    SORT cs_webi-pvepvisoapext BY vepname version.
+    SORT cs_webi-pvepparasoapext BY vepname version function vepparam vepparamtype.
+    SORT cs_webi-pwsheader BY wsname version.
+    SORT cs_webi-pwssoapprop BY wsname version feature soapapp funcref propnum.
+  ENDMETHOD.
+
 ENDCLASS.

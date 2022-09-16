@@ -1,4 +1,3 @@
-"! <p class="shorttext synchronized" lang="en">Git Commit</p>
 CLASS zcl_abapgit_git_commit DEFINITION
   PUBLIC
   CREATE PUBLIC .
@@ -15,6 +14,7 @@ CLASS zcl_abapgit_git_commit DEFINITION
         !iv_branch_name       TYPE string
         !iv_repo_url          TYPE zif_abapgit_persistence=>ty_repo-url
         !iv_deepen_level      TYPE i
+        !iv_sorted            TYPE abap_bool DEFAULT abap_true
       RETURNING
         VALUE(rs_pull_result) TYPE ty_pull_result
       RAISING
@@ -37,10 +37,13 @@ CLASS zcl_abapgit_git_commit DEFINITION
         zcx_abapgit_exception .
     CLASS-METHODS sort_commits
       CHANGING
-        !ct_commits TYPE zif_abapgit_definitions=>ty_commit_tt .
+        !ct_commits TYPE zif_abapgit_definitions=>ty_commit_tt
+      RAISING
+        zcx_abapgit_exception .
     CLASS-METHODS reverse_sort_order
       CHANGING
         !ct_commits TYPE zif_abapgit_definitions=>ty_commit_tt .
+    CLASS-METHODS clear_missing_parents CHANGING ct_commits TYPE zif_abapgit_definitions=>ty_commit_tt .
 
   PROTECTED SECTION.
   PRIVATE SECTION.
@@ -55,6 +58,13 @@ CLASS zcl_abapgit_git_commit DEFINITION
       CHANGING
         ct_commits      TYPE zif_abapgit_definitions=>ty_commit_tt .
 
+    CLASS-METHODS is_missing
+      IMPORTING
+        it_commits       TYPE zif_abapgit_definitions=>ty_commit_tt
+        iv_sha1          TYPE zif_abapgit_definitions=>ty_sha1
+      RETURNING
+        VALUE(rv_result) TYPE abap_bool.
+
 
 ENDCLASS.
 
@@ -63,57 +73,25 @@ ENDCLASS.
 CLASS zcl_abapgit_git_commit IMPLEMENTATION.
 
 
-  METHOD get_by_branch.
+  METHOD clear_missing_parents.
 
-    DATA: li_progress TYPE REF TO zif_abapgit_progress,
-          lt_objects  TYPE zif_abapgit_definitions=>ty_objects_tt.
+    "Part of #4719 to handle cut commit sequences, todo
 
-    li_progress = zcl_abapgit_progress=>get_instance( 1 ).
+    FIELD-SYMBOLS: <ls_commit> TYPE zif_abapgit_definitions=>ty_commit.
 
-    li_progress->show(
-      iv_current = 1
-      iv_text    = |Get git commits { iv_repo_url }| ).
+    LOOP AT ct_commits ASSIGNING <ls_commit>.
 
-    zcl_abapgit_git_transport=>upload_pack_by_branch(
-      EXPORTING
-        iv_url          = iv_repo_url
-        iv_branch_name  = iv_branch_name
-        iv_deepen_level = iv_deepen_level
-      IMPORTING
-        ev_branch       = rs_pull_result-commit
-        et_objects      = lt_objects ).
+      IF is_missing( it_commits = ct_commits
+                     iv_sha1  = <ls_commit>-parent1 ) = abap_true.
+        CLEAR <ls_commit>-parent1.
+      ENDIF.
 
-    DELETE lt_objects WHERE type <> zif_abapgit_definitions=>c_type-commit.
+      IF is_missing( it_commits = ct_commits
+                     iv_sha1  = <ls_commit>-parent2 ) = abap_true.
+        CLEAR <ls_commit>-parent2.
+      ENDIF.
 
-    rs_pull_result-commits = parse_commits( lt_objects ).
-    sort_commits( CHANGING ct_commits = rs_pull_result-commits ).
-
-  ENDMETHOD.
-
-
-  METHOD get_by_commit.
-
-    DATA: li_progress TYPE REF TO zif_abapgit_progress,
-          lt_objects  TYPE zif_abapgit_definitions=>ty_objects_tt.
-
-    li_progress = zcl_abapgit_progress=>get_instance( 1 ).
-
-    li_progress->show(
-      iv_current = 1
-      iv_text    = |Get git commits { iv_repo_url }| ).
-
-    zcl_abapgit_git_transport=>upload_pack_by_commit(
-      EXPORTING
-        iv_url          = iv_repo_url
-        iv_deepen_level = iv_deepen_level
-        iv_hash         = iv_commit_hash
-      IMPORTING
-        et_objects      = lt_objects ).
-
-    DELETE lt_objects WHERE type <> zif_abapgit_definitions=>c_type-commit.
-
-    rt_commits = parse_commits( lt_objects ).
-    sort_commits( CHANGING ct_commits = rt_commits ).
+    ENDLOOP.
 
   ENDMETHOD.
 
@@ -153,6 +131,78 @@ CLASS zcl_abapgit_git_commit IMPLEMENTATION.
     ls_parent-option = 'EQ'.
     ls_parent-low    = es_1st_commit-sha1.
     INSERT ls_parent INTO TABLE et_commit_sha1s.
+
+  ENDMETHOD.
+
+
+  METHOD get_by_branch.
+
+    DATA: li_progress TYPE REF TO zif_abapgit_progress,
+          lt_objects  TYPE zif_abapgit_definitions=>ty_objects_tt.
+
+    li_progress = zcl_abapgit_progress=>get_instance( 1 ).
+
+    li_progress->show(
+      iv_current = 1
+      iv_text    = |Get git commits { iv_repo_url }| ).
+
+    zcl_abapgit_git_transport=>upload_pack_by_branch(
+      EXPORTING
+        iv_url          = iv_repo_url
+        iv_branch_name  = iv_branch_name
+        iv_deepen_level = iv_deepen_level
+      IMPORTING
+        ev_branch       = rs_pull_result-commit
+        et_objects      = lt_objects ).
+
+    DELETE lt_objects WHERE type <> zif_abapgit_definitions=>c_type-commit.
+
+    rs_pull_result-commits = parse_commits( lt_objects ).
+
+    IF iv_sorted = abap_true.
+      sort_commits( CHANGING ct_commits = rs_pull_result-commits ).
+    ENDIF.
+
+  ENDMETHOD.
+
+
+  METHOD get_by_commit.
+
+    DATA: li_progress TYPE REF TO zif_abapgit_progress,
+          lt_objects  TYPE zif_abapgit_definitions=>ty_objects_tt.
+
+    li_progress = zcl_abapgit_progress=>get_instance( 1 ).
+
+    li_progress->show(
+      iv_current = 1
+      iv_text    = |Get git commits { iv_repo_url }| ).
+
+    zcl_abapgit_git_transport=>upload_pack_by_commit(
+      EXPORTING
+        iv_url          = iv_repo_url
+        iv_deepen_level = iv_deepen_level
+        iv_hash         = iv_commit_hash
+      IMPORTING
+        et_objects      = lt_objects ).
+
+    DELETE lt_objects WHERE type <> zif_abapgit_definitions=>c_type-commit.
+
+    rt_commits = parse_commits( lt_objects ).
+    sort_commits( CHANGING ct_commits = rt_commits ).
+
+  ENDMETHOD.
+
+
+  METHOD is_missing.
+
+    IF iv_sha1 IS NOT INITIAL.
+
+      READ TABLE it_commits
+        TRANSPORTING NO FIELDS
+        WITH KEY sha1 = iv_sha1.
+      rv_result = boolc( sy-subrc <> 0 ).
+
+    ENDIF.
 
   ENDMETHOD.
 
@@ -231,32 +281,33 @@ CLASS zcl_abapgit_git_commit IMPLEMENTATION.
 
     " find initial commit
     READ TABLE ct_commits ASSIGNING <ls_initial_commit> WITH KEY parent1 = space.
-    IF sy-subrc = 0.
-
-      ls_parent-sign   = 'I'.
-      ls_parent-option = 'EQ'.
-      ls_parent-low    = <ls_initial_commit>-sha1.
-      INSERT ls_parent INTO TABLE lt_parents.
-
-      " first commit
-      INSERT <ls_initial_commit> INTO TABLE lt_sorted_commits.
-
-      " remove from available commits
-      DELETE ct_commits WHERE sha1 = <ls_initial_commit>-sha1.
-
-      DO.
-        get_1st_child_commit( EXPORTING it_commit_sha1s = lt_parents
-                              IMPORTING et_commit_sha1s = lt_parents
-                                        es_1st_commit   = ls_next_commit
-                              CHANGING  ct_commits      = ct_commits ).
-        IF ls_next_commit IS INITIAL.
-          EXIT. "DO
-        ENDIF.
-        INSERT ls_next_commit INTO TABLE lt_sorted_commits.
-      ENDDO.
-
-      ct_commits = lt_sorted_commits.
+    IF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise( |Cannot find initial commit. Too many commits. Action not possible.| ).
     ENDIF.
+
+    ls_parent-sign   = 'I'.
+    ls_parent-option = 'EQ'.
+    ls_parent-low    = <ls_initial_commit>-sha1.
+    INSERT ls_parent INTO TABLE lt_parents.
+
+    " first commit
+    INSERT <ls_initial_commit> INTO TABLE lt_sorted_commits.
+
+    " remove from available commits
+    DELETE ct_commits WHERE sha1 = <ls_initial_commit>-sha1.
+
+    DO.
+      get_1st_child_commit( EXPORTING it_commit_sha1s = lt_parents
+                            IMPORTING et_commit_sha1s = lt_parents
+                                      es_1st_commit   = ls_next_commit
+                            CHANGING  ct_commits      = ct_commits ).
+      IF ls_next_commit IS INITIAL.
+        EXIT. "DO
+      ENDIF.
+      INSERT ls_next_commit INTO TABLE lt_sorted_commits.
+    ENDDO.
+
+    ct_commits = lt_sorted_commits.
 
   ENDMETHOD.
 ENDCLASS.

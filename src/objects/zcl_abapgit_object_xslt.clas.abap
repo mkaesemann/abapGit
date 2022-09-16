@@ -2,8 +2,6 @@ CLASS zcl_abapgit_object_xslt DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
 
   PUBLIC SECTION.
     INTERFACES zif_abapgit_object.
-    ALIASES mo_files FOR zif_abapgit_object~mo_files.
-
   PROTECTED SECTION.
   PRIVATE SECTION.
     METHODS:
@@ -15,7 +13,7 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_OBJECT_XSLT IMPLEMENTATION.
+CLASS zcl_abapgit_object_xslt IMPLEMENTATION.
 
 
   METHOD get.
@@ -101,9 +99,16 @@ CLASS ZCL_ABAPGIT_OBJECT_XSLT IMPLEMENTATION.
           lv_len        TYPE i,
           ls_attributes TYPE o2xsltattr.
 
+    " Transformation might depend on other objects like a class
+    " We attempt to activate it in late step
+    IF iv_step = zif_abapgit_object=>gc_step_id-late.
+      zcl_abapgit_objects_activation=>add_item( ms_item ).
+      RETURN.
+    ENDIF.
 
     IF zif_abapgit_object~exists( ) = abap_true.
-      zif_abapgit_object~delete( iv_package ).
+      zif_abapgit_object~delete( iv_package   = iv_package
+                                 iv_transport = iv_transport ).
     ENDIF.
 
     io_xml->read( EXPORTING iv_name = 'ATTRIBUTES'
@@ -111,8 +116,9 @@ CLASS ZCL_ABAPGIT_OBJECT_XSLT IMPLEMENTATION.
 
     ls_attributes-devclass = iv_package.
 
-    lv_source = mo_files->read_string( iv_extra = 'source'
-                                       iv_ext   = 'xml' ).
+    lv_source = zif_abapgit_object~mo_files->read_string(
+      iv_extra = 'source'
+      iv_ext   = 'xml' ).
 
 * workaround: somewhere additional linefeeds are added
     lv_len = strlen( lv_source ) - 2.
@@ -146,21 +152,13 @@ CLASS ZCL_ABAPGIT_OBJECT_XSLT IMPLEMENTATION.
         permission_failure    = 5
         OTHERS                = 6 ).
     IF sy-subrc <> 0.
+      lo_xslt->set_changeable( abap_false ). " unlock
       zcx_abapgit_exception=>raise( |Error from XSLT save, { sy-subrc }| ).
     ENDIF.
 
-    lo_xslt->activate(
-      EXCEPTIONS
-        generate_error    = 1
-        storage_error     = 2
-        syntax_errors     = 3
-*        xtc_not_available = 4  downport/upport, does not exist in 751
-        OTHERS            = 5 ).
-    IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( |Error from XSLT activate, { sy-subrc }| ).
-    ENDIF.
-
     lo_xslt->set_changeable( abap_false ).
+
+    zcl_abapgit_objects_activation=>add_item( ms_item ).
 
   ENDMETHOD.
 
@@ -184,6 +182,7 @@ CLASS ZCL_ABAPGIT_OBJECT_XSLT IMPLEMENTATION.
 
   METHOD zif_abapgit_object~get_deserialize_steps.
     APPEND zif_abapgit_object=>gc_step_id-abap TO rt_steps.
+    APPEND zif_abapgit_object=>gc_step_id-late TO rt_steps.
   ENDMETHOD.
 
 
@@ -203,13 +202,7 @@ CLASS ZCL_ABAPGIT_OBJECT_XSLT IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~jump.
-
-    CALL FUNCTION 'RS_TOOL_ACCESS'
-      EXPORTING
-        operation   = 'SHOW'
-        object_name = ms_item-obj_name
-        object_type = ms_item-obj_type.
-
+    " Covered by ZCL_ABAPGIT_OBJECTS=>JUMP
   ENDMETHOD.
 
 
@@ -235,9 +228,10 @@ CLASS ZCL_ABAPGIT_OBJECT_XSLT IMPLEMENTATION.
 
     lv_source = lo_xslt->get_source_string( ).
 
-    mo_files->add_string( iv_extra  = 'source'
-                          iv_ext    = 'xml'
-                          iv_string = lv_source ).
+    zif_abapgit_object~mo_files->add_string(
+      iv_extra  = 'source'
+      iv_ext    = 'xml'
+      iv_string = lv_source ).
 
   ENDMETHOD.
 ENDCLASS.

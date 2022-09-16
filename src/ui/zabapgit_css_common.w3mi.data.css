@@ -7,6 +7,16 @@
 body {
   overflow-x: hidden;
 }
+
+body.centered {
+  max-width: 1280px;
+  margin: 0 auto;
+}
+
+body.full_width {
+  width:100%;
+}
+
 a, a:visited {
   text-decoration:  none;
 }
@@ -67,11 +77,39 @@ span.separator {
 .nodisplay    { display: none }
 .m-em5-sides  { margin-left: 0.5em; margin-right: 0.5em }
 .w600px       { width: 600px }
+.w800px       { width: 800px }
+.w1000px      { width: 1000px }
 .wmax600px    { max-width: 600px }
 .auto-center  { /* use with max-width */
   width: 100%;
   margin-left: auto;
   margin-right: auto;
+}
+
+span.boxed {
+  border-radius: 3px;
+  padding: 4px 7px;
+  margin-left: 0.2em;
+  margin-right: 0.2em;
+  font-size: smaller;
+}
+span.boxed i.icon {
+  padding-right: 5px;
+}
+.red-filled-set {
+  border-width: 0px;
+  color: hsl(0, 78%, 93%);
+  background-color: hsl(0, 78%, 65%);
+}
+.green-filled-set {
+  border-width: 0px;
+  color: hsl(120, 45%, 90%);
+  background-color: hsl(120, 27%, 60%);
+}
+.yellow-filled-set {
+  border-width: 0px;
+  color: hsl(45, 99%, 90%);
+  background-color: hsl(45, 100%, 46%);
 }
 
 /* PANELS */
@@ -185,12 +223,14 @@ div.repo {
 
 /* ABAPGIT OBJECTS */
 span.branch,
-span.user,
-span.package,
-span.transport {
+span.user-box,
+span.package-box,
+span.path-box,
+span.transport-box {
   padding: 2px 4px;
   border: 1px solid;
   border-radius: 4px;
+  display: inline-block;
 }
 
 /* MISC AND REFACTOR */
@@ -200,6 +240,7 @@ span.transport {
   width: 0;
   padding: 0;
   margin: 0;
+  position: absolute;
   overflow: hidden;
 }
 
@@ -207,7 +248,7 @@ span.transport {
 /* STATE BLOCK COMMON*/
 span.state-block {
   margin-left: 1em;
-  font-family: Consolas, Lucida Console, Courier, monospace;
+  font-family: Consolas, "Lucida Console", Courier, monospace;
   font-size: x-small;
   vertical-align: 13%;
   display: inline-block;
@@ -238,7 +279,7 @@ table.repo_tab {
   border: 1px solid;
   border-radius: 3px;
   width: 100%;
-  line-height: 1.5;
+  line-height: 1.2;
 }
 .repo_tab th {
   text-align: left;
@@ -247,44 +288,59 @@ table.repo_tab {
   font-weight: normal;
 }
 .repo_tab td {
-  border-top: 1px solid;
   vertical-align: middle;
   padding-top: 2px;
   padding-bottom: 2px;
 }
+
 .repo_tab td.icon {
   width: 1px;
   text-align: center;
   padding-left: 8px;
   padding-right: 4px;
 }
-.repo_tab td.icon:not(:first-child) {
-  width: 26px;
+
+.repo_tab td.transport {
+  width: 140px;
   text-align: left;
 }
 .repo_tab td.type {
   width: 4em;
   padding-left: 0.5em;
 }
+
+.repo_tab td.filename{
+  padding-left: 1em;
+  word-break: break-all;
+}
+
 .repo_tab td.object {
   padding-left: 0.5em;
 }
+
 .repo_tab td.files {
   padding-left: 0.5em;
   line-height: 1.5;
 }
+
+.repo_tab tr.object_row{
+  border-top: 1px solid;
+}
+
 .repo_tab td.cmd, .repo_tab th.cmd {
   text-align: right;
   padding-left: 0.5em;
   padding-right: 0.7em;
+  min-width: 70px;
 }
+
 .repo_tab th.cmd .icon{
   padding-right: 8px;
 }
 .repo_tab tr:first-child td { border-top: 0px; }
 
-.repo_tab tr:hover {
-  background-color: rgb(245, 245, 245) !important;
+.repo_tab tr:hover td {
+  background-image: linear-gradient(rgba(0, 0, 0, 0.075), rgba(0, 0, 0, 0.075));
 }
 
 
@@ -308,6 +364,7 @@ input.stage-filter { width: 18em; }
   text-align: left;
   font-weight: normal;
   padding: 4px 0.5em;
+  border-bottom: 1px solid;
 }
 .stage_tab td.status {
   width: 2em;
@@ -316,9 +373,14 @@ input.stage-filter { width: 18em; }
 .stage_tab td.highlight {
   font-weight: bold;
 }
+.stage_tab td.name {
+  word-break: break-all;
+}
 
-.stage_tab tr:hover {
-  background-color: rgb(245, 245, 245) !important;
+.stage_tab tr:first-child td { border-top: 0px; }
+
+.stage_tab tr:hover td {
+  background-image: linear-gradient(rgba(0, 0, 0, 0.075), rgba(0, 0, 0, 0.075));
 }
 
 .stage_tab td.cmd {  cursor: pointer; }
@@ -462,6 +524,11 @@ table.diff_tab td.patch, th.patch {
   user-select: none;
   cursor: pointer;
 }
+
+table.diff_tab tr.diff_line:hover td {
+  background-image: linear-gradient(rgba(0, 0, 0, 0.075), rgba(0, 0, 0, 0.075));
+}
+
 table.diff_tab td.num::before {
   content: attr(line-num);
 }
@@ -547,6 +614,9 @@ div.db_list {
   overflow-x: auto;
 }
 
+table.db_tab{
+  table-layout: fixed;
+}
 table.db_tab pre {
   display: inline-block;
   overflow: hidden;
@@ -565,10 +635,29 @@ table.db_tab th {
 table.db_tab td {
   padding: 4px 8px;
   vertical-align: middle;
+  word-break: break-all;
 }
+
+table.db_tab th.package {
+    width: 45ch;
+}
+
 table.db_tab td.data {
   font-style: italic;
 }
+
+li.action_link.enabled{
+  visibility: visible;
+  position: relative;
+  display: block;
+}
+
+li.action_link:not(enabled){
+  visibility: hidden;
+  position: fixed; /* so it does not take up space when hidden */
+  display: none;
+}
+
 
 /* DB ENTRY DISPLAY */
 div.db_entry {
@@ -585,12 +674,15 @@ div.db_entry pre {
   border-radius: 3px;
   padding: 0.5em;
   margin: 0.5em 0em;
-  width: 60em;
+  width: 98%;
 }
 
-div.db_entry textarea { margin: 0.5em 0em; }
+div.db_entry textarea {
+  margin: 0.5em 0em;
+  width: 98%;
+}
 div.db_entry table.toolbar {
-  width: 50em;
+  width: 100%;
 }
 
 table.tag {
@@ -774,8 +866,12 @@ div.info-panel div.info-list {
   padding: 0.8em 0.7em 1em;
 }
 
-div.info-panel li {
+div.info-panel ul {
   padding-left: 10px;
+}
+
+div.info-panel li {
+  padding-left: 0px;
   list-style-type: none;
 }
 
@@ -804,17 +900,23 @@ div.info-panel div.info-list td { padding-right: 1em }
 div.message-panel {
   z-index: 99;
   box-shadow: 2px 2px 4px 0px hsla(0, 0%, 0%, .1);
-  padding: 12px;
-  margin-left: -48%;
+  padding: 0.5em 1em;
   position: fixed;
   bottom: 12px;
-  width: 94%;
-  left: 50%;
+  width: 95%;
+  margin: 0 auto;
+  max-width: 1248px;
 
   border: 1px solid;
   border-radius: 5px;
   border-color: hsl(0, 42%, 64%);
   background-color: hsla(0, 42%, 90%, 1);
+}
+
+.message-panel-bar {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
 }
 
 .message-panel-commands {
@@ -834,7 +936,7 @@ div.message-panel {
 }
 
 div.message-panel:hover .message-panel-commands {
-  display: block
+  display: block;
 }
 
 /* Tooltip text */
@@ -855,6 +957,10 @@ div.message-panel:hover .message-panel-commands {
 }
 
 .link-hint-input {
+  margin-left: -30px;
+}
+
+.link-hint-i {
   margin-left: -30px;
 }
 
@@ -884,7 +990,7 @@ ul.hotkeys span.key-id {
   border: 1px solid;
   border-radius: 3px;
   padding: 1px 7px;
-  width: 1em;
+  width: 3em;
   display: inline-block;
   text-align: center;
   margin-top: 0.2em;
@@ -916,7 +1022,6 @@ table.commit tr .title {
 .repo-overview { font-size: smaller; }
 .repo-overview tbody td { height: 2em; }
 .ro-detail { display: none; }
-.ro-action { width: 260px; }
 .ro-go { font-size: 150%; }
 
 /* Branch Overview Page */
@@ -1036,10 +1141,21 @@ settings_tab tr:first-child td { border-top: 0px; }
 /* DIALOGS */
 
 .dialog {
+  margin: 0 auto;
+  margin-top: 1em;
+  margin-bottom: 1em;
   border: 1px solid;
   padding: 1em 1em;
   border-radius: 6px;
   text-align: left;
+}
+.dialog-form {
+  width: 600px;
+}
+.dialog-form-center {
+  margin: 1em auto 1em;
+  max-width: 600px;
+  width: 100%;
 }
 .dialog ul {
   padding: 0;
@@ -1063,6 +1179,7 @@ settings_tab tr:first-child td { border-top: 0px; }
   border-radius: 3px;
   font-size: smaller;
 }
+.dialog li.dialog-commands input[type="button"],
 .dialog li.dialog-commands input[type="submit"] {
   border: 1px solid;
   padding: 6px 12px;
@@ -1085,6 +1202,9 @@ settings_tab tr:first-child td { border-top: 0px; }
   margin: 4px 0px;
   padding-left: 0.5em;
 }
+.dialog li.hidden {
+  padding: 0px 0px;
+}
 .dialog .radio-container {
   border: 1px solid;
   display: inline-block;
@@ -1094,10 +1214,22 @@ settings_tab tr:first-child td { border-top: 0px; }
 .dialog input[type="checkbox"] + label {
   display: inline-block;
 }
+.dialog input[type="password"],
 .dialog input[type="text"] {
   width: 100%;
-  box-sizing : border-box;
+  box-sizing: border-box;
   height: 2.5em;
+}
+.dialog input[type="number"] {
+  width: 25%;
+  box-sizing: border-box;
+  height: 2.5em;
+}
+.dialog textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px;
+  font-family: Arial,Helvetica,sans-serif;
 }
 .dialog .radio-container input[type="radio"] {
   visibility: hidden;
@@ -1117,6 +1249,24 @@ settings_tab tr:first-child td { border-top: 0px; }
 .dialog .radio-container input[type="radio"]:checked + label {
   border: 1px solid transparent;
 }
+.dialog table {
+  width: 100%;
+}
+.dialog table thead td {
+  font-size: 14px;
+  height: 2.5em;
+  background-color: #ddd;
+  border: 1px solid #ccc;
+  padding: 0px 10px;
+}
+.dialog table tbody td {
+  border: 1px solid #ccc;
+  background-color: white;
+}
+.dialog table td input {
+  border: 0px;
+  background: none;
+}
 .dialog li.with-command div.input-container {
   display: table-cell;
   width: 100%;
@@ -1124,12 +1274,16 @@ settings_tab tr:first-child td { border-top: 0px; }
 .dialog li.with-command div.command-container {
   display: table-cell;
 }
+.dialog li.with-command input[type="button"],
 .dialog li.with-command input[type="submit"] {
   height: 2.5em;
 }
 .dialog fieldset {
   margin-top: 1em;
   border: 1px solid;
+  border-right: none;
+  border-left: none;
+  border-bottom: none;
   border-radius: 6px; /* doesn't work in IE ? */
   padding-bottom: 1em;
 }
@@ -1137,8 +1291,51 @@ settings_tab tr:first-child td { border-top: 0px; }
   margin-top: 0;
 }
 .dialog fieldset legend {
-  font-size: small;
-  text-transform: uppercase;
+  font-size: large;
+  font-weight: bold;
   padding-left: 0.5em;
   padding-right: 0.5em;
+}
+.dialog .dialog-help {
+  float: left;
+}
+
+/* STICKY HEADERS */
+
+/* https://www.w3schools.com/howto/howto_js_navbar_sticky.asp */
+/* Note: We have to use JS since IE does not support CSS position:sticky */
+
+/* The sticky class is added to the navbar with JS when it reaches its scroll position */
+.sticky {
+  position: fixed;
+  top: 0;
+  z-index: 10;
+  width: 100%;
+  padding: 0.5em;
+  margin-bottom: 3px;
+  max-height: 47px;
+  max-width: 1265px; /* if set to 1280px, then actual width will be 1296px (strange) */
+}
+
+.sticky_full_width {
+  position: fixed;
+  top: 0;
+  z-index: 10;
+  width: 100%;
+  padding: 0.5em 0.5em;
+  margin-bottom: 3px;
+  max-height: 47px;
+}
+.sticky_full_width .nav-container {
+  margin-right: 18px;
+}
+
+/* Add some top padding to the page content to prevent sudden quick movement
+   as the navigation bar gets a new position at the top of the page */
+.sticky + .not_sticky {
+  padding-top: 50px;
+}
+
+.sticky_full_width + .not_sticky {
+  padding-top: 50px;
 }

@@ -1,14 +1,18 @@
 {
   "global": {
-    "files": "/src/**/*.*",
+    "files": "/{test,src}/**/*.*",
     "skipGeneratedGatewayClasses": true,
     "skipGeneratedPersistentClasses": true,
     "skipGeneratedFunctionGroups": true
   },
   "dependencies": [
     {
-      "url": "https://github.com/abaplint/deps",
       "folder": "/deps",
+      "files": "/**/*.*"
+    },
+    {
+      "url": "https://github.com/abaplint/deps",
+      "folder": "/lint_deps",
       "files": "/src/**/*.*"
     }
   ],
@@ -19,25 +23,12 @@
       "abap_func_exporting",
       "abap_func_tables",
       "cssf_formtype_text",
-      "icon_abap",
-      "icon_display_text",
-      "icon_folder",
-      "icon_led_green",
-      "icon_led_inactive",
-      "icon_led_red",
-      "icon_led_yellow",
-      "icon_message_information",
-      "icon_okay",
-      "icon_set_state",
-      "icon_stack",
-      "icon_system_help",
-      "icon_workflow_fork",
       "seoc_category_exception",
       "seoc_category_webdynpro_class",
       "seoc_exposure_private",
       "seoc_exposure_protected",
       "seoc_exposure_public",
-      "seoc_exposure_public",
+      "seoc_state_implemented",
       "seoc_version_active",
       "seoc_version_inactive",
       "seok_access_free",
@@ -64,6 +55,8 @@
       "swbm_c_type_wdy_application",
       "swbm_version_active",
       "swbm_version_inactive",
+      "swfco_org_standard_task",
+      "swfco_org_workflow_template",
       "wbmr_c_skwf_folder_class",
       "wdyn_limu_component_controller",
       "wdyn_limu_component_definition",
@@ -72,6 +65,38 @@
     "globalMacros": []
   },
   "rules": {
+    "classic_exceptions_overlap": true,
+    "local_testclass_consistency": true,
+    "no_external_form_calls": false,
+    "no_inline_in_optional_branches": true,
+    "pragma_style": true,
+    "slow_parameter_passing": false,
+    "unnecessary_pragma": false,
+    "align_parameters": false,
+    "cds_parser_error": true,
+    "constant_classes": true,
+    "no_aliases": false,
+    "nrob_consistency": true,
+    "omit_preceding_zeros": true,
+    "prefer_corresponding": true,
+    "static_call_via_instance": false,
+    "unnecessary_chaining": false,
+    "unsecure_fae": false,
+    "identical_descriptions": false,
+    "modify_only_own_db_tables": false,
+    "no_yoda_conditions": false,
+    "no_chained_assignment": true,
+    "select_add_order_by": false,
+    "dangerous_statement": false,
+    "db_operation_in_loop": false,
+    "select_performance": false,
+    "max_one_method_parameter_per_line": true,
+    "unused_ddic": true,
+    "prefer_raise_exception_new": true,
+    "use_class_based_exceptions": true,
+    "uncaught_exception": true,
+    "intf_referencing_clas": false,
+    "method_implemented_twice": true,
     "parser_702_chaining": true,
     "sy_modification": false,
     "call_transaction_authority_check": true,
@@ -79,9 +104,9 @@
     "method_overwrites_builtin": false,
     "omit_parameter_name": false,
     "omit_receiving": true,
-    "unused_methods": false,
+    "unused_methods": true,
     "identical_contents": false,
-    "many_parenthesis": true,
+    "many_parentheses": true,
     "prefer_xsdbool": true,
     "prefer_is_not": false,
     "use_bool_expression": true,
@@ -111,7 +136,17 @@
       "check": ["^stringtab$", "^SYCHAR01$", "^char2$", "^char20$", "^int4$", "^SYREPID$",
         "^flag$", "^char12$", "^char10$", "^char70$", "^char4$", "^sydatum$", "^syuzeit$",
         "^syst_title$", "^sychar70$", "^char30$", "^char50$",
-        "^numc2$", "^sap_bool$", "^SYCHAR10$", "^sylangu$"]
+        "^numc2$", "^sap_bool$", "^SYCHAR10$", "^sylangu$",
+        "^cl_blue_wb_utility$", "^boole_d$",
+        "^cl_srvd_wb_object_data$", "^cx_aff_", "^cl_aff_", "^if_aff_",
+        "^cl_wb_object_operator_factory$",
+        "^cl_aunit_assert$",
+        "^cx_wb_object_operation_error$",
+        "^if_srvd_types$", "^xubname$",
+        "^if_wb_adt_plugin_resource_co$",
+        "^if_wb_object_data_selection_co$",
+        "^if_wb_object_operator$"
+      ]
     },
     "forbidden_identifier": true,
     "try_without_catch": true,
@@ -119,6 +154,7 @@
     "prefix_is_current_class": true,
     "allowed_object_naming": true,
     "check_comments": false,
+    "cyclic_oo": false,
     "fully_type_constants": true,
     "keep_single_parameter_on_one_line": true,
     "prefer_returning_to_exporting": true,
@@ -126,7 +162,6 @@
     "sicf_consistency": true,
     "sql_escape_host_variables": true,
     "xml_consistency": true,
-    "check_no_handler_pragma": true,
     "newline_between_methods": false,
     "chain_mainly_declarations": {
       "definitions": true,
@@ -134,6 +169,7 @@
       "move": true,
       "refresh": true,
       "unassign": true,
+      "sort": true,
       "clear": true,
       "hide": true,
       "free": true,
@@ -143,10 +179,14 @@
     "check_abstract": true,
     "check_text_elements": true,
     "types_naming": {
-      "pattern": "^TY_.+$"
+      "pattern": "^TY_.+$",
+      "exclude": ["/json/"]
     },
     "7bit_ascii": {
-      "exclude": ["zcl_abapgit_utils.clas.testclasses.abap"]
+      "exclude": [
+        "zcl_abapgit_utils.clas.testclasses.abap",
+        "zcl_abapgit_html_action_utils.clas.testclasses.abap"
+      ]
     },
     "abapdoc": false,
     "check_ddic": true,
@@ -162,14 +202,10 @@
         "W3MI"
       ]
     },
-    "ambiguous_statement": false,
+    "ambiguous_statement": true,
     "avoid_use": {
       "define": true,
-      "endselect": true,
-      "execSQL": true,
-      "kernelCall": true,
-      "communication": true,
-      "systemCall": true,
+      "testSeams": true,
       "defaultKey": false,
       "describeLines": true,
       "break": true,
@@ -194,8 +230,12 @@
     },
     "constructor_visibility_public": true,
     "contains_tab": true,
-    "definitions_top": true,
-    "description_empty": true,
+    "definitions_top": {
+      "exclude": ["/json/"]
+    },
+    "description_empty": {
+      "exclude": ["/test/"]
+    },
     "double_space": false,
     "empty_line_in_statement": {
       "allowChained": true
@@ -208,6 +248,7 @@
       "while": true,
       "case": true,
       "select": true,
+      "when": false,
       "do": true,
       "at": true
     },
@@ -225,6 +266,7 @@
     "indentation": {
       "ignoreExceptions": true,
       "alignTryCatch": false,
+      "selectionScreenBlockIndentation": false,
       "globalClassSkipFirst": false,
       "ignoreGlobalClassDefinition": false,
       "ignoreGlobalInterface": false
@@ -252,17 +294,18 @@
       "local": "^LCL_.*$",
       "test": "^LT.+$"
     },
-    "local_testclass_location": true,
     "local_variable_names": {
       "expectedData": "^L._.*$",
       "expectedConstant": "^LC_.*$",
-      "expectedFS": "^<L._.*>$"
+      "expectedFS": "^<L._.*>$",
+      "exclude": ["/json/"]
     },
     "main_file_contents": true,
     "max_one_statement": true,
     "message_exists": false,
     "method_length": {
       "statements": 100,
+      "checkForms": true,
       "ignoreTestClasses": false,
       "errorWhenEmpty": false
     },
@@ -274,7 +317,8 @@
       "exporting": "^E._.*$",
       "ignoreNames": [
         "P_TASK"
-      ]
+      ],
+      "exclude": ["/json/"]
     },
     "mix_returning": true,
     "msag_consistency": true,
@@ -306,17 +350,28 @@
       "refresh": true,
       "compute": true,
       "add": true,
+      "occurences": true,
+      "selectWithoutInto": true,
+      "ranges": true,
+      "callTransformation": true,
+      "regex": true,
+      "sortByFS": true,
       "subtract": true,
+      "freeMemory": true,
+      "exitFromSQL": true,
       "multiply": true,
+      "communication": true,
       "typePools": true,
       "load": true,
       "move": true,
       "divide": true,
       "fieldSymbolStructure": true,
       "requested": true,
+      "pack": true,
       "setExtended": true,
       "withHeaderLine": true,
-      "occurs": true
+      "occurs": true,
+      "parameter": true
     },
     "parser_error": {},
     "preferred_compare_operator": {
@@ -333,7 +388,8 @@
     "release_idoc": true,
     "remove_descriptions": {
       "ignoreWorkflow": false,
-      "ignoreExceptions": false
+      "ignoreExceptions": false,
+      "exclude": ["/json/"]
     },
     "rfc_error_handling": false,
     "sequential_blank": {

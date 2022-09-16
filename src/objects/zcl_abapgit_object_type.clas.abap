@@ -2,8 +2,6 @@ CLASS zcl_abapgit_object_type DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
 
   PUBLIC SECTION.
     INTERFACES zif_abapgit_object.
-    ALIASES mo_files FOR zif_abapgit_object~mo_files.
-
   PROTECTED SECTION.
   PRIVATE SECTION.
     CONSTANTS: c_prefix TYPE c LENGTH 3 VALUE '%_C'.
@@ -11,7 +9,7 @@ CLASS zcl_abapgit_object_type DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
     METHODS read
       EXPORTING ev_ddtext TYPE ddtypet-ddtext
                 et_source TYPE abaptxt255_tab
-      RAISING   zcx_abapgit_not_found.
+      RAISING   zcx_abapgit_exception.
 
     METHODS create
       IMPORTING iv_ddtext   TYPE ddtypet-ddtext
@@ -23,7 +21,7 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_OBJECT_TYPE IMPLEMENTATION.
+CLASS zcl_abapgit_object_type IMPLEMENTATION.
 
 
   METHOD create.
@@ -50,7 +48,7 @@ CLASS ZCL_ABAPGIT_OBJECT_TYPE IMPLEMENTATION.
         illegal_name         = 5
         OTHERS               = 6.
     IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'error from RS_DD_TYGR_INSERT_SOURCES' ).
+      zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
 
     CONCATENATE c_prefix lv_typegroup INTO lv_progname.
@@ -78,7 +76,7 @@ CLASS ZCL_ABAPGIT_OBJECT_TYPE IMPLEMENTATION.
 
     lv_typdname = ms_item-obj_name.
 
-    " Active version
+    " Get active version, ignore errors if not found
     CALL FUNCTION 'TYPD_GET_OBJECT'
       EXPORTING
         typdname          = lv_typdname
@@ -90,32 +88,21 @@ CLASS ZCL_ABAPGIT_OBJECT_TYPE IMPLEMENTATION.
       EXCEPTIONS
         version_not_found = 1
         reps_not_exist    = 2
-        OTHERS            = 3.
-    IF sy-subrc <> 0.
-      " Inactive version
-      CALL FUNCTION 'TYPD_GET_OBJECT'
-        EXPORTING
-          typdname          = lv_typdname
-          r3state           = 'I'
-        TABLES
-          psmodisrc         = lt_psmodisrc
-          psmodilog         = lt_psmodilog
-          psource           = et_source
-          ptrdir            = lt_ptrdir
-        EXCEPTIONS
-          version_not_found = 1
-          reps_not_exist    = 2
-          OTHERS            = 3.
-    ENDIF.
-    IF sy-subrc <> 0.
-      RAISE EXCEPTION TYPE zcx_abapgit_not_found.
-    ENDIF.
+        OTHERS            = 3 ##FM_SUBRC_OK.
 
   ENDMETHOD.
 
 
   METHOD zif_abapgit_object~changed_by.
-    rv_user = c_user_unknown. " todo
+    DATA lv_prog TYPE progname.
+
+    CONCATENATE '%_C' ms_item-obj_name INTO lv_prog.
+
+    SELECT SINGLE unam FROM reposrc INTO rv_user
+      WHERE progname = lv_prog AND r3state = 'A'.
+    IF sy-subrc <> 0.
+      rv_user = c_user_unknown.
+    ENDIF.
   ENDMETHOD.
 
 
@@ -144,7 +131,7 @@ CLASS ZCL_ABAPGIT_OBJECT_TYPE IMPLEMENTATION.
     io_xml->read( EXPORTING iv_name = 'DDTEXT'
                   CHANGING cg_data = lv_ddtext ).
 
-    lt_source = mo_files->read_abap( ).
+    lt_source = zif_abapgit_object~mo_files->read_abap( ).
 
     IF zif_abapgit_object~exists( ) = abap_false.
       create( iv_ddtext   = lv_ddtext
@@ -162,13 +149,17 @@ CLASS ZCL_ABAPGIT_OBJECT_TYPE IMPLEMENTATION.
 
   METHOD zif_abapgit_object~exists.
 
-    TRY.
-        read( ).
-        rv_bool = abap_true.
-      CATCH zcx_abapgit_not_found
-            zcx_abapgit_exception.
-        rv_bool = abap_false.
-    ENDTRY.
+    DATA: lv_progname TYPE progname,
+          lv_state    TYPE r3state.
+
+    lv_progname = |%_C{ ms_item-obj_name }|.
+    SELECT SINGLE state
+      FROM progdir
+      INTO lv_state
+      WHERE name = lv_progname.
+    IF lv_state IS NOT INITIAL.
+      rv_bool = abap_true.
+    ENDIF.
 
   ENDMETHOD.
 
@@ -199,8 +190,7 @@ CLASS ZCL_ABAPGIT_OBJECT_TYPE IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~jump.
-    jump_se11( iv_radio = 'RSRD1-TYMA'
-               iv_field = 'RSRD1-TYMA_VAL' ).
+    " Covered by ZCL_ABAPGIT_OBJECT=>JUMP
   ENDMETHOD.
 
 
@@ -210,18 +200,17 @@ CLASS ZCL_ABAPGIT_OBJECT_TYPE IMPLEMENTATION.
           lt_source TYPE abaptxt255_tab.
 
 
-    TRY.
-        read( IMPORTING
-                ev_ddtext = lv_ddtext
-                et_source = lt_source ).
-      CATCH zcx_abapgit_not_found.
-        RETURN.
-    ENDTRY.
+    read( IMPORTING ev_ddtext = lv_ddtext
+                    et_source = lt_source ).
+
+    IF lt_source IS INITIAL.
+      RETURN.
+    ENDIF.
 
     io_xml->add( iv_name = 'DDTEXT'
                  ig_data = lv_ddtext ).
 
-    mo_files->add_abap( lt_source ).
+    zif_abapgit_object~mo_files->add_abap( lt_source ).
 
   ENDMETHOD.
 ENDCLASS.

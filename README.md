@@ -1,8 +1,10 @@
 ![CI](https://github.com/abapGit/abapGit/workflows/CI/badge.svg)
 [![Slack](https://abapgit-slackinviter.herokuapp.com/badge.svg)](https://abapgit-slackinviter.herokuapp.com/)
-[![abap package version](https://img.shields.io/endpoint?url=https://shield.abap.space/version-shield-json/github/abapGit/abapGit/src/zif_abapgit_version.intf.abap/gc_abap_version&label=version)](https://github.com/abapGit/abapGit/blob/master/src/zif_abapgit_version.intf.abap)
+[![abap package version](https://img.shields.io/endpoint?url=https://shield.abap.space/version-shield-json/github/abapGit/abapGit/src/zif_abapgit_version.intf.abap/c_abap_version&label=version)](https://github.com/abapGit/abapGit/blob/main/src/zif_abapgit_version.intf.abap)
 
-# abapGit
+<!--img src="img/logo.svg#gh-light-mode-only" height="40" alt="abapGit logo"><img src="img/logo-dark.svg#gh-dark-mode-only" height="40" alt="abapGit logo"--> 
+# <a href="https://supportukrainenow.org/"><img src="img/abapGit_in_Ukraine_Colors.svg" height="40" alt="abapGit logo"></a>
+<a href="https://supportukrainenow.org/"><img src="img/Ukraine-heart-shape-flag.svg" height="25" alt="Support Ukraine"> Support Ukraine</a>
 
 Git client for ABAP
 
@@ -17,10 +19,11 @@ Works with: [GitHub](https://github.com/),
 
 ABAP Version: 702 or higher
 
-Latest build: [zabapgit.abap](https://raw.githubusercontent.com/abapGit/build/master/zabapgit.abap)
-*NB: Some people reported that browsers have issues displaying the file with 75k lines. The easiest solution is to "Save as" the link above and then open it with any editor/viewer (notepad included) and copy from there.*
+Latest build: [zabapgit.abap](https://raw.githubusercontent.com/abapGit/build/main/zabapgit.abap)
 
-Recommend using SAP GUI for Windows, there are multiple issues related to running abapGit and Java SAP GUI. Focus is on supporting [ADT](https://github.com/abapGit/ADT_Frontend) instead of supporting Java SAP GUI.
+*Notes: Some people reported that browsers have issues displaying the file with more than 100k lines. The easiest solution is to "Save as" the link above and then open it with any editor/viewer (notepad included) and copy from there. If your SAP GUI editor freezes when pasting the code, use Utilities > More Utilities > Upload/Download > Upload in the editor instead.*
+
+It is recommended to use SAP GUI for Windows, since there are known issues related to running abapGit and SAP GUI for Java. The focus of abapGit is on supporting [ADT](https://github.com/abapGit/ADT_Frontend) instead of supporting SAP GUI for Java.
 
 ## Design Goals
 - Easy installation
@@ -40,9 +43,9 @@ You can find the contribution guidelines [here](CONTRIBUTING.md).
 See [dotabap.org](https://dotabap.org) or [this page](https://docs.abapgit.org/other-where-used.html).
 
 ## FAQ
-For questions/comments/bugs/feature requests/wishes please create an [issue](https://github.com/abapGit/abapGit/issues)
+For questions/comments/bugs/feature requests/wishes please create an [issue](https://github.com/abapGit/abapGit/issues).
 
-![abapgit](https://docs.abapgit.org/img/abapgit_1_99_0.png)
+![abapgit](img/abapgit_1_99_0.png)
 
 ## Credits and references
 

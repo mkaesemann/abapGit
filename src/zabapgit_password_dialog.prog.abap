@@ -2,18 +2,25 @@
 *&  Include           ZABAPGIT_PASSWORD_DIALOG
 *&---------------------------------------------------------------------*
 
-SELECTION-SCREEN BEGIN OF SCREEN 1002 TITLE s_title.
+* Todo, remove comment about Github token usage by 2021-12-31
+
+SELECTION-SCREEN BEGIN OF SCREEN 1002 TITLE sc_title.
 SELECTION-SCREEN BEGIN OF LINE.
-SELECTION-SCREEN COMMENT 1(18) s_url FOR FIELD p_url.
+SELECTION-SCREEN COMMENT 1(18) sc_url FOR FIELD p_url.
 PARAMETERS: p_url TYPE string LOWER CASE VISIBLE LENGTH 60 ##SEL_WRONG.
 SELECTION-SCREEN END OF LINE.
 SELECTION-SCREEN BEGIN OF LINE.
-SELECTION-SCREEN COMMENT 1(18) s_user FOR FIELD p_user.
+SELECTION-SCREEN COMMENT 1(18) sc_user FOR FIELD p_user.
 PARAMETERS: p_user TYPE string LOWER CASE VISIBLE LENGTH 60 ##SEL_WRONG.
 SELECTION-SCREEN END OF LINE.
 SELECTION-SCREEN BEGIN OF LINE.
-SELECTION-SCREEN COMMENT 1(18) s_pass FOR FIELD p_pass.
-PARAMETERS: p_pass TYPE string LOWER CASE VISIBLE LENGTH 60 ##SEL_WRONG.
+SELECTION-SCREEN COMMENT 1(18) sc_pass FOR FIELD p_pass.
+PARAMETERS: p_pass TYPE c LENGTH 255 LOWER CASE VISIBLE LENGTH 60 ##SEL_WRONG.
+SELECTION-SCREEN END OF LINE.
+SELECTION-SCREEN SKIP.
+SELECTION-SCREEN BEGIN OF LINE.
+SELECTION-SCREEN COMMENT 1(18) sc_cmnt FOR FIELD p_cmnt.
+PARAMETERS: p_cmnt TYPE c LENGTH 255 LOWER CASE VISIBLE LENGTH 60 ##SEL_WRONG.
 SELECTION-SCREEN END OF LINE.
 SELECTION-SCREEN END OF SCREEN 1002.
 
@@ -44,6 +51,7 @@ CLASS lcl_password_dialog DEFINITION FINAL.
 
   PRIVATE SECTION.
     CLASS-DATA gv_confirm TYPE abap_bool.
+    CLASS-DATA gv_show_note TYPE abap_bool.
     CLASS-METHODS enrich_title_by_hostname
       IMPORTING
         iv_repo_url TYPE string.
@@ -59,6 +67,12 @@ CLASS lcl_password_dialog IMPLEMENTATION.
     p_user     = cv_user.
     gv_confirm = abap_false.
 
+    IF iv_repo_url CP '*github.com*'.
+      p_cmnt = 'GitHub requires using personal tokens (since 8/2021)'.
+      gv_show_note = abap_true.
+    ELSE.
+      gv_show_note = abap_false.
+    ENDIF.
 
     enrich_title_by_hostname( iv_repo_url ).
 
@@ -76,10 +90,11 @@ CLASS lcl_password_dialog IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD on_screen_init.
-    s_title = 'Login'.
-    s_url   = 'Repo URL'.
-    s_user  = 'User'.
-    s_pass  = 'Password or Token'.
+    sc_title = 'Login'.
+    sc_url   = 'Repo URL'.
+    sc_user  = 'User'.
+    sc_pass  = 'Password or Token'.
+    sc_cmnt  = 'Note'.
   ENDMETHOD.
 
   METHOD on_screen_output.
@@ -88,10 +103,20 @@ CLASS lcl_password_dialog IMPLEMENTATION.
     ASSERT sy-dynnr = c_dynnr.
 
     LOOP AT SCREEN.
-      IF screen-name = 'P_URL'.
+      IF screen-name = 'P_URL' OR screen-name = 'P_CMNT'.
         screen-input       = '0'.
         screen-intensified = '1'.
         screen-display_3d  = '0'.
+        MODIFY SCREEN.
+      ENDIF.
+      IF screen-name = 'P_CMNT' OR screen-name = 'S_CMNT'.
+        IF gv_show_note = abap_true.
+          screen-active    = '1'.
+          screen-invisible = '0'.
+        ELSE.
+          screen-active    = '0'.
+          screen-invisible = '1'.
+        ENDIF.
         MODIFY SCREEN.
       ENDIF.
       IF screen-name = 'P_PASS'.
@@ -144,8 +169,8 @@ CLASS lcl_password_dialog IMPLEMENTATION.
 
     FIND REGEX 'https?://([^/^:]*)' IN iv_repo_url SUBMATCHES lv_host.
     IF lv_host IS NOT INITIAL AND lv_host <> space.
-      CLEAR s_title.
-      CONCATENATE 'Login:' lv_host INTO s_title IN CHARACTER MODE SEPARATED BY space.
+      CLEAR sc_title.
+      CONCATENATE 'Login:' lv_host INTO sc_title IN CHARACTER MODE SEPARATED BY space.
     ENDIF.
 
   ENDMETHOD.

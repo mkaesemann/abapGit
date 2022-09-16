@@ -2,13 +2,11 @@ CLASS zcl_abapgit_object_cus2 DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
 
   PUBLIC SECTION.
     INTERFACES zif_abapgit_object.
-    ALIASES mo_files FOR zif_abapgit_object~mo_files.
 
     METHODS constructor
       IMPORTING
         is_item     TYPE zif_abapgit_definitions=>ty_item
         iv_language TYPE spras.
-
   PROTECTED SECTION.
   PRIVATE SECTION.
     TYPES: ty_attribute_titles        TYPE STANDARD TABLE OF cus_atrt
@@ -34,7 +32,7 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_OBJECT_CUS2 IMPLEMENTATION.
+CLASS zcl_abapgit_object_cus2 IMPLEMENTATION.
 
 
   METHOD constructor.
@@ -137,9 +135,6 @@ CLASS ZCL_ABAPGIT_OBJECT_CUS2 IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~jump.
-
-    zcx_abapgit_exception=>raise( |TODO: Jump| ).
-
   ENDMETHOD.
 
 
@@ -163,7 +158,7 @@ CLASS ZCL_ABAPGIT_OBJECT_CUS2 IMPLEMENTATION.
            ls_customizing_attribute-header-ldatetime,
            ls_customizing_attribute-header-luser.
 
-    IF io_xml->i18n_params( )-serialize_master_lang_only = abap_true.
+    IF io_xml->i18n_params( )-main_language_only = abap_true.
       DELETE ls_customizing_attribute-titles WHERE spras <> mv_language.
     ENDIF.
 

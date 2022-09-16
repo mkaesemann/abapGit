@@ -2,8 +2,6 @@ CLASS zcl_abapgit_object_dcls DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
 
   PUBLIC SECTION.
     INTERFACES zif_abapgit_object.
-    ALIASES mo_files FOR zif_abapgit_object~mo_files.
-
   PROTECTED SECTION.
   PRIVATE SECTION.
 ENDCLASS.
@@ -14,7 +12,36 @@ CLASS zcl_abapgit_object_dcls IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~changed_by.
-    rv_user = c_user_unknown.
+    DATA: lr_data  TYPE REF TO data,
+          lo_dcl   TYPE REF TO object,
+          lx_error TYPE REF TO cx_root.
+
+    FIELD-SYMBOLS: <lg_data>  TYPE any,
+                   <lg_field> TYPE any.
+
+    CREATE DATA lr_data TYPE ('ACM_S_DCLSRC').
+    ASSIGN lr_data->* TO <lg_data>.
+
+    TRY.
+        CALL METHOD ('CL_ACM_DCL_HANDLER_FACTORY')=>('CREATE')
+          RECEIVING
+            ro_handler = lo_dcl.
+
+        CALL METHOD lo_dcl->('READ')
+          EXPORTING
+            iv_dclname = ms_item-obj_name
+          IMPORTING
+            es_dclsrc  = <lg_data>.
+
+        ASSIGN COMPONENT 'AS4USER' OF STRUCTURE <lg_data> TO <lg_field>.
+        IF sy-subrc = 0.
+          rv_user = <lg_field>.
+        ELSE.
+          rv_user = c_user_unknown.
+        ENDIF.
+      CATCH cx_root INTO lx_error.
+        zcx_abapgit_exception=>raise_with_text( lx_error ).
+    ENDTRY.
   ENDMETHOD.
 
 
@@ -33,9 +60,10 @@ CLASS zcl_abapgit_object_dcls IMPLEMENTATION.
             iv_dclname = ms_item-obj_name.
 
       CATCH cx_root INTO lx_error.
-        zcx_abapgit_exception=>raise( iv_text     = lx_error->get_text( )
-                                      ix_previous = lx_error ).
+        zcx_abapgit_exception=>raise_with_text( lx_error ).
     ENDTRY.
+
+    corr_insert( iv_package ).
 
   ENDMETHOD.
 
@@ -61,7 +89,7 @@ CLASS zcl_abapgit_object_dcls IMPLEMENTATION.
 
     ASSIGN COMPONENT 'SOURCE' OF STRUCTURE <lg_data> TO <lg_field>.
     ASSERT sy-subrc = 0.
-    <lg_field> = mo_files->read_string( 'asdcls' ).
+    <lg_field> = zif_abapgit_object~mo_files->read_string( 'asdcls' ).
 
     TRY.
         tadir_insert( iv_package ).
@@ -79,8 +107,7 @@ CLASS zcl_abapgit_object_dcls IMPLEMENTATION.
             iv_access_mode = 'INSERT'.
 
       CATCH cx_root INTO lx_error.
-        zcx_abapgit_exception=>raise( iv_text     = lx_error->get_text( )
-                                      ix_previous = lx_error ).
+        zcx_abapgit_exception=>raise_with_text( lx_error ).
     ENDTRY.
 
     zcl_abapgit_objects_activation=>add_item( ms_item ).
@@ -105,8 +132,7 @@ CLASS zcl_abapgit_object_dcls IMPLEMENTATION.
             rv_exists     = rv_bool.
 
       CATCH cx_root INTO lx_error.
-        zcx_abapgit_exception=>raise( iv_text     = lx_error->get_text( )
-                                      ix_previous = lx_error ).
+        zcx_abapgit_exception=>raise_with_text( lx_error ).
     ENDTRY.
 
   ENDMETHOD.
@@ -142,16 +168,7 @@ CLASS zcl_abapgit_object_dcls IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~jump.
-
-    TRY.
-
-        jump_adt( iv_obj_name = ms_item-obj_name
-                  iv_obj_type = ms_item-obj_type ).
-
-      CATCH zcx_abapgit_exception.
-        zcx_abapgit_exception=>raise( 'DCLS Jump Error' ).
-    ENDTRY.
-
+    " Covered by ZCL_ABAPGIT_ADT_LINK=>JUMP
   ENDMETHOD.
 
 
@@ -211,8 +228,9 @@ CLASS zcl_abapgit_object_dcls IMPLEMENTATION.
         ASSIGN COMPONENT 'SOURCE' OF STRUCTURE <lg_data> TO <lg_field>.
         ASSERT sy-subrc = 0.
 
-        mo_files->add_string( iv_ext = 'asdcls'
-                              iv_string = <lg_field> ).
+        zif_abapgit_object~mo_files->add_string(
+          iv_ext    = 'asdcls'
+          iv_string = <lg_field> ).
 
         CLEAR <lg_field>.
 
@@ -220,8 +238,7 @@ CLASS zcl_abapgit_object_dcls IMPLEMENTATION.
                      ig_data = <lg_data> ).
 
       CATCH cx_root INTO lx_error.
-        zcx_abapgit_exception=>raise( iv_text     = lx_error->get_text( )
-                                      ix_previous = lx_error ).
+        zcx_abapgit_exception=>raise_with_text( lx_error ).
     ENDTRY.
 
   ENDMETHOD.

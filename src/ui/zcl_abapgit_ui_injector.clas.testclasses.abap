@@ -36,19 +36,14 @@ CLASS ltcl_abapgit_popups_mock IMPLEMENTATION.
 
   ENDMETHOD.
 
+  METHOD zif_abapgit_popups~commit_list_popup.
+  ENDMETHOD.
+
   METHOD zif_abapgit_popups~create_branch_popup.
 
   ENDMETHOD.
 
   METHOD zif_abapgit_popups~popup_folder_logic.
-
-  ENDMETHOD.
-
-  METHOD zif_abapgit_popups~popup_object.
-
-  ENDMETHOD.
-
-  METHOD zif_abapgit_popups~popup_package_export.
 
   ENDMETHOD.
 
@@ -64,10 +59,6 @@ CLASS ltcl_abapgit_popups_mock IMPLEMENTATION.
 
   ENDMETHOD.
 
-  METHOD zif_abapgit_popups~popup_to_inform.
-
-  ENDMETHOD.
-
   METHOD zif_abapgit_popups~popup_to_select_from_list.
 
   ENDMETHOD.
@@ -80,14 +71,6 @@ CLASS ltcl_abapgit_popups_mock IMPLEMENTATION.
 
   ENDMETHOD.
 
-  METHOD zif_abapgit_popups~repo_popup.
-
-  ENDMETHOD.
-
-  METHOD zif_abapgit_popups~popup_proxy_bypass.
-
-  ENDMETHOD.
-
   METHOD zif_abapgit_popups~popup_search_help.
 
   ENDMETHOD.
@@ -96,9 +79,18 @@ CLASS ltcl_abapgit_popups_mock IMPLEMENTATION.
 
   ENDMETHOD.
 
-  METHOD zif_abapgit_popups~popup_perf_test_parameters.
+  METHOD zif_abapgit_popups~popup_select_tr_requests.
 
   ENDMETHOD.
+
+  METHOD zif_abapgit_popups~popup_select_wb_tc_tr_and_tsk.
+
+  ENDMETHOD.
+
+  METHOD zif_abapgit_popups~tag_list_popup.
+
+  ENDMETHOD.
+
 ENDCLASS.
 
 CLASS ltcl_no_dependency_injection IMPLEMENTATION.

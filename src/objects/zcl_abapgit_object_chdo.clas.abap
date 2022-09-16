@@ -6,36 +6,26 @@ CLASS zcl_abapgit_object_chdo DEFINITION
 
   PUBLIC SECTION.
     INTERFACES zif_abapgit_object.
-    ALIASES mo_files FOR zif_abapgit_object~mo_files.
 
     METHODS constructor
       IMPORTING
         is_item     TYPE zif_abapgit_definitions=>ty_item
         iv_language TYPE spras.
-
   PROTECTED SECTION.
-    METHODS get_generic
-      RETURNING
-        VALUE(ro_generic) TYPE REF TO zcl_abapgit_objects_generic
-      RAISING
-        zcx_abapgit_exception.
 
     METHODS after_import
       RAISING
-        zcx_abapgit_exception.
-
+        zcx_abapgit_exception .
     METHODS delete_tadir_cdnames
       IMPORTING
         !is_cdnames TYPE cdnames
       RAISING
-        zcx_abapgit_exception.
-
+        zcx_abapgit_exception .
     METHODS delete_tadir_tabl
       IMPORTING
         !is_tcdrs TYPE tcdrs
       RAISING
-        zcx_abapgit_exception.
-
+        zcx_abapgit_exception .
   PRIVATE SECTION.
     TYPES: BEGIN OF ty_change_document,
              reports_generated TYPE SORTED TABLE OF tcdrps WITH UNIQUE KEY object reportname,
@@ -52,12 +42,158 @@ ENDCLASS.
 CLASS zcl_abapgit_object_chdo IMPLEMENTATION.
 
 
+  METHOD after_import.
+
+    DATA: lt_cts_object_entry TYPE STANDARD TABLE OF e071 WITH DEFAULT KEY,
+          ls_cts_object_entry LIKE LINE OF lt_cts_object_entry,
+          lt_errormsg         TYPE STANDARD TABLE OF sprot_u WITH DEFAULT KEY.
+
+    ls_cts_object_entry-pgmid    = seok_pgmid_r3tr.
+    ls_cts_object_entry-object   = ms_item-obj_type.
+    ls_cts_object_entry-obj_name = ms_item-obj_name.
+    INSERT ls_cts_object_entry INTO TABLE lt_cts_object_entry.
+
+    CALL FUNCTION 'AFTER_IMP_CHDO'
+      EXPORTING
+        iv_tarclient  = sy-mandt
+        iv_is_upgrade = abap_false
+      TABLES
+        tt_e071       = lt_cts_object_entry
+        tt_errormsg   = lt_errormsg.
+
+    LOOP AT lt_errormsg TRANSPORTING NO FIELDS WHERE severity = 'E' OR severity = 'A'.
+      EXIT.
+    ENDLOOP.
+
+    IF sy-subrc = 0.
+      zcx_abapgit_exception=>raise( 'Error from AFTER_IMP_CHDO' ).
+    ENDIF.
+
+  ENDMETHOD.
+
+
   METHOD constructor.
 
     super->constructor( is_item     = is_item
                         iv_language = iv_language ).
 
     mv_object = is_item-obj_name.
+
+  ENDMETHOD.
+
+
+  METHOD delete_tadir_cdnames.
+
+    DATA: lv_obj_name TYPE sobj_name.
+
+    IF is_cdnames-repnamec IS NOT INITIAL.
+      lv_obj_name = is_cdnames-repnamec.
+      CALL FUNCTION 'TR_TADIR_INTERFACE'
+        EXPORTING
+          wi_delete_tadir_entry    = abap_true
+          wi_tadir_pgmid           = 'R3TR'
+          wi_tadir_object          = 'PROG'
+          wi_tadir_obj_name        = lv_obj_name
+          wi_test_modus            = abap_false
+        EXCEPTIONS
+          tadir_entry_not_existing = 1
+          OTHERS                   = 2.
+      IF sy-subrc > 1.
+        zcx_abapgit_exception=>raise_t100( ).
+      ENDIF.
+    ENDIF.
+
+    IF is_cdnames-repnamet IS NOT INITIAL.
+      lv_obj_name = is_cdnames-repnamet.
+      CALL FUNCTION 'TR_TADIR_INTERFACE'
+        EXPORTING
+          wi_delete_tadir_entry    = abap_true
+          wi_tadir_pgmid           = 'R3TR'
+          wi_tadir_object          = 'PROG'
+          wi_tadir_obj_name        = lv_obj_name
+          wi_test_modus            = abap_false
+        EXCEPTIONS
+          tadir_entry_not_existing = 1
+          OTHERS                   = 2.
+      IF sy-subrc > 1.
+        zcx_abapgit_exception=>raise_t100( ).
+      ENDIF.
+    ENDIF.
+
+    IF is_cdnames-repnamefix IS NOT INITIAL.
+      lv_obj_name = is_cdnames-repnamefix.
+      CALL FUNCTION 'TR_TADIR_INTERFACE'
+        EXPORTING
+          wi_delete_tadir_entry    = abap_true
+          wi_tadir_pgmid           = 'R3TR'
+          wi_tadir_object          = 'PROG'
+          wi_tadir_obj_name        = lv_obj_name
+          wi_test_modus            = abap_false
+        EXCEPTIONS
+          tadir_entry_not_existing = 1
+          OTHERS                   = 2.
+      IF sy-subrc > 1.
+        zcx_abapgit_exception=>raise_t100( ).
+      ENDIF.
+    ENDIF.
+
+    IF is_cdnames-repnamevar IS NOT INITIAL.
+      lv_obj_name = is_cdnames-repnamevar.
+      CALL FUNCTION 'TR_TADIR_INTERFACE'
+        EXPORTING
+          wi_delete_tadir_entry    = abap_true
+          wi_tadir_pgmid           = 'R3TR'
+          wi_tadir_object          = 'PROG'
+          wi_tadir_obj_name        = lv_obj_name
+          wi_test_modus            = abap_false
+        EXCEPTIONS
+          tadir_entry_not_existing = 1
+          OTHERS                   = 2.
+      IF sy-subrc > 1.
+        zcx_abapgit_exception=>raise_t100( ).
+      ENDIF.
+    ENDIF.
+
+    IF is_cdnames-fgrp IS NOT INITIAL.
+      lv_obj_name = is_cdnames-fgrp.
+      CALL FUNCTION 'TR_TADIR_INTERFACE'
+        EXPORTING
+          wi_delete_tadir_entry    = abap_true
+          wi_tadir_pgmid           = 'R3TR'
+          wi_tadir_object          = 'FUGR'
+          wi_tadir_obj_name        = lv_obj_name
+          wi_test_modus            = abap_false
+        EXCEPTIONS
+          tadir_entry_not_existing = 1
+          OTHERS                   = 2.
+      IF sy-subrc > 1.
+        zcx_abapgit_exception=>raise_t100( ).
+      ENDIF.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+  METHOD delete_tadir_tabl.
+
+    DATA: lv_obj_name TYPE sobj_name.
+
+    IF is_tcdrs-tabname IS NOT INITIAL.
+      lv_obj_name = is_tcdrs-tabname.
+      CALL FUNCTION 'TR_TADIR_INTERFACE'
+        EXPORTING
+          wi_delete_tadir_entry    = abap_true
+          wi_tadir_pgmid           = 'R3TR'
+          wi_tadir_object          = 'TABL'
+          wi_tadir_obj_name        = lv_obj_name
+          wi_test_modus            = abap_false
+        EXCEPTIONS
+          tadir_entry_not_existing = 1
+          OTHERS                   = 2.
+      IF sy-subrc > 1.
+        zcx_abapgit_exception=>raise( |Error from TR_TADIR_INTERFACE (subrc={ sy-subrc } ).| ).
+      ENDIF.
+    ENDIF.
 
   ENDMETHOD.
 
@@ -120,6 +256,8 @@ CLASS zcl_abapgit_object_chdo IMPLEMENTATION.
       delete_tadir_tabl( ls_tcdrs ).
     ENDLOOP.
 
+    corr_insert( iv_package ).
+
   ENDMETHOD.
 
 
@@ -142,6 +280,8 @@ CLASS zcl_abapgit_object_chdo IMPLEMENTATION.
     INSERT tcdobs  FROM TABLE ls_change_object-objects.
     INSERT tcdobts FROM TABLE ls_change_object-objects_text.
     INSERT tcdrps  FROM TABLE ls_change_object-reports_generated.
+
+    tadir_insert( iv_package ).
 
     after_import( ).
 
@@ -207,22 +347,11 @@ CLASS zcl_abapgit_object_chdo IMPLEMENTATION.
     ls_bdcdata-fval = '=DISP'.
     APPEND ls_bdcdata TO lt_bdcdata.
 
-    CALL FUNCTION 'ABAP4_CALL_TRANSACTION'
-      STARTING NEW TASK 'GIT'
-      EXPORTING
-        tcode                 = 'SCDO'
-        mode_val              = 'E'
-      TABLES
-        using_tab             = lt_bdcdata
-      EXCEPTIONS
-        system_failure        = 1
-        communication_failure = 2
-        resource_failure      = 3
-        OTHERS                = 4.
+    zcl_abapgit_ui_factory=>get_gui_jumper( )->jump_batch_input(
+      iv_tcode   = 'SCDO'
+      it_bdcdata = lt_bdcdata ).
 
-    IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( |ERROR: Jump { mv_object }| ).
-    ENDIF.
+    rv_exit = abap_true.
 
   ENDMETHOD.
 
@@ -280,154 +409,4 @@ CLASS zcl_abapgit_object_chdo IMPLEMENTATION.
                  ig_data = ls_change_object ).
 
   ENDMETHOD.
-
-
-  METHOD get_generic.
-
-    CREATE OBJECT ro_generic
-      EXPORTING
-        is_item = ms_item.
-
-  ENDMETHOD.
-
-
-  METHOD after_import.
-
-    DATA: lt_cts_object_entry TYPE STANDARD TABLE OF e071 WITH DEFAULT KEY,
-          ls_cts_object_entry LIKE LINE OF lt_cts_object_entry,
-          lt_errormsg         TYPE STANDARD TABLE OF sprot_u WITH DEFAULT KEY.
-
-    ls_cts_object_entry-pgmid    = seok_pgmid_r3tr.
-    ls_cts_object_entry-object   = ms_item-obj_type.
-    ls_cts_object_entry-obj_name = ms_item-obj_name.
-    INSERT ls_cts_object_entry INTO TABLE lt_cts_object_entry.
-
-    CALL FUNCTION 'AFTER_IMP_CHDO'
-      EXPORTING
-        iv_tarclient  = sy-mandt
-        iv_is_upgrade = abap_false
-      TABLES
-        tt_e071       = lt_cts_object_entry
-        tt_errormsg   = lt_errormsg.
-
-    LOOP AT lt_errormsg TRANSPORTING NO FIELDS WHERE severity = 'E' OR severity = 'A'.
-      EXIT.
-    ENDLOOP.
-
-    IF sy-subrc = 0.
-      zcx_abapgit_exception=>raise( 'Error from AFTER_IMP_CHDO' ).
-    ENDIF.
-
-  ENDMETHOD.
-
-
-  METHOD delete_tadir_cdnames.
-
-    DATA: lv_obj_name TYPE sobj_name.
-
-    IF is_cdnames-repnamec IS NOT INITIAL.
-      lv_obj_name = is_cdnames-repnamec.
-      CALL FUNCTION 'TR_TADIR_INTERFACE'
-        EXPORTING
-          wi_delete_tadir_entry    = abap_true
-          wi_tadir_pgmid           = 'R3TR'
-          wi_tadir_object          = 'PROG'
-          wi_tadir_obj_name        = lv_obj_name
-        EXCEPTIONS
-          tadir_entry_not_existing = 1
-          OTHERS                   = 2.
-      IF sy-subrc > 1.
-        zcx_abapgit_exception=>raise( |Error from TR_TADIR_INTERFACE (subrc={ sy-subrc } ).| ).
-      ENDIF.
-    ENDIF.
-
-    IF is_cdnames-repnamet IS NOT INITIAL.
-      lv_obj_name = is_cdnames-repnamet.
-      CALL FUNCTION 'TR_TADIR_INTERFACE'
-        EXPORTING
-          wi_delete_tadir_entry    = abap_true
-          wi_tadir_pgmid           = 'R3TR'
-          wi_tadir_object          = 'PROG'
-          wi_tadir_obj_name        = lv_obj_name
-        EXCEPTIONS
-          tadir_entry_not_existing = 1
-          OTHERS                   = 2.
-      IF sy-subrc > 1.
-        zcx_abapgit_exception=>raise( |Error from TR_TADIR_INTERFACE (subrc={ sy-subrc } ).| ).
-      ENDIF.
-    ENDIF.
-
-    IF is_cdnames-repnamefix IS NOT INITIAL.
-      lv_obj_name = is_cdnames-repnamefix.
-      CALL FUNCTION 'TR_TADIR_INTERFACE'
-        EXPORTING
-          wi_delete_tadir_entry    = abap_true
-          wi_tadir_pgmid           = 'R3TR'
-          wi_tadir_object          = 'PROG'
-          wi_tadir_obj_name        = lv_obj_name
-        EXCEPTIONS
-          tadir_entry_not_existing = 1
-          OTHERS                   = 2.
-      IF sy-subrc > 1.
-        zcx_abapgit_exception=>raise( |Error from TR_TADIR_INTERFACE (subrc={ sy-subrc } ).| ).
-      ENDIF.
-    ENDIF.
-
-    IF is_cdnames-repnamevar IS NOT INITIAL.
-      lv_obj_name = is_cdnames-repnamevar.
-      CALL FUNCTION 'TR_TADIR_INTERFACE'
-        EXPORTING
-          wi_delete_tadir_entry    = abap_true
-          wi_tadir_pgmid           = 'R3TR'
-          wi_tadir_object          = 'PROG'
-          wi_tadir_obj_name        = lv_obj_name
-        EXCEPTIONS
-          tadir_entry_not_existing = 1
-          OTHERS                   = 2.
-      IF sy-subrc > 1.
-        zcx_abapgit_exception=>raise( |Error from TR_TADIR_INTERFACE (subrc={ sy-subrc } ).| ).
-      ENDIF.
-    ENDIF.
-
-    IF is_cdnames-fgrp IS NOT INITIAL.
-      lv_obj_name = is_cdnames-fgrp.
-      CALL FUNCTION 'TR_TADIR_INTERFACE'
-        EXPORTING
-          wi_delete_tadir_entry    = abap_true
-          wi_tadir_pgmid           = 'R3TR'
-          wi_tadir_object          = 'FUGR'
-          wi_tadir_obj_name        = lv_obj_name
-        EXCEPTIONS
-          tadir_entry_not_existing = 1
-          OTHERS                   = 2.
-      IF sy-subrc > 1.
-        zcx_abapgit_exception=>raise( |Error from TR_TADIR_INTERFACE (subrc={ sy-subrc } ).| ).
-      ENDIF.
-    ENDIF.
-
-  ENDMETHOD.
-
-
-  METHOD delete_tadir_tabl.
-
-    DATA: lv_obj_name TYPE sobj_name.
-
-    IF is_tcdrs-tabname IS NOT INITIAL.
-      lv_obj_name = is_tcdrs-tabname.
-      CALL FUNCTION 'TR_TADIR_INTERFACE'
-        EXPORTING
-          wi_delete_tadir_entry    = abap_true
-          wi_tadir_pgmid           = 'R3TR'
-          wi_tadir_object          = 'FUGR'
-          wi_tadir_obj_name        = lv_obj_name
-        EXCEPTIONS
-          tadir_entry_not_existing = 1
-          OTHERS                   = 2.
-      IF sy-subrc > 1.
-        zcx_abapgit_exception=>raise( |Error from TR_TADIR_INTERFACE (subrc={ sy-subrc } ).| ).
-      ENDIF.
-    ENDIF.
-
-  ENDMETHOD.
-
 ENDCLASS.

@@ -7,8 +7,7 @@ CLASS zcl_abapgit_log_viewer DEFINITION
 
     CLASS-METHODS show_log
       IMPORTING
-        !iv_header_text TYPE csequence DEFAULT 'Log'
-        !ii_log         TYPE REF TO zif_abapgit_log .
+        !ii_log TYPE REF TO zif_abapgit_log .
     CLASS-METHODS to_html
       IMPORTING
         !ii_log        TYPE REF TO zif_abapgit_log
@@ -92,7 +91,7 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_LOG_VIEWER IMPLEMENTATION.
+CLASS zcl_abapgit_log_viewer IMPLEMENTATION.
 
 
   METHOD calculate_cell_type.
@@ -290,10 +289,11 @@ CLASS ZCL_ABAPGIT_LOG_VIEWER IMPLEMENTATION.
           lo_columns     TYPE REF TO cl_salv_columns_table,
           lo_column      TYPE REF TO cl_salv_column,
           lo_functions   TYPE REF TO cl_salv_functions_list,
+          ls_position    TYPE zcl_abapgit_popups=>ty_popup_position,
           lv_add_obj_col TYPE abap_bool,
           lo_event       TYPE REF TO cl_salv_events_table.
 
-    gt_log = prepare_log_for_display( ii_log = ii_log ).
+    gt_log = prepare_log_for_display( ii_log ).
 
     "check if log contains any object info
     LOOP AT gt_log REFERENCE INTO lr_log.
@@ -311,6 +311,8 @@ CLASS ZCL_ABAPGIT_LOG_VIEWER IMPLEMENTATION.
 
         lo_functions = lo_alv->get_functions( ).
         lo_functions->set_all( ).
+
+        lo_alv->get_display_settings( )->set_list_header( |abapGit Log Viewer| ).
 
         lo_columns = lo_alv->get_columns( ).
 
@@ -352,14 +354,51 @@ CLASS ZCL_ABAPGIT_LOG_VIEWER IMPLEMENTATION.
           lo_column->set_technical( abap_true ).
         ENDIF.
 
-        lo_alv->set_screen_popup( start_column = 10
-                                  end_column   = 180
-                                  start_line   = 4
-                                  end_line     = 25 ).
+        "hide empty columns
+        LOOP AT gt_log TRANSPORTING NO FIELDS WHERE t100 IS NOT INITIAL.
+          EXIT.
+        ENDLOOP.
+        IF sy-subrc <> 0.
+          lo_column = lo_columns->get_column( |T100| ).
+          lo_column->set_technical( abap_true ).
+        ENDIF.
+
+        LOOP AT gt_log TRANSPORTING NO FIELDS WHERE source IS NOT INITIAL.
+          EXIT.
+        ENDLOOP.
+        IF sy-subrc <> 0.
+          lo_column = lo_columns->get_column( |SOURCE| ).
+          lo_column->set_technical( abap_true ).
+        ENDIF.
+
+        LOOP AT gt_log TRANSPORTING NO FIELDS WHERE longtext IS NOT INITIAL.
+          EXIT.
+        ENDLOOP.
+        IF sy-subrc <> 0.
+          lo_column = lo_columns->get_column( |LONGTEXT| ).
+          lo_column->set_technical( abap_true ).
+        ENDIF.
+
+        LOOP AT gt_log TRANSPORTING NO FIELDS WHERE callstack IS NOT INITIAL.
+          EXIT.
+        ENDLOOP.
+        IF sy-subrc <> 0.
+          lo_column = lo_columns->get_column( |CALLSTACK| ).
+          lo_column->set_technical( abap_true ).
+        ENDIF.
+
+        ls_position = zcl_abapgit_popups=>center(
+          iv_width  = 125
+          iv_height = 20 ).
+
+        lo_alv->set_screen_popup( start_column = ls_position-start_column
+                                  end_column   = ls_position-end_column
+                                  start_line   = ls_position-start_row
+                                  end_line     = ls_position-end_row ).
 
         CREATE OBJECT lo_form_header
           EXPORTING
-            text = iv_header_text.
+            text = ii_log->get_title( ).
 
         lo_alv->set_top_of_list( lo_form_header ).
 

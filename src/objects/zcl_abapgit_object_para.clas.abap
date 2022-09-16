@@ -2,15 +2,28 @@ CLASS zcl_abapgit_object_para DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
 
   PUBLIC SECTION.
     INTERFACES zif_abapgit_object.
-    ALIASES mo_files FOR zif_abapgit_object~mo_files.
-
   PROTECTED SECTION.
   PRIVATE SECTION.
+
+    METHODS unlock
+      IMPORTING
+        !iv_paramid TYPE memoryid .
 ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_OBJECT_PARA IMPLEMENTATION.
+CLASS zcl_abapgit_object_para IMPLEMENTATION.
+
+
+  METHOD unlock.
+
+    CALL FUNCTION 'RS_ACCESS_PERMISSION'
+      EXPORTING
+        mode         = 'FREE'
+        object       = iv_paramid
+        object_class = 'PARA'.
+
+  ENDMETHOD.
 
 
   METHOD zif_abapgit_object~changed_by.
@@ -54,12 +67,14 @@ CLASS ZCL_ABAPGIT_OBJECT_PARA IMPLEMENTATION.
     SELECT COUNT(*) FROM cross
       WHERE ( type = 'P' OR type = 'Q' ) AND name = lv_paramid.
     IF sy-subrc = 0.
+      unlock( lv_paramid ).
       zcx_abapgit_exception=>raise( 'PARA: Parameter is still used' ).
     ELSE.
       SELECT COUNT(*) FROM dd04l BYPASSING BUFFER
         WHERE memoryid = lv_paramid
         AND as4local = 'A'.
       IF sy-subrc = 0.
+        unlock( lv_paramid ).
         zcx_abapgit_exception=>raise( 'PARA: Parameter is still used' ).
       ENDIF.
     ENDIF.
@@ -89,14 +104,11 @@ CLASS ZCL_ABAPGIT_OBJECT_PARA IMPLEMENTATION.
             type      = 'CR'.
       ENDIF.
     ELSE.
-      zcx_abapgit_exception=>raise( 'error from RS_CORR_INSERT' ).
+      unlock( lv_paramid ).
+      zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
 
-    CALL FUNCTION 'RS_ACCESS_PERMISSION'
-      EXPORTING
-        mode         = 'FREE'
-        object       = lv_paramid
-        object_class = 'PARA'.
+    unlock( lv_paramid ).
 
   ENDMETHOD.
 
@@ -137,7 +149,7 @@ CLASS ZCL_ABAPGIT_OBJECT_PARA IMPLEMENTATION.
         unknown_objectclass = 3
         OTHERS              = 4.
     IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'error from RS_CORR_INSERT, PARA' ).
+      zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
 
     MODIFY tpara FROM ls_tpara.                           "#EC CI_SUBRC
@@ -173,8 +185,6 @@ CLASS ZCL_ABAPGIT_OBJECT_PARA IMPLEMENTATION.
 
   METHOD zif_abapgit_object~get_metadata.
     rs_metadata = get_metadata( ).
-* Data elements can refer to PARA objects
-    rs_metadata-ddic = abap_true.
   ENDMETHOD.
 
 
@@ -198,14 +208,7 @@ CLASS ZCL_ABAPGIT_OBJECT_PARA IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~jump.
-
-    CALL FUNCTION 'RS_TOOL_ACCESS'
-      EXPORTING
-        operation     = 'SHOW'
-        object_name   = ms_item-obj_name
-        object_type   = 'PARA'
-        in_new_window = abap_true.
-
+    " Covered by ZCL_ABAPGIT_OBJECTS=>JUMP
   ENDMETHOD.
 
 

@@ -2,14 +2,11 @@ CLASS zcl_abapgit_object_shi5 DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
 
   PUBLIC SECTION.
     INTERFACES zif_abapgit_object.
-    ALIASES mo_files FOR zif_abapgit_object~mo_files.
 
     METHODS constructor
       IMPORTING
         is_item     TYPE zif_abapgit_definitions=>ty_item
         iv_language TYPE spras.
-
-
   PROTECTED SECTION.
   PRIVATE SECTION.
     TYPES: ty_ttree_extt TYPE STANDARD TABLE OF ttree_extt
@@ -26,7 +23,7 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_OBJECT_SHI5 IMPLEMENTATION.
+CLASS zcl_abapgit_object_shi5 IMPLEMENTATION.
 
 
   METHOD constructor.
@@ -48,6 +45,8 @@ CLASS ZCL_ABAPGIT_OBJECT_SHI5 IMPLEMENTATION.
 
     DATA: ls_message             TYPE hier_mess,
           lv_deletion_successful TYPE hier_yesno.
+
+    corr_insert( iv_package ).
 
     CALL FUNCTION 'STREE_EXTENSION_DELETE'
       EXPORTING
@@ -85,6 +84,8 @@ CLASS ZCL_ABAPGIT_OBJECT_SHI5 IMPLEMENTATION.
 
     DELETE FROM ttree_extt WHERE extension = ls_extension-header-extension.
     MODIFY ttree_extt FROM TABLE ls_extension-texts.
+
+    corr_insert( iv_package ).
 
     tadir_insert( iv_package ).
 
@@ -132,7 +133,20 @@ CLASS ZCL_ABAPGIT_OBJECT_SHI5 IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~jump.
-    zcx_abapgit_exception=>raise( |TODO: Jump { ms_item-obj_type }| ).
+    DATA: lt_extension TYPE STANDARD TABLE OF ttree_ext.
+    FIELD-SYMBOLS: <ls_extension> LIKE LINE OF lt_extension.
+
+    INSERT INITIAL LINE INTO TABLE lt_extension ASSIGNING <ls_extension>.
+    <ls_extension>-extension = mv_extension.
+
+    CALL FUNCTION 'STREE_EXTENSION_NAME_F4'
+      EXPORTING
+        originals_only       = abap_true
+      TABLES
+        show_only_extensions = lt_extension.
+
+    rv_exit = abap_true.
+
   ENDMETHOD.
 
 

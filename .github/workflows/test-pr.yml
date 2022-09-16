@@ -1,0 +1,46 @@
+name: test-pr
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-merge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - uses: actions/checkout@v3
+    - uses: actions/setup-node@v3
+      with:
+        node-version: '16'
+    - name: npm install
+      run: |
+        npm install
+        npm run eslint
+        npm run merge
+        npm run merge.ci
+    - name: Upload build artifact
+      uses: actions/upload-artifact@main
+      with:
+        name: zabapgit_standalone.abap
+        path: ./zabapgit.abap
+        retention-days: 7
+
+  unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - uses: actions/checkout@v3
+    - uses: actions/setup-node@v3
+      with:
+        node-version: '16'
+    - name: npm install
+      run: npm install
+    - name: npm run unit
+      run: npm run unit
+    - name: npm run coverage
+      run: npm run coverage
+    - name: npm run integration
+      run: npm run integration

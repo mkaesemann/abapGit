@@ -2,14 +2,12 @@ CLASS zcl_abapgit_object_suso DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
 
   PUBLIC SECTION.
     INTERFACES zif_abapgit_object.
-    ALIASES mo_files FOR zif_abapgit_object~mo_files.
 
     METHODS:
       constructor
         IMPORTING
           is_item     TYPE zif_abapgit_definitions=>ty_item
           iv_language TYPE spras.
-
   PROTECTED SECTION.
   PRIVATE SECTION.
     DATA:
@@ -22,13 +20,15 @@ CLASS zcl_abapgit_object_suso DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
 
       pre_check
         RAISING
-          zcx_abapgit_exception.
+          zcx_abapgit_exception,
+
+      regenerate_sap_all.
 
 ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_OBJECT_SUSO IMPLEMENTATION.
+CLASS zcl_abapgit_object_suso IMPLEMENTATION.
 
 
   METHOD constructor.
@@ -154,6 +154,28 @@ CLASS ZCL_ABAPGIT_OBJECT_SUSO IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD regenerate_sap_all.
+
+    DATA: ls_e071  TYPE e071,
+          lt_e071  TYPE STANDARD TABLE OF e071,
+          lt_e071k TYPE STANDARD TABLE OF e071k.
+
+    ls_e071-pgmid = 'R3TR'.
+    ls_e071-object = ms_item-obj_type.
+    ls_e071-obj_name = ms_item-obj_name.
+    INSERT ls_e071 INTO TABLE lt_e071.
+
+    CALL FUNCTION 'PRGN_AFTER_IMP_SUSO_SAP_ALL'
+      EXPORTING
+        iv_tarclient  = '000'
+        iv_is_upgrade = space
+      TABLES
+        tt_e071       = lt_e071
+        tt_e071k      = lt_e071k.
+
+  ENDMETHOD.
+
+
   METHOD zif_abapgit_object~changed_by.
     rv_user = c_user_unknown. " todo
   ENDMETHOD.
@@ -183,6 +205,8 @@ CLASS ZCL_ABAPGIT_OBJECT_SUSO IMPLEMENTATION.
         object    = mv_objectname
         type      = 'SUSO'
         operation = 'DELETE'.
+
+    regenerate_sap_all( ).
 
   ENDMETHOD.
 
@@ -234,6 +258,8 @@ CLASS ZCL_ABAPGIT_OBJECT_SUSO IMPLEMENTATION.
     DELETE FROM tobjvor WHERE objct = ms_item-obj_name.   "#EC CI_SUBRC
     INSERT tobjvor FROM TABLE lt_tobjvor.                 "#EC CI_SUBRC
 
+    regenerate_sap_all( ).
+
   ENDMETHOD.
 
 
@@ -281,6 +307,8 @@ CLASS ZCL_ABAPGIT_OBJECT_SUSO IMPLEMENTATION.
     CALL FUNCTION 'SUSR_SHOW_OBJECT'
       EXPORTING
         object = mv_objectname.
+
+    rv_exit = abap_true.
 
   ENDMETHOD.
 

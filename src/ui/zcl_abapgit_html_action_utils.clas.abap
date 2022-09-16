@@ -6,8 +6,8 @@ CLASS zcl_abapgit_html_action_utils DEFINITION
 
     CLASS-METHODS parse_post_form_data
       IMPORTING
-        !it_post_data TYPE cnht_post_data_tab
-        !iv_upper_cased TYPE abap_bool DEFAULT abap_false
+        !it_post_data    TYPE zif_abapgit_html_viewer=>ty_post_data
+        !iv_upper_cased  TYPE abap_bool DEFAULT abap_false
       RETURNING
         VALUE(rt_fields) TYPE tihttpnvp .
     CLASS-METHODS parse_fields
@@ -23,7 +23,7 @@ CLASS zcl_abapgit_html_action_utils DEFINITION
         VALUE(rt_fields) TYPE tihttpnvp .
     CLASS-METHODS translate_postdata
       IMPORTING
-        !it_postdata TYPE cnht_post_data_tab
+        !it_postdata     TYPE zif_abapgit_html_viewer=>ty_post_data
       RETURNING
         VALUE(rv_string) TYPE string .
 
@@ -59,6 +59,7 @@ CLASS zcl_abapgit_html_action_utils DEFINITION
       RETURNING
         VALUE(rv_string) TYPE string .
 
+    CLASS-METHODS class_constructor.
     CLASS-METHODS dbkey_encode
       IMPORTING
         !is_key          TYPE zif_abapgit_persistence=>ty_content
@@ -67,6 +68,7 @@ CLASS zcl_abapgit_html_action_utils DEFINITION
 
   PROTECTED SECTION.
   PRIVATE SECTION.
+    CLASS-DATA gv_non_breaking_space TYPE string.
 
     CLASS-METHODS field_keys_to_upper
       CHANGING
@@ -86,7 +88,7 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_HTML_ACTION_UTILS IMPLEMENTATION.
+CLASS zcl_abapgit_html_action_utils IMPLEMENTATION.
 
 
   METHOD add_field.
@@ -113,6 +115,15 @@ CLASS ZCL_ABAPGIT_HTML_ACTION_UTILS IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD class_constructor.
+
+    CONSTANTS lc_nbsp TYPE xstring VALUE 'C2A0'. " &nbsp;
+
+    gv_non_breaking_space = zcl_abapgit_convert=>xstring_to_string_utf8( lc_nbsp ).
+
+  ENDMETHOD.
+
+
   METHOD dbkey_encode.
 
     DATA: lt_fields TYPE tihttpnvp.
@@ -122,7 +133,7 @@ CLASS ZCL_ABAPGIT_HTML_ACTION_UTILS IMPLEMENTATION.
     add_field( EXPORTING iv_name = 'VALUE'
                          ig_field = is_key-value CHANGING ct_field = lt_fields ).
 
-    rv_string = cl_http_utility=>if_http_utility~fields_to_string( lt_fields ).
+    rv_string = cl_http_utility=>fields_to_string( lt_fields ).
 
   ENDMETHOD.
 
@@ -132,7 +143,7 @@ CLASS ZCL_ABAPGIT_HTML_ACTION_UTILS IMPLEMENTATION.
     DATA: lt_fields TYPE tihttpnvp.
     add_field( EXPORTING iv_name = 'PATH'
                          ig_field = iv_path CHANGING ct_field = lt_fields ).
-    rv_string = cl_http_utility=>if_http_utility~fields_to_string( lt_fields ).
+    rv_string = cl_http_utility=>fields_to_string( lt_fields ).
 
   ENDMETHOD.
 
@@ -160,7 +171,7 @@ CLASS ZCL_ABAPGIT_HTML_ACTION_UTILS IMPLEMENTATION.
     add_field( EXPORTING iv_name = 'FILENAME'
                          ig_field = ig_file CHANGING ct_field = lt_fields ).
 
-    rv_string = cl_http_utility=>if_http_utility~fields_to_string( lt_fields ).
+    rv_string = cl_http_utility=>fields_to_string( lt_fields ).
 
   ENDMETHOD.
 
@@ -208,7 +219,7 @@ CLASS ZCL_ABAPGIT_HTML_ACTION_UTILS IMPLEMENTATION.
     add_field( EXPORTING iv_name = 'NAME'
                          ig_field = iv_obj_name CHANGING ct_field = lt_fields ).
 
-    rv_string = cl_http_utility=>if_http_utility~fields_to_string( lt_fields ).
+    rv_string = cl_http_utility=>fields_to_string( lt_fields ).
 
   ENDMETHOD.
 
@@ -225,7 +236,7 @@ CLASS ZCL_ABAPGIT_HTML_ACTION_UTILS IMPLEMENTATION.
     add_field( EXPORTING iv_name = 'OBJ_NAME'
                          ig_field = ig_object CHANGING ct_field = lt_fields ).
 
-    rv_string = cl_http_utility=>if_http_utility~fields_to_string( lt_fields ).
+    rv_string = cl_http_utility=>fields_to_string( lt_fields ).
 
   ENDMETHOD.
 
@@ -243,16 +254,16 @@ CLASS ZCL_ABAPGIT_HTML_ACTION_UTILS IMPLEMENTATION.
     LOOP AT lt_substrings ASSIGNING <lv_substring>.
 
       CLEAR ls_field.
-      <lv_substring> = unescape( <lv_substring> ).
       " On attempt to change unescaping -> run unit tests to check !
 
-      ls_field-name = substring_before(
+      " Unescape name and value separately
+      ls_field-name = unescape( substring_before(
         val = <lv_substring>
-        sub = '=' ).
+        sub = '=' ) ).
 
-      ls_field-value = substring_after(
+      ls_field-value = unescape( substring_after(
         val = <lv_substring>
-        sub = '=' ).
+        sub = '=' ) ).
 
       IF ls_field IS INITIAL. " Not a field with proper structure
         CONTINUE.
@@ -294,8 +305,8 @@ CLASS ZCL_ABAPGIT_HTML_ACTION_UTILS IMPLEMENTATION.
 
   METHOD translate_postdata.
 
-    DATA: lt_post_data       TYPE cnht_post_data_tab,
-          ls_last_line       TYPE cnht_post_data_line,
+    DATA: lt_post_data       TYPE zif_abapgit_html_viewer=>ty_post_data,
+          ls_last_line       LIKE LINE OF it_postdata,
           lv_last_line_index TYPE i.
 
     IF it_postdata IS INITIAL.
@@ -308,6 +319,12 @@ CLASS ZCL_ABAPGIT_HTML_ACTION_UTILS IMPLEMENTATION.
     WHILE ls_last_line IS INITIAL.
       lv_last_line_index = lines( lt_post_data ).
       READ TABLE lt_post_data INTO ls_last_line INDEX lv_last_line_index.
+      "Avoid trailing null values (see isssue #4832)
+      "todo, keep until SAP GUI for Java is fixed (remove on 2022-12-31)
+      ls_last_line = replace( val  = ls_last_line
+                              sub  = zcl_abapgit_git_utils=>get_null( )
+                              with = space
+                              occ  = 0 ).
       DELETE lt_post_data INDEX lv_last_line_index.
     ENDWHILE.
 
@@ -320,12 +337,17 @@ CLASS ZCL_ABAPGIT_HTML_ACTION_UTILS IMPLEMENTATION.
 
 
   METHOD unescape.
+
 * do not use cl_http_utility as it does strange things with the encoding
     rv_string = iv_string.
 
 * todo, more to be added here
-    REPLACE ALL OCCURRENCES OF '%3F' IN rv_string WITH '?'.
-    REPLACE ALL OCCURRENCES OF '%3D' IN rv_string WITH '='.
+    REPLACE ALL OCCURRENCES OF '%3F' IN rv_string WITH '?' IGNORING CASE.
+    REPLACE ALL OCCURRENCES OF '%3D' IN rv_string WITH '=' IGNORING CASE.
+    REPLACE ALL OCCURRENCES OF '%2F' IN rv_string WITH '/' IGNORING CASE.
+    REPLACE ALL OCCURRENCES OF '%25' IN rv_string WITH '%' IGNORING CASE.
+    REPLACE ALL OCCURRENCES OF '%26' IN rv_string WITH '&' IGNORING CASE.
+    REPLACE ALL OCCURRENCES OF gv_non_breaking_space IN rv_string WITH ` `.
 
   ENDMETHOD.
 ENDCLASS.

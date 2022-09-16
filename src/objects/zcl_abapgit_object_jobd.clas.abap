@@ -11,7 +11,7 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_OBJECT_JOBD IMPLEMENTATION.
+CLASS zcl_abapgit_object_jobd IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~changed_by.
@@ -152,8 +152,10 @@ CLASS ZCL_ABAPGIT_OBJECT_JOBD IMPLEMENTATION.
         OTHERS            = 2.
 
     IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( |Error from TR_OBJECT_JUMP_TO_TOOL, JOBD| ).
+      zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
+
+    rv_exit = abap_true.
 
   ENDMETHOD.
 

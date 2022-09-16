@@ -27,22 +27,31 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_OBJECT_OTGR IMPLEMENTATION.
+CLASS zcl_abapgit_object_otgr IMPLEMENTATION.
 
 
   METHOD instantiate_and_lock_otgr.
-    DATA: lv_new  TYPE abap_bool,
-          lv_name TYPE cls_attribute_name.
+    DATA:
+      lv_new   TYPE abap_bool,
+      lv_name  TYPE cls_attribute_name,
+      lv_state TYPE cls_type_group-activation_state.
 
     SELECT SINGLE name FROM cls_type_group INTO lv_name WHERE name = ms_item-obj_name.
-    lv_new = boolc( sy-subrc <> 0 ).
+    IF sy-subrc = 0.
+      lv_new   = abap_false.
+      lv_state = cl_pak_wb_domains=>co_activation_state-invalid.
+    ELSE.
+      lv_new   = abap_true.
+      lv_state = cl_pak_wb_domains=>co_activation_state-active.
+    ENDIF.
     lv_name = ms_item-obj_name.
 
     TRY.
         CREATE OBJECT ro_otgr
           EXPORTING
-            im_name = lv_name
-            im_new  = lv_new.
+            im_name             = lv_name
+            im_new              = lv_new
+            im_activation_state = lv_state.
       CATCH cx_pak_invalid_data
           cx_pak_not_authorized
           cx_pak_invalid_state
@@ -102,12 +111,12 @@ CLASS ZCL_ABAPGIT_OBJECT_OTGR IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~deserialize.
-    DATA: ls_otgr       TYPE ty_otgr,
-          lo_otgr       TYPE REF TO cl_cls_object_type_group,
-          lx_pak_error  TYPE REF TO cx_root,
-          lv_text       TYPE string,
-          lv_masterlang TYPE sy-langu,
-          lo_parents    TYPE REF TO data.
+    DATA: ls_otgr      TYPE ty_otgr,
+          lo_otgr      TYPE REF TO cl_cls_object_type_group,
+          lx_pak_error TYPE REF TO cx_root,
+          lv_text      TYPE string,
+          lv_main_lang TYPE sy-langu,
+          lo_parents   TYPE REF TO data.
 
     FIELD-SYMBOLS: <ls_groupt>  LIKE LINE OF ls_otgr-texts,
                    <ls_element> LIKE LINE OF ls_otgr-elements,
@@ -168,14 +177,14 @@ CLASS ZCL_ABAPGIT_OBJECT_OTGR IMPLEMENTATION.
               im_parent_groups = <lt_parents>.
         ENDIF.
 
-        lv_masterlang = lo_otgr->if_pak_wb_object~get_master_language( ).
-        READ TABLE ls_otgr-texts WITH KEY langu = lv_masterlang ASSIGNING <ls_groupt>.
+        lv_main_lang = lo_otgr->if_pak_wb_object~get_master_language( ).
+        READ TABLE ls_otgr-texts WITH KEY langu = lv_main_lang ASSIGNING <ls_groupt>.
         IF sy-subrc = 0.
           lo_otgr->set_description( <ls_groupt>-text ).
           " ELSE.
-          "   Do we want to clear the master language description if not present in the XML conent?
-          "   Master Language is non-deterministic - it depends on sy-langu, so rather don't touch
-          "   description if the master language is not present
+          "   Do we want to clear the main language description if not present in the XML conent?
+          "   Main language is non-deterministic - it depends on sy-langu, so rather don't touch
+          "   description if the main language is not present
           "   Perhaps, we can display some sort of a message but how?
         ENDIF.
 
@@ -227,24 +236,13 @@ CLASS ZCL_ABAPGIT_OBJECT_OTGR IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~jump.
-    CALL FUNCTION 'RS_TOOL_ACCESS'
-      EXPORTING
-        operation           = 'SHOW'
-        object_name         = ms_item-obj_name
-        object_type         = ms_item-obj_type
-      EXCEPTIONS
-        not_executed        = 1
-        invalid_object_type = 2
-        OTHERS              = 3.
-
-    IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( |Error from RS_TOOL_ACCESS, CHAR| ).
-    ENDIF.
+    " Covered by ZCL_ABAPGIT_OBJECTS=>JUMP
   ENDMETHOD.
 
 
   METHOD zif_abapgit_object~serialize.
     DATA: lv_text      TYPE string,
+          lv_name      TYPE ty_otgr-cls_type_group,
           ls_otgr      TYPE ty_otgr,
           lo_otgr      TYPE REF TO cl_cls_object_type_group,
           lx_pak_error TYPE REF TO cx_root,
@@ -260,10 +258,10 @@ CLASS ZCL_ABAPGIT_OBJECT_OTGR IMPLEMENTATION.
 
 *   Description part 1:
 *   Dealing with Description of OTGR objects is problematic.
-*   The API supports setting of Master Language only and
+*   The API supports setting of main language only and
 *   if we want to save also translations we would have to implement
 *   our own logic for merging and activation. To keep it simple stupid
-*   the current version focuses on the Master language only.
+*   the current version focuses on the main language only.
 *   If anybody ever runs into the need to version also translation,
 *   ask the maintainers of CL_CLS_OBJECT_TYPE_GROUP to add a method for it.
 *
@@ -281,7 +279,27 @@ CLASS ZCL_ABAPGIT_OBJECT_OTGR IMPLEMENTATION.
     TRY.
         ls_otgr-cls_type_group-name = lo_otgr->if_cls_object_type_group~get_name( ).
         ls_otgr-cls_type_group-proxy_flag = lo_otgr->if_cls_object_type_group~get_proxy_filter( ).
-        lo_otgr->get_elements( IMPORTING ex_elements = ls_otgr-elements ).
+
+        TRY.
+            CALL METHOD lo_otgr->('GET_ELEMENTS')
+              EXPORTING
+                im_explicit_elements_only = abap_true " doesn't exist on lower releases. Eg. 752 SP04
+              IMPORTING
+                ex_elements               = ls_otgr-elements.
+
+          CATCH cx_sy_dyn_call_param_not_found.
+
+            lo_otgr->get_elements( IMPORTING ex_elements = ls_otgr-elements ).
+
+        ENDTRY.
+
+        " Remove children since they are created automatically (by the child group)
+        LOOP AT ls_otgr-elements ASSIGNING <ls_element>.
+          SELECT SINGLE name FROM cls_type_group INTO lv_name WHERE name = <ls_element>-type.
+          IF sy-subrc = 0.
+            DELETE ls_otgr-elements.
+          ENDIF.
+        ENDLOOP.
 
         IF <lt_parents> IS ASSIGNED.
           CALL METHOD lo_otgr->('IF_CLS_OBJECT_TYPE_GROUP~GET_PARENT_GROUPS')
@@ -291,7 +309,7 @@ CLASS ZCL_ABAPGIT_OBJECT_OTGR IMPLEMENTATION.
               ex_parent_groups         = <lt_parents>.
         ENDIF.
 
-        " Beware: the following method returns the Master Language description only if the object is Locked!
+        " Beware: the following method returns the main language description only if the object is locked!
         <ls_groupt>-text = lo_otgr->if_cls_object_type_group~get_description( ).
         <ls_groupt>-langu = lo_otgr->if_pak_wb_object~get_master_language( ).
 
@@ -314,7 +332,7 @@ CLASS ZCL_ABAPGIT_OBJECT_OTGR IMPLEMENTATION.
 * lt_lang_sel  TYPE RANGE OF langu,
 * ls_lang_sel  LIKE LINE OF lt_lang_sel,
 *
-*    IF io_xml->i18n_params( )-serialize_master_lang_only = abap_true.
+*    IF io_xml->i18n_params( )-main_language_only = abap_true.
 *      ls_lang_sel-low = mv_language.
 *      ls_lang_sel-sign = 'I'.
 *      ls_lang_sel-option = 'EQ'.

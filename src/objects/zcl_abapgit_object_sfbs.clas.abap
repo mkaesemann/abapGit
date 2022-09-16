@@ -14,7 +14,7 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_OBJECT_SFBS IMPLEMENTATION.
+CLASS zcl_abapgit_object_sfbs IMPLEMENTATION.
 
 
   METHOD get.
@@ -161,7 +161,6 @@ CLASS ZCL_ABAPGIT_OBJECT_SFBS IMPLEMENTATION.
 
   METHOD zif_abapgit_object~get_metadata.
     rs_metadata = get_metadata( ).
-    rs_metadata-ddic = abap_true.
     rs_metadata-delete_tadir = abap_true.
   ENDMETHOD.
 
@@ -177,14 +176,7 @@ CLASS ZCL_ABAPGIT_OBJECT_SFBS IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~jump.
-
-    CALL FUNCTION 'RS_TOOL_ACCESS'
-      EXPORTING
-        operation     = 'SHOW'
-        object_name   = ms_item-obj_name
-        object_type   = 'SFBS'
-        in_new_window = abap_true.
-
+    " Covered by ZCL_ABAPGIT_OBJECTS=>JUMP
   ENDMETHOD.
 
 

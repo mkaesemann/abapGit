@@ -31,7 +31,7 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_OBJECT_CHAR IMPLEMENTATION.
+CLASS zcl_abapgit_object_char IMPLEMENTATION.
 
 
   METHOD instantiate_char_and_lock.
@@ -254,21 +254,7 @@ CLASS ZCL_ABAPGIT_OBJECT_CHAR IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~jump.
-
-    CALL FUNCTION 'RS_TOOL_ACCESS'
-      EXPORTING
-        operation           = 'SHOW'
-        object_name         = ms_item-obj_name
-        object_type         = ms_item-obj_type
-      EXCEPTIONS
-        not_executed        = 1
-        invalid_object_type = 2
-        OTHERS              = 3.
-
-    IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( |Error from RS_TOOL_ACCESS, CHAR| ).
-    ENDIF.
-
+    " Covered by ZCL_ABAPGIT_OBJECTS=>JUMP
   ENDMETHOD.
 
 
@@ -291,15 +277,24 @@ CLASS ZCL_ABAPGIT_OBJECT_CHAR IMPLEMENTATION.
 
     SELECT * FROM cls_attributet INTO TABLE ls_char-cls_attributet
       WHERE name = ms_item-obj_name
-      AND activation_state = lc_active.
+      AND activation_state = lc_active
+      ORDER BY PRIMARY KEY.
+    IF io_xml->i18n_params( )-main_language_only = abap_true.
+      DELETE ls_char-cls_attributet WHERE langu <> mv_language.
+    ENDIF.
 
     SELECT * FROM cls_attr_value INTO TABLE ls_char-cls_attr_value
       WHERE name = ms_item-obj_name
-      AND activation_state = lc_active.
+      AND activation_state = lc_active
+      ORDER BY PRIMARY KEY.
 
     SELECT * FROM cls_attr_valuet INTO TABLE ls_char-cls_attr_valuet
       WHERE name = ms_item-obj_name
-      AND activation_state = lc_active.
+      AND activation_state = lc_active
+      ORDER BY PRIMARY KEY.
+    IF io_xml->i18n_params( )-main_language_only = abap_true.
+      DELETE ls_char-cls_attr_valuet WHERE langu <> mv_language.
+    ENDIF.
 
     io_xml->add( iv_name = 'CHAR'
                  ig_data = ls_char ).

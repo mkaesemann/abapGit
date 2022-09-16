@@ -5,13 +5,12 @@ CLASS zcl_abapgit_services_abapgit DEFINITION
 
   PUBLIC SECTION.
 
-    CONSTANTS: c_abapgit_repo     TYPE string   VALUE 'https://github.com/abapGit/abapGit'     ##NO_TEXT,
-               c_abapgit_homepage TYPE string   VALUE 'https://www.abapgit.org'                ##NO_TEXT,
-               c_abapgit_wikipage TYPE string   VALUE 'https://docs.abapgit.org'               ##NO_TEXT,
-               c_dotabap_homepage TYPE string   VALUE 'https://dotabap.org'               ##NO_TEXT,
-               c_abapgit_package  TYPE devclass VALUE '$ABAPGIT'                              ##NO_TEXT,
-               c_abapgit_url      TYPE string   VALUE 'https://github.com/abapGit/abapGit.git' ##NO_TEXT,
-               c_abapgit_class    TYPE tcode    VALUE `ZCL_ABAPGIT_REPO`                      ##NO_TEXT.
+    CONSTANTS c_abapgit_repo TYPE string VALUE 'https://github.com/abapGit/abapGit' ##NO_TEXT.
+    CONSTANTS c_abapgit_homepage TYPE string VALUE 'https://www.abapgit.org' ##NO_TEXT.
+    CONSTANTS c_abapgit_wikipage TYPE string VALUE 'https://docs.abapgit.org' ##NO_TEXT.
+    CONSTANTS c_dotabap_homepage TYPE string VALUE 'https://dotabap.org' ##NO_TEXT.
+    CONSTANTS c_abapgit_class TYPE seoclsname VALUE `ZCX_ABAPGIT_EXCEPTION` ##NO_TEXT.
+    CONSTANTS c_changelog_path TYPE string VALUE '/blob/main/changelog.txt' ##NO_TEXT.
 
     CLASS-METHODS open_abapgit_homepage
       RAISING
@@ -25,37 +24,34 @@ CLASS zcl_abapgit_services_abapgit DEFINITION
     CLASS-METHODS open_abapgit_changelog
       RAISING
         zcx_abapgit_exception .
-    CLASS-METHODS install_abapgit
-      RAISING
-        zcx_abapgit_exception .
     CLASS-METHODS is_installed
       RETURNING
         VALUE(rv_devclass) TYPE tadir-devclass .
     CLASS-METHODS prepare_gui_startup
       RAISING
         zcx_abapgit_exception .
+    CLASS-METHODS get_abapgit_tcode
+      RETURNING
+        VALUE(rv_tcode) TYPE tcode .
   PROTECTED SECTION.
   PRIVATE SECTION.
-    CLASS-METHODS do_install
-      IMPORTING iv_title   TYPE c
-                iv_text    TYPE c
-                iv_url     TYPE string
-                iv_package TYPE devclass
-      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS set_start_repo_from_package
       IMPORTING
-        iv_package TYPE devclass
+        !iv_package TYPE devclass
       RAISING
-        zcx_abapgit_exception.
-
+        zcx_abapgit_exception .
     CLASS-METHODS get_package_from_adt
       RETURNING
-        VALUE(rv_package) TYPE devclass.
+        VALUE(rv_package) TYPE devclass .
     CLASS-METHODS check_sapgui
       RAISING
+        zcx_abapgit_exception .
+    CLASS-METHODS open_url_in_browser
+      IMPORTING
+        !iv_url TYPE string
+      RAISING
         zcx_abapgit_exception.
-
 ENDCLASS.
 
 
@@ -81,7 +77,7 @@ CLASS ZCL_ABAPGIT_SERVICES_ABAPGIT IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    IF zcl_abapgit_ui_factory=>get_gui_functions( )->is_sapgui_for_java( ) = abap_false.
+    IF zcl_abapgit_ui_factory=>get_frontend_services( )->is_sapgui_for_java( ) = abap_false.
       RETURN.
     ENDIF.
 
@@ -98,45 +94,6 @@ CLASS ZCL_ABAPGIT_SERVICES_ABAPGIT IMPLEMENTATION.
       ls_settings-hide_sapgui_hint = abap_true.
       li_user_persistence->set_settings( ls_settings ).
     ENDIF.
-
-  ENDMETHOD.
-
-
-  METHOD do_install.
-
-    DATA: lo_repo   TYPE REF TO zcl_abapgit_repo_online,
-          lv_answer TYPE c LENGTH 1.
-
-
-    lv_answer = zcl_abapgit_ui_factory=>get_popups( )->popup_to_confirm(
-      iv_titlebar              = iv_title
-      iv_text_question         = iv_text
-      iv_text_button_1         = 'Continue'
-      iv_text_button_2         = 'Cancel'
-      iv_default_button        = '2'
-      iv_display_cancel_button = abap_false ).
-
-    IF lv_answer <> '1'.
-      RETURN.
-    ENDIF.
-
-    IF abap_false = zcl_abapgit_repo_srv=>get_instance( )->is_repo_installed(
-        iv_url              = iv_url
-        iv_target_package   = iv_package ).
-
-      zcl_abapgit_factory=>get_sap_package( iv_package )->create_local( ).
-
-      lo_repo = zcl_abapgit_repo_srv=>get_instance( )->new_online(
-        iv_url         = iv_url
-        iv_branch_name = zif_abapgit_definitions=>c_git_branch-master
-        iv_package     = iv_package ).
-
-      zcl_abapgit_services_repo=>gui_deserialize( lo_repo ).
-
-      zcl_abapgit_services_repo=>toggle_favorite( lo_repo->get_key( ) ).
-    ENDIF.
-
-    COMMIT WORK.
 
   ENDMETHOD.
 
@@ -199,29 +156,6 @@ CLASS ZCL_ABAPGIT_SERVICES_ABAPGIT IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD install_abapgit.
-
-    CONSTANTS lc_title TYPE c LENGTH 40 VALUE 'Install abapGit'.
-    DATA lv_text       TYPE c LENGTH 100.
-
-    IF NOT is_installed( ) IS INITIAL.
-      lv_text = 'Seems like abapGit package is already installed. No changes to be done'.
-      zcl_abapgit_ui_factory=>get_popups( )->popup_to_inform(
-        iv_titlebar     = lc_title
-        iv_text_message = lv_text ).
-      RETURN.
-    ENDIF.
-
-    lv_text = |Confirm to install current version of abapGit to package { c_abapgit_package }|.
-
-    do_install( iv_title   = lc_title
-                iv_text    = lv_text
-                iv_url     = c_abapgit_url
-                iv_package = c_abapgit_package ).
-
-  ENDMETHOD.
-
-
   METHOD is_installed.
 
     SELECT SINGLE devclass FROM tadir INTO rv_devclass
@@ -233,50 +167,34 @@ CLASS ZCL_ABAPGIT_SERVICES_ABAPGIT IMPLEMENTATION.
 
 
   METHOD open_abapgit_changelog.
-
-    cl_gui_frontend_services=>execute(
-      EXPORTING document = c_abapgit_repo && '/blob/master/changelog.txt'
-      EXCEPTIONS OTHERS = 1 ).
-    IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'Opening page in external browser failed.' ).
-    ENDIF.
-
+    open_url_in_browser( |{ c_abapgit_repo }{ c_changelog_path }| ).
   ENDMETHOD.
 
 
   METHOD open_abapgit_homepage.
-
-    cl_gui_frontend_services=>execute(
-      EXPORTING document = c_abapgit_homepage
-      EXCEPTIONS OTHERS = 1 ).
-    IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'Opening page in external browser failed.' ).
-    ENDIF.
-
+    open_url_in_browser( c_abapgit_homepage ).
   ENDMETHOD.
 
 
   METHOD open_abapgit_wikipage.
-
-    cl_gui_frontend_services=>execute(
-      EXPORTING document = c_abapgit_wikipage
-      EXCEPTIONS OTHERS = 1 ).
-    IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'Opening page in external browser failed.' ).
-    ENDIF.
-
+    open_url_in_browser( c_abapgit_wikipage ).
   ENDMETHOD.
 
 
   METHOD open_dotabap_homepage.
+    open_url_in_browser( c_dotabap_homepage ).
+  ENDMETHOD.
 
-    cl_gui_frontend_services=>execute(
-      EXPORTING document = c_dotabap_homepage
-      EXCEPTIONS OTHERS = 1 ).
-    IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'Opening page in external browser failed.' ).
-    ENDIF.
 
+  METHOD open_url_in_browser.
+    DATA lx_error TYPE REF TO zcx_abapgit_exception.
+
+    TRY.
+        zcl_abapgit_ui_factory=>get_frontend_services( )->execute( iv_document = iv_url ).
+      CATCH zcx_abapgit_exception INTO lx_error.
+        zcx_abapgit_exception=>raise( iv_text     = 'Opening page in external browser failed.'
+                                      ix_previous = lx_error ).
+    ENDTRY.
   ENDMETHOD.
 
 
@@ -288,7 +206,7 @@ CLASS ZCL_ABAPGIT_SERVICES_ABAPGIT IMPLEMENTATION.
 
     check_sapgui( ).
 
-    IF zcl_abapgit_persist_settings=>get_instance( )->read( )->get_show_default_repo( ) = abap_false.
+    IF zcl_abapgit_persist_factory=>get_settings( )->read( )->get_show_default_repo( ) = abap_false.
       " Don't show the last seen repo at startup
       zcl_abapgit_persistence_user=>get_instance( )->set_repo_show( || ).
     ENDIF.
@@ -329,9 +247,9 @@ CLASS ZCL_ABAPGIT_SERVICES_ABAPGIT IMPLEMENTATION.
           ls_r_package     LIKE LINE OF lt_r_package,
           lt_superpackages TYPE zif_abapgit_sap_package=>ty_devclass_tt,
           li_package       TYPE REF TO zif_abapgit_sap_package,
-          lt_repo_list     TYPE zif_abapgit_definitions=>ty_repo_ref_tt.
+          lt_repo_list     TYPE zif_abapgit_repo_srv=>ty_repo_list.
 
-    FIELD-SYMBOLS: <lo_repo>         TYPE LINE OF zif_abapgit_definitions=>ty_repo_ref_tt,
+    FIELD-SYMBOLS: <lo_repo>         TYPE LINE OF zif_abapgit_repo_srv=>ty_repo_list,
                    <lv_superpackage> LIKE LINE OF lt_superpackages.
 
     li_package = zcl_abapgit_factory=>get_sap_package( iv_package ).
@@ -358,7 +276,7 @@ CLASS ZCL_ABAPGIT_SERVICES_ABAPGIT IMPLEMENTATION.
     LOOP AT lt_repo_list ASSIGNING <lo_repo>.
 
       IF <lo_repo>->get_package( ) IN lt_r_package.
-        lo_repo = <lo_repo>.
+        lo_repo ?= <lo_repo>.
         EXIT.
       ENDIF.
 
@@ -369,4 +287,22 @@ CLASS ZCL_ABAPGIT_SERVICES_ABAPGIT IMPLEMENTATION.
     ENDIF.
 
   ENDMETHOD.
+
+
+  METHOD get_abapgit_tcode.
+    CONSTANTS: lc_report_tcode_hex TYPE x VALUE '80'.
+    DATA: lt_tcodes TYPE STANDARD TABLE OF tcode.
+
+    SELECT tcode
+      FROM tstc
+      INTO TABLE lt_tcodes
+      WHERE pgmna = sy-cprog
+        AND cinfo = lc_report_tcode_hex.
+
+    IF lines( lt_tcodes ) > 0.
+      READ TABLE lt_tcodes INDEX 1 INTO rv_tcode.
+    ENDIF.
+  ENDMETHOD.
+
+
 ENDCLASS.

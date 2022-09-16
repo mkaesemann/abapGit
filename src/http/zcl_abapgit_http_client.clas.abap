@@ -48,22 +48,24 @@ CLASS zcl_abapgit_http_client IMPLEMENTATION.
       WHEN 200.
         RETURN. " Success, OK
       WHEN 302.
-        zcx_abapgit_exception=>raise( 'Resource access temporarily redirected. Check the URL (HTTP 302)' ).
+        zcx_abapgit_exception=>raise( 'Resource access temporarily redirected (HTTP 302). Check the URL' ).
       WHEN 401.
-        zcx_abapgit_exception=>raise( 'Unauthorized access to resource. Check your credentials (HTTP 401)' ).
+        zcx_abapgit_exception=>raise( 'Unauthorized access to resource (HTTP 401). Check your credentials' ).
       WHEN 403.
         zcx_abapgit_exception=>raise( 'Access to resource forbidden (HTTP 403)' ).
       WHEN 404.
-        zcx_abapgit_exception=>raise( 'Resource not found. Check the URL (HTTP 404)' ).
+        zcx_abapgit_exception=>raise( 'Resource not found (HTTP 404). Check the URL' ).
       WHEN 407.
-        zcx_abapgit_exception=>raise( 'Proxy authentication required. Check your credentials (HTTP 407)' ).
+        zcx_abapgit_exception=>raise( 'Proxy authentication required (HTTP 407). Check your credentials' ).
       WHEN 408.
         zcx_abapgit_exception=>raise( 'Request timeout (HTTP 408)' ).
       WHEN 415.
         zcx_abapgit_exception=>raise( 'Unsupported media type (HTTP 415)' ).
+      WHEN 422.
+        zcx_abapgit_exception=>raise( 'Unprocessable entity (HTTP 422). Check, if URL has to end with ".git"' ).
       WHEN OTHERS.
         lv_text = mi_client->response->get_cdata( ).
-        zcx_abapgit_exception=>raise( |{ lv_text } (HTTP { lv_code })| ).
+        zcx_abapgit_exception=>raise( |(HTTP { lv_code }) { lv_text }| ).
     ENDCASE.
 
   ENDMETHOD.
@@ -113,13 +115,22 @@ CLASS zcl_abapgit_http_client IMPLEMENTATION.
           lv_code    TYPE i,
           lv_message TYPE string.
 
-    mi_client->send( ).
-    mi_client->receive(
+    mi_client->send(
       EXCEPTIONS
         http_communication_failure = 1
         http_invalid_state         = 2
         http_processing_failed     = 3
-        OTHERS                     = 4 ).
+        http_invalid_timeout       = 4
+        OTHERS                     = 5 ).
+
+    IF sy-subrc = 0.
+      mi_client->receive(
+        EXCEPTIONS
+          http_communication_failure = 1
+          http_invalid_state         = 2
+          http_processing_failed     = 3
+          OTHERS                     = 4 ).
+    ENDIF.
 
     IF sy-subrc <> 0.
       " in case of HTTP_COMMUNICATION_FAILURE

@@ -20,13 +20,6 @@ CLASS zcl_abapgit_factory DEFINITION
         VALUE(ri_code_inspector) TYPE REF TO zif_abapgit_code_inspector
       RAISING
         zcx_abapgit_exception .
-    CLASS-METHODS get_branch_overview
-      IMPORTING
-        !io_repo                  TYPE REF TO zcl_abapgit_repo_online
-      RETURNING
-        VALUE(ri_branch_overview) TYPE REF TO zif_abapgit_branch_overview
-      RAISING
-        zcx_abapgit_exception .
     CLASS-METHODS get_stage_logic
       RETURNING
         VALUE(ri_logic) TYPE REF TO zif_abapgit_stage_logic .
@@ -42,6 +35,9 @@ CLASS zcl_abapgit_factory DEFINITION
     CLASS-METHODS get_http_agent
       RETURNING
         VALUE(ri_http_agent) TYPE REF TO zif_abapgit_http_agent .
+    CLASS-METHODS get_lxe_texts
+      RETURNING
+        VALUE(ri_lxe_texts) TYPE REF TO zif_abapgit_lxe_texts .
   PROTECTED SECTION.
   PRIVATE SECTION.
 
@@ -70,21 +66,12 @@ CLASS zcl_abapgit_factory DEFINITION
     CLASS-DATA gi_environment TYPE REF TO zif_abapgit_environment .
     CLASS-DATA gi_longtext TYPE REF TO zif_abapgit_longtexts .
     CLASS-DATA gi_http_agent TYPE REF TO zif_abapgit_http_agent .
+    CLASS-DATA gi_lxe_texts TYPE REF TO zif_abapgit_lxe_texts .
 ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_FACTORY IMPLEMENTATION.
-
-
-  METHOD get_branch_overview.
-
-    CREATE OBJECT ri_branch_overview
-      TYPE zcl_abapgit_branch_overview
-      EXPORTING
-        io_repo = io_repo.
-
-  ENDMETHOD.
+CLASS zcl_abapgit_factory IMPLEMENTATION.
 
 
   METHOD get_code_inspector.
@@ -146,6 +133,16 @@ CLASS ZCL_ABAPGIT_FACTORY IMPLEMENTATION.
       CREATE OBJECT gi_longtext TYPE zcl_abapgit_longtexts.
     ENDIF.
     ri_longtexts = gi_longtext.
+
+  ENDMETHOD.
+
+
+  METHOD get_lxe_texts.
+
+    IF gi_lxe_texts IS NOT BOUND.
+      CREATE OBJECT gi_lxe_texts TYPE zcl_abapgit_lxe_texts.
+    ENDIF.
+    ri_lxe_texts = gi_lxe_texts.
 
   ENDMETHOD.
 

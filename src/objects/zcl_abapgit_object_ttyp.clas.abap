@@ -2,15 +2,13 @@ CLASS zcl_abapgit_object_ttyp DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
 
   PUBLIC SECTION.
     INTERFACES zif_abapgit_object.
-    ALIASES mo_files FOR zif_abapgit_object~mo_files.
-
   PROTECTED SECTION.
   PRIVATE SECTION.
 ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_OBJECT_TTYP IMPLEMENTATION.
+CLASS zcl_abapgit_object_ttyp IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~changed_by.
@@ -46,13 +44,6 @@ CLASS ZCL_ABAPGIT_OBJECT_TTYP IMPLEMENTATION.
 
     io_xml->read( EXPORTING iv_name = 'DD40V'
                   CHANGING cg_data = ls_dd40v ).
-
-    " DDIC Step: Replace REF TO class/interface with generic reference to avoid cyclic dependency
-    IF iv_step = zif_abapgit_object=>gc_step_id-ddic AND ls_dd40v-datatype = 'REF'.
-      ls_dd40v-rowtype = 'OBJECT'.
-    ELSEIF iv_step = zif_abapgit_object=>gc_step_id-late AND ls_dd40v-datatype <> 'REF'.
-      RETURN. " already active
-    ENDIF.
 
     io_xml->read( EXPORTING iv_name = 'DD42V'
                   CHANGING cg_data = lt_dd42v ).
@@ -122,13 +113,11 @@ CLASS ZCL_ABAPGIT_OBJECT_TTYP IMPLEMENTATION.
 
   METHOD zif_abapgit_object~get_deserialize_steps.
     APPEND zif_abapgit_object=>gc_step_id-ddic TO rt_steps.
-    APPEND zif_abapgit_object=>gc_step_id-late TO rt_steps.
   ENDMETHOD.
 
 
   METHOD zif_abapgit_object~get_metadata.
     rs_metadata = get_metadata( ).
-    rs_metadata-ddic = abap_true.
   ENDMETHOD.
 
 
@@ -146,16 +135,14 @@ CLASS ZCL_ABAPGIT_OBJECT_TTYP IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~jump.
-
-    jump_se11( iv_radio = 'RSRD1-DDTYPE'
-               iv_field = 'RSRD1-DDTYPE_VAL' ).
-
+    " Covered by ZCL_ABAPGIT_OBJECT=>JUMP
   ENDMETHOD.
 
 
   METHOD zif_abapgit_object~serialize.
 
     DATA: lv_name  TYPE ddobjname,
+          lv_state TYPE ddgotstate,
           lt_dd42v TYPE dd42v_tab,
           lt_dd43v TYPE dd43v_tab,
           ls_dd40v TYPE dd40v.
@@ -169,6 +156,7 @@ CLASS ZCL_ABAPGIT_OBJECT_TTYP IMPLEMENTATION.
         state         = 'A'
         langu         = mv_language
       IMPORTING
+        gotstate      = lv_state
         dd40v_wa      = ls_dd40v
       TABLES
         dd42v_tab     = lt_dd42v
@@ -181,8 +169,8 @@ CLASS ZCL_ABAPGIT_OBJECT_TTYP IMPLEMENTATION.
       zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
 
-    IF ls_dd40v IS INITIAL.
-      RETURN. " does not exist in system
+    IF ls_dd40v IS INITIAL OR lv_state <> 'A'.
+      RETURN.
     ENDIF.
 
     CLEAR: ls_dd40v-as4user,

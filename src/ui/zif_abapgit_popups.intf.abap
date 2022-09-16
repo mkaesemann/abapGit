@@ -3,16 +3,7 @@ INTERFACE zif_abapgit_popups
 
 
   TYPES:
-    BEGIN OF ty_popup, " TODO remove, use zif_abapgit_services_repo=>ty_repo_params instead
-      url              TYPE string,
-      package          TYPE devclass,
-      branch_name      TYPE string,
-      display_name     TYPE string,
-      folder_logic     TYPE string,
-      ign_subpkg       TYPE abap_bool,
-      master_lang_only TYPE abap_bool,
-      cancel           TYPE abap_bool,
-    END OF ty_popup .
+    ty_sval_tt TYPE STANDARD TABLE OF sval WITH DEFAULT KEY .
 
   CONSTANTS c_new_branch_label TYPE string VALUE '+ create new ...' ##NO_TEXT.
 
@@ -23,21 +14,9 @@ INTERFACE zif_abapgit_popups
       VALUE(rv_value) TYPE ddshretval-fieldval
     RAISING
       zcx_abapgit_exception .
-  METHODS popup_package_export
-    EXPORTING
-      !ev_package                    TYPE devclass
-      !ev_folder_logic               TYPE string
-      !ev_serialize_master_lang_only TYPE abap_bool
-    RAISING
-      zcx_abapgit_exception .
   METHODS popup_folder_logic
     RETURNING
       VALUE(rv_folder_logic) TYPE string
-    RAISING
-      zcx_abapgit_exception .
-  METHODS popup_object
-    RETURNING
-      VALUE(rs_tadir) TYPE zif_abapgit_definitions=>ty_tadir
     RAISING
       zcx_abapgit_exception .
   METHODS create_branch_popup
@@ -59,37 +38,35 @@ INTERFACE zif_abapgit_popups
       VALUE(rs_branch)    TYPE zif_abapgit_definitions=>ty_git_branch
     RAISING
       zcx_abapgit_exception .
-  METHODS repo_popup
+  METHODS tag_list_popup
     IMPORTING
-      !iv_url            TYPE string
-      !iv_package        TYPE devclass OPTIONAL
-      !iv_branch         TYPE string DEFAULT zif_abapgit_definitions=>c_git_branch-master
-      !iv_freeze_package TYPE abap_bool OPTIONAL
-      !iv_freeze_url     TYPE abap_bool OPTIONAL
-      !iv_title          TYPE clike DEFAULT 'New Online Project'
-      !iv_display_name   TYPE string OPTIONAL
+      !iv_url       TYPE string
     RETURNING
-      VALUE(rs_popup)    TYPE ty_popup
+      VALUE(rs_tag) TYPE zif_abapgit_definitions=>ty_git_tag
     RAISING
-      zcx_abapgit_exception ##NO_TEXT.
+      zcx_abapgit_exception .
+  METHODS commit_list_popup
+    IMPORTING
+      !iv_repo_url     TYPE string
+      !iv_branch_name  TYPE string OPTIONAL
+    RETURNING
+      VALUE(rs_commit) TYPE zif_abapgit_definitions=>ty_commit
+    RAISING
+      zcx_abapgit_exception .
+  TYPES ty_char1 TYPE c LENGTH 1.
+  TYPES ty_icon TYPE c LENGTH 30.
   METHODS popup_to_confirm
     IMPORTING
       !iv_titlebar              TYPE clike
       !iv_text_question         TYPE clike
       !iv_text_button_1         TYPE clike DEFAULT 'Yes'
-      !iv_icon_button_1         TYPE icon-name DEFAULT space
+      !iv_icon_button_1         TYPE ty_icon DEFAULT space
       !iv_text_button_2         TYPE clike DEFAULT 'No'
-      !iv_icon_button_2         TYPE icon-name DEFAULT space
-      !iv_default_button        TYPE char1 DEFAULT '1'
-      !iv_display_cancel_button TYPE char1 DEFAULT abap_true
+      !iv_icon_button_2         TYPE ty_icon DEFAULT space
+      !iv_default_button        TYPE ty_char1 DEFAULT '1'
+      !iv_display_cancel_button TYPE ty_char1 DEFAULT abap_true
     RETURNING
-      VALUE(rv_answer)          TYPE char1
-    RAISING
-      zcx_abapgit_exception .
-  METHODS popup_to_inform
-    IMPORTING
-      !iv_titlebar     TYPE clike
-      !iv_text_message TYPE clike
+      VALUE(rv_answer)          TYPE ty_char1
     RAISING
       zcx_abapgit_exception .
   METHODS popup_to_create_package
@@ -113,10 +90,10 @@ INTERFACE zif_abapgit_popups
       !it_list               TYPE STANDARD TABLE
       !iv_title              TYPE lvc_title DEFAULT space
       !iv_header_text        TYPE csequence DEFAULT space
-      !iv_start_column       TYPE i DEFAULT 2
-      !iv_end_column         TYPE i DEFAULT 65
+      !iv_start_column       TYPE i DEFAULT 10
+      !iv_end_column         TYPE i DEFAULT 90
       !iv_start_line         TYPE i DEFAULT 8
-      !iv_end_line           TYPE i DEFAULT 20
+      !iv_end_line           TYPE i DEFAULT 25
       !iv_striped_pattern    TYPE abap_bool DEFAULT abap_false
       !iv_optimize_col_width TYPE abap_bool DEFAULT abap_true
       !iv_selection_mode     TYPE salv_de_constant DEFAULT if_salv_c_selection_mode=>multiple
@@ -130,23 +107,17 @@ INTERFACE zif_abapgit_popups
     IMPORTING
       !iv_code       TYPE clike
     CHANGING
-      !ct_fields     TYPE zif_abapgit_definitions=>ty_sval_tt
+      !ct_fields     TYPE ty_sval_tt
       !cs_error      TYPE svale
       !cv_show_popup TYPE char01
     RAISING
       zcx_abapgit_exception .
   METHODS popup_transport_request
     IMPORTING
-      !is_transport_type  TYPE zif_abapgit_definitions=>ty_transport_type
+      !is_transport_type        TYPE zif_abapgit_definitions=>ty_transport_type
+      !iv_use_default_transport TYPE abap_bool DEFAULT abap_false
     RETURNING
-      VALUE(rv_transport) TYPE trkorr
-    RAISING
-      zcx_abapgit_exception .
-  METHODS popup_proxy_bypass
-    IMPORTING
-      !it_proxy_bypass       TYPE zif_abapgit_definitions=>ty_range_proxy_bypass_url
-    RETURNING
-      VALUE(rt_proxy_bypass) TYPE zif_abapgit_definitions=>ty_range_proxy_bypass_url
+      VALUE(rv_transport)       TYPE trkorr
     RAISING
       zcx_abapgit_exception .
   METHODS choose_pr_popup
@@ -156,14 +127,13 @@ INTERFACE zif_abapgit_popups
       VALUE(rs_pull) TYPE zif_abapgit_pr_enum_provider=>ty_pull_request
     RAISING
       zcx_abapgit_exception .
-  METHODS popup_perf_test_parameters
-    EXPORTING
-      !et_object_type_filter         TYPE zif_abapgit_definitions=>ty_object_type_range
-      !et_object_name_filter         TYPE zif_abapgit_definitions=>ty_object_name_range
-    CHANGING
-      !cv_package                    TYPE devclass
-      !cv_include_sub_packages       TYPE abap_bool
-      !cv_serialize_master_lang_only TYPE abap_bool
-    RAISING
-      zcx_abapgit_exception .
+  METHODS popup_select_tr_requests
+    IMPORTING is_selection        TYPE trwbo_selection
+              iv_title            TYPE trwbo_title
+              iv_username_pattern TYPE any DEFAULT sy-uname
+    RETURNING VALUE(rt_r_trkorr)  TYPE zif_abapgit_definitions=>ty_trrngtrkor_tt
+    RAISING   zcx_abapgit_exception.
+  METHODS popup_select_wb_tc_tr_and_tsk
+    RETURNING VALUE(rt_r_trkorr) TYPE zif_abapgit_definitions=>ty_trrngtrkor_tt
+    RAISING   zcx_abapgit_exception.
 ENDINTERFACE.

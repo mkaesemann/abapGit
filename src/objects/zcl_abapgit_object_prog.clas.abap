@@ -2,35 +2,45 @@ CLASS zcl_abapgit_object_prog DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
 
   PUBLIC SECTION.
     INTERFACES zif_abapgit_object.
-    ALIASES mo_files FOR zif_abapgit_object~mo_files.
-
   PROTECTED SECTION.
   PRIVATE SECTION.
-    TYPES: BEGIN OF ty_tpool_i18n,
-             language TYPE langu,
-             textpool TYPE zif_abapgit_definitions=>ty_tpool_tt,
-           END OF ty_tpool_i18n,
-           ty_tpools_i18n TYPE STANDARD TABLE OF ty_tpool_i18n.
-    CONSTANTS: c_longtext_id_prog TYPE dokil-id VALUE 'RE'.
 
-    METHODS:
-      serialize_texts
-        IMPORTING ii_xml TYPE REF TO zif_abapgit_xml_output
-        RAISING   zcx_abapgit_exception,
-      deserialize_texts
-        IMPORTING ii_xml TYPE REF TO zif_abapgit_xml_input
-        RAISING   zcx_abapgit_exception,
-      is_program_locked
-        RETURNING
-          VALUE(rv_is_program_locked) TYPE abap_bool
-        RAISING
-          zcx_abapgit_exception.
+    TYPES:
+      BEGIN OF ty_tpool_i18n,
+        language TYPE langu,
+        textpool TYPE zif_abapgit_definitions=>ty_tpool_tt,
+      END OF ty_tpool_i18n .
+    TYPES:
+      ty_tpools_i18n TYPE STANDARD TABLE OF ty_tpool_i18n .
 
+    CONSTANTS c_longtext_id_prog TYPE dokil-id VALUE 'RE' ##NO_TEXT.
+
+    METHODS deserialize_with_ext
+      IMPORTING
+        !is_progdir TYPE ty_progdir
+        !it_source  TYPE abaptxt255_tab
+      RAISING
+        zcx_abapgit_exception .
+    METHODS serialize_texts
+      IMPORTING
+        !ii_xml TYPE REF TO zif_abapgit_xml_output
+      RAISING
+        zcx_abapgit_exception .
+    METHODS deserialize_texts
+      IMPORTING
+        !ii_xml TYPE REF TO zif_abapgit_xml_input
+      RAISING
+        zcx_abapgit_exception .
+    METHODS is_program_locked
+      RETURNING
+        VALUE(rv_is_program_locked) TYPE abap_bool
+      RAISING
+        zcx_abapgit_exception .
 ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_OBJECT_PROG IMPLEMENTATION.
+CLASS zcl_abapgit_object_prog IMPLEMENTATION.
 
 
   METHOD deserialize_texts.
@@ -54,6 +64,42 @@ CLASS ZCL_ABAPGIT_OBJECT_PROG IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD deserialize_with_ext.
+
+    " Special treatment for extensions
+    " If the program name exceeds 30 characters it is not a usual ABAP program but might be
+    " some extension, which requires the internal addition EXTENSION TYPE
+    " https://help.sap.com/doc/abapdocu_755_index_htm/7.55/en-US/index.htm?file=abapinsert_report_internal.htm
+    " This e.g. occurs in case of transportable Code Inspector variants (ending with ===VC)
+
+    INSERT REPORT is_progdir-name
+      FROM it_source
+      STATE 'I'
+      EXTENSION TYPE is_progdir-name+30
+      PROGRAM TYPE is_progdir-subc.
+    IF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise( 'Error from INSERT REPORT .. EXTENSION TYPE' ).
+    ENDIF.
+
+    CALL FUNCTION 'UPDATE_PROGDIR'
+      EXPORTING
+        i_progdir    = is_progdir
+        i_progname   = is_progdir-name
+        i_state      = 'I'
+      EXCEPTIONS
+        not_executed = 1
+        OTHERS       = 2.
+    IF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise( 'Error updating program directory' ).
+    ENDIF.
+
+    zcl_abapgit_objects_activation=>add(
+      iv_type = 'REPS'
+      iv_name = is_progdir-name ).
+
+  ENDMETHOD.
+
+
   METHOD is_program_locked.
 
     rv_is_program_locked = exists_a_lock_entry_for( iv_lock_object = 'ESRDIRE'
@@ -64,24 +110,27 @@ CLASS ZCL_ABAPGIT_OBJECT_PROG IMPLEMENTATION.
 
   METHOD serialize_texts.
 
-    DATA: lt_tpool_i18n TYPE ty_tpools_i18n,
-          lt_tpool      TYPE textpool_table.
+    DATA: lt_tpool_i18n      TYPE ty_tpools_i18n,
+          lt_tpool           TYPE textpool_table,
+          lt_language_filter TYPE zif_abapgit_environment=>ty_system_language_filter.
 
     FIELD-SYMBOLS <ls_tpool> LIKE LINE OF lt_tpool_i18n.
 
-    IF ii_xml->i18n_params( )-serialize_master_lang_only = abap_true.
+    IF ii_xml->i18n_params( )-main_language_only = abap_true.
       RETURN.
     ENDIF.
 
     " Table d010tinf stores info. on languages in which program is maintained
     " Select all active translations of program texts
-    " Skip master language - it was already serialized
+    " Skip main language - it was already serialized
+    lt_language_filter = zcl_abapgit_factory=>get_environment( )->get_system_language_filter( ).
     SELECT DISTINCT language
       INTO CORRESPONDING FIELDS OF TABLE lt_tpool_i18n
       FROM d010tinf
       WHERE r3state = 'A'
       AND prog = ms_item-obj_name
-      AND language <> mv_language ##TOO_MANY_ITAB_FIELDS.
+      AND language <> mv_language
+      AND language IN lt_language_filter ##TOO_MANY_ITAB_FIELDS.
 
     SORT lt_tpool_i18n BY language ASCENDING.
     LOOP AT lt_tpool_i18n ASSIGNING <ls_tpool>.
@@ -111,14 +160,19 @@ CLASS ZCL_ABAPGIT_OBJECT_PROG IMPLEMENTATION.
 
   METHOD zif_abapgit_object~delete.
 
-    DATA: lv_program LIKE sy-repid.
+    DATA:
+      lv_program  LIKE sy-repid,
+      lv_obj_name TYPE e071-obj_name.
 
     lv_program = ms_item-obj_name.
 
     CALL FUNCTION 'RS_DELETE_PROGRAM'
       EXPORTING
+        corrnumber                 = iv_transport
         program                    = lv_program
         suppress_popup             = abap_true
+        mass_delete_call           = abap_true
+        tadir_devclass             = iv_package
         force_delete_used_includes = abap_true
       EXCEPTIONS
         enqueue_lock               = 1
@@ -126,9 +180,28 @@ CLASS ZCL_ABAPGIT_OBJECT_PROG IMPLEMENTATION.
         permission_failure         = 3
         reject_deletion            = 4
         OTHERS                     = 5.
+    IF sy-subrc = 2.
+      " Drop also any inactive code that is left in REPOSRC
+      DELETE REPORT lv_program ##SUBRC_OK.
 
-    IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( |Error from RS_DELETE_PROGRAM: { sy-subrc }| ).
+      " Remove inactive objects from work area
+      lv_obj_name = lv_program.
+
+      CALL FUNCTION 'RS_DELETE_FROM_WORKING_AREA'
+        EXPORTING
+          object                 = 'REPS'
+          obj_name               = lv_obj_name
+          immediate              = 'X'
+          actualize_working_area = 'X'.
+
+      CALL FUNCTION 'RS_DELETE_FROM_WORKING_AREA'
+        EXPORTING
+          object                 = 'REPT'
+          obj_name               = lv_obj_name
+          immediate              = 'X'
+          actualize_working_area = 'X'.
+    ELSEIF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
 
     delete_longtexts( c_longtext_id_prog ).
@@ -146,9 +219,12 @@ CLASS ZCL_ABAPGIT_OBJECT_PROG IMPLEMENTATION.
           ls_cua          TYPE ty_cua,
           lt_source       TYPE abaptxt255_tab.
 
+    " Add R3TR PROG to transport first, otherwise we get several LIMUs
+    corr_insert( iv_package ).
+
     lv_program_name = ms_item-obj_name.
 
-    lt_source = mo_files->read_abap( ).
+    lt_source = zif_abapgit_object~mo_files->read_abap( ).
 
     io_xml->read( EXPORTING iv_name = 'TPOOL'
                   CHANGING cg_data = lt_tpool_ext ).
@@ -156,28 +232,40 @@ CLASS ZCL_ABAPGIT_OBJECT_PROG IMPLEMENTATION.
 
     io_xml->read( EXPORTING iv_name = 'PROGDIR'
                   CHANGING cg_data  = ls_progdir ).
-    deserialize_program( is_progdir = ls_progdir
-                         it_source  = lt_source
-                         it_tpool   = lt_tpool
-                         iv_package = iv_package ).
 
-    io_xml->read( EXPORTING iv_name = 'DYNPROS'
-                  CHANGING cg_data  = lt_dynpros ).
-    deserialize_dynpros( lt_dynpros ).
+    IF strlen( lv_program_name ) > 30.
 
-    io_xml->read( EXPORTING iv_name = 'CUA'
-                  CHANGING cg_data  = ls_cua ).
-    deserialize_cua( iv_program_name = lv_program_name
-                     is_cua = ls_cua ).
+      " Objects with extension for example transportable Code Inspector variants (ending with ===VC)
+      deserialize_with_ext( is_progdir = ls_progdir
+                            it_source  = lt_source ).
 
-    " Texts deserializing (English)
-    deserialize_textpool( iv_program = lv_program_name
-                          it_tpool   = lt_tpool ).
+    ELSE.
 
-    " Texts deserializing (translations)
-    deserialize_texts( io_xml ).
+      deserialize_program( is_progdir = ls_progdir
+                           it_source  = lt_source
+                           it_tpool   = lt_tpool
+                           iv_package = iv_package ).
 
-    deserialize_longtexts( io_xml ).
+      io_xml->read( EXPORTING iv_name = 'DYNPROS'
+                    CHANGING cg_data  = lt_dynpros ).
+      deserialize_dynpros( lt_dynpros ).
+
+      io_xml->read( EXPORTING iv_name = 'CUA'
+                    CHANGING cg_data  = ls_cua ).
+      deserialize_cua( iv_program_name = lv_program_name
+                       is_cua = ls_cua ).
+
+      " Texts deserializing (English)
+      deserialize_textpool( iv_program = lv_program_name
+                            it_tpool   = lt_tpool ).
+
+      " Texts deserializing (translations)
+      deserialize_texts( io_xml ).
+      deserialize_lxe_texts( io_xml ).
+
+      deserialize_longtexts( io_xml ).
+
+    ENDIF.
 
   ENDMETHOD.
 
@@ -228,14 +316,7 @@ CLASS ZCL_ABAPGIT_OBJECT_PROG IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~jump.
-
-    CALL FUNCTION 'RS_TOOL_ACCESS'
-      EXPORTING
-        operation     = 'SHOW'
-        object_name   = ms_item-obj_name
-        object_type   = 'PROG'
-        in_new_window = abap_true.
-
+    " Covered by ZCL_ABAPGIT_OBJECTS=>JUMP
   ENDMETHOD.
 
 
@@ -246,10 +327,16 @@ CLASS ZCL_ABAPGIT_OBJECT_PROG IMPLEMENTATION.
 
     serialize_program( io_xml   = io_xml
                        is_item  = ms_item
-                       io_files = mo_files ).
+                       io_files = zif_abapgit_object~mo_files ).
 
     " Texts serializing (translations)
-    serialize_texts( io_xml ).
+    IF io_xml->i18n_params( )-translation_languages IS INITIAL.
+      " Old I18N option
+      serialize_texts( io_xml ).
+    ELSE.
+      " New LXE option
+      serialize_lxe_texts( io_xml ).
+    ENDIF.
 
     serialize_longtexts( ii_xml         = io_xml
                          iv_longtext_id = c_longtext_id_prog ).

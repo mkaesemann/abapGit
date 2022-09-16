@@ -13,12 +13,6 @@ CLASS zcl_abapgit_ui_factory DEFINITION
     CLASS-METHODS get_popups
       RETURNING
         VALUE(ri_popups) TYPE REF TO zif_abapgit_popups .
-    CLASS-METHODS get_tag_popups
-      RETURNING
-        VALUE(ri_tag_popups) TYPE REF TO zif_abapgit_tag_popups .
-    CLASS-METHODS get_gui_functions
-      RETURNING
-        VALUE(ri_gui_functions) TYPE REF TO zif_abapgit_gui_functions .
     CLASS-METHODS get_gui
       RETURNING
         VALUE(ro_gui) TYPE REF TO zcl_abapgit_gui
@@ -33,23 +27,28 @@ CLASS zcl_abapgit_ui_factory DEFINITION
       RETURNING
         VALUE(ri_fe_serv) TYPE REF TO zif_abapgit_frontend_services .
     CLASS-METHODS get_html_viewer
+      IMPORTING
+        !io_container           TYPE REF TO cl_gui_container DEFAULT cl_gui_container=>screen0
+        !iv_disable_query_table TYPE abap_bool DEFAULT abap_true
       RETURNING
-        VALUE(ri_viewer) TYPE REF TO zif_abapgit_html_viewer .
+        VALUE(ri_viewer)        TYPE REF TO zif_abapgit_html_viewer .
+    CLASS-METHODS get_gui_jumper
+      RETURNING
+        VALUE(ri_gui_jumper) TYPE REF TO zif_abapgit_gui_jumper .
   PROTECTED SECTION.
   PRIVATE SECTION.
 
     CLASS-DATA gi_popups TYPE REF TO zif_abapgit_popups .
-    CLASS-DATA gi_tag_popups TYPE REF TO zif_abapgit_tag_popups .
-    CLASS-DATA gi_gui_functions TYPE REF TO zif_abapgit_gui_functions .
     CLASS-DATA gi_html_viewer TYPE REF TO zif_abapgit_html_viewer .
     CLASS-DATA go_gui TYPE REF TO zcl_abapgit_gui .
     CLASS-DATA gi_fe_services TYPE REF TO zif_abapgit_frontend_services .
     CLASS-DATA gi_gui_services TYPE REF TO zif_abapgit_gui_services .
+    CLASS-DATA gi_gui_jumper TYPE REF TO zif_abapgit_gui_jumper .
 ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_UI_FACTORY IMPLEMENTATION.
+CLASS zcl_abapgit_ui_factory IMPLEMENTATION.
 
 
   METHOD get_asset_manager.
@@ -145,7 +144,7 @@ CLASS ZCL_ABAPGIT_UI_FACTORY IMPLEMENTATION.
       lo_html_preprocessor->preserve_css( 'css/common.css' ).
 
       CREATE OBJECT li_router TYPE zcl_abapgit_gui_router.
-      CREATE OBJECT li_hotkey_ctl TYPE zcl_abapgit_hotkeys.
+      CREATE OBJECT li_hotkey_ctl TYPE zcl_abapgit_gui_hotkey_ctl.
 
       CREATE OBJECT go_gui
         EXPORTING
@@ -159,13 +158,13 @@ CLASS ZCL_ABAPGIT_UI_FACTORY IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD get_gui_functions.
+  METHOD get_gui_jumper.
 
-    IF gi_gui_functions IS INITIAL.
-      CREATE OBJECT gi_gui_functions TYPE zcl_abapgit_gui_functions.
+    IF gi_gui_jumper IS INITIAL.
+      CREATE OBJECT gi_gui_jumper TYPE zcl_abapgit_gui_jumper.
     ENDIF.
 
-    ri_gui_functions = gi_gui_functions.
+    ri_gui_jumper = gi_gui_jumper.
 
   ENDMETHOD.
 
@@ -180,12 +179,14 @@ CLASS ZCL_ABAPGIT_UI_FACTORY IMPLEMENTATION.
 
   METHOD get_html_viewer.
 
-    IF gi_html_viewer IS BOUND.
-      ri_viewer = gi_html_viewer.
-      RETURN.
+    IF gi_html_viewer IS NOT BOUND.
+      CREATE OBJECT gi_html_viewer TYPE zcl_abapgit_html_viewer_gui
+        EXPORTING
+          io_container           = io_container
+          iv_disable_query_table = iv_disable_query_table.
     ENDIF.
 
-    CREATE OBJECT ri_viewer TYPE zcl_abapgit_html_viewer_gui.
+    ri_viewer = gi_html_viewer.
 
   ENDMETHOD.
 
@@ -197,17 +198,6 @@ CLASS ZCL_ABAPGIT_UI_FACTORY IMPLEMENTATION.
     ENDIF.
 
     ri_popups = gi_popups.
-
-  ENDMETHOD.
-
-
-  METHOD get_tag_popups.
-
-    IF gi_tag_popups IS INITIAL.
-      CREATE OBJECT gi_tag_popups TYPE zcl_abapgit_tag_popups.
-    ENDIF.
-
-    ri_tag_popups = gi_tag_popups.
 
   ENDMETHOD.
 ENDCLASS.

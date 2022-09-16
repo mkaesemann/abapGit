@@ -6,9 +6,6 @@ CLASS zcl_abapgit_object_tran DEFINITION
 
   PUBLIC SECTION.
     INTERFACES zif_abapgit_object .
-
-    ALIASES mo_files
-      FOR zif_abapgit_object~mo_files .
   PROTECTED SECTION.
 
   PRIVATE SECTION.
@@ -398,11 +395,11 @@ CLASS zcl_abapgit_object_tran IMPLEMENTATION.
 
     DATA lt_tpool_i18n TYPE TABLE OF tstct.
 
-    IF io_xml->i18n_params( )-serialize_master_lang_only = abap_true.
+    IF io_xml->i18n_params( )-main_language_only = abap_true.
       RETURN.
     ENDIF.
 
-    " Skip master language - it was already serialized
+    " Skip main language - it was already serialized
     " Don't serialize t-code itself
     SELECT sprsl ttext
       INTO CORRESPONDING FIELDS OF TABLE lt_tpool_i18n
@@ -611,7 +608,7 @@ CLASS zcl_abapgit_object_tran IMPLEMENTATION.
     IF sy-subrc = 4 OR sy-subrc = 3.
       RETURN.
     ELSEIF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'Error from RPY_TRANSACTION_READ' ).
+      zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
 
     READ TABLE lt_tcodes INDEX 1 INTO es_transaction.
@@ -623,7 +620,8 @@ CLASS zcl_abapgit_object_tran IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~changed_by.
-    rv_user = c_user_unknown. " todo
+* looks like "changed by user" is not stored in the database
+    rv_user = c_user_unknown.
   ENDMETHOD.
 
 
@@ -642,7 +640,7 @@ CLASS zcl_abapgit_object_tran IMPLEMENTATION.
         object_not_found = 0
         OTHERS           = 3.
     IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'Error from RPY_TRANSACTION_DELETE' ).
+      zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
 
   ENDMETHOD.
@@ -669,7 +667,8 @@ CLASS zcl_abapgit_object_tran IMPLEMENTATION.
 
 
     IF zif_abapgit_object~exists( ) = abap_true.
-      zif_abapgit_object~delete( iv_package ).
+      zif_abapgit_object~delete( iv_package   = iv_package
+                                 iv_transport = iv_transport ).
     ENDIF.
 
     io_xml->read( EXPORTING iv_name = 'TSTC'
@@ -721,6 +720,8 @@ CLASS zcl_abapgit_object_tran IMPLEMENTATION.
 
         clear_functiongroup_globals( ).
 
+        corr_insert( iv_package ).
+
         CALL FUNCTION 'RPY_TRANSACTION_INSERT'
           EXPORTING
             transaction             = ls_tstc-tcode
@@ -737,6 +738,7 @@ CLASS zcl_abapgit_object_tran IMPLEMENTATION.
             html_enabled            = ls_tstcc-s_webgui
             java_enabled            = ls_tstcc-s_platin
             wingui_enabled          = ls_tstcc-s_win32
+            suppress_corr_insert    = abap_true
           TABLES
             param_values            = lt_param_values
           EXCEPTIONS
@@ -750,7 +752,7 @@ CLASS zcl_abapgit_object_tran IMPLEMENTATION.
             db_access_error         = 8
             OTHERS                  = 9.
         IF sy-subrc <> 0.
-          zcx_abapgit_exception=>raise( 'Error from RPY_TRANSACTION_INSERT' ).
+          zcx_abapgit_exception=>raise_t100( ).
         ENDIF.
 
     ENDCASE.
@@ -833,19 +835,11 @@ CLASS zcl_abapgit_object_tran IMPLEMENTATION.
     <ls_bdcdata>-fnam = 'TSTC-TCODE'.
     <ls_bdcdata>-fval = ms_item-obj_name.
 
-    CALL FUNCTION 'ABAP4_CALL_TRANSACTION'
-      STARTING NEW TASK 'GIT'
-      EXPORTING
-        tcode                 = 'SE93'
-        mode_val              = 'E'
-      TABLES
-        using_tab             = lt_bdcdata
-      EXCEPTIONS
-        system_failure        = 1
-        communication_failure = 2
-        resource_failure      = 3
-        OTHERS                = 4
-        ##fm_subrc_ok.    "#EC CI_SUBRC
+    zcl_abapgit_ui_factory=>get_gui_jumper( )->jump_batch_input(
+      iv_tcode      = 'SE93'
+      it_bdcdata    = lt_bdcdata ).
+
+    rv_exit = abap_true.
 
   ENDMETHOD.
 

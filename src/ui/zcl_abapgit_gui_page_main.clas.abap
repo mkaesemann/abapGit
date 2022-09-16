@@ -7,7 +7,8 @@ CLASS zcl_abapgit_gui_page_main DEFINITION
     INTERFACES: zif_abapgit_gui_hotkeys.
     METHODS:
       constructor
-        RAISING zcx_abapgit_exception,
+        IMPORTING iv_only_favorites TYPE abap_bool
+        RAISING   zcx_abapgit_exception,
       zif_abapgit_gui_event_handler~on_event REDEFINITION.
 
 
@@ -25,8 +26,9 @@ CLASS zcl_abapgit_gui_page_main DEFINITION
         abapgit_home TYPE string VALUE 'abapgit_home',
       END OF c_actions.
 
-    DATA: mo_repo_overview TYPE REF TO zcl_abapgit_gui_page_repo_over,
-          mv_repo_key      TYPE zif_abapgit_persistence=>ty_value.
+    DATA: mo_repo_overview  TYPE REF TO zcl_abapgit_gui_page_repo_over,
+          mv_repo_key       TYPE zif_abapgit_persistence=>ty_value,
+          mv_only_favorites TYPE abap_bool.
 
     METHODS build_main_menu
       RETURNING VALUE(ro_menu) TYPE REF TO zcl_abapgit_html_toolbar.
@@ -35,7 +37,7 @@ ENDCLASS.
 
 
 
-CLASS zcl_abapgit_gui_page_main IMPLEMENTATION.
+CLASS ZCL_ABAPGIT_GUI_PAGE_MAIN IMPLEMENTATION.
 
 
   METHOD build_main_menu.
@@ -67,16 +69,18 @@ CLASS zcl_abapgit_gui_page_main IMPLEMENTATION.
     super->constructor( ).
     ms_control-page_menu  = build_main_menu( ).
     ms_control-page_title = 'Repository List'.
+    mv_only_favorites = iv_only_favorites.
   ENDMETHOD.
 
 
   METHOD render_content.
 
     CREATE OBJECT ri_html TYPE zcl_abapgit_html.
-    gui_services( )->get_hotkeys_ctl( )->register_hotkeys( me ).
 
-    IF mo_repo_overview IS INITIAL.
-      CREATE OBJECT mo_repo_overview.
+    gui_services( )->get_hotkeys_ctl( )->register_hotkeys( zif_abapgit_gui_hotkeys~get_hotkey_actions( ) ).
+
+    IF mo_repo_overview IS INITIAL OR mo_repo_overview->mv_only_favorites <> mv_only_favorites.
+      CREATE OBJECT mo_repo_overview EXPORTING iv_only_favorites = mv_only_favorites.
     ENDIF.
 
     ri_html->add( mo_repo_overview->zif_abapgit_gui_renderable~render( ) ).
@@ -90,13 +94,14 @@ CLASS zcl_abapgit_gui_page_main IMPLEMENTATION.
 
     DATA: lv_key TYPE zif_abapgit_persistence=>ty_value.
 
+    lv_key = ii_event->query( )->get( 'KEY' ).
+
     CASE ii_event->mv_action.
       WHEN c_actions-abapgit_home.
         CLEAR mv_repo_key.
         rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
       WHEN c_actions-select.
 
-        lv_key = ii_event->query( )->get( 'KEY' ).
         zcl_abapgit_persistence_user=>get_instance( )->set_repo_show( lv_key ).
 
         TRY.
@@ -115,6 +120,11 @@ CLASS zcl_abapgit_gui_page_main IMPLEMENTATION.
         mo_repo_overview->set_order_by( ii_event->query( )->get( 'ORDERBY' ) ).
         rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
 
+      WHEN zif_abapgit_definitions=>c_action-toggle_favorites.
+
+        mv_only_favorites = ii_event->query( )->get( 'FAVORITES' ).
+        rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
+
       WHEN zif_abapgit_definitions=>c_action-direction.
 
         mo_repo_overview->set_order_direction(
@@ -128,18 +138,9 @@ CLASS zcl_abapgit_gui_page_main IMPLEMENTATION.
 
       WHEN zif_abapgit_definitions=>c_action-go_patch.
 
-        lv_key = ii_event->query( )->get( 'KEY' ).
         CREATE OBJECT rs_handled-page TYPE zcl_abapgit_gui_page_patch
           EXPORTING
             iv_key = lv_key.
-        rs_handled-state = zcl_abapgit_gui=>c_event_state-new_page.
-
-      WHEN zif_abapgit_definitions=>c_action-repo_settings.
-
-        lv_key = ii_event->query( )->get( 'KEY' ).
-        CREATE OBJECT rs_handled-page TYPE zcl_abapgit_gui_page_repo_sett
-          EXPORTING
-            io_repo = zcl_abapgit_repo_srv=>get_instance( )->get( lv_key ).
         rs_handled-state = zcl_abapgit_gui=>c_event_state-new_page.
 
       WHEN OTHERS.
@@ -157,19 +158,60 @@ CLASS zcl_abapgit_gui_page_main IMPLEMENTATION.
 
     ls_hotkey_action-ui_component = 'Main'.
 
-    ls_hotkey_action-description   = |abapGit settings|.
+    ls_hotkey_action-description   = |abapGit Settings|.
     ls_hotkey_action-action = zif_abapgit_definitions=>c_action-go_settings.
     ls_hotkey_action-hotkey = |x|.
     INSERT ls_hotkey_action INTO TABLE rt_hotkey_actions.
 
-    ls_hotkey_action-description   = |New online repository|.
+    ls_hotkey_action-description   = |New Online Repository|.
     ls_hotkey_action-action = zif_abapgit_definitions=>c_action-repo_newonline.
     ls_hotkey_action-hotkey = |n|.
     INSERT ls_hotkey_action INTO TABLE rt_hotkey_actions.
 
-    ls_hotkey_action-description   = |New offline repository|.
+    ls_hotkey_action-description   = |New Offline Repository|.
     ls_hotkey_action-action = zif_abapgit_definitions=>c_action-repo_newoffline.
-    ls_hotkey_action-hotkey = |f|.
+    ls_hotkey_action-hotkey = |o|.
+    INSERT ls_hotkey_action INTO TABLE rt_hotkey_actions.
+
+    ls_hotkey_action-description = |Stage|.
+    ls_hotkey_action-action = zif_abapgit_definitions=>c_action-go_stage.
+    ls_hotkey_action-hotkey = |s|.
+    INSERT ls_hotkey_action INTO TABLE rt_hotkey_actions.
+
+    ls_hotkey_action-description   = |Diff|.
+    ls_hotkey_action-action = zif_abapgit_definitions=>c_action-go_repo_diff.
+    ls_hotkey_action-hotkey = |d|.
+    INSERT ls_hotkey_action INTO TABLE rt_hotkey_actions.
+
+    ls_hotkey_action-description = |Check|.
+    ls_hotkey_action-action = zif_abapgit_definitions=>c_action-repo_code_inspector.
+    ls_hotkey_action-hotkey = |c|.
+    INSERT ls_hotkey_action INTO TABLE rt_hotkey_actions.
+
+    ls_hotkey_action-description   = |Pull|.
+    ls_hotkey_action-action = zif_abapgit_definitions=>c_action-git_reset.
+    ls_hotkey_action-hotkey = |p|.
+    INSERT ls_hotkey_action INTO TABLE rt_hotkey_actions.
+
+    ls_hotkey_action-description = |Patch|.
+    ls_hotkey_action-action = zif_abapgit_definitions=>c_action-go_patch.
+    ls_hotkey_action-hotkey = |p|.
+    INSERT ls_hotkey_action INTO TABLE rt_hotkey_actions.
+
+    " registered/handled in js
+    ls_hotkey_action-description = |Previous Repository|.
+    ls_hotkey_action-action = `#`.
+    ls_hotkey_action-hotkey = |4|.
+    INSERT ls_hotkey_action INTO TABLE rt_hotkey_actions.
+
+    ls_hotkey_action-description = |Next Repository|.
+    ls_hotkey_action-action = `##`.
+    ls_hotkey_action-hotkey = |6|.
+    INSERT ls_hotkey_action INTO TABLE rt_hotkey_actions.
+
+    ls_hotkey_action-description = |Open Repository|.
+    ls_hotkey_action-action = `###`.
+    ls_hotkey_action-hotkey = |Enter|.
     INSERT ls_hotkey_action INTO TABLE rt_hotkey_actions.
 
   ENDMETHOD.

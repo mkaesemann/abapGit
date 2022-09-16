@@ -1,8 +1,12 @@
-CLASS zcl_abapgit_object_enqu DEFINITION PUBLIC INHERITING FROM zcl_abapgit_objects_super FINAL.
+CLASS zcl_abapgit_object_enqu DEFINITION
+  PUBLIC
+  INHERITING FROM zcl_abapgit_objects_super
+  FINAL
+  CREATE PUBLIC .
 
   PUBLIC SECTION.
-    INTERFACES zif_abapgit_object.
-    ALIASES mo_files FOR zif_abapgit_object~mo_files.
+
+    INTERFACES zif_abapgit_object .
   PROTECTED SECTION.
   PRIVATE SECTION.
     TYPES: ty_dd27p TYPE STANDARD TABLE OF dd27p WITH DEFAULT KEY.
@@ -12,7 +16,7 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_OBJECT_ENQU IMPLEMENTATION.
+CLASS zcl_abapgit_object_enqu IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~changed_by.
@@ -75,7 +79,7 @@ CLASS ZCL_ABAPGIT_OBJECT_ENQU IMPLEMENTATION.
         put_refused       = 5
         OTHERS            = 6.
     IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'error from DDIF_ENQU_PUT' ).
+      zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
 
     zcl_abapgit_objects_activation=>add_item( ms_item ).
@@ -106,7 +110,6 @@ CLASS ZCL_ABAPGIT_OBJECT_ENQU IMPLEMENTATION.
 
   METHOD zif_abapgit_object~get_metadata.
     rs_metadata = get_metadata( ).
-    rs_metadata-ddic = abap_true.
   ENDMETHOD.
 
 
@@ -123,16 +126,14 @@ CLASS ZCL_ABAPGIT_OBJECT_ENQU IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~jump.
-
-    jump_se11( iv_radio = 'RSRD1-ENQU'
-               iv_field = 'RSRD1-ENQU_VAL' ).
-
+    " Covered by ZCL_ABAPGIT_OBJECT=>JUMP
   ENDMETHOD.
 
 
   METHOD zif_abapgit_object~serialize.
 
     DATA: lv_name  TYPE ddobjname,
+          lv_state TYPE ddgotstate,
           ls_dd25v TYPE dd25v,
           lt_dd26e TYPE TABLE OF dd26e,
           lt_dd27p TYPE ty_dd27p.
@@ -145,6 +146,7 @@ CLASS ZCL_ABAPGIT_OBJECT_ENQU IMPLEMENTATION.
         state         = 'A'
         langu         = mv_language
       IMPORTING
+        gotstate      = lv_state
         dd25v_wa      = ls_dd25v
       TABLES
         dd26e_tab     = lt_dd26e
@@ -153,10 +155,11 @@ CLASS ZCL_ABAPGIT_OBJECT_ENQU IMPLEMENTATION.
         illegal_input = 1
         OTHERS        = 2.
     IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'error from DDIF_ENQU_GET' ).
+      zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
-    IF ls_dd25v IS INITIAL.
-      RETURN. " does not exist in system
+
+    IF ls_dd25v IS INITIAL OR lv_state <> 'A'.
+      RETURN.
     ENDIF.
 
     CLEAR: ls_dd25v-as4user,

@@ -101,6 +101,14 @@ CLASS zcl_abapgit_object_ueno DEFINITION
         zcx_abapgit_exception.
 
 
+    METHODS get_generic
+      RETURNING
+        VALUE(ro_generic) TYPE REF TO zcl_abapgit_objects_generic
+      RAISING
+        zcx_abapgit_exception .
+    METHODS get_field_rules
+      RETURNING
+        VALUE(ro_result) TYPE REF TO zif_abapgit_field_rules.
 ENDCLASS.
 
 
@@ -334,10 +342,12 @@ CLASS zcl_abapgit_object_ueno IMPLEMENTATION.
       ls_docu-header-tdfuser = sy-uname.
       ls_docu-header-tdfdate = sy-datum.
       ls_docu-header-tdftime = sy-uzeit.
+      ls_docu-header-tdfreles = sy-saprl.
 
       ls_docu-header-tdluser = sy-uname.
       ls_docu-header-tdldate = sy-datum.
       ls_docu-header-tdltime = sy-uzeit.
+      ls_docu-header-tdlreles = sy-saprl.
 
       lv_objname = ls_docu-header-tdname.
 
@@ -355,6 +365,86 @@ CLASS zcl_abapgit_object_ueno IMPLEMENTATION.
 
     ENDLOOP.
 
+
+  ENDMETHOD.
+
+
+  METHOD get_field_rules.
+
+    DATA:
+      lt_fields    TYPE TABLE OF string,
+      lv_fields    TYPE string,
+      lv_table     TYPE tabname,
+      lv_field     TYPE string,
+      lv_rule      TYPE string,
+      lv_rule_iter TYPE string,
+      lv_fill_rule TYPE zif_abapgit_field_rules=>ty_fill_rule,
+      lv_prefix    TYPE fieldname,
+      lv_suffix    TYPE fieldname.
+
+    ro_result = zcl_abapgit_field_rules=>create( ).
+
+    " Many tables and fields with date,time,user so we encode them
+    APPEND 'DM02L,FL,DTU' TO lt_fields.
+    APPEND 'DM02T,L,DTU' TO lt_fields.
+    APPEND 'DM03S,FL,DTU' TO lt_fields.
+    APPEND 'DM25L,FL,DTU' TO lt_fields.
+    APPEND 'DM26L,FL,DTU' TO lt_fields.
+    APPEND 'DM42S,FL,DTU' TO lt_fields.
+    APPEND 'DM42T,L,DTU' TO lt_fields.
+    APPEND 'DM43T,L,DU' TO lt_fields.
+    APPEND 'DM45L,FL,DTU' TO lt_fields.
+    APPEND 'DM45T,L,DTU' TO lt_fields.
+    APPEND 'DM46S,FL,DTU' TO lt_fields.
+
+    LOOP AT lt_fields INTO lv_fields.
+      SPLIT lv_fields AT ',' INTO lv_table lv_field lv_rule_iter.
+
+      DO strlen( lv_field ) TIMES.
+        CASE lv_field(1).
+          WHEN 'F'.
+            lv_prefix = 'FST'.
+          WHEN 'L'.
+            lv_prefix = 'LST'.
+        ENDCASE.
+
+        lv_rule = lv_rule_iter.
+        DO strlen( lv_rule ) TIMES.
+          CASE lv_rule(1).
+            WHEN 'D'.
+              lv_suffix    = 'DATE'.
+              lv_fill_rule = zif_abapgit_field_rules=>c_fill_rule-date.
+            WHEN 'T'.
+              lv_suffix    = 'TIME'.
+              lv_fill_rule = zif_abapgit_field_rules=>c_fill_rule-time.
+            WHEN 'U'.
+              lv_suffix    = 'USER'.
+              lv_fill_rule = zif_abapgit_field_rules=>c_fill_rule-user.
+          ENDCASE.
+
+          ro_result->add(
+            iv_table     = lv_table
+            iv_field     = lv_prefix && lv_suffix
+            iv_fill_rule = lv_fill_rule ).
+
+          SHIFT lv_rule LEFT.
+        ENDDO.
+
+        SHIFT lv_field LEFT.
+      ENDDO.
+
+    ENDLOOP.
+
+  ENDMETHOD.
+
+
+  METHOD get_generic.
+
+    CREATE OBJECT ro_generic
+      EXPORTING
+        io_field_rules = get_field_rules( )
+        is_item        = ms_item
+        iv_language    = mv_language.
 
   ENDMETHOD.
 
@@ -475,10 +565,12 @@ CLASS zcl_abapgit_object_ueno IMPLEMENTATION.
       CLEAR ls_docu-header-tdfuser.
       CLEAR ls_docu-header-tdfdate.
       CLEAR ls_docu-header-tdftime.
+      CLEAR ls_docu-header-tdfreles.
 
       CLEAR ls_docu-header-tdluser.
       CLEAR ls_docu-header-tdldate.
       CLEAR ls_docu-header-tdltime.
+      CLEAR ls_docu-header-tdlreles.
 
       APPEND ls_docu TO rt_result.
 
@@ -504,12 +596,6 @@ CLASS zcl_abapgit_object_ueno IMPLEMENTATION.
 
   METHOD zif_abapgit_object~delete.
 
-    DATA lo_generic TYPE REF TO zcl_abapgit_objects_generic.
-
-    CREATE OBJECT lo_generic
-      EXPORTING
-        is_item = ms_item.
-
     " The deletion of the documentation occurs before the deletion of
     " the associated tables - otherwise we don't know what
     " documentation needs deletion
@@ -518,24 +604,18 @@ CLASS zcl_abapgit_object_ueno IMPLEMENTATION.
     delete_docu_usp( ).
 
     " the deletion of the tables of the entity
-    lo_generic->delete( ).
+    get_generic( )->delete( iv_package ).
 
   ENDMETHOD.
 
 
   METHOD zif_abapgit_object~deserialize.
 
-    DATA lo_generic TYPE REF TO zcl_abapgit_objects_generic.
-
-    CREATE OBJECT lo_generic
-      EXPORTING
-        is_item = ms_item.
-
     " Is the entity type name compliant with naming conventions?
     " Entity Type have their own conventions.
     is_name_permitted( ).
 
-    lo_generic->deserialize(
+    get_generic( )->deserialize(
       iv_package = iv_package
       io_xml     = io_xml ).
 
@@ -550,13 +630,7 @@ CLASS zcl_abapgit_object_ueno IMPLEMENTATION.
 
   METHOD zif_abapgit_object~exists.
 
-    DATA: lo_generic TYPE REF TO zcl_abapgit_objects_generic.
-
-    CREATE OBJECT lo_generic
-      EXPORTING
-        is_item = ms_item.
-
-    rv_bool = lo_generic->exists( ).
+    rv_bool = get_generic( )->exists( ).
 
   ENDMETHOD.
 
@@ -617,32 +691,18 @@ CLASS zcl_abapgit_object_ueno IMPLEMENTATION.
     <ls_bdcdata>-fnam = 'RSUD3-OBJ_KEY'.
     <ls_bdcdata>-fval = ms_item-obj_name.
 
-    CALL FUNCTION 'ABAP4_CALL_TRANSACTION'
-      STARTING NEW TASK 'GIT'
-      EXPORTING
-        tcode                 = 'SD11'
-        mode_val              = 'E'
-      TABLES
-        using_tab             = lt_bdcdata
-      EXCEPTIONS
-        system_failure        = 1
-        communication_failure = 2
-        resource_failure      = 3
-        OTHERS                = 4
-        ##fm_subrc_ok.                                                   "#EC CI_SUBRC
+    zcl_abapgit_ui_factory=>get_gui_jumper( )->jump_batch_input(
+      iv_tcode   = 'SD11'
+      it_bdcdata = lt_bdcdata ).
+
+    rv_exit = abap_true.
 
   ENDMETHOD.
 
 
   METHOD zif_abapgit_object~serialize.
 
-    DATA: lo_generic TYPE REF TO zcl_abapgit_objects_generic.
-
-    CREATE OBJECT lo_generic
-      EXPORTING
-        is_item = ms_item.
-
-    lo_generic->serialize( io_xml ).
+    get_generic( )->serialize( io_xml ).
 
     serialize_docu_uen( io_xml ).
     serialize_docu_url( io_xml ).

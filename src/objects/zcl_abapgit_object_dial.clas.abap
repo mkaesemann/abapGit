@@ -20,7 +20,7 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_OBJECT_DIAL IMPLEMENTATION.
+CLASS zcl_abapgit_object_dial IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~changed_by.
@@ -76,18 +76,10 @@ CLASS ZCL_ABAPGIT_OBJECT_DIAL IMPLEMENTATION.
     ls_bcdata-fval = '=BACK'.
     APPEND ls_bcdata TO lt_bcdata.
 
-    CALL FUNCTION 'ABAP4_CALL_TRANSACTION'
-      EXPORTING
-        tcode     = 'SE35'
-        mode_val  = 'E'
-      TABLES
-        using_tab = lt_bcdata
-      EXCEPTIONS
-        OTHERS    = 1.
-
-    IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'error from ABAP4_CALL_TRANSACTION, SE35' ).
-    ENDIF.
+    zcl_abapgit_ui_factory=>get_gui_jumper( )->jump_batch_input(
+      iv_tcode      = 'SE35'
+      it_bdcdata    = lt_bcdata
+      iv_new_window = abap_false ).
 
   ENDMETHOD.
 
@@ -179,22 +171,21 @@ CLASS ZCL_ABAPGIT_OBJECT_DIAL IMPLEMENTATION.
         object_not_found = 1
         OTHERS           = 2.
 
-    IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( |Error from RS_DIALOG_SHOW, DIAL| ).
-    ENDIF.
+    rv_exit = boolc( sy-subrc = 0 ).
 
   ENDMETHOD.
 
 
   METHOD zif_abapgit_object~serialize.
 
-    DATA: ls_dialog_module TYPE ty_dialog_module.
+    DATA ls_dialog_module TYPE ty_dialog_module.
 
     ls_dialog_module-tdct = _read_tdct( ).
 
     SELECT * FROM diapar
-             INTO TABLE ls_dialog_module-dia_pars
-             WHERE dnam = ls_dialog_module-tdct-dnam.
+      INTO TABLE ls_dialog_module-dia_pars
+      WHERE dnam = ls_dialog_module-tdct-dnam
+      ORDER BY PRIMARY KEY.
 
     io_xml->add( iv_name = 'DIAL'
                  ig_data = ls_dialog_module ).

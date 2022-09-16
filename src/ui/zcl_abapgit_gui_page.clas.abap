@@ -13,8 +13,15 @@ CLASS zcl_abapgit_gui_page DEFINITION PUBLIC ABSTRACT
 
   PROTECTED SECTION.
 
+    CONSTANTS:
+      BEGIN OF c_page_layout,
+        centered   TYPE string VALUE `centered`,
+        full_width TYPE string VALUE `full_width`,
+      END OF c_page_layout.
+
     TYPES:
       BEGIN OF ty_control,
+        page_layout TYPE string,
         page_title TYPE string,
         page_menu  TYPE REF TO zcl_abapgit_html_toolbar,
       END OF  ty_control .
@@ -22,12 +29,14 @@ CLASS zcl_abapgit_gui_page DEFINITION PUBLIC ABSTRACT
     DATA ms_control TYPE ty_control .
 
     METHODS render_content
-          ABSTRACT
+      ABSTRACT
       RETURNING
         VALUE(ri_html) TYPE REF TO zif_abapgit_html
       RAISING
         zcx_abapgit_exception .
   PRIVATE SECTION.
+
+    TYPES: ty_time TYPE p LENGTH 10 DECIMALS 2.
 
     DATA mo_settings TYPE REF TO zcl_abapgit_settings .
     DATA mx_error TYPE REF TO zcx_abapgit_exception .
@@ -46,6 +55,8 @@ CLASS zcl_abapgit_gui_page DEFINITION PUBLIC ABSTRACT
       RETURNING
         VALUE(ri_html) TYPE REF TO zif_abapgit_html .
     METHODS footer
+      IMPORTING
+        !iv_time       TYPE ty_time
       RETURNING
         VALUE(ri_html) TYPE REF TO zif_abapgit_html .
     METHODS render_link_hints
@@ -77,20 +88,28 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_GUI_PAGE IMPLEMENTATION.
+CLASS zcl_abapgit_gui_page IMPLEMENTATION.
 
 
   METHOD constructor.
 
     super->constructor( ).
-    mo_settings = zcl_abapgit_persist_settings=>get_instance( )->read( ).
+    mo_settings = zcl_abapgit_persist_factory=>get_settings( )->read( ).
+    ms_control-page_layout = c_page_layout-centered.
 
   ENDMETHOD.
 
 
   METHOD footer.
 
+    DATA lv_version_detail TYPE string.
     CREATE OBJECT ri_html TYPE zcl_abapgit_html.
+
+    IF zcl_abapgit_factory=>get_environment( )->is_merged( ) = abap_true.
+      lv_version_detail = ` (Standalone Version)`.
+    ELSE.
+      lv_version_detail = ` (Developer Version)`.
+    ENDIF.
 
     ri_html->add( '<div id="footer">' ).
     ri_html->add( '<table class="w100"><tr>' ).
@@ -100,9 +119,10 @@ CLASS ZCL_ABAPGIT_GUI_PAGE IMPLEMENTATION.
     ri_html->add( '<td class="center">' ).
     ri_html->add( '<div class="logo">' ).
     ri_html->add( ri_html->icon( 'git-alt' ) ).
-    ri_html->add( ri_html->icon( 'abapgit' ) ).
+    ri_html->add( ri_html->icon( iv_name = 'abapgit'
+                                 iv_hint = |{ iv_time } sec| ) ).
     ri_html->add( '</div>' ).
-    ri_html->add( |<div class="version">{ zif_abapgit_version=>gc_abap_version }</div>| ).
+    ri_html->add( |<div class="version">{ zif_abapgit_version=>c_abap_version }{ lv_version_detail }</div>| ).
     ri_html->add( '</td>' ).
 
     ri_html->add( '<td id="debug-output" class="w40"></td>' ).
@@ -135,7 +155,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE IMPLEMENTATION.
         ri_html->add( '<link rel="stylesheet" type="text/css" href="css/theme-belize-blue.css">' ).
     ENDCASE.
 
-    ri_html->add( '<script type="text/javascript" src="js/common.js"></script>' ).
+    ri_html->add( '<script src="js/common.js"></script>' ).
 
     CASE mo_settings->get_icon_scaling( ). " Enforce icon scaling
       WHEN mo_settings->c_icon_scaling-large.
@@ -151,7 +171,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE IMPLEMENTATION.
 
   METHOD render_command_palettes.
 
-    ii_html->add( 'var gCommandPalette = new CommandPalette(enumerateToolbarActions, {' ).
+    ii_html->add( 'var gCommandPalette = new CommandPalette(enumerateUiActions, {' ).
     ii_html->add( '  toggleKey: "F1",' ).
     ii_html->add( '  hotkeyDescription: "Command ..."' ).
     ii_html->add( '});' ).
@@ -305,18 +325,27 @@ CLASS ZCL_ABAPGIT_GUI_PAGE IMPLEMENTATION.
 
   METHOD zif_abapgit_gui_renderable~render.
 
-    DATA: li_script TYPE REF TO zif_abapgit_html.
+    DATA:
+      li_script TYPE REF TO zif_abapgit_html,
+      lv_start  TYPE i,
+      lv_end    TYPE i,
+      lv_total  TYPE ty_time.
 
     gui_services( )->register_event_handler( me ).
+
+    GET RUN TIME FIELD lv_start.
 
     " Real page
     CREATE OBJECT ri_html TYPE zcl_abapgit_html.
 
     ri_html->add( '<!DOCTYPE html>' ).
-    ri_html->add( '<html>' ).
+    ri_html->add( '<html lang="en">' ).
     ri_html->add( html_head( ) ).
-    ri_html->add( '<body>' ).
+    ri_html->add( |<body class="{ ms_control-page_layout }">| ).
+
     ri_html->add( title( ) ).
+
+    ri_html->add( '<div class="not_sticky">' ).
 
     ri_html->add( render_content( ) ). " TODO -> render child
 
@@ -327,12 +356,17 @@ CLASS ZCL_ABAPGIT_GUI_PAGE IMPLEMENTATION.
       ii_html          = ri_html
       iv_part_category = c_html_parts-hidden_forms ).
 
-    ri_html->add( footer( ) ).
+    GET RUN TIME FIELD lv_end.
+    lv_total = ( lv_end - lv_start ) / 1000 / 1000.
+
+    ri_html->add( footer( lv_total ) ).
+
+    ri_html->add( '</div>' ).
 
     li_script = scripts( ).
 
     IF li_script IS BOUND AND li_script->is_empty( ) = abap_false.
-      ri_html->add( '<script type="text/javascript">' ).
+      ri_html->add( '<script>' ).
       ri_html->add( li_script ).
       ri_html->add( 'confirmInitialized();' ).
       ri_html->add( '</script>' ).

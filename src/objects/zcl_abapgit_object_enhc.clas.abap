@@ -4,14 +4,12 @@ CLASS zcl_abapgit_object_enhc DEFINITION
 
   PUBLIC SECTION.
     INTERFACES zif_abapgit_object.
-    ALIASES mo_files FOR zif_abapgit_object~mo_files.
 
     METHODS:
       constructor
         IMPORTING
           is_item     TYPE zif_abapgit_definitions=>ty_item
           iv_language TYPE spras.
-
   PROTECTED SECTION.
   PRIVATE SECTION.
     DATA:
@@ -21,7 +19,7 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_OBJECT_ENHC IMPLEMENTATION.
+CLASS zcl_abapgit_object_enhc IMPLEMENTATION.
 
 
   METHOD constructor.
@@ -36,14 +34,18 @@ CLASS ZCL_ABAPGIT_OBJECT_ENHC IMPLEMENTATION.
 
   METHOD zif_abapgit_object~changed_by.
 
-    rv_user = c_user_unknown.
+    SELECT SINGLE changedby INTO rv_user FROM enhcompheader
+      WHERE enhcomposite = ms_item-obj_name AND version = 'A'.
+    IF sy-subrc <> 0.
+      rv_user = c_user_unknown.
+    ENDIF.
 
   ENDMETHOD.
 
 
   METHOD zif_abapgit_object~delete.
 
-    DATA: lx_error      TYPE REF TO cx_enh_root,
+    DATA: lx_enh_root   TYPE REF TO cx_enh_root,
           li_enh_object TYPE REF TO if_enh_object.
 
     TRY.
@@ -51,12 +53,12 @@ CLASS ZCL_ABAPGIT_OBJECT_ENHC IMPLEMENTATION.
           name = mv_composite_id
           lock = abap_true ).
 
-        li_enh_object->delete( ).
-        li_enh_object->save( ).
+        li_enh_object->delete( nevertheless_delete = abap_true
+                               run_dark            = abap_true ).
         li_enh_object->unlock( ).
 
-      CATCH cx_enh_root INTO lx_error.
-        zcx_abapgit_exception=>raise( lx_error->get_text( ) ).
+      CATCH cx_enh_root INTO lx_enh_root.
+        zcx_abapgit_exception=>raise_with_text( lx_enh_root ).
     ENDTRY.
 
   ENDMETHOD.
@@ -64,12 +66,13 @@ CLASS ZCL_ABAPGIT_OBJECT_ENHC IMPLEMENTATION.
 
   METHOD zif_abapgit_object~deserialize.
 
-    DATA: lx_error            TYPE REF TO cx_enh_root,
+    DATA: lx_enh_root         TYPE REF TO cx_enh_root,
           li_enh_composite    TYPE REF TO if_enh_composite,
           lv_package          TYPE devclass,
           lt_composite_childs TYPE enhcompositename_it,
           lt_enh_childs       TYPE enhname_it,
           lv_longtext_id      TYPE enhdocuobject,
+          lv_vers             TYPE enhcompheader-version,
           lv_shorttext        TYPE string.
 
     FIELD-SYMBOLS: <lv_composite_child> TYPE enhcompositename,
@@ -86,6 +89,24 @@ CLASS ZCL_ABAPGIT_OBJECT_ENHC IMPLEMENTATION.
                   CHANGING  cg_data = lt_enh_childs ).
     io_xml->read( EXPORTING iv_name = 'LONGTEXT_ID'
                   CHANGING  cg_data = lv_longtext_id ).
+
+    SELECT SINGLE version FROM enhcompheader INTO lv_vers WHERE enhcomposite = ms_item-obj_name.
+    IF sy-subrc = 0.
+      " If object exists already, then set TADIR entry to deleted
+      " otherwise create_enhancement_composite will fail
+      CALL FUNCTION 'TR_TADIR_INTERFACE'
+        EXPORTING
+          wi_test_modus     = abap_false
+          wi_tadir_pgmid    = 'R3TR'
+          wi_tadir_object   = ms_item-obj_type
+          wi_tadir_obj_name = ms_item-obj_name
+          iv_delflag        = abap_true
+        EXCEPTIONS
+          OTHERS            = 1.
+      IF sy-subrc <> 0.
+        zcx_abapgit_exception=>raise_t100( ).
+      ENDIF.
+    ENDIF.
 
     TRY.
         cl_enh_factory=>create_enhancement_composite(
@@ -113,12 +134,8 @@ CLASS ZCL_ABAPGIT_OBJECT_ENHC IMPLEMENTATION.
         li_enh_composite->if_enh_object~activate( ).
         li_enh_composite->if_enh_object~unlock( ).
 
-        zcl_abapgit_sotr_handler=>create_sotr(
-          iv_package = iv_package
-          io_xml     = io_xml ).
-
-      CATCH cx_enh_root INTO lx_error.
-        zcx_abapgit_exception=>raise( lx_error->get_text( ) ).
+      CATCH cx_enh_root INTO lx_enh_root.
+        zcx_abapgit_exception=>raise_with_text( lx_enh_root ).
     ENDTRY.
 
   ENDMETHOD.
@@ -173,26 +190,13 @@ CLASS ZCL_ABAPGIT_OBJECT_ENHC IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~jump.
-
-    CALL FUNCTION 'RS_TOOL_ACCESS'
-      EXPORTING
-        operation     = 'SHOW'
-        object_name   = ms_item-obj_name
-        object_type   = ms_item-obj_type
-        in_new_window = abap_true
-      EXCEPTIONS
-        OTHERS        = 1.
-
-    IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise_t100( ).
-    ENDIF.
-
+    " Covered by ZCL_ABAPGIT_OBJECTS=>JUMP
   ENDMETHOD.
 
 
   METHOD zif_abapgit_object~serialize.
 
-    DATA: lx_error            TYPE REF TO cx_enh_root,
+    DATA: lx_enh_root         TYPE REF TO cx_enh_root,
           li_enh_composite    TYPE REF TO if_enh_composite,
           lt_composite_childs TYPE enhcompositename_it,
           lt_enh_childs       TYPE enhname_it,
@@ -219,14 +223,8 @@ CLASS ZCL_ABAPGIT_OBJECT_ENHC IMPLEMENTATION.
         io_xml->add( iv_name = 'LONGTEXT_ID'
                      ig_data = lv_longtext_id ).
 
-        zcl_abapgit_sotr_handler=>read_sotr(
-          iv_pgmid    = 'R3TR'
-          iv_object   = ms_item-obj_type
-          iv_obj_name = ms_item-obj_name
-          io_xml      = io_xml ).
-
-      CATCH cx_enh_root INTO lx_error.
-        zcx_abapgit_exception=>raise( lx_error->get_text( ) ).
+      CATCH cx_enh_root INTO lx_enh_root.
+        zcx_abapgit_exception=>raise_with_text( lx_enh_root ).
     ENDTRY.
 
   ENDMETHOD.

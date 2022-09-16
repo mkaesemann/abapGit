@@ -17,12 +17,15 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_OBJECT_SXCI IMPLEMENTATION.
+CLASS zcl_abapgit_object_sxci IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~changed_by.
 
-    rv_user = c_user_unknown.
+    SELECT SINGLE uname FROM sxc_attr INTO rv_user WHERE imp_name = ms_item-obj_name.
+    IF sy-subrc <> 0.
+      rv_user = c_user_unknown.
+    ENDIF.
 
   ENDMETHOD.
 
@@ -45,7 +48,7 @@ CLASS ZCL_ABAPGIT_OBJECT_SXCI IMPLEMENTATION.
         OTHERS             = 5.
 
     IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'error from SXO_IMPL_DELETE' ).
+      zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
 
   ENDMETHOD.
@@ -78,7 +81,7 @@ CLASS ZCL_ABAPGIT_OBJECT_SXCI IMPLEMENTATION.
         OTHERS       = 2.
 
     IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'error from SXO_BADI_READ' ).
+      zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
 
     lv_package = iv_package.
@@ -109,7 +112,7 @@ CLASS ZCL_ABAPGIT_OBJECT_SXCI IMPLEMENTATION.
         OTHERS           = 3.
 
     IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'error from SXO_IMPL_SAVE' ).
+      zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
 
     CALL FUNCTION 'SXO_IMPL_ACTIVE'
@@ -127,7 +130,7 @@ CLASS ZCL_ABAPGIT_OBJECT_SXCI IMPLEMENTATION.
         OTHERS                    = 8.
 
     IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'error from SXO_IMPL_ACTIVE' ).
+      zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
 
   ENDMETHOD.
@@ -171,6 +174,10 @@ CLASS ZCL_ABAPGIT_OBJECT_SXCI IMPLEMENTATION.
 
   METHOD zif_abapgit_object~is_active.
     rv_active = is_active( ).
+
+    "Note: SAP does not show inactive classic BAdIs as "Inactive objects" in SE80
+    "Therefore, rv_active will always be true. The implementation state (runtime
+    "behaviour of the BAdI) will be serialized as part of the XML
   ENDMETHOD.
 
 
@@ -180,22 +187,7 @@ CLASS ZCL_ABAPGIT_OBJECT_SXCI IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~jump.
-
-    CALL FUNCTION 'RS_TOOL_ACCESS'
-      EXPORTING
-        operation           = 'SHOW'
-        object_name         = ms_item-obj_name
-        object_type         = ms_item-obj_type
-        in_new_window       = abap_true
-      EXCEPTIONS
-        not_executed        = 1
-        invalid_object_type = 2
-        OTHERS              = 3.
-
-    IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'error from RS_TOOL_ACCESS' ).
-    ENDIF.
-
+    " Covered by ZCL_ABAPGIT_OBJECTS=>JUMP
   ENDMETHOD.
 
 
@@ -223,7 +215,7 @@ CLASS ZCL_ABAPGIT_OBJECT_SXCI IMPLEMENTATION.
         OTHERS             = 2.
 
     IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'error from SXV_EXIT_FOR_IMP' ).
+      zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
 
     CALL FUNCTION 'SXO_BADI_READ'
@@ -243,7 +235,7 @@ CLASS ZCL_ABAPGIT_OBJECT_SXCI IMPLEMENTATION.
         OTHERS       = 2.
 
     IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'error from SXO_BADI_READ' ).
+      zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
 
     CALL FUNCTION 'SXO_IMPL_FOR_BADI_READ'
@@ -268,7 +260,7 @@ CLASS ZCL_ABAPGIT_OBJECT_SXCI IMPLEMENTATION.
         OTHERS                      = 2.
 
     IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'error from SXO_IMPL_FOR_BADI_READ' ).
+      zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
 
     CLEAR: ls_classic_badi_implementation-implementation_data-aname,
@@ -276,8 +268,7 @@ CLASS ZCL_ABAPGIT_OBJECT_SXCI IMPLEMENTATION.
            ls_classic_badi_implementation-implementation_data-atime,
            ls_classic_badi_implementation-implementation_data-uname,
            ls_classic_badi_implementation-implementation_data-udate,
-           ls_classic_badi_implementation-implementation_data-utime,
-           ls_classic_badi_implementation-implementation_data-active.
+           ls_classic_badi_implementation-implementation_data-utime.
 
     io_xml->add( iv_name = 'SXCI'
                  ig_data = ls_classic_badi_implementation ).

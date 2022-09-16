@@ -8,20 +8,45 @@ CLASS zcl_abapgit_popups DEFINITION
 
     INTERFACES zif_abapgit_popups .
 
-    CONSTANTS c_default_column TYPE lvc_fname VALUE `DEFAULT_COLUMN` ##NO_TEXT.
+    TYPES:
+      BEGIN OF ty_popup_position,
+        start_column LIKE  sy-cucol,
+        start_row    LIKE  sy-curow,
+        end_column   LIKE  sy-cucol,
+        end_row      LIKE  sy-curow,
+      END OF ty_popup_position.
+
+    CLASS-METHODS center
+      IMPORTING
+        !iv_width          TYPE i
+        !iv_height         TYPE i
+      RETURNING
+        VALUE(rs_position) TYPE ty_popup_position.
+
   PROTECTED SECTION.
   PRIVATE SECTION.
+    CONSTANTS c_default_column TYPE abap_componentdescr-name VALUE `DEFAULT_COLUMN` ##NO_TEXT.
 
     TYPES:
-      ty_sval_tt TYPE STANDARD TABLE OF sval WITH DEFAULT KEY.
+      ty_lt_fields TYPE STANDARD TABLE OF sval WITH DEFAULT KEY .
 
-    CONSTANTS c_fieldname_selected TYPE lvc_fname VALUE `SELECTED` ##NO_TEXT.
+    TYPES:
+      BEGIN OF ty_commit_value_tab,
+        commit   TYPE zif_abapgit_definitions=>ty_sha1,
+        message  TYPE c LENGTH 100,
+        datetime TYPE c LENGTH 20,
+      END OF ty_commit_value_tab.
+    TYPES:
+      ty_commit_value_tab_tt TYPE STANDARD TABLE OF ty_commit_value_tab WITH DEFAULT KEY.
+
+    CONSTANTS c_fieldname_selected TYPE abap_componentdescr-name VALUE `SELECTED` ##NO_TEXT.
     CONSTANTS c_answer_cancel      TYPE c LENGTH 1 VALUE 'A' ##NO_TEXT.
 
     DATA mo_select_list_popup TYPE REF TO cl_salv_table .
     DATA mr_table TYPE REF TO data .
     DATA mv_cancel TYPE abap_bool VALUE abap_false.
     DATA mo_table_descr TYPE REF TO cl_abap_tabledescr .
+    DATA ms_position TYPE ty_popup_position.
 
     METHODS add_field
       IMPORTING
@@ -32,7 +57,7 @@ CLASS zcl_abapgit_popups DEFINITION
         !iv_field_attr TYPE sval-field_attr DEFAULT ''
         !iv_obligatory TYPE spo_obl OPTIONAL
       CHANGING
-        !ct_fields     TYPE ty_sval_tt .
+        !ct_fields     TYPE zif_abapgit_popups=>ty_sval_tt .
     METHODS create_new_table
       IMPORTING
         !it_list TYPE STANDARD TABLE .
@@ -40,52 +65,38 @@ CLASS zcl_abapgit_popups DEFINITION
       EXPORTING
         !et_list TYPE INDEX TABLE .
     METHODS on_select_list_link_click
-          FOR EVENT link_click OF cl_salv_events_table
+      FOR EVENT link_click OF cl_salv_events_table
       IMPORTING
-          !row
-          !column .
+        !row
+        !column .
     METHODS on_select_list_function_click
-          FOR EVENT added_function OF cl_salv_events_table
+      FOR EVENT added_function OF cl_salv_events_table
       IMPORTING
-          !e_salv_function .
+        !e_salv_function .
     METHODS on_double_click
-          FOR EVENT double_click OF cl_salv_events_table
+      FOR EVENT double_click OF cl_salv_events_table
       IMPORTING
-          !row
-          !column .
-    METHODS extract_field_values
-      IMPORTING
-        it_fields           TYPE ty_sval_tt
-      EXPORTING
-        ev_url              TYPE abaptxt255-line
-        ev_package          TYPE tdevc-devclass
-        ev_branch           TYPE textl-line
-        ev_display_name     TYPE trm255-text
-        ev_folder_logic     TYPE string
-        ev_ign_subpkg       TYPE abap_bool
-        ev_master_lang_only TYPE abap_bool.
-    TYPES:
-      ty_lt_fields TYPE STANDARD TABLE OF sval WITH DEFAULT KEY.
+        !row
+        !column .
     METHODS _popup_3_get_values
-      IMPORTING iv_popup_title    TYPE string
-                iv_no_value_check TYPE abap_bool DEFAULT abap_false
-      EXPORTING ev_value_1        TYPE spo_value
-                ev_value_2        TYPE spo_value
-                ev_value_3        TYPE spo_value
-      CHANGING  ct_fields         TYPE ty_lt_fields
-      RAISING   zcx_abapgit_exception.
-    METHODS popup_get_from_free_selections
       IMPORTING
-        iv_title      TYPE zcl_abapgit_free_sel_dialog=>ty_syst_title OPTIONAL
-        iv_frame_text TYPE zcl_abapgit_free_sel_dialog=>ty_syst_title OPTIONAL
+        !iv_popup_title    TYPE string
+        !iv_no_value_check TYPE abap_bool DEFAULT abap_false
+      EXPORTING
+        !ev_value_1        TYPE spo_value
+        !ev_value_2        TYPE spo_value
+        !ev_value_3        TYPE spo_value
       CHANGING
-        ct_fields     TYPE zcl_abapgit_free_sel_dialog=>ty_free_sel_field_tab
+        !ct_fields         TYPE ty_lt_fields
       RAISING
-        zcx_abapgit_cancel
-        zcx_abapgit_exception.
-    METHODS validate_folder_logic
+        zcx_abapgit_exception .
+    METHODS commit_list_build
       IMPORTING
-        iv_folder_logic TYPE string
+        !iv_repo_url    TYPE string
+        !iv_branch_name TYPE string
+      EXPORTING
+        !et_value_tab   TYPE ty_commit_value_tab_tt
+        !et_commits     TYPE zif_abapgit_definitions=>ty_commit_tt
       RAISING
         zcx_abapgit_exception.
 ENDCLASS.
@@ -106,6 +117,83 @@ CLASS zcl_abapgit_popups IMPLEMENTATION.
     <ls_field>-value      = iv_value.
     <ls_field>-field_attr = iv_field_attr.
     <ls_field>-field_obl  = iv_obligatory.
+
+  ENDMETHOD.
+
+
+  METHOD center.
+
+    CONSTANTS:
+      lc_min_size TYPE i VALUE 10,
+      lc_min_pos  TYPE i VALUE 5.
+
+    " Magic math to approximate starting position of popup
+    IF sy-scols > lc_min_size AND iv_width > 0 AND sy-scols > iv_width.
+      rs_position-start_column = nmax(
+        val1 = ( sy-scols - iv_width ) / 2
+        val2 = lc_min_pos ).
+    ELSE.
+      rs_position-start_column = lc_min_pos.
+    ENDIF.
+
+    IF sy-srows > lc_min_size AND iv_height > 0 AND sy-srows > iv_height.
+      rs_position-start_row = nmax(
+        val1 = ( sy-srows - iv_height ) / 2 - 1
+        val2 = lc_min_pos ).
+    ELSE.
+      rs_position-start_row = lc_min_pos.
+    ENDIF.
+
+    rs_position-end_column = rs_position-start_column + iv_width.
+    rs_position-end_row = rs_position-start_row + iv_height.
+
+  ENDMETHOD.
+
+
+  METHOD commit_list_build.
+
+    DATA:
+      lv_unix_time   TYPE zcl_abapgit_time=>ty_unixtime,
+      lv_date        TYPE d,
+      lv_date_string TYPE c LENGTH 12,
+      lv_time        TYPE t,
+      lv_time_string TYPE c LENGTH 10.
+
+    FIELD-SYMBOLS:
+      <ls_commit>    TYPE zif_abapgit_definitions=>ty_commit,
+      <ls_value_tab> TYPE ty_commit_value_tab.
+
+    CLEAR: et_commits, et_value_tab.
+
+    et_commits = zcl_abapgit_git_commit=>get_by_branch( iv_branch_name  = iv_branch_name
+                                                        iv_repo_url     = iv_repo_url
+                                                        iv_deepen_level = 99
+                                                        iv_sorted       = abap_false )-commits.
+
+    IF et_commits IS INITIAL.
+      zcx_abapgit_exception=>raise( |No commits are available in this branch.| ).
+    ENDIF.
+
+    SORT et_commits BY time DESCENDING.
+
+    LOOP AT et_commits ASSIGNING <ls_commit>.
+
+      APPEND INITIAL LINE TO et_value_tab ASSIGNING <ls_value_tab>.
+      <ls_value_tab>-commit  = <ls_commit>-sha1.
+      <ls_value_tab>-message = <ls_commit>-message.
+      lv_unix_time = <ls_commit>-time.
+      zcl_abapgit_time=>get_utc(
+        EXPORTING
+          iv_unix = lv_unix_time
+        IMPORTING
+          ev_time = lv_time
+          ev_date = lv_date ).
+      WRITE: lv_date TO lv_date_string,
+             lv_time TO lv_time_string.
+      <ls_value_tab>-datetime = |{ lv_date_string }, | &&
+                                |{ lv_time_string }|.
+
+    ENDLOOP.
 
   ENDMETHOD.
 
@@ -177,51 +265,6 @@ CLASS zcl_abapgit_popups IMPLEMENTATION.
       ENDCASE.
       INSERT <lg_line> INTO TABLE <lt_table>.
     ENDLOOP.
-
-  ENDMETHOD.
-
-
-  METHOD extract_field_values.
-
-    FIELD-SYMBOLS: <ls_field> LIKE LINE OF it_fields.
-
-    CLEAR: ev_url,
-           ev_package,
-           ev_branch,
-           ev_display_name,
-           ev_folder_logic,
-           ev_ign_subpkg.
-
-    READ TABLE it_fields INDEX 1 ASSIGNING <ls_field>.
-    ASSERT sy-subrc = 0.
-    ev_url = <ls_field>-value.
-
-    READ TABLE it_fields INDEX 2 ASSIGNING <ls_field>.
-    ASSERT sy-subrc = 0.
-    ev_package = <ls_field>-value.
-    TRANSLATE ev_package TO UPPER CASE.
-
-    READ TABLE it_fields INDEX 3 ASSIGNING <ls_field>.
-    ASSERT sy-subrc = 0.
-    ev_branch = <ls_field>-value.
-
-    READ TABLE it_fields INDEX 4 ASSIGNING <ls_field>.
-    ASSERT sy-subrc = 0.
-    ev_display_name = <ls_field>-value.
-
-    READ TABLE it_fields INDEX 5 ASSIGNING <ls_field>.
-    ASSERT sy-subrc = 0.
-    ev_folder_logic = <ls_field>-value.
-    TRANSLATE ev_folder_logic TO UPPER CASE.
-
-    READ TABLE it_fields INDEX 6 ASSIGNING <ls_field>.
-    ASSERT sy-subrc = 0.
-    ev_ign_subpkg = <ls_field>-value.
-    TRANSLATE ev_ign_subpkg TO UPPER CASE.
-
-    READ TABLE it_fields INDEX 7 ASSIGNING <ls_field>.
-    ASSERT sy-subrc = 0.
-    ev_master_lang_only = <ls_field>-value.
 
   ENDMETHOD.
 
@@ -395,33 +438,6 @@ CLASS zcl_abapgit_popups IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD popup_get_from_free_selections.
-    DATA: lo_free_sel_dialog TYPE REF TO zcl_abapgit_free_sel_dialog.
-
-    CREATE OBJECT lo_free_sel_dialog
-      EXPORTING
-        iv_title      = iv_title
-        iv_frame_text = iv_frame_text.
-
-    lo_free_sel_dialog->set_fields( CHANGING ct_fields = ct_fields ).
-    lo_free_sel_dialog->show( ).
-  ENDMETHOD.
-
-
-  METHOD validate_folder_logic.
-
-    IF iv_folder_logic <> zif_abapgit_dot_abapgit=>c_folder_logic-prefix
-        AND iv_folder_logic <> zif_abapgit_dot_abapgit=>c_folder_logic-full.
-
-      zcx_abapgit_exception=>raise( |Invalid folder logic { iv_folder_logic }. |
-                                 && |Choose either { zif_abapgit_dot_abapgit=>c_folder_logic-prefix } |
-                                 && |or { zif_abapgit_dot_abapgit=>c_folder_logic-full } | ).
-
-    ENDIF.
-
-  ENDMETHOD.
-
-
   METHOD zif_abapgit_popups~branch_list_popup.
 
     DATA: lo_branches    TYPE REF TO zcl_abapgit_git_branch_list,
@@ -453,9 +469,9 @@ CLASS zcl_abapgit_popups IMPLEMENTATION.
 
     IF lt_branches IS INITIAL.
       IF iv_hide_head IS NOT INITIAL.
-        lv_text = 'master'.
+        lv_text = 'main'.
       ENDIF.
-      IF iv_hide_branch IS NOT INITIAL AND iv_hide_branch <> zif_abapgit_definitions=>c_git_branch-master.
+      IF iv_hide_branch IS NOT INITIAL AND iv_hide_branch <> zif_abapgit_definitions=>c_git_branch-main.
         IF lv_text IS INITIAL.
           lv_text = iv_hide_branch && ' is'.
         ELSE.
@@ -513,12 +529,16 @@ CLASS zcl_abapgit_popups IMPLEMENTATION.
       <ls_sel>-varoption = zif_abapgit_popups=>c_new_branch_label.
     ENDIF.
 
+    ms_position = center(
+      iv_width  = 30
+      iv_height = lines( lt_selection ) ).
+
     CALL FUNCTION 'POPUP_TO_DECIDE_LIST'
       EXPORTING
-        textline1  = 'Select branch'
-        titel      = 'Select branch'
-        start_col  = 30
-        start_row  = 5
+        titel      = 'Select Branch'
+        textline1  = 'Select a branch'
+        start_col  = ms_position-start_column
+        start_row  = ms_position-start_row
         cursorline = lv_default
       IMPORTING
         answer     = lv_answer
@@ -636,14 +656,17 @@ CLASS zcl_abapgit_popups IMPLEMENTATION.
       APPEND INITIAL LINE TO lt_selection ASSIGNING <ls_sel>.
       <ls_sel>-varoption = |{ <ls_pull>-number } - { <ls_pull>-title } @{ <ls_pull>-user }|.
     ENDLOOP.
-    SORT lt_selection BY varoption DESCENDING.
+
+    ms_position = center(
+      iv_width  = 74
+      iv_height = lines( lt_selection ) ).
 
     CALL FUNCTION 'POPUP_TO_DECIDE_LIST'
       EXPORTING
         textline1 = 'Select pull request'
         titel     = 'Select pull request'
-        start_col = 30
-        start_row = 5
+        start_col = ms_position-start_column
+        start_row = ms_position-start_row
       IMPORTING
         answer    = lv_answer
       TABLES
@@ -662,6 +685,64 @@ CLASS zcl_abapgit_popups IMPLEMENTATION.
     ASSERT sy-subrc = 0.
 
     READ TABLE it_pulls INTO rs_pull INDEX sy-tabix.
+    ASSERT sy-subrc = 0.
+
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_popups~commit_list_popup.
+
+    DATA:
+      lt_commits         TYPE zif_abapgit_definitions=>ty_commit_tt,
+      lt_value_tab       TYPE ty_commit_value_tab_tt,
+      lt_selected_values TYPE ty_commit_value_tab_tt,
+      lt_columns         TYPE zif_abapgit_definitions=>ty_alv_column_tt.
+
+    FIELD-SYMBOLS:
+      <ls_value_tab> TYPE ty_commit_value_tab,
+      <ls_column>    TYPE zif_abapgit_definitions=>ty_alv_column.
+
+    commit_list_build(
+      EXPORTING
+        iv_branch_name = iv_branch_name
+        iv_repo_url    = iv_repo_url
+      IMPORTING
+        et_value_tab   = lt_value_tab
+        et_commits     = lt_commits ).
+
+    APPEND INITIAL LINE TO lt_columns ASSIGNING <ls_column>.
+    <ls_column>-name   = 'COMMIT'.
+    <ls_column>-text   = 'Hash'.
+    <ls_column>-length = 8.
+    APPEND INITIAL LINE TO lt_columns ASSIGNING <ls_column>.
+    <ls_column>-name = 'MESSAGE'.
+    <ls_column>-text = 'Message'.
+    <ls_column>-length = 60.
+    APPEND INITIAL LINE TO lt_columns ASSIGNING <ls_column>.
+    <ls_column>-name = 'DATETIME'.
+    <ls_column>-text = 'Datetime'.
+    <ls_column>-length = 17.
+
+    zif_abapgit_popups~popup_to_select_from_list(
+      EXPORTING
+        it_list               = lt_value_tab
+        iv_title              = |Select a commit|
+        iv_end_column         = 100
+        iv_striped_pattern    = abap_true
+        iv_optimize_col_width = abap_false
+        iv_selection_mode     = if_salv_c_selection_mode=>single
+        it_columns_to_display = lt_columns
+      IMPORTING
+        et_list               = lt_selected_values ).
+
+    IF lt_selected_values IS INITIAL.
+      RAISE EXCEPTION TYPE zcx_abapgit_cancel.
+    ENDIF.
+
+    READ TABLE lt_selected_values ASSIGNING <ls_value_tab> INDEX 1.
+    ASSERT sy-subrc = 0.
+
+    READ TABLE lt_commits INTO rs_commit WITH KEY sha1 = <ls_value_tab>-commit.
     ASSERT sy-subrc = 0.
 
   ENDMETHOD.
@@ -726,174 +807,6 @@ CLASS zcl_abapgit_popups IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_popups~popup_object.
-
-    DATA: lt_fields      TYPE TABLE OF sval.
-    DATA: lv_object_type TYPE spo_value.
-    DATA: lv_object_name TYPE spo_value.
-
-    CLEAR: rs_tadir-object, rs_tadir-obj_name.
-
-    add_field( EXPORTING iv_tabname   = 'TADIR'
-                         iv_fieldname = 'OBJECT'
-                         iv_fieldtext = 'Type'
-               CHANGING ct_fields     = lt_fields ).
-
-    add_field( EXPORTING iv_tabname   = 'TADIR'
-                         iv_fieldname = 'OBJ_NAME'
-                         iv_fieldtext = 'Name'
-               CHANGING ct_fields     = lt_fields ).
-
-    _popup_3_get_values( EXPORTING iv_popup_title    = 'Object'
-                                   iv_no_value_check = abap_true
-                         IMPORTING ev_value_1        = lv_object_type
-                                   ev_value_2        = lv_object_name
-                         CHANGING  ct_fields         = lt_fields ).
-
-    rs_tadir = zcl_abapgit_factory=>get_tadir( )->read_single(
-      iv_object   = to_upper( lv_object_type )
-      iv_obj_name = to_upper( lv_object_name ) ).
-
-  ENDMETHOD.
-
-
-  METHOD zif_abapgit_popups~popup_package_export.
-
-    DATA: lt_fields       TYPE TABLE OF sval.
-    DATA: lv_package      TYPE spo_value.
-    DATA: lv_folder_logic TYPE spo_value.
-    DATA: lv_serialize_master_lang_only TYPE spo_value.
-
-    add_field( EXPORTING iv_tabname   = 'TDEVC'
-                         iv_fieldname = 'DEVCLASS'
-                         iv_fieldtext = 'Package'
-               CHANGING  ct_fields    = lt_fields ).
-
-    add_field( EXPORTING iv_tabname   = 'TDEVC'
-                         iv_fieldname = 'INTSYS'
-                         iv_fieldtext = 'Folder logic'
-                         iv_value     = 'PREFIX'
-               CHANGING  ct_fields    = lt_fields ).
-
-    add_field( EXPORTING iv_tabname   = 'TVDIR'
-                         iv_fieldname = 'FLAG'
-                         iv_fieldtext = 'Master lang only'
-               CHANGING  ct_fields    = lt_fields ).
-
-    TRY.
-
-        _popup_3_get_values( EXPORTING iv_popup_title    = 'Export package'
-                                       iv_no_value_check = abap_true
-                             IMPORTING ev_value_1        = lv_package
-                                       ev_value_2        = lv_folder_logic
-                                       ev_value_3        = lv_serialize_master_lang_only
-                             CHANGING  ct_fields         = lt_fields ).
-
-        ev_package = to_upper( lv_package ).
-        ev_folder_logic = to_upper( lv_folder_logic ).
-        ev_serialize_master_lang_only = boolc( lv_serialize_master_lang_only IS NOT INITIAL ).
-
-      CATCH zcx_abapgit_cancel.
-    ENDTRY.
-
-  ENDMETHOD.
-
-
-  METHOD zif_abapgit_popups~popup_perf_test_parameters.
-    DATA: lt_fields TYPE zcl_abapgit_free_sel_dialog=>ty_free_sel_field_tab.
-    FIELD-SYMBOLS: <ls_field> TYPE zcl_abapgit_free_sel_dialog=>ty_free_sel_field.
-
-    APPEND INITIAL LINE TO lt_fields ASSIGNING <ls_field>.
-    <ls_field>-name = 'PACKAGE'.
-    <ls_field>-only_parameter = abap_true.
-    <ls_field>-ddic_tabname = 'TADIR'.
-    <ls_field>-ddic_fieldname = 'DEVCLASS'.
-    <ls_field>-param_obligatory = abap_true.
-    <ls_field>-value = cv_package.
-
-    APPEND INITIAL LINE TO lt_fields ASSIGNING <ls_field>.
-    <ls_field>-name = 'PGMID'.
-    <ls_field>-only_parameter = abap_true.
-    <ls_field>-ddic_tabname = 'TADIR'.
-    <ls_field>-ddic_fieldname = 'PGMID'.
-    <ls_field>-value = 'R3TR'.
-
-    APPEND INITIAL LINE TO lt_fields ASSIGNING <ls_field>.
-    <ls_field>-name = 'OBJECT'.
-    <ls_field>-ddic_tabname = 'TADIR'.
-    <ls_field>-ddic_fieldname = 'OBJECT'.
-
-    APPEND INITIAL LINE TO lt_fields ASSIGNING <ls_field>.
-    <ls_field>-name = 'OBJ_NAME'.
-    <ls_field>-ddic_tabname = 'TADIR'.
-    <ls_field>-ddic_fieldname = 'OBJ_NAME'.
-
-    APPEND INITIAL LINE TO lt_fields ASSIGNING <ls_field>.
-    <ls_field>-name = 'INCLUDE_SUB_PACKAGES'.
-    <ls_field>-only_parameter = abap_true.
-    <ls_field>-ddic_tabname = 'TDEVC'.
-    <ls_field>-ddic_fieldname = 'IS_ENHANCEABLE'.
-    <ls_field>-text = 'Include subpackages'.
-    <ls_field>-value = cv_include_sub_packages.
-
-    APPEND INITIAL LINE TO lt_fields ASSIGNING <ls_field>.
-    <ls_field>-name = 'MASTER_LANG_ONLY'.
-    <ls_field>-only_parameter = abap_true.
-    <ls_field>-ddic_tabname = 'TVDIR'.
-    <ls_field>-ddic_fieldname = 'FLAG'.
-    <ls_field>-text = 'Master lang only'.
-    <ls_field>-value = cv_serialize_master_lang_only.
-
-    popup_get_from_free_selections(
-      EXPORTING
-        iv_title       = 'Serialization Performance Test Parameters'
-        iv_frame_text  = 'Parameters'
-      CHANGING
-        ct_fields      = lt_fields ).
-
-    LOOP AT lt_fields ASSIGNING <ls_field>.
-      CASE <ls_field>-name.
-        WHEN 'PACKAGE'.
-          cv_package = <ls_field>-value.
-        WHEN 'OBJECT'.
-          et_object_type_filter = <ls_field>-value_range.
-        WHEN 'OBJ_NAME'.
-          et_object_name_filter = <ls_field>-value_range.
-        WHEN 'INCLUDE_SUB_PACKAGES'.
-          cv_include_sub_packages = boolc( <ls_field>-value IS NOT INITIAL ).
-        WHEN 'MASTER_LANG_ONLY'.
-          cv_serialize_master_lang_only = boolc( <ls_field>-value IS NOT INITIAL ).
-      ENDCASE.
-    ENDLOOP.
-  ENDMETHOD.
-
-
-  METHOD zif_abapgit_popups~popup_proxy_bypass.
-    rt_proxy_bypass = it_proxy_bypass.
-    CALL FUNCTION 'COMPLEX_SELECTIONS_DIALOG'
-      EXPORTING
-        title             = 'Bypass proxy settings for these Hosts & Domains'
-        signed            = abap_false
-        lower_case        = abap_true
-        no_interval_check = abap_true
-      TABLES
-        range             = rt_proxy_bypass
-      EXCEPTIONS
-        no_range_tab      = 1
-        cancelled         = 2
-        internal_error    = 3
-        invalid_fieldname = 4
-        OTHERS            = 5.
-    CASE sy-subrc.
-      WHEN 0.
-      WHEN 2.
-        RAISE EXCEPTION TYPE zcx_abapgit_cancel.
-      WHEN OTHERS.
-        zcx_abapgit_exception=>raise( 'Error from COMPLEX_SELECTIONS_DIALOG' ).
-    ENDCASE.
-  ENDMETHOD.
-
-
   METHOD zif_abapgit_popups~popup_search_help.
 
     DATA lt_ret TYPE TABLE OF ddshretval.
@@ -919,15 +832,86 @@ CLASS zcl_abapgit_popups IMPLEMENTATION.
     ENDIF.
 
     IF lines( lt_ret ) > 0.
-      READ TABLE lt_ret INDEX 1 INTO ls_ret.
-      ASSERT sy-subrc = 0.
-      rv_value = ls_ret-fieldval.
+      READ TABLE lt_ret WITH KEY fieldname = lv_fieldname INTO ls_ret.
+      IF sy-subrc = 0.
+        rv_value = ls_ret-fieldval.
+      ELSE.
+        READ TABLE lt_ret INDEX 1 INTO ls_ret.
+        ASSERT sy-subrc = 0.
+        rv_value = ls_ret-fieldval.
+      ENDIF.
     ENDIF.
 
   ENDMETHOD.
 
 
+  METHOD zif_abapgit_popups~popup_select_tr_requests.
+    DATA ls_r_trkorr TYPE LINE OF zif_abapgit_definitions=>ty_trrngtrkor_tt.
+    DATA lr_request TYPE REF TO trwbo_request_header.
+    DATA lt_request TYPE trwbo_request_headers.
+
+    ms_position = center(
+      iv_width  = 120
+      iv_height = 10 ).
+
+    CALL FUNCTION 'TRINT_SELECT_REQUESTS'
+      EXPORTING
+        iv_username_pattern    = iv_username_pattern
+        is_selection           = is_selection
+        iv_complete_projects   = abap_false
+        is_popup               = ms_position
+        iv_via_selscreen       = 'X'
+        iv_title               = iv_title
+      IMPORTING
+        et_requests            = lt_request
+      EXCEPTIONS
+        action_aborted_by_user = 1
+        OTHERS                 = 2.
+    IF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise( 'Selection canceled' ).
+    ENDIF.
+
+    IF lt_request IS INITIAL.
+      zcx_abapgit_exception=>raise( 'No Request Found' ).
+    ENDIF.
+
+    LOOP AT lt_request REFERENCE INTO lr_request.
+      ls_r_trkorr-sign = 'I'.
+      ls_r_trkorr-option = 'EQ'.
+      ls_r_trkorr-low = lr_request->trkorr.
+      INSERT ls_r_trkorr INTO TABLE rt_r_trkorr.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_popups~popup_select_wb_tc_tr_and_tsk.
+    DATA ls_selection  TYPE trwbo_selection.
+    DATA lv_title TYPE trwbo_title.
+
+    ls_selection-trkorrpattern = space.
+    ls_selection-connect_req_task_conditions = 'X'.
+    ls_selection-reqfunctions = 'KTRXS'.
+    ls_selection-reqstatus = 'RNODL'.
+    ls_selection-taskstatus = 'RNODL'.
+    CONDENSE ls_selection-reqfunctions NO-GAPS.
+    ls_selection-taskfunctions = 'QRSX'.
+    CONCATENATE sy-sysid '*' INTO ls_selection-trkorrpattern.
+
+    lv_title = 'Select Transports / Tasks'.
+
+    rt_r_trkorr = zif_abapgit_popups~popup_select_tr_requests(
+      is_selection        = ls_selection
+      iv_title            = lv_title
+      iv_username_pattern = '*' ).
+  ENDMETHOD.
+
+
   METHOD zif_abapgit_popups~popup_to_confirm.
+
+    ms_position = center(
+      iv_width  = 65
+      iv_height = 5 ).
 
     CALL FUNCTION 'POPUP_TO_CONFIRM'
       EXPORTING
@@ -939,6 +923,8 @@ CLASS zcl_abapgit_popups IMPLEMENTATION.
         icon_button_2         = iv_icon_button_2
         default_button        = iv_default_button
         display_cancel_button = iv_display_cancel_button
+        start_column          = ms_position-start_column
+        start_row             = ms_position-start_row
       IMPORTING
         answer                = rv_answer
       EXCEPTIONS
@@ -1004,40 +990,21 @@ CLASS zcl_abapgit_popups IMPLEMENTATION.
                          iv_fieldname = 'LINE'
                          iv_fieldtext = 'Branch name'
                          iv_value     = lv_transports_as_text
-               CHANGING ct_fields     = lt_fields ).
+               CHANGING  ct_fields    = lt_fields ).
 
     add_field( EXPORTING iv_tabname   = 'ABAPTXT255'
                          iv_fieldname = 'LINE'
                          iv_fieldtext = 'Commit text'
                          iv_value     = lv_desc_as_text
-               CHANGING ct_fields     = lt_fields ).
+               CHANGING  ct_fields    = lt_fields ).
 
-    _popup_3_get_values( EXPORTING iv_popup_title    = 'Transport to new Branch'
-                         IMPORTING ev_value_1        = lv_branch_name
-                                   ev_value_2        = lv_commit_text
-                         CHANGING  ct_fields         = lt_fields ).
+    _popup_3_get_values( EXPORTING iv_popup_title = 'Transport to new Branch'
+                         IMPORTING ev_value_1     = lv_branch_name
+                                   ev_value_2     = lv_commit_text
+                         CHANGING  ct_fields      = lt_fields ).
 
     rs_transport_branch-branch_name = lv_branch_name.
     rs_transport_branch-commit_text = lv_commit_text.
-
-  ENDMETHOD.
-
-
-  METHOD zif_abapgit_popups~popup_to_inform.
-
-    DATA: lv_line1 TYPE c LENGTH 70,
-          lv_line2 TYPE c LENGTH 70.
-
-    lv_line1 = iv_text_message.
-    IF strlen( iv_text_message ) > 70.
-      lv_line2 = iv_text_message+70.
-    ENDIF.
-
-    CALL FUNCTION 'POPUP_TO_INFORM'
-      EXPORTING
-        titel = iv_titlebar
-        txt1  = lv_line1
-        txt2  = lv_line2.
 
   ENDMETHOD.
 
@@ -1062,9 +1029,13 @@ CLASS zcl_abapgit_popups IMPLEMENTATION.
     ASSIGN mr_table->* TO <lt_table>.
     ASSERT sy-subrc = 0.
 
+    ms_position = center(
+      iv_width  = iv_end_column - iv_start_column
+      iv_height = iv_end_line - iv_start_line ).
+
     TRY.
         cl_salv_table=>factory( IMPORTING r_salv_table = mo_select_list_popup
-                                CHANGING  t_table = <lt_table> ).
+                                CHANGING  t_table      = <lt_table> ).
 
         CASE iv_selection_mode.
           WHEN if_salv_c_selection_mode=>single.
@@ -1076,12 +1047,12 @@ CLASS zcl_abapgit_popups IMPLEMENTATION.
         ENDCASE.
 
         mo_select_list_popup->set_screen_status( pfstatus = lv_pfstatus
-                                                 report = 'SAPMSVIM' ).
+                                                 report   = 'SAPMSVIM' ).
 
-        mo_select_list_popup->set_screen_popup( start_column = iv_start_column
-                                                end_column   = iv_end_column
-                                                start_line   = iv_start_line
-                                                end_line     = iv_end_line ).
+        mo_select_list_popup->set_screen_popup( start_column = ms_position-start_column
+                                                end_column   = ms_position-end_column
+                                                start_line   = ms_position-start_row
+                                                end_line     = ms_position-end_row ).
 
         lo_events = mo_select_list_popup->get_event( ).
 
@@ -1137,6 +1108,10 @@ CLASS zcl_abapgit_popups IMPLEMENTATION.
                 lo_column->set_output_length( <ls_column_to_display>-length ).
               ENDIF.
 
+              IF <ls_column_to_display>-show_icon = abap_true.
+                lo_column->set_icon( abap_true ).
+              ENDIF.
+
             WHEN OTHERS.
               " Hide column
               lo_column->set_technical( abap_true ).
@@ -1187,13 +1162,24 @@ CLASS zcl_abapgit_popups IMPLEMENTATION.
 
   METHOD zif_abapgit_popups~popup_transport_request.
 
-    DATA: lt_e071  TYPE STANDARD TABLE OF e071,
-          lt_e071k TYPE STANDARD TABLE OF e071k.
+    DATA: lt_e071    TYPE STANDARD TABLE OF e071,
+          lt_e071k   TYPE STANDARD TABLE OF e071k,
+          lv_order   TYPE trkorr,
+          ls_e070use TYPE e070use.
+
+    " If default transport is set and its type matches, then use it as default for the popup
+    ls_e070use = zcl_abapgit_default_transport=>get_instance( )->get( ).
+
+    IF ( ls_e070use-trfunction = is_transport_type-request OR ls_e070use-trfunction IS INITIAL )
+      AND iv_use_default_transport = abap_true.
+      lv_order = ls_e070use-ordernum.
+    ENDIF.
 
     CALL FUNCTION 'TRINT_ORDER_CHOICE'
       EXPORTING
         wi_order_type          = is_transport_type-request
         wi_task_type           = is_transport_type-task
+        wi_order               = lv_order
       IMPORTING
         we_order               = rv_transport
       TABLES
@@ -1210,170 +1196,81 @@ CLASS zcl_abapgit_popups IMPLEMENTATION.
     IF sy-subrc = 1.
       RAISE EXCEPTION TYPE zcx_abapgit_cancel.
     ELSEIF sy-subrc > 1.
-      zcx_abapgit_exception=>raise( |Error from TRINT_ORDER_CHOICE { sy-subrc }| ).
+      zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
 
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_popups~repo_popup.
+  METHOD zif_abapgit_popups~tag_list_popup.
 
-    DATA: lv_returncode       TYPE c,
-          lv_icon_ok          TYPE icon-name,
-          lv_icon_br          TYPE icon-name,
-          lt_fields           TYPE TABLE OF sval,
-          lv_uattr            TYPE spo_fattr,
-          lv_pattr            TYPE spo_fattr,
-          lv_button2          TYPE svalbutton-buttontext,
-          lv_icon2            TYPE icon-name,
-          lv_package          TYPE tdevc-devclass,
-          lv_url              TYPE abaptxt255-line,
-          lv_branch           TYPE textl-line,
-          lv_display_name     TYPE trm255-text,
-          lv_folder_logic     TYPE string,
-          lv_ign_subpkg       TYPE abap_bool,
-          lv_finished         TYPE abap_bool,
-          lv_master_lang_only TYPE abap_bool,
-          lx_error            TYPE REF TO zcx_abapgit_exception.
+    DATA: lo_branches  TYPE REF TO zcl_abapgit_git_branch_list,
+          lt_tags      TYPE zif_abapgit_definitions=>ty_git_branch_list_tt,
+          ls_branch    TYPE zif_abapgit_definitions=>ty_git_branch,
+          lv_answer    TYPE c LENGTH 1,
+          lv_default   TYPE i,
+          lv_tag       TYPE string,
+          lt_selection TYPE TABLE OF spopli.
 
-    IF iv_freeze_url = abap_true.
-      lv_uattr = '05'.
+    FIELD-SYMBOLS: <ls_sel> LIKE LINE OF lt_selection,
+                   <ls_tag> LIKE LINE OF lt_tags.
+
+
+    lo_branches = zcl_abapgit_git_transport=>branches( iv_url ).
+    lt_tags     = lo_branches->get_tags_only( ).
+
+    LOOP AT lt_tags ASSIGNING <ls_tag> WHERE name NP '*^{}'.
+
+      APPEND INITIAL LINE TO lt_selection ASSIGNING <ls_sel>.
+      <ls_sel>-varoption = zcl_abapgit_git_tag=>remove_tag_prefix( <ls_tag>-name ).
+
+    ENDLOOP.
+
+    IF lt_selection IS INITIAL.
+      zcx_abapgit_exception=>raise( 'No tags are available to select' ).
     ENDIF.
 
-    IF iv_freeze_package = abap_true.
-      lv_pattr = '05'.
+    ms_position = center(
+      iv_width  = 30
+      iv_height = lines( lt_selection ) ).
+
+    CALL FUNCTION 'POPUP_TO_DECIDE_LIST'
+      EXPORTING
+        titel      = 'Select Tag'
+        textline1  = 'Select a tag'
+        start_col  = ms_position-start_column
+        start_row  = ms_position-start_row
+        cursorline = lv_default
+      IMPORTING
+        answer     = lv_answer
+      TABLES
+        t_spopli   = lt_selection
+      EXCEPTIONS
+        OTHERS     = 1.
+    IF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise( 'Error from POPUP_TO_DECIDE_LIST' ).
     ENDIF.
 
-    IF iv_package IS INITIAL. " Empty package -> can be created
-      lv_button2 = 'Create package'.
-      lv_icon2   = icon_folder.
+    IF lv_answer = c_answer_cancel.
+      RETURN.
     ENDIF.
 
-    lv_display_name = iv_display_name.
-    lv_package = iv_package.
-    lv_url     = iv_url.
-    lv_branch  = iv_branch.
+    READ TABLE lt_selection ASSIGNING <ls_sel> WITH KEY selflag = abap_true.
+    ASSERT sy-subrc = 0.
 
-    WHILE lv_finished = abap_false.
+    lv_tag = zcl_abapgit_git_tag=>add_tag_prefix( <ls_sel>-varoption ).
 
-      CLEAR: lt_fields.
+    READ TABLE lt_tags WITH KEY name_key COMPONENTS name = lv_tag ASSIGNING <ls_tag>.
+    IF sy-subrc <> 0.
+      " tag name longer than 65 characters
+      LOOP AT lt_tags ASSIGNING <ls_tag> WHERE name CS lv_tag.
+        EXIT.
+      ENDLOOP.
+    ENDIF.
+    ASSERT <ls_tag> IS ASSIGNED.
 
-      add_field( EXPORTING iv_tabname    = 'ABAPTXT255'
-                           iv_fieldname  = 'LINE'
-                           iv_fieldtext  = 'Git clone URL'
-                           iv_value      = lv_url
-                           iv_field_attr = lv_uattr
-                 CHANGING ct_fields      = lt_fields ).
-
-      add_field( EXPORTING iv_tabname    = 'TDEVC'
-                           iv_fieldname  = 'DEVCLASS'
-                           iv_fieldtext  = 'Package'
-                           iv_value      = lv_package
-                           iv_field_attr = lv_pattr
-                 CHANGING ct_fields      = lt_fields ).
-
-      add_field( EXPORTING iv_tabname    = 'TEXTL'
-                           iv_fieldname  = 'LINE'
-                           iv_fieldtext  = 'Branch'
-                           iv_value      = lv_branch
-                           iv_field_attr = '05'
-                 CHANGING ct_fields      = lt_fields ).
-
-      add_field( EXPORTING iv_tabname    = 'TRM255'
-                           iv_fieldname  = 'TEXT'
-                           iv_fieldtext  = 'Display name (opt.)'
-                           iv_value      = lv_display_name
-                 CHANGING ct_fields      = lt_fields ).
-
-      add_field( EXPORTING iv_tabname    = 'TADIR'
-                           iv_fieldname  = 'AUTHOR'
-                           iv_fieldtext  = 'Folder logic'
-                           iv_obligatory = abap_true
-                           iv_value      = zif_abapgit_dot_abapgit=>c_folder_logic-prefix
-                 CHANGING ct_fields      = lt_fields ).
-
-      add_field( EXPORTING iv_tabname    = 'TDEVC'
-                           iv_fieldname  = 'IS_ENHANCEABLE'
-                           iv_fieldtext  = 'Ignore subpackages'
-                           iv_value      = abap_false
-                 CHANGING ct_fields      = lt_fields ).
-
-      add_field( EXPORTING iv_tabname    = 'DOKIL'
-                           iv_fieldname  = 'MASTERLANG'
-                           iv_fieldtext  = 'Master language only'
-                           iv_value      = abap_true
-                  CHANGING ct_fields     = lt_fields ).
-
-      lv_icon_ok  = icon_okay.
-      lv_icon_br  = icon_workflow_fork.
-
-      CALL FUNCTION 'POPUP_GET_VALUES_USER_BUTTONS'
-        EXPORTING
-          popup_title       = iv_title
-          programname       = sy-cprog
-          formname          = 'BRANCH_POPUP'
-          ok_pushbuttontext = 'OK'
-          icon_ok_push      = lv_icon_ok
-          first_pushbutton  = 'Select branch'
-          icon_button_1     = lv_icon_br
-          second_pushbutton = lv_button2
-          icon_button_2     = lv_icon2
-        IMPORTING
-          returncode        = lv_returncode
-        TABLES
-          fields            = lt_fields
-        EXCEPTIONS
-          error_in_fields   = 1
-          OTHERS            = 2.
-
-      IF sy-subrc <> 0.
-        zcx_abapgit_exception=>raise( 'Error from POPUP_GET_VALUES' ).
-      ENDIF.
-
-      IF lv_returncode = c_answer_cancel.
-        rs_popup-cancel = abap_true.
-        RETURN.
-      ENDIF.
-
-      extract_field_values(
-        EXPORTING
-          it_fields       = lt_fields
-        IMPORTING
-          ev_url          = lv_url
-          ev_package      = lv_package
-          ev_branch       = lv_branch
-          ev_display_name = lv_display_name
-          ev_folder_logic = lv_folder_logic
-          ev_ign_subpkg   = lv_ign_subpkg
-          ev_master_lang_only = lv_master_lang_only ).
-
-      lv_finished = abap_true.
-
-      TRY.
-          IF iv_freeze_url = abap_false.
-            zcl_abapgit_url=>validate( |{ lv_url }| ).
-          ENDIF.
-          IF iv_freeze_package = abap_false.
-            zcl_abapgit_repo_srv=>get_instance( )->validate_package( iv_package    = lv_package
-                                                                     iv_ign_subpkg = lv_ign_subpkg
-                                                                     iv_chk_exists = abap_false ).
-          ENDIF.
-          validate_folder_logic( lv_folder_logic ).
-        CATCH zcx_abapgit_exception INTO lx_error.
-          MESSAGE lx_error TYPE 'S' DISPLAY LIKE 'E'.
-          " in case of validation errors we display the popup again
-          CLEAR lv_finished.
-      ENDTRY.
-
-    ENDWHILE.
-
-    rs_popup-url                = lv_url.
-    rs_popup-package            = lv_package.
-    rs_popup-branch_name        = lv_branch.
-    rs_popup-display_name       = lv_display_name.
-    rs_popup-folder_logic       = lv_folder_logic.
-    rs_popup-ign_subpkg         = lv_ign_subpkg.
-    rs_popup-master_lang_only   = lv_master_lang_only.
+    ls_branch = lo_branches->find_by_name( <ls_tag>-name ).
+    MOVE-CORRESPONDING ls_branch TO rs_tag.
 
   ENDMETHOD.
 
@@ -1383,10 +1280,16 @@ CLASS zcl_abapgit_popups IMPLEMENTATION.
     DATA lv_answer TYPE c LENGTH 1.
     FIELD-SYMBOLS: <ls_field> TYPE sval.
 
+    ms_position = center(
+      iv_width  = 120
+      iv_height = lines( ct_fields ) ).
+
     CALL FUNCTION 'POPUP_GET_VALUES'
       EXPORTING
         no_value_check = iv_no_value_check
         popup_title    = iv_popup_title
+        start_column   = ms_position-start_column
+        start_row      = ms_position-start_row
       IMPORTING
         returncode     = lv_answer
       TABLES

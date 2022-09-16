@@ -196,7 +196,7 @@ CLASS zcl_abapgit_object_udmo IMPLEMENTATION.
     " You are reminded that SUDM - Data Model has no part objects e.g. no LIMU
     " Therefore global lock is always appropriate
 
-    " You are reminded that the master language (in TADIR) is taken from MV_LANGUAGE.
+    " You are reminded that the main language (in TADIR) is taken from MV_LANGUAGE.
 
     CALL FUNCTION 'RS_CORR_INSERT'
       EXPORTING
@@ -204,7 +204,7 @@ CLASS zcl_abapgit_object_udmo IMPLEMENTATION.
         object_class        = c_transport_object_class
         devclass            = iv_package
         master_language     = mv_language
-        mode                = 'INSERT'
+        mode                = 'I'
         global_lock         = abap_true
         suppress_dialog     = abap_true
       EXCEPTIONS
@@ -215,7 +215,7 @@ CLASS zcl_abapgit_object_udmo IMPLEMENTATION.
     IF sy-subrc = 1.
       zcx_abapgit_exception=>raise( 'Cancelled' ).
     ELSEIF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'Error from RS_CORR_INSERT' ).
+      zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
   ENDMETHOD.
 
@@ -233,10 +233,9 @@ CLASS zcl_abapgit_object_udmo IMPLEMENTATION.
 
       CALL FUNCTION 'SDU_DMO_ENT_PUT'
         EXPORTING
-          object   = ls_udmo_entity
+          object = ls_udmo_entity
         EXCEPTIONS
-          ret_code = 0
-          OTHERS   = 0.
+          OTHERS = 0.
 
     ENDLOOP.
 
@@ -415,11 +414,10 @@ CLASS zcl_abapgit_object_udmo IMPLEMENTATION.
     SELECT * FROM dm41s
       INTO TABLE lt_udmo_entities
       WHERE dmoid = mv_data_model
-      AND as4local = mv_activation_state.
-
+      AND as4local = mv_activation_state
+      ORDER BY PRIMARY KEY.
 
     LOOP AT lt_udmo_entities ASSIGNING <ls_udmo_entity>.
-
       " You are reminded that administrative information, such as last changed by user, date, time is not serialised.
       CLEAR <ls_udmo_entity>-lstuser.
       CLEAR <ls_udmo_entity>-lstdate.
@@ -427,7 +425,6 @@ CLASS zcl_abapgit_object_udmo IMPLEMENTATION.
       CLEAR <ls_udmo_entity>-fstuser.
       CLEAR <ls_udmo_entity>-fstdate.
       CLEAR <ls_udmo_entity>-fsttime.
-
     ENDLOOP.
 
     " You are reminded that descriptions in other languages do not have to be in existence, although they may.
@@ -443,7 +440,7 @@ CLASS zcl_abapgit_object_udmo IMPLEMENTATION.
 
     " The model has short texts in multiple languages. These are held in DM40T.
 
-    " The model has a long description also in a master language, with other long descriptions
+    " The model has a long description also in a main language, with other long descriptions
     " maintained as translations using SE63 Translation Editor. All of these long texts are held in DOK*
 
     TYPES BEGIN OF ty_language_type.
@@ -736,19 +733,11 @@ CLASS zcl_abapgit_object_udmo IMPLEMENTATION.
     <ls_bdcdata>-fnam = 'RSUD3-OBJ_KEY'.
     <ls_bdcdata>-fval = ms_item-obj_name.
 
-    CALL FUNCTION 'ABAP4_CALL_TRANSACTION'
-      STARTING NEW TASK 'GIT'
-      EXPORTING
-        tcode                 = 'SD11'
-        mode_val              = 'E'
-      TABLES
-        using_tab             = lt_bdcdata
-      EXCEPTIONS
-        system_failure        = 1
-        communication_failure = 2
-        resource_failure      = 3
-        OTHERS                = 4
-        ##fm_subrc_ok.                                                   "#EC CI_SUBRC
+    zcl_abapgit_ui_factory=>get_gui_jumper( )->jump_batch_input(
+      iv_tcode   = 'SD11'
+      it_bdcdata = lt_bdcdata ).
+
+    rv_exit = abap_true.
 
   ENDMETHOD.
 

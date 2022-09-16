@@ -8,9 +8,6 @@ CLASS zcl_abapgit_object_sicf DEFINITION
 
     INTERFACES zif_abapgit_object .
 
-    ALIASES mo_files
-      FOR zif_abapgit_object~mo_files .
-
     TYPES: ty_hash TYPE c LENGTH 25.
 
     CLASS-METHODS read_tadir_sicf
@@ -83,7 +80,7 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_OBJECT_SICF IMPLEMENTATION.
+CLASS zcl_abapgit_object_sicf IMPLEMENTATION.
 
 
   METHOD change_sicf.
@@ -147,7 +144,7 @@ CLASS ZCL_ABAPGIT_OBJECT_SICF IMPLEMENTATION.
         no_authority              = 26
         OTHERS                    = 27 ).
     IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( |SICF - error from change_node. Subrc = { sy-subrc }| ).
+      zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
 
   ENDMETHOD.
@@ -169,7 +166,7 @@ CLASS ZCL_ABAPGIT_OBJECT_SICF IMPLEMENTATION.
         no_authority          = 5
         OTHERS                = 6 ).
     IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( |SICF - error from service_from_url. Subrc = { sy-subrc }| ).
+      zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
 
   ENDMETHOD.
@@ -232,7 +229,7 @@ CLASS ZCL_ABAPGIT_OBJECT_SICF IMPLEMENTATION.
         no_authority              = 26
         OTHERS                    = 27 ).
     IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( |SICF - error from insert_node: { sy-subrc }| ).
+      zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
 
   ENDMETHOD.
@@ -270,7 +267,7 @@ CLASS ZCL_ABAPGIT_OBJECT_SICF IMPLEMENTATION.
         no_authority      = 4
         OTHERS            = 5 ).
     IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( |SICF - error from get_info_from_serv. Subrc = { sy-subrc }| ).
+      zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
 
     ASSERT lines( lt_serv_info ) = 1.
@@ -324,6 +321,7 @@ CLASS ZCL_ABAPGIT_OBJECT_SICF IMPLEMENTATION.
     IF sy-subrc = 0.
       lv_string = lv_url.
       rv_hash = zcl_abapgit_hash=>sha1_raw( zcl_abapgit_convert=>string_to_xstring_utf8( lv_string ) ).
+      rv_hash = to_upper( rv_hash ).
     ENDIF.
 
   ENDMETHOD.
@@ -347,10 +345,10 @@ CLASS ZCL_ABAPGIT_OBJECT_SICF IMPLEMENTATION.
       WHERE pgmid = iv_pgmid
       AND object = 'SICF'
       AND obj_name LIKE lv_obj_name
-      ORDER BY PRIMARY KEY ##TOO_MANY_ITAB_FIELDS. "#EC CI_GENBUFF
+      ORDER BY PRIMARY KEY ##TOO_MANY_ITAB_FIELDS.      "#EC CI_GENBUFF
 
     LOOP AT lt_tadir ASSIGNING <ls_tadir>.
-      IF read_sicf_url( <ls_tadir>-obj_name ) = lv_hash.
+      IF read_sicf_url( <ls_tadir>-obj_name ) = to_upper( lv_hash ).
         rs_tadir = <ls_tadir>.
         RETURN.
       ENDIF.
@@ -391,7 +389,7 @@ CLASS ZCL_ABAPGIT_OBJECT_SICF IMPLEMENTATION.
 
   METHOD zif_abapgit_object~delete.
 
-    DATA: ls_icfservice TYPE icfservice.
+    DATA ls_icfservice TYPE icfservice.
 
     read( IMPORTING es_icfservice = ls_icfservice ).
 
@@ -434,7 +432,7 @@ CLASS ZCL_ABAPGIT_OBJECT_SICF IMPLEMENTATION.
         no_authority                = 11
         OTHERS                      = 12 ).
     IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( |SICF - error from delete_node. Subrc = { sy-subrc }| ).
+      zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
 
   ENDMETHOD.
@@ -481,15 +479,11 @@ CLASS ZCL_ABAPGIT_OBJECT_SICF IMPLEMENTATION.
 
   METHOD zif_abapgit_object~exists.
 
-    DATA: ls_tadir TYPE zif_abapgit_definitions=>ty_tadir,
-          ls_key   TYPE ty_sicf_key.
+    DATA ls_key TYPE ty_sicf_key.
 
-    ls_tadir = read_tadir_sicf( ms_item-obj_name ).
+    ls_key = read_tadir_sicf( ms_item-obj_name )-obj_name.
 
-    rv_bool = boolc( NOT ls_tadir IS INITIAL ).
-
-    IF rv_bool = abap_true.
-      ls_key = ls_tadir-obj_name.
+    IF ls_key IS NOT INITIAL.
       SELECT SINGLE icfaltnme FROM icfservice INTO ls_key-icf_name
         WHERE icf_name = ls_key-icf_name
         AND icfparguid = ls_key-icfparguid.
@@ -552,19 +546,11 @@ CLASS ZCL_ABAPGIT_OBJECT_SICF IMPLEMENTATION.
     ls_bcdata-fval = '=ONLI'.
     APPEND ls_bcdata TO lt_bcdata.
 
-    CALL FUNCTION 'ABAP4_CALL_TRANSACTION'
-      STARTING NEW TASK 'GIT'
-      EXPORTING
-        tcode     = 'SICF'
-        mode_val  = 'E'
-      TABLES
-        using_tab = lt_bcdata
-      EXCEPTIONS
-        OTHERS    = 1.
+    zcl_abapgit_ui_factory=>get_gui_jumper( )->jump_batch_input(
+      iv_tcode   = 'SICF'
+      it_bdcdata = lt_bcdata ).
 
-    IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'error from ABAP4_CALL_TRANSACTION, SICF' ).
-    ENDIF.
+    rv_exit = abap_true.
 
   ENDMETHOD.
 
@@ -588,6 +574,8 @@ CLASS ZCL_ABAPGIT_OBJECT_SICF IMPLEMENTATION.
     CLEAR ls_icfservice-icf_mandt.
     CLEAR ls_icfservice-icfnodguid.
     CLEAR ls_icfservice-icfparguid.
+    CLEAR ls_icfservice-icfchildno.
+    CLEAR ls_icfservice-icfaliasno.
     CLEAR ls_icfservice-icf_user.
     CLEAR ls_icfservice-icf_cclnt.
     CLEAR ls_icfservice-icf_mclnt.

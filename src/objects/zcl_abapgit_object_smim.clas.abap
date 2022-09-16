@@ -2,8 +2,6 @@ CLASS zcl_abapgit_object_smim DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
 
   PUBLIC SECTION.
     INTERFACES zif_abapgit_object.
-    ALIASES mo_files FOR zif_abapgit_object~mo_files.
-
   PROTECTED SECTION.
   PRIVATE SECTION.
     METHODS get_filename
@@ -29,7 +27,7 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_OBJECT_SMIM IMPLEMENTATION.
+CLASS zcl_abapgit_object_smim IMPLEMENTATION.
 
 
   METHOD build_filename.
@@ -53,9 +51,11 @@ CLASS ZCL_ABAPGIT_OBJECT_SMIM IMPLEMENTATION.
 
     lv_filename = build_filename( lv_filename ).
 
-    lt_files = mo_files->get_files( ).
+    lt_files = zif_abapgit_object~mo_files->get_files( ).
 
-    READ TABLE lt_files ASSIGNING <ls_file> WITH KEY filename = lv_filename.
+    READ TABLE lt_files ASSIGNING <ls_file>
+        WITH KEY file
+        COMPONENTS filename = lv_filename.
     IF sy-subrc <> 0.
       zcx_abapgit_exception=>raise( 'SMIM, file not found' ).
     ENDIF.
@@ -129,7 +129,11 @@ CLASS ZCL_ABAPGIT_OBJECT_SMIM IMPLEMENTATION.
     SELECT SINGLE chng_user FROM smimloio INTO rv_user
       WHERE loio_id = lv_loio.                          "#EC CI_GENBUFF
     IF sy-subrc <> 0 OR rv_user IS INITIAL.
-      rv_user = c_user_unknown.
+      SELECT SINGLE chng_user FROM smimphio INTO rv_user
+        WHERE loio_id = lv_loio.                        "#EC CI_GENBUFF
+      IF sy-subrc <> 0 OR rv_user IS INITIAL.
+        rv_user = c_user_unknown.
+      ENDIF.
     ENDIF.
 
   ENDMETHOD.
@@ -160,7 +164,7 @@ CLASS ZCL_ABAPGIT_OBJECT_SMIM IMPLEMENTATION.
         not_found          = 5
         OTHERS             = 6 ).
     IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'error from delete' ).
+      zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
 
   ENDMETHOD.
@@ -205,7 +209,7 @@ CLASS ZCL_ABAPGIT_OBJECT_SMIM IMPLEMENTATION.
           folder_exists      = 5
           OTHERS             = 6 ).
       IF sy-subrc <> 5 AND sy-subrc <> 0.
-        zcx_abapgit_exception=>raise( 'error frrom SMIM create_folder' ).
+        zcx_abapgit_exception=>raise_t100( ).
       ENDIF.
     ELSE.
       lv_filename = get_filename( lv_url ).
@@ -237,7 +241,7 @@ CLASS ZCL_ABAPGIT_OBJECT_SMIM IMPLEMENTATION.
           is_folder               = 7
           OTHERS                  = 8 ).
       IF sy-subrc <> 0.
-        zcx_abapgit_exception=>raise( 'error from SMIM put' ).
+        zcx_abapgit_exception=>raise_t100( ).
       ENDIF.
     ENDIF.
 
@@ -284,13 +288,7 @@ CLASS ZCL_ABAPGIT_OBJECT_SMIM IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~jump.
-
-    CALL FUNCTION 'RS_TOOL_ACCESS'
-      EXPORTING
-        operation   = 'SHOW'
-        object_name = ms_item-obj_name
-        object_type = ms_item-obj_type.
-
+    " Covered by ZCL_ABAPGIT_OBJECTS=>JUMP
   ENDMETHOD.
 
 
@@ -331,7 +329,7 @@ CLASS ZCL_ABAPGIT_OBJECT_SMIM IMPLEMENTATION.
           permission_failure = 4
           OTHERS             = 5 ).
       IF sy-subrc <> 0 AND sy-subrc <> 2 AND sy-subrc <> 3.
-        zcx_abapgit_exception=>raise( 'error from mime api->get:' && sy-msgv1 ).
+        zcx_abapgit_exception=>raise_t100( ).
       ENDIF.
 
       lv_filename = get_filename( lv_url ).
@@ -339,7 +337,7 @@ CLASS ZCL_ABAPGIT_OBJECT_SMIM IMPLEMENTATION.
       ls_file-filename = build_filename( lv_filename ).
       ls_file-path     = '/'.
       ls_file-data     = lv_content.
-      mo_files->add( ls_file ).
+      zif_abapgit_object~mo_files->add( ls_file ).
 
       SELECT SINGLE lo_class FROM smimloio INTO lv_class
         WHERE loio_id = lv_loio.                        "#EC CI_GENBUFF

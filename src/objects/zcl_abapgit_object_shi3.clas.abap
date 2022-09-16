@@ -2,13 +2,11 @@ CLASS zcl_abapgit_object_shi3 DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
 
   PUBLIC SECTION.
     INTERFACES zif_abapgit_object.
-    ALIASES mo_files FOR zif_abapgit_object~mo_files.
 
     METHODS constructor
       IMPORTING
         is_item     TYPE zif_abapgit_definitions=>ty_item
         iv_language TYPE spras.
-
   PROTECTED SECTION.
 
     METHODS has_authorization
@@ -30,6 +28,9 @@ CLASS zcl_abapgit_object_shi3 DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
     DATA: mv_tree_id TYPE ttree-id.
 
     METHODS jump_se43
+      RAISING zcx_abapgit_exception.
+
+    METHODS jump_sbach04
       RAISING zcx_abapgit_exception.
 
     METHODS clear_fields
@@ -109,6 +110,33 @@ CLASS zcl_abapgit_object_shi3 IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD jump_sbach04.
+    DATA: ls_message      TYPE hier_mess,
+          lv_structure_id TYPE hier_treeg.
+
+    lv_structure_id = ms_item-obj_name.
+
+    CALL FUNCTION 'STREE_EXTERNAL_EDIT'
+      EXPORTING
+        structure_id   = lv_structure_id
+        language       = mv_language
+        edit_structure = abap_false
+        no_commit_work = abap_false
+        activity       = 'D'
+      IMPORTING
+        message        = ls_message.
+    IF ls_message IS NOT INITIAL.
+      zcx_abapgit_exception=>raise_t100(
+        iv_msgid = ls_message-msgid
+        iv_msgno = ls_message-msgno
+        iv_msgv1 = ls_message-msgv1
+        iv_msgv2 = ls_message-msgv2
+        iv_msgv3 = ls_message-msgv3
+        iv_msgv4 = ls_message-msgv4 ).
+    ENDIF.
+  ENDMETHOD.
+
+
   METHOD jump_se43.
 
     DATA: lt_bdcdata TYPE TABLE OF bdcdata.
@@ -128,22 +156,9 @@ CLASS zcl_abapgit_object_shi3 IMPLEMENTATION.
     <ls_bdcdata>-fnam = 'BMENUNAME-ID'.
     <ls_bdcdata>-fval = ms_item-obj_name.
 
-    CALL FUNCTION 'ABAP4_CALL_TRANSACTION'
-      STARTING NEW TASK 'GIT'
-      EXPORTING
-        tcode                 = 'SE43'
-        mode_val              = 'E'
-      TABLES
-        using_tab             = lt_bdcdata
-      EXCEPTIONS
-        system_failure        = 1
-        communication_failure = 2
-        resource_failure      = 3
-        OTHERS                = 4.
-
-    IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'error from ABAP4_CALL_TRANSACTION, SHI3' ).
-    ENDIF.
+    zcl_abapgit_ui_factory=>get_gui_jumper( )->jump_batch_input(
+      iv_tcode   = 'SE43'
+      it_bdcdata = lt_bdcdata ).
 
   ENDMETHOD.
 
@@ -190,6 +205,7 @@ CLASS zcl_abapgit_object_shi3 IMPLEMENTATION.
 
     DATA: ls_msg    TYPE hier_mess,
           ls_head   TYPE ttree,
+          ls_ttree  TYPE ttree,
           lt_titles TYPE TABLE OF ttreet,
           lt_nodes  TYPE TABLE OF hier_iface,
           lt_texts  TYPE TABLE OF hier_texts,
@@ -230,7 +246,16 @@ CLASS zcl_abapgit_object_shi3 IMPLEMENTATION.
         no_nodes_given           = 1
         OTHERS                   = 2.
     IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'Error from STREE_HIERARCHY_SAVE, SHI3' ).
+      zcx_abapgit_exception=>raise_t100( ).
+    ENDIF.
+
+    " Set buffer mode for menus (see function BMENU_CREATE_TREE)
+    SELECT SINGLE * FROM ttree INTO ls_ttree
+      WHERE type = 'BMENU' AND id = mv_tree_id.
+    IF sy-subrc = 0.
+      ls_ttree-buffermode = ls_head-buffermode.
+      ls_ttree-buffervar  = ls_head-buffervar.
+      MODIFY ttree FROM ls_ttree.
     ENDIF.
 
   ENDMETHOD.
@@ -242,10 +267,12 @@ CLASS zcl_abapgit_object_shi3 IMPLEMENTATION.
           ls_header TYPE ttree,
           ls_tadir  TYPE tadir.
 
+    " Ignore buffer and get state from DB
     CALL FUNCTION 'STREE_STRUCTURE_EXIST'
       EXPORTING
         structure_id         = mv_tree_id
-        do_not_read_devclass = ''
+        read_from_database   = abap_true
+        do_not_read_devclass = abap_false
       IMPORTING
         message              = ls_msg
         structure_header     = ls_header
@@ -294,8 +321,10 @@ CLASS zcl_abapgit_object_shi3 IMPLEMENTATION.
     CASE ls_head-type.
       WHEN 'BMENU'.
         jump_se43( ).
-      WHEN OTHERS.
-        zcx_abapgit_exception=>raise( |Jump for type { ls_head-type } not implemented| ).
+        rv_exit = abap_true.
+      WHEN 'GHIER'.
+        jump_sbach04( ).
+        rv_exit = abap_true.
     ENDCASE.
 
   ENDMETHOD.
@@ -303,12 +332,14 @@ CLASS zcl_abapgit_object_shi3 IMPLEMENTATION.
 
   METHOD zif_abapgit_object~serialize.
 
-    DATA: ls_msg    TYPE hier_mess,
-          ls_head   TYPE ttree,
-          lt_titles TYPE TABLE OF ttreet,
-          lt_nodes  TYPE TABLE OF hier_iface,
-          lt_texts  TYPE TABLE OF hier_texts,
-          lt_refs   TYPE TABLE OF hier_ref.
+    DATA: ls_msg           TYPE hier_mess,
+          ls_head          TYPE ttree,
+          lt_titles        TYPE TABLE OF ttreet,
+          lt_nodes         TYPE TABLE OF hier_iface,
+          lt_texts         TYPE TABLE OF hier_texts,
+          lt_refs          TYPE TABLE OF hier_ref,
+          lv_language      TYPE spras,
+          lv_all_languages TYPE abap_bool.
 
 
     CALL FUNCTION 'STREE_STRUCTURE_READ'
@@ -320,11 +351,21 @@ CLASS zcl_abapgit_object_shi3 IMPLEMENTATION.
       TABLES
         description      = lt_titles.
 
+    lv_all_languages = abap_false.
+
+    IF io_xml->i18n_params( )-main_language_only = abap_false.
+      lv_all_languages = abap_true.
+    ELSE.
+      lv_language = mv_language.
+      DELETE lt_titles WHERE spras <> lv_language.
+    ENDIF.
+
     CALL FUNCTION 'STREE_HIERARCHY_READ'
       EXPORTING
         structure_id       = mv_tree_id
         read_also_texts    = 'X'
-        all_languages      = 'X'
+        all_languages      = lv_all_languages
+        language           = lv_language
       IMPORTING
         message            = ls_msg
       TABLES
@@ -334,6 +375,12 @@ CLASS zcl_abapgit_object_shi3 IMPLEMENTATION.
 
     clear_fields( CHANGING cs_head  = ls_head
                            ct_nodes = lt_nodes ).
+
+    SORT lt_titles BY id.
+    DELETE ADJACENT DUPLICATES FROM lt_titles COMPARING id.
+
+    SORT lt_texts BY spras.
+    DELETE ADJACENT DUPLICATES FROM lt_texts COMPARING spras node_id.
 
     io_xml->add( iv_name = 'TREE_HEAD'
                  ig_data = ls_head ).

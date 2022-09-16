@@ -42,6 +42,7 @@ CLASS zcl_abapgit_code_inspector DEFINITION
     DATA mv_success TYPE abap_bool .
 
     TYPES: ty_run_mode TYPE c LENGTH 1.
+
     CONSTANTS:
       BEGIN OF co_run_mode,
         run_with_popup   TYPE ty_run_mode VALUE 'P',
@@ -55,7 +56,6 @@ CLASS zcl_abapgit_code_inspector DEFINITION
     DATA mv_name TYPE sci_objs .
     DATA mv_run_mode TYPE c LENGTH 1 .
 
-
     METHODS create_objectset
       RETURNING
         VALUE(ro_set) TYPE REF TO cl_ci_objectset .
@@ -68,21 +68,23 @@ CLASS zcl_abapgit_code_inspector DEFINITION
         zcx_abapgit_exception .
     METHODS create_inspection
       IMPORTING
-        io_set               TYPE REF TO cl_ci_objectset
-        io_variant           TYPE REF TO cl_ci_checkvariant
+        !io_set              TYPE REF TO cl_ci_objectset
+        !io_variant          TYPE REF TO cl_ci_checkvariant
       RETURNING
         VALUE(ro_inspection) TYPE REF TO cl_ci_inspection
       RAISING
         zcx_abapgit_exception .
-
     METHODS decide_run_mode
       RETURNING
-        VALUE(rv_run_mode) TYPE ty_run_mode.
+        VALUE(rv_run_mode) TYPE ty_run_mode .
+    METHODS filter_inspection
+      CHANGING
+        !ct_list TYPE scit_alvlist .
 ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_CODE_INSPECTOR IMPLEMENTATION.
+CLASS zcl_abapgit_code_inspector IMPLEMENTATION.
 
 
   METHOD cleanup.
@@ -244,8 +246,8 @@ CLASS ZCL_ABAPGIT_CODE_INSPECTOR IMPLEMENTATION.
 
   METHOD decide_run_mode.
 
-    DATA: lo_settings TYPE REF TO zcl_abapgit_settings.
-    lo_settings = zcl_abapgit_persist_settings=>get_instance( )->read( ).
+    DATA lo_settings TYPE REF TO zcl_abapgit_settings.
+    lo_settings = zcl_abapgit_persist_factory=>get_settings( )->read( ).
 
     IF sy-batch = abap_true.
       " We have to disable parallelization in batch because of lock errors.
@@ -255,6 +257,14 @@ CLASS ZCL_ABAPGIT_CODE_INSPECTOR IMPLEMENTATION.
     ELSE.
       rv_run_mode = co_run_mode-run_via_rfc.
     ENDIF.
+
+  ENDMETHOD.
+
+
+  METHOD filter_inspection.
+
+    " Remove findings in LSVIM* includes which are part of generated maintenance screens
+    DELETE ct_list WHERE sobjtype = 'PROG' AND sobjname CP 'LSVIM*'.
 
   ENDMETHOD.
 
@@ -274,6 +284,8 @@ CLASS ZCL_ABAPGIT_CODE_INSPECTOR IMPLEMENTATION.
 
     io_inspection->plain_list( IMPORTING p_list = rt_list ).
 
+    filter_inspection( CHANGING ct_list = rt_list ).
+
     SORT rt_list BY objtype objname test code sobjtype sobjname line col.
 
     DELETE ADJACENT DUPLICATES FROM rt_list.
@@ -283,17 +295,17 @@ CLASS ZCL_ABAPGIT_CODE_INSPECTOR IMPLEMENTATION.
 
   METHOD skip_object.
 
-    DATA: ls_trdir TYPE trdir.
+    DATA ls_program_type TYPE subc.
 
     CASE is_obj-objtype.
       WHEN 'PROG'.
 
-        SELECT SINGLE *
-          INTO ls_trdir
+        SELECT SINGLE subc
+          INTO ls_program_type
           FROM trdir
           WHERE name = is_obj-objname.
 
-        rv_skip = boolc( ls_trdir-subc = 'I' ). " Include program.
+        rv_skip = boolc( ls_program_type = 'I' ). " Include program.
 
       WHEN OTHERS.
         rv_skip = abap_false.
@@ -362,8 +374,7 @@ CLASS ZCL_ABAPGIT_CODE_INSPECTOR IMPLEMENTATION.
 
         " ensure cleanup
         cleanup( lo_set ).
-        zcx_abapgit_exception=>raise( iv_text     = lx_error->get_text( )
-                                      ix_previous = lx_error ).
+        zcx_abapgit_exception=>raise_with_text( lx_error ).
 
     ENDTRY.
 

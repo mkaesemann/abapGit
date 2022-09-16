@@ -24,7 +24,7 @@
 /* exported addMarginBottom */
 /* exported enumerateJumpAllFiles */
 /* exported createRepoCatalogEnumerator */
-/* exported enumerateToolbarActions */
+/* exported enumerateUiActions */
 /* exported onDiffCollapse */
 /* exported restoreScrollPosition */
 
@@ -86,6 +86,12 @@ if (!String.prototype.startsWith) {
   });
 }
 
+// forEach polyfill, taken from https://developer.mozilla.org
+// used for querySelectorAll results
+if (window.NodeList && !NodeList.prototype.forEach) {
+  NodeList.prototype.forEach = Array.prototype.forEach;
+}
+
 /**********************************************************
  * Common functions
  **********************************************************/
@@ -100,13 +106,26 @@ function debugOutput(text, dstID) {
 // Use a pre-created form or create a hidden form
 // and submit with sapevent
 function submitSapeventForm(params, action, method) {
+
+  function getSapeventPrefix() {
+    if (document.querySelector('a[href*="file:///SAPEVENT:"]'))  {
+      return "file:///"; //Prefix for chromium based browser control
+    } else {
+      return "";
+    }
+  }
+
   var stub_form_id = "form_" + action;
   var form = document.getElementById(stub_form_id);
 
   if (form === null) {
     form = document.createElement("form");
     form.setAttribute("method", method || "post");
-    form.setAttribute("action", "sapevent:" + action);
+    if (/sapevent/i.test(action)){
+      form.setAttribute("action", action);
+    } else {
+      form.setAttribute("action", getSapeventPrefix() + "SAPEVENT:" + action);
+    }
   }
 
   for(var key in params) {
@@ -235,22 +254,170 @@ function RepoOverViewHelper() {
   this.actionCssClass = findStyleSheetByName(".ro-action");
   var icon = document.getElementById("icon-filter-detail");
   this.toggleFilterIcon(icon, this.isDetailsDisplayed);
-  icon = document.getElementById("icon-filter-favorite");
-  this.toggleFilterIcon(icon, this.isOnlyFavoritesDisplayed);
+  this.registerRowSelection();
+  this.registerKeyboardShortcuts();
 }
+
+RepoOverViewHelper.prototype.setHooks = function () {
+  window.onload = this.onPageLoad.bind(this);
+};
+
+RepoOverViewHelper.prototype.onPageLoad = function () {
+  var data = window.localStorage && JSON.parse(window.localStorage.getItem(this.pageId));
+  if (data) {
+    if (data.isDetailsDisplayed) {
+      this.toggleItemsDetail(true);
+    }
+    if (data.selectedRepoKey) {
+      this.selectRowByRepoKey(data.selectedRepoKey);
+    } else {
+      this.selectRowByIndex(0);
+    }
+  }
+};
+
+RepoOverViewHelper.prototype.registerKeyboardShortcuts = function() {
+  var self = this;
+  document.addEventListener("keypress", function(event) {
+    if (document.activeElement.id === "filter") {
+      return;
+    }
+    var keycode = event.keyCode;
+    var rows = Array.prototype.slice.call(self.getVisibleRows());
+    var selected = document.querySelector(".repo.selected");
+    var indexOfSelected = rows.indexOf(selected);
+
+    if (keycode == 13 && // "enter" to open
+       document.activeElement.tagName.toLowerCase() != "input") { // prevent opening if command field has focus
+      self.openSelectedRepo();
+    } else if ((keycode == 52 || keycode == 100) && indexOfSelected > 0) {
+      // "4" for previous
+      self.selectRowByIndex(indexOfSelected - 1);
+    } else if ((keycode == 54 || keycode == 102) && indexOfSelected < rows.length - 1) {
+      // "6" for next
+      self.selectRowByIndex(indexOfSelected + 1);
+    }
+  });
+};
+
+RepoOverViewHelper.prototype.openSelectedRepo = function () {
+  this.selectedRepoKey = document.querySelector(".repo.selected").dataset.key;
+  this.saveLocalStorage();
+  document.querySelector(".repo.selected td.ro-go a").click();
+};
+
+RepoOverViewHelper.prototype.selectRowByIndex = function (index) {
+  var rows = this.getVisibleRows();
+  if (rows.length >= index) {
+    var selectedRow = rows[index];
+    if (selectedRow.classList.contains("selected")) {
+      return;
+    }
+
+    this.deselectAllRows();
+    rows[index].classList.add("selected");
+    this.selectedRepoKey = selectedRow.dataset.key;
+    this.updateActionLinks(selectedRow);
+    this.saveLocalStorage();
+  }
+};
+
+RepoOverViewHelper.prototype.selectRowByRepoKey = function (key) {
+  var attributeQuery = "[data-key='" + key + "']";
+  var row = document.querySelector(".repo" + attributeQuery);
+  // navigation to already selected repo
+  if (row.dataset.key === key && row.classList.contains("selected")) {
+    return;
+  }
+
+  this.deselectAllRows();
+  row.classList.add("selected");
+  this.selectedRepoKey = key;
+  this.updateActionLinks(row);
+  this.saveLocalStorage();
+};
+
+RepoOverViewHelper.prototype.updateActionLinks = function (selectedRow) {
+  // now we have a repo selected, determine which action buttons are relevant
+  var selectedRepoKey = selectedRow.dataset.key;
+  var selectedRepoIsOffline = selectedRow.dataset.offline === "X";
+
+  var actionLinks = document.querySelectorAll("a.action_link");
+  actionLinks.forEach(function (link) {
+    // adjust repo key in urls
+    link.href = link.href.replace(/\?key=(#|\d+)/, "?key=" + selectedRepoKey);
+
+    // toggle button visibility
+    if (link.classList.contains("action_offline_repo")) {
+      if (selectedRepoIsOffline) {
+        link.parentElement.classList.add("enabled");
+      } else {
+        link.parentElement.classList.remove("enabled");
+      }
+    }
+    else if (link.classList.contains("action_online_repo")) {
+      if (!selectedRepoIsOffline) {
+        link.parentElement.classList.add("enabled");
+      } else {
+        link.parentElement.classList.remove("enabled");
+      }
+    }
+    else {
+      // if the action is for both repository types, it will only have the .action_link class
+      // it still needs to be toggled as we want to hide everything if no repo is selected
+      link.parentElement.classList.add("enabled");
+    }
+  });
+};
+
+RepoOverViewHelper.prototype.deselectAllRows = function () {
+  document.querySelectorAll(".repo").forEach(function (x) {
+    x.classList.remove("selected");
+  });
+};
+
+RepoOverViewHelper.prototype.getVisibleRows = function () {
+  return document.querySelectorAll(".repo:not(.nodisplay)");
+};
+
+RepoOverViewHelper.prototype.registerRowSelection = function () {
+  var self = this;
+  document.querySelectorAll(".repo td:not(.ro-go)").forEach(function (repoListRowCell) {
+    repoListRowCell.addEventListener("click", function () {
+      self.selectRowByRepoKey(this.parentElement.dataset.key);
+    });
+  });
+
+  document.querySelectorAll(".repo td.ro-go").forEach(function (openRepoIcon) {
+    openRepoIcon.addEventListener("click", function () {
+      var selectedRow = this.parentElement;
+      self.selectRowByRepoKey(selectedRow.dataset.key);
+      self.openSelectedRepo();
+    });
+  });
+};
 
 RepoOverViewHelper.prototype.toggleRepoListDetail = function (forceDisplay) {
   if (this.detailCssClass) {
     this.toggleItemsDetail(forceDisplay);
-    this.saveFilter();
+    this.saveLocalStorage();
   }
 };
 
-RepoOverViewHelper.prototype.toggleItemsDetail = function(forceDisplay){
+RepoOverViewHelper.prototype.toggleItemsDetail = function (forceDisplay) {
   if (this.detailCssClass) {
     this.isDetailsDisplayed = forceDisplay || !this.isDetailsDisplayed;
+
+    // change layout to wide if details are displayed
+    if (this.isDetailsDisplayed) {
+      document.body.classList.remove("centered");
+      document.body.classList.add("full_width");
+    } else {
+      document.body.classList.add("centered");
+      document.body.classList.remove("full_width");
+    }
+
     this.detailCssClass.style.display = this.isDetailsDisplayed ? "" : "none";
-    this.actionCssClass.style.display = this.isDetailsDisplayed ? "none" : "";
     var icon = document.getElementById("icon-filter-detail");
     this.toggleFilterIcon(icon, this.isDetailsDisplayed);
   }
@@ -266,52 +433,16 @@ RepoOverViewHelper.prototype.toggleFilterIcon = function (icon, isEnabled) {
   }
 };
 
-RepoOverViewHelper.prototype.toggleRepoListFavorites = function (forceDisplay) {
-  this.toggleItemsFavorites(forceDisplay);
-  this.saveFilter();
-};
-
-RepoOverViewHelper.prototype.toggleItemsFavorites = function(forceDisplay){
-  this.isOnlyFavoritesDisplayed = forceDisplay || !this.isOnlyFavoritesDisplayed;
-  var repositories = document.getElementsByClassName("repo");
-  var icon = document.getElementById("icon-filter-favorite");
-  this.toggleFilterIcon(icon, this.isOnlyFavoritesDisplayed);
-  for (var i = 0; i < repositories.length; i++) {
-    var repo = repositories[i];
-    if (this.isOnlyFavoritesDisplayed) {
-      if (!repo.classList.contains("favorite")) {
-        repo.style.display = "none";
-      }
-    } else {
-      repo.style.display = "";
-    }
-  }
-};
-
-RepoOverViewHelper.prototype.setHooks = function () {
-  window.onload = this.onPageLoad.bind(this);
-};
-
-RepoOverViewHelper.prototype.saveFilter = function () {
+RepoOverViewHelper.prototype.saveLocalStorage = function () {
   if (!window.localStorage) return;
   var data = {
     isDetailsDisplayed: this.isDetailsDisplayed,
-    isOnlyFavoritesDisplayed: this.isOnlyFavoritesDisplayed
+    isOnlyFavoritesDisplayed: this.isOnlyFavoritesDisplayed,
+    selectedRepoKey: this.selectedRepoKey,
   };
   window.localStorage.setItem(this.pageId, JSON.stringify(data));
 };
 
-RepoOverViewHelper.prototype.onPageLoad = function () {
-  var data = window.localStorage && JSON.parse(window.localStorage.getItem(this.pageId));
-  if (data) {
-    if (data.isDetailsDisplayed) {
-      this.toggleItemsDetail(true);
-    }
-    if (data.isOnlyFavoritesDisplayed) {
-      this.toggleItemsFavorites(true);
-    }
-  }
-};
 
 /**********************************************************
  * STAGE PAGE Logic
@@ -437,7 +568,6 @@ StageHelper.prototype.onPageLoad = function() {
   if (this.dom.objectSearch.value) {
     this.applyFilterValue(this.dom.objectSearch.value);
   }
-  debugOutput("StageHelper.onPageLoad: " + ((data) ? "from Storage" : "initial state"));
 };
 
 // Table event handler, change status
@@ -509,8 +639,12 @@ StageHelper.prototype.applyFilterValue = function(sFilterValue) {
 StageHelper.prototype.applyFilterToRow = function (row, filter) {
   // Collect data cells
   var targets = this.filterTargets.map(function(attr) {
+    // Get the innermost tag with the text we want to filter
+    // <td>text</td>: elem = td-tag
+    // <td><span><i></i><a>text</a></span></td>: elem = a-tag
     var elem = row.cells[this.colIndex[attr]];
-    if (elem.firstChild && elem.firstChild.tagName === "A") elem = elem.firstChild;
+    var elemA = elem.getElementsByTagName("A")[0];
+    if (elemA) elem = elemA;
     return {
       elem:      elem,
       plainText: elem.innerText.replace(/ /g, "\u00a0"), // without tags, with encoded spaces
@@ -523,8 +657,10 @@ StageHelper.prototype.applyFilterToRow = function (row, filter) {
   // Apply filter to cells, mark filtered text
   for (var i = targets.length - 1; i >= 0; i--) {
     var target = targets[i];
+    // Ignore case of filter
+    var regFilter = new RegExp("("+filter+")", "gi");
     target.newHtml = (filter)
-      ? target.plainText.replace(filter, "<mark>"+filter+"</mark>")
+      ? target.plainText.replace(regFilter, "<mark>$1</mark>")
       : target.plainText;
     target.isChanged = target.newHtml !== target.curHtml;
     isVisible        = isVisible || !filter || target.newHtml !== target.plainText;
@@ -674,9 +810,10 @@ StageHelper.prototype.iterateStageTab = function (changeMode, cb /*, ...*/) {
  * Check list wrapper
  **********************************************************/
 
-function CheckListWrapper(id, cbAction) {
+function CheckListWrapper(id, cbAction, cbActionOnlyMyChanges) {
   this.id         = document.getElementById(id);
   this.cbAction   = cbAction;
+  this.cbActionOnlyMyChanges = cbActionOnlyMyChanges;
   this.id.onclick = this.onClick.bind(this);
 }
 
@@ -709,8 +846,14 @@ CheckListWrapper.prototype.onClick = function(e) { // eslint-disable-line no-unu
     nodeLi.setAttribute("data-check", "");
   }
 
-  // Action callback
-  this.cbAction(nodeLi.getAttribute("data-aux"), option, newState);
+  // Action callback, special handling for "Only My Changes"
+  if(option === "Only my changes") {
+    this.cbActionOnlyMyChanges(nodeLi.getAttribute("data-aux"), newState);
+
+    // hide "Changed By" menu
+  } else {
+    this.cbAction(nodeLi.getAttribute("data-aux"), option, newState);
+  }
 };
 
 /**********************************************************
@@ -737,7 +880,7 @@ function DiffHelper(params) {
 
   // Checklist wrapper
   if (document.getElementById(params.ids.filterMenu)) {
-    this.checkList = new CheckListWrapper(params.ids.filterMenu, this.onFilter.bind(this));
+    this.checkList = new CheckListWrapper(params.ids.filterMenu, this.onFilter.bind(this), this.onFilterOnlyMyChanges.bind(this));
     this.dom.filterButton = document.getElementById(params.ids.filterMenu).parentNode;
   }
 
@@ -765,6 +908,71 @@ DiffHelper.prototype.onJump = function(e){
 DiffHelper.prototype.onFilter = function(attr, target, state) {
   this.applyFilter(attr, target, state);
   this.highlightButton(state);
+};
+
+DiffHelper.prototype.onFilterOnlyMyChanges = function(username, state) {
+  this.applyOnlyMyChangesFilter(username, state);
+  this.counter = 0;
+
+  if(state) {
+    this.dom.filterButton.classList.add("bgorange");
+  } else {
+    this.dom.filterButton.classList.remove("bgorange");
+  }
+
+  // apply logic on Changed By list items
+  var changedByListItems = Array.prototype.slice.call(document.querySelectorAll("[data-aux*=changed-by]"));
+
+  changedByListItems
+    .map(function(item) {
+      var nodeIcon = item.children[0].children[0];
+
+      if (state === true) {
+        if(item.innerText === username) { // current user
+          item.style.display = "";
+          item.setAttribute("data-check", "X");
+
+          if(nodeIcon) {
+            nodeIcon.classList.remove("grey");
+            nodeIcon.classList.add("blue");
+          }
+        } else { // other users
+          item.style.display = "none";
+          item.setAttribute("data-check", "");
+        }
+      } else {
+        item.style.display = "";
+        item.setAttribute("data-check", "X");
+
+        if(nodeIcon) {
+          nodeIcon.classList.remove("grey");
+          nodeIcon.classList.add("blue");
+        }
+      }
+    });
+};
+
+DiffHelper.prototype.applyOnlyMyChangesFilter = function (username, state) {
+
+  var jumpListItems = Array.prototype.slice.call(document.querySelectorAll("[id*=li_jump]"));
+
+  this.iterateDiffList(function(div) {
+    if (state === true) { // switching on "Only my changes" filter
+      if (div.getAttribute("data-changed-by") === username) {
+        div.style.display = state ? "" : "none";
+      } else {
+        div.style.display = state ? "none" : "";
+      }
+    } else { // disabling
+      div.style.display = "";
+    }
+
+    // hide the file in the jump list
+    var dataFile = div.getAttribute("data-file");
+    jumpListItems
+      .filter(function(item){ return dataFile.includes(item.text) })
+      .map(function(item){ item.style.display = div.style.display });
+  });
 };
 
 // Hide/show diff based on params
@@ -1133,7 +1341,7 @@ LinkHints.prototype.getHintStartValue = function(targetsCount){
 
 LinkHints.prototype.deployHintContainers = function() {
 
-  var hintTargets = document.querySelectorAll("a, input[type='checkbox']");
+  var hintTargets = document.querySelectorAll("a, input, textarea, i");
   var codeCounter = this.getHintStartValue(hintTargets.length);
   var hintsMap    = { first: codeCounter };
 
@@ -1141,6 +1349,11 @@ LinkHints.prototype.deployHintContainers = function() {
   //   <span class="pending">12</span><span>3</span>
   // </span>
   for (var i = 0, N = hintTargets.length; i < N; i++) {
+    // skip hidden fields
+    if (hintTargets[i].type === "HIDDEN") {
+      continue;
+    }
+
     var hint = {};
     hint.container     = document.createElement("span");
     hint.pendingSpan   = document.createElement("span");
@@ -1153,18 +1366,33 @@ LinkHints.prototype.deployHintContainers = function() {
 
     hint.pendingSpan.classList.add("pending");
     hint.container.classList.add("link-hint");
-    if (hint.parent.nodeName === "INPUT"){
+    if (hint.parent.nodeName === "INPUT" || hint.parent.nodeName === "TEXTAREA"){
       hint.container.classList.add("link-hint-input");
-    } else {
+    } else if (hint.parent.nodeName === "A") {
       hint.container.classList.add("link-hint-a");
+    } else if (hint.parent.nodeName === "I" && hint.parent.classList.contains("cursor-pointer")) {
+      hint.container.classList.add("link-hint-i");
+    } else {
+      continue;
     }
 
     hint.container.classList.add("nodisplay");            // hide by default
     hint.container.dataset.code = codeCounter.toString(); // not really needed, more for debug
 
-    if (hintTargets[i].nodeName === "INPUT") {
-      // does not work if inside the input, so appending right after
-      hintTargets[i].insertAdjacentElement("afterend", hint.container);
+    if (hintTargets[i].nodeName === "INPUT" || hintTargets[i].nodeName === "TEXTAREA") {
+      // does not work if inside the input node
+      if (hintTargets[i].type === "checkbox" || hintTargets[i].type === "radio") {
+        if (hintTargets[i].nextElementSibling && hintTargets[i].nextElementSibling.nodeName === "LABEL" ) {
+          // insert at end of label
+          hintTargets[i].nextElementSibling.appendChild(hint.container);
+        } else {
+          // inserting right after
+          hintTargets[i].insertAdjacentElement("afterend", hint.container);
+        }
+      } else {
+        // inserting right after
+        hintTargets[i].insertAdjacentElement("afterend", hint.container);
+      }
     } else {
       hintTargets[i].appendChild(hint.container);
     }
@@ -1185,11 +1413,7 @@ LinkHints.prototype.handleKey = function(event){
     return;
   }
 
-  var activeElementType = (document.activeElement && document.activeElement.nodeName) || "";
-
-  // link hints are disabled for input and textareas for obvious reasons.
-  // Maybe we must add other types here in the future
-  if (event.key === this.linkHintHotKey && activeElementType !== "INPUT" && activeElementType !== "TEXTAREA") {
+  if (event.key === this.linkHintHotKey && Hotkeys.isHotkeyCallPossible()) {
 
     // on user hide hints, close an opened dropdown too
     if (this.areHintsDisplayed && this.activatedDropdown) this.closeActivatedDropdown();
@@ -1205,6 +1429,7 @@ LinkHints.prototype.handleKey = function(event){
 
     if (hint) { // we are there, we have a fully specified tooltip. Let's activate it
       this.displayHints(false);
+      event.preventDefault();
       this.hintActivate(hint);
     } else {
       // we are not there yet, but let's filter the link so that only
@@ -1249,9 +1474,28 @@ LinkHints.prototype.hintActivate = function (hint) {
     this.activatedDropdown = hint.parent.parentElement;
     this.activatedDropdown.classList.toggle("force-nav-hover");
     hint.parent.focus();
+  } else if (hint.parent.type === "checkbox" || hint.parent.type === "radio") {
+    this.toggleCheckbox(hint);
+  } else if (hint.parent.type === "submit") {
+    hint.parent.click();
+  } else if (hint.parent.nodeName === "INPUT" || hint.parent.nodeName === "TEXTAREA") {
+    hint.parent.focus();
   } else {
     hint.parent.click();
     if (this.activatedDropdown) this.closeActivatedDropdown();
+  }
+};
+
+LinkHints.prototype.toggleCheckbox = function (hint) {
+  // ensures that onclick handler is executed
+  // https://stackoverflow.com/questions/41981509/trigger-an-event-when-a-checkbox-is-changed-programmatically-via-javascript
+  var event = document.createEvent("HTMLEvents");
+  var checked = hint.parent.checked;
+  event.initEvent("click", false, true);
+  hint.parent.parentElement.dispatchEvent(event);
+  if (checked === hint.parent.checked) {
+    // fallback if no handler is registered
+    hint.parent.checked = !hint.parent.checked;
   }
 };
 
@@ -1289,7 +1533,7 @@ function Hotkeys(oKeyMap){
     var action = this.oKeyMap[sKey];
 
     // add a tooltip/title with the hotkey, currently only sapevents are supported
-    [].slice.call(document.querySelectorAll("a[href^='sapevent:" + action + "']")).forEach(function(elAnchor) {
+    this.getAllSapEventsForSapEventName(action).forEach(function(elAnchor) {
       elAnchor.title = elAnchor.title + " [" + sKey + "]";
     });
 
@@ -1313,15 +1557,31 @@ function Hotkeys(oKeyMap){
       }
 
       // Or a global function
-      if (window[action]) {
+      if (window[action] && typeof(window[action]) === "function") {
         window[action].call(this);
         return;
       }
 
-      // Or a SAP event
-      var sUiSapEvent = this.getSapEvent(action);
-      if (sUiSapEvent) {
-        submitSapeventForm({}, sUiSapEvent, "post");
+      // Or a SAP event link
+      var sUiSapEventHref = this.getSapEventHref(action);
+      if (sUiSapEventHref) {
+        submitSapeventForm({}, sUiSapEventHref, "post");
+        oEvent.preventDefault();
+        return;
+      }
+
+      // Or a SAP event input
+      var sUiSapEventInputAction = this.getSapEventInputAction(action);
+      if (sUiSapEventInputAction) {
+        submitSapeventForm({}, sUiSapEventInputAction, "post");
+        oEvent.preventDefault();
+        return;
+      }
+
+      // Or a SAP event main form
+      var elForm = this.getSapEventForm(action);
+      if (elForm) {
+        elForm.submit();
         oEvent.preventDefault();
         return;
       }
@@ -1340,27 +1600,65 @@ Hotkeys.prototype.showHotkeys = function() {
   }
 };
 
-Hotkeys.prototype.getSapEvent = function(sSapEvent) {
+Hotkeys.prototype.getAllSapEventsForSapEventName = function(sSapEvent) {
+  return [].slice.call(
+    document.querySelectorAll('a[href*="sapevent:' + sSapEvent + '"],'
+                            + 'a[href*="SAPEVENT:' + sSapEvent + '"],'
+                            + 'input[formaction*="sapevent:' + sSapEvent + '"],'
+                            + 'input[formaction*="SAPEVENT:' + sSapEvent + '"],'
+                            + 'form[action*="sapevent:' + sSapEvent + '"] input[type="submit"].main,'
+                            + 'form[action*="SAPEVENT:' + sSapEvent + '"] input[type="submit"].main'));
+};
 
-  var fnNormalizeSapEventHref = function(sSapEvent, oSapEvent) {
-    if (new RegExp(sSapEvent + "$" ).test(oSapEvent.href)
-    || (new RegExp(sSapEvent + "\\?" ).test(oSapEvent.href))) {
-      return oSapEvent.href.replace("sapevent:","");
-    }
+Hotkeys.prototype.getSapEventHref = function(sSapEvent) {
+
+  return this.getAllSapEventsForSapEventName(sSapEvent)
+    .filter(function(el){
+      // only anchors
+      return (!!el.href);
+    })
+    .map(function(oSapEvent){
+      return oSapEvent.href;
+    })
+    .filter(this.eliminateSapEventFalsePositives(sSapEvent))
+    .pop();
+
+};
+
+Hotkeys.prototype.getSapEventInputAction = function(sSapEvent) {
+
+  return this.getAllSapEventsForSapEventName(sSapEvent)
+    .filter(function(el){
+      // input forms
+      return (el.type === "submit");
+    })
+    .map(function(oSapEvent){
+      return oSapEvent.formAction;
+    })
+    .filter(this.eliminateSapEventFalsePositives(sSapEvent))
+    .pop();
+
+};
+
+Hotkeys.prototype.getSapEventForm = function(sSapEvent) {
+
+  return this.getAllSapEventsForSapEventName(sSapEvent)
+    .filter(function(el){
+      // forms
+      var parentForm = el.parentNode.parentNode.parentNode;
+      return (el.type === "submit" && parentForm.nodeName === "FORM");
+    })
+    .map(function(oSapEvent){
+      return oSapEvent.parentNode.parentNode.parentNode;
+    })
+    .pop();
+
+};
+
+Hotkeys.prototype.eliminateSapEventFalsePositives = function(sapEvent){
+  return function(sapEventAttr) {
+    return sapEventAttr.match(new RegExp("\\b" + sapEvent + "\\b"));
   };
-
-  var aSapEvents = document.querySelectorAll('a[href^="sapevent:' + sSapEvent + '"]');
-
-  var aFilteredAndNormalizedSapEvents =
-    [].map.call(aSapEvents, function(oSapEvent){
-      return fnNormalizeSapEventHref(sSapEvent, oSapEvent);
-    }).filter(function(elem){
-      // remove false positives
-      return (elem && !elem.includes("sapevent:"));
-    });
-
-  return (aFilteredAndNormalizedSapEvents && aFilteredAndNormalizedSapEvents[0]);
-
 };
 
 Hotkeys.prototype.onkeydown = function(oEvent){
@@ -1369,9 +1667,7 @@ Hotkeys.prototype.onkeydown = function(oEvent){
     return;
   }
 
-  var activeElementType = ((document.activeElement && document.activeElement.nodeName) || "");
-
-  if (activeElementType === "INPUT" || activeElementType === "TEXTAREA") {
+  if (!Hotkeys.isHotkeyCallPossible()){
     return;
   }
 
@@ -1382,6 +1678,14 @@ Hotkeys.prototype.onkeydown = function(oEvent){
   if (fnHotkey) {
     fnHotkey.call(this, oEvent);
   }
+};
+
+Hotkeys.isHotkeyCallPossible = function(){
+
+  var activeElementType = ((document.activeElement && document.activeElement.nodeName) || "");
+  var activeElementReadOnly = ((document.activeElement && document.activeElement.readOnly) || false);
+
+  return (activeElementReadOnly || ( activeElementType !== "INPUT" && activeElementType !== "TEXTAREA" ));
 };
 
 Hotkeys.addHotkeyToHelpSheet = function(key, description) {
@@ -1507,7 +1811,8 @@ Patch.prototype.ID = {
 
 Patch.prototype.ACTION = {
   PATCH_STAGE: "patch_stage",
-  PATCH_REFRESH_LOCAL: "patch_refresh_local"
+  REFRESH_LOCAL: "refresh_local",
+  REFRESH_ALL: "refresh_all"
 };
 
 Patch.prototype.escape = function(sFileName){
@@ -1633,12 +1938,14 @@ Patch.prototype.clickAllLineCheckboxesInSection = function(oSection, bChecked){
 
 };
 
-Patch.prototype.registerStagePatch = function registerStagePatch(){
+Patch.prototype.registerStagePatch = function (){
 
   var elStage = document.querySelector("#" + this.ID.STAGE);
+  var REFRESH_PREFIX = "refresh";
+
   elStage.addEventListener("click", this.submitPatch.bind(this, this.ACTION.PATCH_STAGE));
 
-  var aRefresh = document.querySelectorAll("[id*=patch_refresh]");
+  var aRefresh = document.querySelectorAll("[id*=" + REFRESH_PREFIX + "]");
   [].forEach.call( aRefresh, function(el) {
     el.addEventListener("click", memoizeScrollPosition(this.submitPatch.bind(this, el.id)).bind(this));
   }.bind(this));
@@ -1649,7 +1956,11 @@ Patch.prototype.registerStagePatch = function registerStagePatch(){
   }.bind(this);
 
   window.refreshLocal = memoizeScrollPosition(function(){
-    this.submitPatch(this.ACTION.PATCH_REFRESH_LOCAL);
+    this.submitPatch(this.ACTION.REFRESH_LOCAL);
+  }.bind(this));
+
+  window.refreshAll = memoizeScrollPosition(function(){
+    this.submitPatch(this.ACTION.REFRESH_ALL);
   }.bind(this));
 
 };
@@ -1823,6 +2134,11 @@ function CommandPalette(commandEnumerator, opts) {
   this.renderAndBindElements();
   this.hookEvents();
   Hotkeys.addHotkeyToHelpSheet(opts.toggleKey, opts.hotkeyDescription);
+
+  if (!CommandPalette.instances) {
+    CommandPalette.instances = [];
+  }
+  CommandPalette.instances.push(this);
 }
 
 CommandPalette.prototype.hookEvents = function(){
@@ -1962,6 +2278,14 @@ CommandPalette.prototype.adjustScrollPosition = function(itemElement){
 CommandPalette.prototype.toggleDisplay = function(forceState) {
   var isDisplayed = (this.elements.palette.style.display !== "none");
   var tobeDisplayed = (forceState !== undefined) ? forceState : !isDisplayed;
+
+  if (tobeDisplayed) {
+    // auto close other command palettes
+    CommandPalette.instances.forEach(function(instance){
+      instance.elements.palette.style.display = "none";
+    });
+  }
+
   this.elements.palette.style.display = tobeDisplayed ? "" : "none";
   if (tobeDisplayed) {
     this.elements.input.value = "";
@@ -1969,6 +2293,7 @@ CommandPalette.prototype.toggleDisplay = function(forceState) {
     this.applyFilter();
     this.selectFirst();
   }
+
 };
 
 CommandPalette.prototype.getCommandByElement = function(element) {
@@ -2013,7 +2338,7 @@ function createRepoCatalogEnumerator(catalog, action) {
   };
 }
 
-function enumerateToolbarActions() {
+function enumerateUiActions() {
 
   var items = [];
   function processUL(ulNode, prefix) {
@@ -2035,21 +2360,61 @@ function enumerateToolbarActions() {
     }
   }
 
-  var toolbarRoot = document.getElementById("toolbar-main");
-  if (toolbarRoot && toolbarRoot.nodeName === "UL") processUL(toolbarRoot);
-  toolbarRoot = document.getElementById("toolbar-repo");
-  if (toolbarRoot && toolbarRoot.nodeName === "UL") processUL(toolbarRoot);
-  // Add more toolbars ?
-  if (items.length === 0) return;
+  // toolbars
+  [].slice.call(document.querySelectorAll("[id*=toolbar]"))
+    .filter(function(toolbar){
+      return (toolbar && toolbar.nodeName === "UL");
+    }).forEach(function(toolbar){
+      processUL(toolbar);
+    });
 
   items = items.map(function(item) {
+    var action = "";
     var anchor = item[0];
+    if (anchor.href.includes("#")) {
+      action = function(){
+        anchor.click();
+      };
+    } else {
+      action = anchor.href.replace("sapevent:", "");
+    }
     var prefix = item[1];
     return {
-      action:    anchor.href.replace("sapevent:", ""),
+      action:    action,
       title:     (prefix ? prefix + ": " : "") + anchor.innerText.trim()
     };
   });
+
+  // forms
+  [].slice.call(document.querySelectorAll("input[type='submit']"))
+    .forEach(function(input){
+      items.push({
+        action: function(){
+          if ([].slice.call(input.classList).indexOf("main") !== -1){
+            var parentForm = input.parentNode.parentNode.parentNode;
+            if (parentForm.nodeName === "FORM"){
+              parentForm.submit();
+            }
+          } else {
+            submitSapeventForm({}, input.formAction, "post");
+          }
+        },
+        title: input.value + " " + input.title.replace(/\[.*\]/,"")
+      });
+    });
+
+  // links inside forms
+  [].slice.call(document.querySelectorAll("form a"))
+    .filter(function(anchor){
+      return !!anchor.title;
+    }).forEach(function(anchor){
+      items.push({
+        action: function(){
+          anchor.click();
+        },
+        title: anchor.title
+      });
+    });
 
   return items;
 }
@@ -2068,6 +2433,8 @@ function enumerateJumpAllFiles() {
         title:  title
       };});
 }
+
+/* Save Scroll Position for Diff/Patch Page */
 
 function saveScrollPosition(){
   if (!window.sessionStorage) { return }
@@ -2089,4 +2456,31 @@ function memoizeScrollPosition(fn){
     saveScrollPosition();
     return fn.call(this, fn.args);
   }.bind(this);
+}
+
+/* STICKY HEADERS */
+
+/* https://www.w3schools.com/howto/howto_js_navbar_sticky.asp */
+/* Note: We have to use JS since IE does not support CSS position:sticky */
+
+// When the user scrolls the page, execute toggleSticky
+window.onscroll = function() { toggleSticky() };
+
+// Add the sticky class to the navbar when you reach its scroll position.
+// Remove "sticky" when you leave the scroll position
+function toggleSticky() {
+  var body = document.getElementsByTagName("body")[0];
+  var header = document.getElementById("header");
+  var sticky = header.offsetTop;
+
+  var stickyClass = "sticky";
+  if (body.classList.contains("full_width")) {
+    stickyClass = "sticky_full_width";
+  }
+
+  if (window.pageYOffset >= sticky) {
+    header.classList.add( stickyClass );
+  } else {
+    header.classList.remove( stickyClass );
+  }
 }

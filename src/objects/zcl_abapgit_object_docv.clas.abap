@@ -2,8 +2,6 @@ CLASS zcl_abapgit_object_docv DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
 
   PUBLIC SECTION.
     INTERFACES zif_abapgit_object.
-    ALIASES mo_files FOR zif_abapgit_object~mo_files.
-
   PROTECTED SECTION.
   PRIVATE SECTION.
     CONSTANTS: c_typ     TYPE dokhl-typ VALUE 'E',
@@ -23,7 +21,7 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_OBJECT_DOCV IMPLEMENTATION.
+CLASS zcl_abapgit_object_docv IMPLEMENTATION.
 
 
   METHOD read.
@@ -78,7 +76,7 @@ CLASS ZCL_ABAPGIT_OBJECT_DOCV IMPLEMENTATION.
         ret_code = 1
         OTHERS   = 2.
     IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'error from DOCU_DEL' ).
+      zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
 
   ENDMETHOD.
@@ -149,9 +147,6 @@ CLASS ZCL_ABAPGIT_OBJECT_DOCV IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~jump.
-
-    zcx_abapgit_exception=>raise( 'todo, jump DOCV' ).
-
   ENDMETHOD.
 
 

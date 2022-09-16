@@ -6,7 +6,7 @@
   --theme-background-color: #E8E8E8;
   --theme-container-background-color: #f2f2f2;
   --theme-container-border-color: lightgrey;
-  --theme-primary-font: Arial,Helvetica,sans-serif;
+  --theme-primary-font: "72", Arial, Helvetica, sans-serif;
   --theme-primary-font-color: #333333;
   --theme-primary-font-color-reduced: #ccc;
   --theme-font-size: 12pt;
@@ -28,6 +28,11 @@ body {
   font-size: var(--theme-font-size);
 }
 a, a:visited  { color: var(--theme-link-color); }
+.link  {
+  color: var(--theme-link-color);
+  cursor: pointer;
+}
+
 input, textarea, select     { border-color: #ddd; }
 input:focus, textarea:focus { border-color: #8cadd9; }
 
@@ -58,15 +63,16 @@ input:focus, textarea:focus { border-color: #8cadd9; }
 }
 
 /* ABAPGIT OBJECTS */
-span.user {
+span.user-box {
   border-color: #c2d4ea;
   background-color: #d9e4f2;
 }
-span.package {
+span.package-box {
   border-color: #d3ccd2;
   background-color: #ebe3ea;
 }
-span.transport {
+span.path-box,
+span.transport-box {
   border-color: #a7e3cf;
   background-color: #dbf3eb;
 }
@@ -85,7 +91,10 @@ div.panel.error {
 div.dummydiv { background-color: var(--theme-container-background-color); }
 
 /* STRUCTURE DIVS, HEADER & FOOTER */
-div#header { border-bottom-color: var(--theme-container-border-color); }
+div#header {
+  background-color: var(--theme-background-color);
+  border-bottom-color: var(--theme-container-border-color);
+}
 div#header .page-title { color: var(--theme-greyscale-medium); }
 div#footer .version { color: var(--theme-greyscale-medium); }
 div#footer { border-top-color: var(--theme-container-border-color); }
@@ -101,6 +110,7 @@ div.repo { background-color: var(--theme-container-background-color); }
 .repo_name span.name { color: #333; }
 .repo_name span.url  { color: var(--theme-primary-font-color-reduced); }
 .repo_name a.url { color: var(--theme-primary-font-color-reduced); }
+.repo_name a.url:hover { color: var(--theme-link-color); }
 .repo_attr       { color: grey; }
 
 .repo_attr span.bg_marker {
@@ -130,11 +140,15 @@ table.repo_tab {
   background-color: #fff;
 }
 .repo_tab th {
-  color: #888888;
+  color: var(--theme-link-color);
+  background-color: #edf2f9;
   border-bottom-color: #ddd;
 }
 .repo_tab td {
   color: #333;
+}
+
+.repo_tab tr.object_row{
   border-top-color: var(--theme-table-border-color);
 }
 .repo_tab .inactive      { color: orange; }
@@ -174,22 +188,21 @@ table.repo_tab {
   border-color: #ddd;
   background-color: #fff;
 }
-.stage_tab td {
-  color: #333;
-  border-top-color: var(--theme-table-border-color);
-}
 .stage_tab th {
-  color: var(--theme-greyscale-medium);
+  color: var(--theme-greyscale-dark);
   background-color: #edf2f9;
+  border-bottom-color: #ddd;
+}
+.stage_tab td {
+  color: var(--theme-greyscale-medium);
+  border-top-color: var(--theme-table-border-color);
 }
 .stage_tab td.status {
   color: var(--theme-primary-font-color-reduced);
   background-color: #fafafa;
 }
 .stage_tab td.highlight { color: #444 !important; }
-.stage_tab td.method { color: var(--theme-primary-font-color-reduced); }
-.stage_tab td.user   { color: var(--theme-greyscale-medium); }
-.stage_tab td.type   { color: var(--theme-greyscale-medium); }
+.stage_tab td.method { font-weight: bold; }
 .stage_tab mark {
   color: white;
   background-color: #79a0d2;
@@ -340,8 +353,8 @@ table.diff_tab td.patch, th.patch {
 .syntax-hl span.variables    { color:purple; }
 
 /* DEBUG INFO STYLES */
-div.debug_container { 
-  color: #444; 
+div.debug_container {
+  color: #444;
   background-color: var(--theme-container-background-color);
 }
 
@@ -349,11 +362,24 @@ div.debug_container {
 div.db_list { background-color: #fff; }
 table.db_tab td      { color: #333; }
 table.db_tab td.data { color: #888; }
-table.db_tab tbody tr:hover, tr:active { background-color: #f4f4f4; }
+table.db_tab tbody tr:hover td {
+  background-image: linear-gradient(rgba(0, 0, 0, 0.075), rgba(0, 0, 0, 0.075));
+}
+table.db_tab tbody tr:active td {
+  background-color: #f4f4f4;
+}
 table.db_tab th {
-  color: #888888;
+  color: var(--theme-link-color);
   border-bottom-color: #ddd;
 }
+
+table.db_tab tr.selected {
+  background-color: rgba(191, 191, 191, 1) !important;
+}
+table.db_tab a.remote_repo {
+  color: var(--theme-primary-font-color-reduced);
+}
+table.db_tab a.remote_repo:hover { color: var(--theme-link-color); }
 
 /* DB ENTRY DISPLAY */
 div.db_entry {
@@ -375,6 +401,7 @@ div.tutorial hr { border-color: var(--theme-greyscale-light); }
 div.tutorial h1, h2 { color: #404040; }
 
 /* MENU */
+.nav-container ul li:hover { background-color: #fff; }
 .nav-container ul ul li:hover { background-color: #f6f6f6; }
 .nav-container > ul > li:hover > a { background-color: #ffffff80; }
 .nav-container ul ul { background-color: #fff; }
@@ -473,16 +500,20 @@ table.settings_tab input:focus {
 /* HTML FORMS */
 
 .dialog input::placeholder { color: #ccc }
+.dialog textarea::placeholder { color: #ccc }
 .dialog input:-ms-input-placeholder { color: #ccc }
+.dialog textarea:-ms-input-placeholder { color: #ccc }
 .dialog {
-  border-color: #cbcbcb;
-  background-color: #f4f4f4;
+  border-color: #ccc;
+  background-color: #f0f0f0;
 }
 .dialog li.dialog-commands a {
   border-color: #ccc;
+  background-color: #ddd;
 }
 .dialog li.dialog-commands input[type="submit"] {
   border-color: #ccc;
+  background-color: #ddd;
 }
 .dialog li.dialog-commands input[type="submit"].main {
   background-color: #64a8ff;
@@ -497,6 +528,7 @@ table.settings_tab input:focus {
 .dialog li.error small {
   color: #ff5959;
 }
+.dialog li.error input[type="number"],
 .dialog li.error input[type="text"] {
   border-color: #ff5959;
 }
@@ -511,6 +543,7 @@ table.settings_tab input:focus {
   background-color: #64a8ff;
   color: #fff;
 }
+.dialog li.with-command input[type="button"]:hover,
 .dialog li.with-command input[type="submit"]:hover {
   background-color: #64a8ff;
   color: #fff;
@@ -519,5 +552,14 @@ table.settings_tab input:focus {
   border-color: #dfdfdf;
 }
 .dialog fieldset legend {
-  color: #ccc;
+  color: #444;
+}
+.dialog input:read-only {
+  background-color: #f4f4f4;
+  color: var(--theme-greyscale-dark);
+}
+/* for IE */
+.dialog input[readonly] {
+  background-color: #f4f4f4;
+  color: var(--theme-greyscale-dark);
 }

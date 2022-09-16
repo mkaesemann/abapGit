@@ -1,30 +1,19 @@
-CLASS zcl_abapgit_object_wdcc DEFINITION PUBLIC
-  INHERITING FROM zcl_abapgit_objects_super.
+CLASS zcl_abapgit_object_wdcc DEFINITION
+  PUBLIC
+  INHERITING FROM zcl_abapgit_objects_super
+  FINAL
+  CREATE PUBLIC .
 
   PUBLIC SECTION.
-    INTERFACES zif_abapgit_object.
-    ALIASES mo_files FOR zif_abapgit_object~mo_files.
 
-    METHODS constructor
-      IMPORTING
-        !is_item     TYPE zif_abapgit_definitions=>ty_item
-        !iv_language TYPE spras.
-
+    INTERFACES zif_abapgit_object .
   PROTECTED SECTION.
   PRIVATE SECTION.
 ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_OBJECT_WDCC IMPLEMENTATION.
-
-
-  METHOD constructor.
-
-    super->constructor( is_item     = is_item
-                        iv_language = iv_language ).
-
-  ENDMETHOD.
+CLASS zcl_abapgit_object_wdcc IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~changed_by.
@@ -33,7 +22,8 @@ CLASS ZCL_ABAPGIT_OBJECT_WDCC IMPLEMENTATION.
           ls_config_key TYPE wdy_config_key.
 
     ls_config_key-config_id = ms_item-obj_name+0(32).
-    ls_config_key-config_type = '00'.
+    ls_config_key-config_type = ms_item-obj_name+32(2).
+    ls_config_key-config_var = ms_item-obj_name+34(6).
 
     TRY.
         cl_wdr_cfg_persistence_utils=>read_comp_config_from_db(
@@ -55,7 +45,8 @@ CLASS ZCL_ABAPGIT_OBJECT_WDCC IMPLEMENTATION.
           lv_subrc      TYPE sysubrc.
 
     ls_config_key-config_id = ms_item-obj_name+0(32).
-    ls_config_key-config_type = '00'.
+    ls_config_key-config_type = ms_item-obj_name+32(2).
+    ls_config_key-config_var = ms_item-obj_name+34(6).
 
     TRY.
         " does not exist in 702
@@ -70,6 +61,8 @@ CLASS ZCL_ABAPGIT_OBJECT_WDCC IMPLEMENTATION.
       CATCH cx_root.
         zcx_abapgit_exception=>raise( 'Object type WDCC not supported for this release' ).
     ENDTRY.
+
+    corr_insert( iv_package ).
 
   ENDMETHOD.
 
@@ -96,6 +89,10 @@ CLASS ZCL_ABAPGIT_OBJECT_WDCC IMPLEMENTATION.
     io_xml->read( EXPORTING iv_name = 'CONFIG_VAR'
                   CHANGING  cg_data = ls_orig_config-config_var ).
 
+    lv_config_id = ls_orig_config-config_id.
+    lv_config_type = ls_orig_config-config_type.
+    lv_config_var = ls_orig_config-config_var.
+
     ASSIGN COMPONENT 'CONFIG_IDPAR' OF STRUCTURE ls_orig_config TO <lv_data>.
     IF sy-subrc = 0.
       io_xml->read( EXPORTING iv_name = 'CONFIG_IDPAR'
@@ -121,8 +118,10 @@ CLASS ZCL_ABAPGIT_OBJECT_WDCC IMPLEMENTATION.
     io_xml->read( EXPORTING iv_name = 'WDA_COMPONENT'
                   CHANGING  cg_data = ls_orig_config-component ).
 
-    lv_xml_string = mo_files->read_string( iv_extra = 'comp_config'
-                                           iv_ext   = 'xml' ).
+    lv_xml_string = zif_abapgit_object~mo_files->read_string(
+      iv_extra = 'comp_config'
+      iv_ext   = 'xml' ).
+
     TRY.
         lv_xml_string = zcl_abapgit_xml_pretty=>print( iv_xml           = lv_xml_string
                                                        iv_ignore_errors = abap_false
@@ -149,10 +148,20 @@ CLASS ZCL_ABAPGIT_OBJECT_WDCC IMPLEMENTATION.
     io_xml->read( EXPORTING iv_name = 'RELID'
                   CHANGING  cg_data = ls_orig_config-relid ).
 
-    ls_orig_config-author = sy-uname.
+    SELECT SINGLE author createdon FROM wdy_config_data INTO (ls_orig_config-author, ls_orig_config-createdon)
+      WHERE config_id = lv_config_id AND
+    config_type = lv_config_type AND
+    config_var = lv_config_var.
+
+    IF ls_orig_config-author IS INITIAL.
+      ls_orig_config-author = sy-uname.
+    ENDIF.
     ls_orig_config-changedby = sy-uname.
     ls_orig_config-changedon = sy-datum.
-    ls_orig_config-createdon = sy-datum.
+
+    IF ls_orig_config-createdon IS INITIAL.
+      ls_orig_config-createdon = sy-datum.
+    ENDIF.
 
     CALL FUNCTION 'ENQUEUE_E_WDY_CONFCOMP'
       EXPORTING
@@ -219,7 +228,9 @@ CLASS ZCL_ABAPGIT_OBJECT_WDCC IMPLEMENTATION.
         x_config_type        = 'X'
         x_config_var         = 'X'.
 
-    tadir_insert( iv_package = iv_package ).
+    tadir_insert( iv_package ).
+
+    corr_insert( iv_package ).
 
   ENDMETHOD.
 
@@ -230,7 +241,8 @@ CLASS ZCL_ABAPGIT_OBJECT_WDCC IMPLEMENTATION.
           ls_config_key TYPE wdy_config_key.
 
     ls_config_key-config_id = ms_item-obj_name+0(32).
-    ls_config_key-config_type = '00'.
+    ls_config_key-config_type = ms_item-obj_name+32(2).
+    ls_config_key-config_var = ms_item-obj_name+34(6).
 
     TRY.
         cl_wdr_cfg_persistence_utils=>read_comp_config_from_db(
@@ -305,14 +317,7 @@ CLASS ZCL_ABAPGIT_OBJECT_WDCC IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~jump.
-
-    CALL FUNCTION 'RS_TOOL_ACCESS'
-      EXPORTING
-        operation     = 'SHOW'
-        object_name   = ms_item-obj_name
-        object_type   = 'WDCC'
-        in_new_window = abap_true.
-
+    " Covered by ZCL_ABAPGIT_OBJECTS=>JUMP
   ENDMETHOD.
 
 
@@ -332,7 +337,8 @@ CLASS ZCL_ABAPGIT_OBJECT_WDCC IMPLEMENTATION.
                  ig_data =  ms_item-obj_name ).
 
     ls_config_key-config_id = ms_item-obj_name+0(32).
-    ls_config_key-config_type = '00'.
+    ls_config_key-config_type = ms_item-obj_name+32(2).
+    ls_config_key-config_var = ms_item-obj_name+34(6).
 
     TRY.
         " original_config_data does not exist in 702
@@ -390,35 +396,42 @@ CLASS ZCL_ABAPGIT_OBJECT_WDCC IMPLEMENTATION.
                  ig_data =  ls_orig_config-relid ).
 
     lv_xml_string = zcl_abapgit_convert=>xstring_to_string_utf8( iv_data = lv_xml_xstring ).
-    TRY.
-        lv_xml_string = zcl_abapgit_xml_pretty=>print( iv_xml           = lv_xml_string
-                                                       iv_ignore_errors = abap_false ).
-      CATCH zcx_abapgit_exception.    "
-        zcx_abapgit_exception=>raise( 'Error Pretty Printing WDCC XML Content: ' && ms_item-obj_name ).
-    ENDTRY.
+    IF lv_xml_string IS NOT INITIAL.
+      TRY.
+          lv_xml_string = zcl_abapgit_xml_pretty=>print(
+            iv_xml           = lv_xml_string
+            iv_ignore_errors = abap_false ).
+        CATCH zcx_abapgit_exception.
+          zcx_abapgit_exception=>raise( 'Error Pretty Printing WDCC XML Content: ' && ms_item-obj_name ).
+      ENDTRY.
 
-    REPLACE FIRST OCCURRENCE
-      OF REGEX '<\?xml version="1\.0" encoding="[\w-]+"\?>'
-      IN lv_xml_string
-      WITH '<?xml version="1.0" encoding="utf-8"?>'.
-    ASSERT sy-subrc = 0.
+      REPLACE FIRST OCCURRENCE
+        OF REGEX '<\?xml version="1\.0" encoding="[\w-]+"\?>'
+        IN lv_xml_string
+        WITH '<?xml version="1.0" encoding="utf-8"?>'.
+      ASSERT sy-subrc = 0.
+    ENDIF.
 
-    mo_files->add_string( iv_extra  = 'comp_config'
-                          iv_ext    = 'xml'
-                          iv_string = lv_xml_string ).
+    zif_abapgit_object~mo_files->add_string(
+      iv_extra  = 'comp_config'
+      iv_ext    = 'xml'
+      iv_string = lv_xml_string ).
 
-    SELECT * FROM wdy_config_compt INTO TABLE lt_otr_texts WHERE config_id   = ls_orig_config-config_id
-                                                             AND config_type = ls_orig_config-config_type
-                                                             AND config_var  = ls_orig_config-config_var.
-
+    SELECT * FROM wdy_config_compt INTO TABLE lt_otr_texts
+      WHERE config_id   = ls_orig_config-config_id
+      AND config_type = ls_orig_config-config_type
+      AND config_var  = ls_orig_config-config_var
+      ORDER BY PRIMARY KEY.
     IF lt_otr_texts IS NOT INITIAL.
       io_xml->add( iv_name = 'OTR_TEXT'
                    ig_data = lt_otr_texts ).
     ENDIF.
 
-    SELECT * FROM wdy_config_datt INTO TABLE lt_cc_text WHERE config_id   = ls_orig_config-config_id
-                                                          AND config_type = ls_orig_config-config_type
-                                                          AND config_var  = ls_orig_config-config_var.
+    SELECT * FROM wdy_config_datt INTO TABLE lt_cc_text
+      WHERE config_id   = ls_orig_config-config_id
+      AND config_type = ls_orig_config-config_type
+      AND config_var  = ls_orig_config-config_var
+      ORDER BY PRIMARY KEY.
     IF lt_cc_text IS NOT INITIAL.
       io_xml->add( iv_name = 'DESCR_LANG'
                    ig_data = lt_cc_text ).

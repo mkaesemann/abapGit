@@ -9,7 +9,7 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_OBJECT_SHMA IMPLEMENTATION.
+CLASS zcl_abapgit_object_shma IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~changed_by.
@@ -62,7 +62,7 @@ CLASS ZCL_ABAPGIT_OBJECT_SHMA IMPLEMENTATION.
             OTHERS               = 3.
 
         IF sy-subrc <> 0.
-          zcx_abapgit_exception=>raise( |Error deleting SHMA { ms_item-obj_name }| ).
+          zcx_abapgit_exception=>raise_t100( ).
         ENDIF.
 
         CALL METHOD ('\PROGRAM=SAPMSHM_MONITOR\CLASS=LCL_SHMM')=>('FREE_AREA_BY_NAME')
@@ -246,19 +246,11 @@ CLASS ZCL_ABAPGIT_OBJECT_SHMA IMPLEMENTATION.
     ls_bcdata-fval = '=SHOW'.
     APPEND ls_bcdata TO lt_bcdata.
 
-    CALL FUNCTION 'ABAP4_CALL_TRANSACTION'
-      STARTING NEW TASK 'GIT'
-      EXPORTING
-        tcode     = 'SHMA'
-        mode_val  = 'E'
-      TABLES
-        using_tab = lt_bcdata
-      EXCEPTIONS
-        OTHERS    = 1.
+    zcl_abapgit_ui_factory=>get_gui_jumper( )->jump_batch_input(
+      iv_tcode   = 'SHMA'
+      it_bdcdata = lt_bcdata ).
 
-    IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'error from ABAP4_CALL_TRANSACTION, SHMA' ).
-    ENDIF.
+    rv_exit = abap_true.
 
   ENDMETHOD.
 
