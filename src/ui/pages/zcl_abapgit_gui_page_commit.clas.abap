@@ -487,6 +487,11 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_COMMIT IMPLEMENTATION.
             IN ms_commit-body
             WITH cl_abap_char_utilities=>newline.
 
+          zcl_abapgit_cts_integration=>supplement_task_info(
+            EXPORTING it_staged = mo_stage->get_all( )
+                      it_status = mo_repo->status( )
+            CHANGING cs_commit = ms_commit ).
+
           lv_new_branch_name = mo_form_data->get( c_id-new_branch_name ).
           " create new branch and commit to it if branch name is not empty
           IF lv_new_branch_name IS NOT INITIAL.
@@ -519,6 +524,14 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_COMMIT IMPLEMENTATION.
     IF mo_form_util->is_empty( mo_form_data ) = abap_true.
       get_defaults( ).
     ENDIF.
+
+    zcl_abapgit_cts_integration=>propose_default_texts(
+        EXPORTING
+          it_staged = mo_stage->get_all( )
+          it_status = mo_repo->status( )
+          io_form   = mo_form_data
+        CHANGING
+          cs_commit = ms_commit ).
 
     CREATE OBJECT ri_html TYPE zcl_abapgit_html.
 
