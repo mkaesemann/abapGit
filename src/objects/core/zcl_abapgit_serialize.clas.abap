@@ -305,9 +305,10 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
         gv_max_processes = gv_max_processes - 1.
       ENDIF.
 
-      IF gv_max_processes > 32.
+      DATA(c_max_threads) = 50.
+      IF gv_max_processes > c_max_threads.
         " https://en.wikipedia.org/wiki/Amdahl%27s_law
-        gv_max_processes = 32.
+        gv_max_processes = c_max_threads.
       ENDIF.
 
     ENDIF.
