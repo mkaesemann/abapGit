@@ -8,14 +8,12 @@ public section.
   class-methods PROPOSE_DEFAULT_TEXTS
     importing
       !IT_STAGED type ZIF_ABAPGIT_DEFINITIONS=>TY_STAGE_TT
-      !IT_STATUS type ZIF_ABAPGIT_DEFINITIONS=>TY_RESULTS_TT
       !IO_FORM type ref to ZCL_ABAPGIT_STRING_MAP
     changing
       !CS_COMMIT type ZIF_ABAPGIT_SERVICES_GIT=>TY_COMMIT_FIELDS .
   class-methods SUPPLEMENT_TASK_INFO
     importing
       !IT_STAGED type ZIF_ABAPGIT_DEFINITIONS=>TY_STAGE_TT
-      !IT_STATUS type ZIF_ABAPGIT_DEFINITIONS=>TY_RESULTS_TT
     changing
       !CS_COMMIT type ZIF_ABAPGIT_SERVICES_GIT=>TY_COMMIT_FIELDS .
   PROTECTED SECTION.
@@ -51,7 +49,6 @@ public section.
     CLASS-METHODS get_lock_info
       IMPORTING
                 !it_staged          TYPE zif_abapgit_definitions=>ty_stage_tt
-                !it_status          TYPE zif_abapgit_definitions=>ty_results_tt
       RETURNING VALUE(rt_lock_info) TYPE tty_lock_info.
 
     CLASS-METHODS propose_default_body
@@ -107,17 +104,13 @@ CLASS ZCL_ABAPGIT_CTS_INTEGRATION IMPLEMENTATION.
     CLEAR: rt_lock_info.
 
     "Reliably determine the object information for the staged files
-    LOOP AT it_staged INTO DATA(ls_staged)
-      WHERE file-path IS NOT INITIAL
-        AND file-filename IS NOT INITIAL.
-      TRY.
-          DATA(ls_file) = it_status[ path     = ls_staged-file-path
-                                     filename = ls_staged-file-filename ].
-          INSERT CORRESPONDING #( ls_file ) INTO TABLE lt_items.
-        CATCH cx_root.
-          CONTINUE.
-      ENDTRY.
-    ENDLOOP.
+    lt_items = value #( for <ls_staged_object> in it_staged
+                          ( obj_type  = <ls_staged_object>-status-obj_type
+                            obj_name  = <ls_staged_object>-status-obj_name
+                            devclass  = <ls_staged_object>-status-package
+                            inactive  = <ls_staged_object>-status-inactive
+                            origlang  = <ls_staged_object>-status-origlang
+                            srcsystem = <ls_staged_object>-status-srcsystem ) ).
 
     "Determine the transports/tasks for the staged objects that currently hold a lock in an open transport
     TRY.
@@ -373,8 +366,7 @@ CLASS ZCL_ABAPGIT_CTS_INTEGRATION IMPLEMENTATION.
     DATA: fixdate TYPE d VALUE '00010101'.
 
     DATA(lt_lock_info) = get_lock_info(
-                           it_staged = it_staged
-                           it_status = it_status ).
+                           it_staged = it_staged ).
 
     IF lt_lock_info IS INITIAL.
       RETURN.
@@ -466,8 +458,7 @@ CLASS ZCL_ABAPGIT_CTS_INTEGRATION IMPLEMENTATION.
     "Supplement Transport Request/Task Lock Links in Comment
 
     DATA(lt_lock_info) = get_lock_info(
-                           it_staged = it_staged
-                           it_status = it_status ).
+                           it_staged = it_staged ).
 
     IF lt_lock_info IS INITIAL.
       RETURN.
