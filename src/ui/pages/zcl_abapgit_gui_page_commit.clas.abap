@@ -114,7 +114,7 @@ ENDCLASS.
 
 
 
-CLASS zcl_abapgit_gui_page_commit IMPLEMENTATION.
+CLASS ZCL_ABAPGIT_GUI_PAGE_COMMIT IMPLEMENTATION.
 
 
   METHOD branch_name_to_internal.
@@ -488,7 +488,6 @@ CLASS zcl_abapgit_gui_page_commit IMPLEMENTATION.
 
           zcl_abapgit_cts_integration=>supplement_task_info(
             EXPORTING it_staged = mo_stage->get_all( )
-                      it_status = mo_repo->status( )
             CHANGING cs_commit = ms_commit ).
 
           lv_new_branch_name = mo_form_data->get( c_id-new_branch_name ).
@@ -529,7 +528,6 @@ CLASS zcl_abapgit_gui_page_commit IMPLEMENTATION.
     zcl_abapgit_cts_integration=>propose_default_texts(
         EXPORTING
           it_staged = mo_stage->get_all( )
-          it_status = mo_repo->status( )
           io_form   = mo_form_data
         CHANGING
           cs_commit = ms_commit ).
