@@ -102,6 +102,7 @@ INTERFACE zif_abapgit_popups
       !it_list               TYPE STANDARD TABLE
       !iv_title              TYPE lvc_title DEFAULT space
       !iv_header_text        TYPE csequence DEFAULT space
+      !io_header             TYPE REF TO cl_salv_form_element OPTIONAL
       !iv_start_column       TYPE i DEFAULT 10
       !iv_end_column         TYPE i DEFAULT 125
       !iv_start_line         TYPE i DEFAULT 10

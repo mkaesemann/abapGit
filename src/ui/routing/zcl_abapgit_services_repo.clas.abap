@@ -567,6 +567,7 @@ CLASS zcl_abapgit_services_repo IMPLEMENTATION.
         it_list               = ct_overwrite
         iv_header_text        = |The following objects are different between local and remote repository.|
                              && | Select the objects which should be brought in line with the remote version.|
+        io_header             = zcl_abapgit_user_branch=>get_obj_check_warning_header( )
         iv_select_column_text = 'Change?'
         it_columns_to_display = lt_columns
         it_preselected_rows   = lt_preselected_rows

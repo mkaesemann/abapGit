@@ -657,6 +657,7 @@ CLASS zcl_abapgit_popups IMPLEMENTATION.
         it_list               = it_list
         iv_title              = iv_title
         iv_header_text        = iv_header_text
+        io_header             = io_header
         is_position           = ms_position
         iv_striped_pattern    = iv_striped_pattern
         iv_optimize_col_width = iv_optimize_col_width

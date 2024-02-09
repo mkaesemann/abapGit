@@ -230,7 +230,7 @@ CLASS zcl_abapgit_repo_online IMPLEMENTATION.
 
 
   METHOD zif_abapgit_repo_online~get_selected_branch.
-    rv_name = ms_data-branch_name.
+    rv_name = zcl_abapgit_user_branch=>get_selected_branch( ms_data ).
   ENDMETHOD.
 
 
@@ -258,7 +258,7 @@ CLASS zcl_abapgit_repo_online IMPLEMENTATION.
           lv_parent TYPE zif_abapgit_git_definitions=>ty_sha1.
 
 
-    IF ms_data-branch_name CP zif_abapgit_git_definitions=>c_git_branch-tags.
+    IF zcl_abapgit_user_branch=>get_selected_branch( ms_data ) CP zif_abapgit_git_definitions=>c_git_branch-tags.
       lv_text = |You're working on a tag. Currently it's not |
              && |possible to push on tags. Consider creating a branch instead|.
       zcx_abapgit_exception=>raise( lv_text ).
@@ -305,8 +305,15 @@ CLASS zcl_abapgit_repo_online IMPLEMENTATION.
   METHOD zif_abapgit_repo_online~select_branch.
 
     reset_remote( ).
-    set( iv_branch_name     = iv_branch_name
-         iv_selected_commit = space ).
+
+    IF zcl_abapgit_user_branch=>is_user_branch_active( ).
+      zcl_abapgit_user_branch=>select_branch(
+        iv_url    = get_url( )
+        iv_branch = iv_branch_name ).
+    ELSE.
+      set( iv_branch_name     = iv_branch_name
+           iv_selected_commit = space ).
+    ENDIF.
 
   ENDMETHOD.
 
@@ -357,7 +364,7 @@ CLASS zcl_abapgit_repo_online IMPLEMENTATION.
         set( iv_switched_origin = '' ).
       ENDIF.
     ELSEIF ms_data-switched_origin IS INITIAL.
-      set( iv_switched_origin = ms_data-url && '@' && ms_data-branch_name ).
+      set( iv_switched_origin = ms_data-url && '@' && zcl_abapgit_user_branch=>get_selected_branch( ms_data ) ).
       set_url( iv_url ).
       select_branch( iv_branch ).
     ELSE.

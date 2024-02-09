@@ -379,6 +379,12 @@ CLASS zcl_abapgit_gui_page_db IMPLEMENTATION.
         lv_descr       = 'Repo Checksums'.
         ls_explanation = explain_content_repo_cs( is_data ).
 
+      WHEN zcl_abapgit_persistence_ortec=>c_type_ortec.
+        zcl_abapgit_persistence_ortec=>get_instance( )->get_db_explanation(
+            EXPORTING is_data       = is_data
+            CHANGING cv_descr       = lv_descr
+                     cs_explanation = ls_explanation ).
+
       WHEN OTHERS.
         IF strlen( is_data-data_str ) >= 250.
           ls_explanation-value = is_data-data_str(250).
