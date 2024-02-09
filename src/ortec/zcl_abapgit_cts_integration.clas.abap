@@ -1,21 +1,36 @@
-class ZCL_ABAPGIT_CTS_INTEGRATION definition
-  public
-  final
-  create private .
+CLASS zcl_abapgit_cts_integration DEFINITION
+  PUBLIC
+  FINAL
+  CREATE PRIVATE .
 
-public section.
+  PUBLIC SECTION.
+    TYPE-POOLS trsel .
 
-  class-methods PROPOSE_DEFAULT_TEXTS
-    importing
-      !IT_STAGED type ZIF_ABAPGIT_DEFINITIONS=>TY_STAGE_TT
-      !IO_FORM type ref to ZCL_ABAPGIT_STRING_MAP
-    changing
-      !CS_COMMIT type ZIF_ABAPGIT_SERVICES_GIT=>TY_COMMIT_FIELDS .
-  class-methods SUPPLEMENT_TASK_INFO
-    importing
-      !IT_STAGED type ZIF_ABAPGIT_DEFINITIONS=>TY_STAGE_TT
-    changing
-      !CS_COMMIT type ZIF_ABAPGIT_SERVICES_GIT=>TY_COMMIT_FIELDS .
+    CLASS-METHODS propose_default_texts
+      IMPORTING
+        !it_staged TYPE zif_abapgit_definitions=>ty_stage_tt
+        !io_form   TYPE REF TO zcl_abapgit_string_map
+      CHANGING
+        !cs_commit TYPE zif_abapgit_services_git=>ty_commit_fields .
+    CLASS-METHODS supplement_task_info
+      IMPORTING
+        !it_staged TYPE zif_abapgit_definitions=>ty_stage_tt
+      CHANGING
+        !cs_commit TYPE zif_abapgit_services_git=>ty_commit_fields .
+    CLASS-METHODS get_open_user_requests
+      IMPORTING
+        !i_tasks           TYPE abap_bool DEFAULT abap_true
+        !i_requests        TYPE abap_bool DEFAULT abap_true
+        !i_parent_request  TYPE abap_bool DEFAULT abap_true
+        !i_recent_days     TYPE i DEFAULT 2
+      RETURNING
+        VALUE(rt_requests) TYPE trsel_trt_trkorr .
+    CLASS-METHODS popup_select_own_tr_requests
+      IMPORTING is_selection        TYPE trwbo_selection
+                iv_title            TYPE trwbo_title
+                iv_username_pattern TYPE any DEFAULT sy-uname
+      RETURNING VALUE(rt_r_trkorr)  TYPE zif_abapgit_definitions=>ty_trrngtrkor_tt
+      RAISING   zcx_abapgit_exception.
   PROTECTED SECTION.
 
     TYPES: BEGIN OF ty_trkorr,
@@ -60,36 +75,36 @@ public section.
                 !it_lock_info    TYPE tty_lock_info
       RETURNING VALUE(r_comment) TYPE string .
 
-PRIVATE SECTION.
+  PRIVATE SECTION.
 
-  CONSTANTS:
-    BEGIN OF cs_formid,
-      committer       TYPE string VALUE 'committer',
-      committer_name  TYPE string VALUE 'committer_name',
-      committer_email TYPE string VALUE 'committer_email',
-      message         TYPE string VALUE 'message',
-      comment         TYPE string VALUE 'comment',
-      body            TYPE string VALUE 'body',
-      author          TYPE string VALUE 'author',
-      author_name     TYPE string VALUE 'author_name',
-      author_email    TYPE string VALUE 'author_email',
-    END OF cs_formid.
+    CONSTANTS:
+      BEGIN OF cs_formid,
+        committer       TYPE string VALUE 'committer',
+        committer_name  TYPE string VALUE 'committer_name',
+        committer_email TYPE string VALUE 'committer_email',
+        message         TYPE string VALUE 'message',
+        comment         TYPE string VALUE 'comment',
+        body            TYPE string VALUE 'body',
+        author          TYPE string VALUE 'author',
+        author_name     TYPE string VALUE 'author_name',
+        author_email    TYPE string VALUE 'author_email',
+      END OF cs_formid.
 
-  CLASS-METHODS get_lock_text
-    IMPORTING
-      !is_lock_info TYPE zcl_abapgit_cts_integration=>ty_lock_info
-    RETURNING
-      VALUE(r_text) TYPE string .
-  CLASS-METHODS get_task_docu
-    IMPORTING
-      !i_trkorr     TYPE trkorr
-    RETURNING
-      VALUE(r_docu) TYPE string .
+    CLASS-METHODS get_lock_text
+      IMPORTING
+        !is_lock_info TYPE zcl_abapgit_cts_integration=>ty_lock_info
+      RETURNING
+        VALUE(r_text) TYPE string .
+    CLASS-METHODS get_task_docu
+      IMPORTING
+        !i_trkorr     TYPE trkorr
+      RETURNING
+        VALUE(r_docu) TYPE string .
 ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_CTS_INTEGRATION IMPLEMENTATION.
+CLASS zcl_abapgit_cts_integration IMPLEMENTATION.
 
 
   METHOD get_lock_info.
@@ -104,7 +119,7 @@ CLASS ZCL_ABAPGIT_CTS_INTEGRATION IMPLEMENTATION.
     CLEAR: rt_lock_info.
 
     "Reliably determine the object information for the staged files
-    lt_items = value #( for <ls_staged_object> in it_staged
+    lt_items = VALUE #( FOR <ls_staged_object> IN it_staged
                           ( obj_type  = <ls_staged_object>-status-obj_type
                             obj_name  = <ls_staged_object>-status-obj_name
                             devclass  = <ls_staged_object>-status-package
@@ -366,7 +381,7 @@ CLASS ZCL_ABAPGIT_CTS_INTEGRATION IMPLEMENTATION.
     DATA: fixdate TYPE d VALUE '00010101'.
 
     DATA(lt_lock_info) = get_lock_info(
-                           it_staged = it_staged ).
+      it_staged = it_staged ).
 
     IF lt_lock_info IS INITIAL.
       RETURN.
@@ -458,7 +473,7 @@ CLASS ZCL_ABAPGIT_CTS_INTEGRATION IMPLEMENTATION.
     "Supplement Transport Request/Task Lock Links in Comment
 
     DATA(lt_lock_info) = get_lock_info(
-                           it_staged = it_staged ).
+      it_staged = it_staged ).
 
     IF lt_lock_info IS INITIAL.
       RETURN.
@@ -503,4 +518,152 @@ CLASS ZCL_ABAPGIT_CTS_INTEGRATION IMPLEMENTATION.
                         | ({ tr_links } // { ta_links } )|.
 
   ENDMETHOD.
+
+
+  METHOD get_open_user_requests.
+
+    CONSTANTS c_SECSOFDAY TYPE i VALUE 86400.
+
+    DATA lt_rt_function TYPE RANGE OF trfunction.
+
+    IF i_tasks = abap_true.
+      lt_rt_function = VALUE #( BASE lt_rt_function
+                                sign   = 'I'
+                                option = 'EQ'
+                                ( low = 'S' ) ).
+    ENDIF.
+
+    IF i_requests = abap_true.
+      lt_rt_function = VALUE #( BASE lt_rt_function
+                                sign   = 'I'
+                                option = 'EQ'
+                                ( low = 'W' )
+                                ( low = 'T' ) ).
+    ENDIF.
+
+    IF lt_rt_function IS INITIAL.
+      " No Request Types set
+      RETURN.
+    ENDIF.
+
+    GET TIME STAMP FIELD DATA(now).
+    DATA(earliest) = now.
+    IF i_recent_days > 0.
+      TRY.
+          earliest = cl_abap_tstmp=>subtractsecs_to_short(
+            tstmp = now
+            secs  = ( i_recent_days * c_secsofday ) ).
+        CATCH cx_root.
+          earliest = now.
+      ENDTRY.
+    ENDIF.
+
+    " Read Open and Recent User Tasks/Request
+    SELECT * FROM ZPI_TransportRequests
+      WHERE Function IN @lt_rt_function
+        AND SystemId  = @sy-sysid
+        AND UserName  = @sy-uname
+        AND (    status IN ( 'D', 'L' )
+              OR
+                 (     status      IN ( 'R', 'O', 'P' )
+                   AND LastChanged  > @earliest ) )
+      INTO TABLE @DATA(lt_requests).
+
+    " Process
+    LOOP AT lt_requests ASSIGNING FIELD-SYMBOL(<ls_request>).
+
+      INSERT VALUE #( sign   = 'I'
+                      option = 'EQ'
+                      low    = <ls_request>-Request
+       ) INTO TABLE rt_requests.
+
+      IF     i_parent_request            = abap_true
+         AND <ls_request>-ParentRequest IS NOT INITIAL.
+        " If we are dealing with a task, and it is requested to also retrieve the parent
+        INSERT VALUE #( sign   = 'I'
+                        option = 'EQ'
+                        low    = <ls_request>-ParentRequest
+         ) INTO TABLE rt_requests.
+      ENDIF.
+
+    ENDLOOP.
+    SORT rt_requests BY sign
+                        option
+                        low.
+    DELETE ADJACENT DUPLICATES FROM rt_requests
+           COMPARING sign option low.
+
+  ENDMETHOD.
+
+  METHOD popup_select_own_tr_requests.
+
+    DATA ls_r_trkorr TYPE LINE OF zif_abapgit_definitions=>ty_trrngtrkor_tt.
+    DATA lr_request TYPE REF TO trwbo_request_header.
+    DATA lt_request TYPE trwbo_request_headers.
+
+    DATA(ls_position) = zcl_abapgit_popups=>center(
+      iv_width  = 120
+      iv_height = 10 ).
+
+    DATA(ls_selection) = is_selection.
+    DATA(ls_ranges) = VALUE trsel_ts_ranges(
+      trkorr = zcl_abapgit_cts_integration=>get_open_user_requests(
+                 i_tasks          = abap_true
+                 i_requests       = abap_true
+                 i_parent_request = abap_true
+                 i_recent_days    = 1 ) ).
+    IF ls_ranges-trkorr IS NOT INITIAL.
+      CLEAR: ls_selection.
+      ls_ranges-task_funcs = VALUE #( sign = 'I' option = 'EQ'
+        ( low = 'K' )
+        ( low = 'T' )
+        ( low = 'R' )
+        ( low = 'X' )
+        ( low = 'S' )  ) .
+      ls_ranges-task_status = VALUE #( sign = 'I' option = 'EQ'
+        ( low = 'R' )
+        ( low = 'N' )
+        ( low = 'O' )
+        ( low = 'D' )
+        ( low = 'L' )  ) .
+      ls_ranges-request_funcs  = ls_ranges-task_funcs .
+      ls_ranges-request_status = ls_ranges-task_status.
+    ENDIF.
+
+    CALL FUNCTION 'TRINT_SELECT_REQUESTS'
+      EXPORTING
+        iv_username_pattern    = iv_username_pattern
+        is_selection           = ls_selection
+        iv_complete_projects   = abap_false
+        is_popup               = ls_position
+        iv_via_selscreen       = 'X'
+        iv_title               = iv_title
+      IMPORTING
+        et_requests            = lt_request
+      CHANGING
+        cs_ranges              = ls_ranges
+      EXCEPTIONS
+        action_aborted_by_user = 1
+        OTHERS                 = 2.
+    IF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise( 'Selection canceled' ).
+    ENDIF.
+
+    IF lt_request IS INITIAL.
+      zcx_abapgit_exception=>raise( 'No Request Found' ).
+    ENDIF.
+
+    IF lines( lt_request ) > 10000.
+      zcx_abapgit_exception=>raise( 'Too many requests selected (max 10000)' ).
+    ENDIF.
+
+    LOOP AT lt_request REFERENCE INTO lr_request.
+      ls_r_trkorr-sign = 'I'.
+      ls_r_trkorr-option = 'EQ'.
+      ls_r_trkorr-low = lr_request->trkorr.
+      INSERT ls_r_trkorr INTO TABLE rt_r_trkorr.
+    ENDLOOP.
+
+  ENDMETHOD.
+
 ENDCLASS.
