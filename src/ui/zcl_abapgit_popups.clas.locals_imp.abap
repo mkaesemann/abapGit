@@ -12,6 +12,7 @@ CLASS lcl_object_descision_list DEFINITION FINAL.
         !it_list               TYPE STANDARD TABLE
         !iv_title              TYPE lvc_title DEFAULT space
         !iv_header_text        TYPE csequence DEFAULT space
+        !io_header             type ref to cl_salv_form_element OPTIONAL
         !is_position           TYPE zif_abapgit_popups=>ty_popup_position
         !iv_striped_pattern    TYPE abap_bool DEFAULT abap_false
         !iv_optimize_col_width TYPE abap_bool DEFAULT abap_true
@@ -234,9 +235,13 @@ CLASS lcl_object_descision_list IMPLEMENTATION.
           mo_alv->get_display_settings( )->set_list_header( iv_title ).
         ENDIF.
 
-        IF iv_header_text CN ' _0'.
-          CREATE OBJECT lo_table_header EXPORTING text = iv_header_text.
-          mo_alv->set_top_of_list( lo_table_header ).
+        IF io_header IS BOUND.
+          mo_alv->set_top_of_list( io_header ).
+        ELSE.
+          IF iv_header_text CN ' _0'.
+            CREATE OBJECT lo_table_header EXPORTING text = iv_header_text.
+            mo_alv->set_top_of_list( lo_table_header ).
+          ENDIF.
         ENDIF.
 
         mo_alv->get_display_settings( )->set_striped_pattern( iv_striped_pattern ).

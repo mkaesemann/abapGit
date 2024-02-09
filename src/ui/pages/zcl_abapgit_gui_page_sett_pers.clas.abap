@@ -118,6 +118,10 @@ CLASS zcl_abapgit_gui_page_sett_pers IMPLEMENTATION.
       iv_name          = c_id-show_default_repo
       iv_label         = 'Show Last Opened Repository'
       iv_hint          = 'Recommended to check, if you are using ADT'
+    )->checkbox(
+      iv_name          = zcl_abapgit_user_branch=>cs_info-settings-name
+      iv_label         = zcl_abapgit_user_branch=>cs_info-settings-label
+      iv_hint          = zcl_abapgit_user_branch=>cs_info-settings-hint
     )->start_group(
       iv_name          = c_id-ui
       iv_label         = 'User Interface'
@@ -214,6 +218,9 @@ CLASS zcl_abapgit_gui_page_sett_pers IMPLEMENTATION.
     ro_form_data->set(
       iv_key = c_id-show_default_repo
       iv_val = |{ ms_settings-show_default_repo }| ).
+    ro_form_data->set(
+      iv_key = zcl_abapgit_user_branch=>cs_info-settings-name
+      iv_val = |{ zcl_abapgit_user_branch=>get_use_user_branch( ) }| ).
 
     " UI
     ro_form_data->set(
@@ -317,6 +324,8 @@ CLASS zcl_abapgit_gui_page_sett_pers IMPLEMENTATION.
   METHOD save_settings.
 
     DATA li_persistence TYPE REF TO zif_abapgit_persist_settings.
+
+    zcl_abapgit_user_branch=>set_use_user_branch( mo_form_data->get( zcl_abapgit_user_branch=>cs_info-settings-name ) ).
 
     " Startup
     ms_settings-show_default_repo = mo_form_data->get( c_id-show_default_repo ).

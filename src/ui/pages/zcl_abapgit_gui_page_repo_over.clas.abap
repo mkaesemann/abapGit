@@ -1037,6 +1037,10 @@ CLASS zcl_abapgit_gui_page_repo_over IMPLEMENTATION.
 
     lt_overview = prepare_overviews( ).
 
+    zcl_abapgit_user_branch=>set_user_branch_in_repo_list(
+      CHANGING
+        ct_overview = lt_overview ).
+
     CREATE OBJECT ri_html TYPE zcl_abapgit_html.
 
     zcl_abapgit_exit=>get_instance( )->wall_message_list( ri_html ).
