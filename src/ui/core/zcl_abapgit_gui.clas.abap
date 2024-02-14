@@ -381,6 +381,12 @@ CLASS zcl_abapgit_gui IMPLEMENTATION.
 
   METHOD on_event.
 
+    zcl_abapgit_cts_integration=>on_event(
+      action      = action
+      getdata     = getdata
+      postdata    = postdata
+    ).
+
     handle_action(
       iv_action   = action
       iv_getdata  = getdata
