@@ -517,17 +517,33 @@ CLASS zcl_abapgit_git_porcelain IMPLEMENTATION.
 
   METHOD pull_by_branch.
 
-    zcl_abapgit_git_transport=>upload_pack_by_branch(
-      EXPORTING
-        iv_url          = iv_url
-        iv_branch_name  = iv_branch_name
-        iv_deepen_level = iv_deepen_level
-      IMPORTING
-        et_objects      = rs_result-objects
-        ev_branch       = rs_result-commit ).
+    rs_result = zcl_abapgit_pull_buffer=>pull_buffered_branch(
+      iv_url         = iv_url
+      iv_branch_name = iv_branch_name ).
+    IF rs_result IS INITIAL.
 
-    rs_result-files = pull( iv_commit  = rs_result-commit
-                            it_objects = rs_result-objects ).
+      zcl_abapgit_git_transport=>upload_pack_by_branch(
+        EXPORTING
+          iv_url          = iv_url
+          iv_branch_name  = iv_branch_name
+          iv_deepen_level = iv_deepen_level
+        IMPORTING
+          et_objects      = rs_result-objects
+          ev_branch       = rs_result-commit ).
+
+      rs_result-files = pull(
+        iv_commit  = rs_result-commit
+        it_objects = rs_result-objects ).
+
+      zcl_abapgit_pull_buffer=>store_branch_in_buffer(
+        iv_url         = iv_url
+        iv_branch_name = iv_branch_name
+        iv_commit      = rs_result-commit
+        it_objects     = rs_result-objects
+        it_files       = rs_result-files
+      ).
+
+    ENDIF.
 
   ENDMETHOD.
 
