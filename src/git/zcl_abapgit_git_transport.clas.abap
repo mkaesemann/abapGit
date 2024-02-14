@@ -7,6 +7,12 @@ CLASS zcl_abapgit_git_transport DEFINITION
     INTERFACES:
       zif_abapgit_git_transport.
 
+    CONSTANTS:
+      BEGIN OF c_service,
+        receive TYPE string VALUE 'receive',                  "#EC NOTEXT
+        upload  TYPE string VALUE 'upload',                   "#EC NOTEXT
+      END OF c_service .
+
 * remote to local
     CLASS-METHODS upload_pack_by_branch
       IMPORTING
@@ -47,14 +53,20 @@ CLASS zcl_abapgit_git_transport DEFINITION
       RAISING
         zcx_abapgit_exception .
 
+    CLASS-METHODS find_branch
+      IMPORTING
+        !iv_url         TYPE string
+        !iv_service     TYPE string
+        !iv_branch_name TYPE string
+      EXPORTING
+        !eo_client      TYPE REF TO zcl_abapgit_http_client
+        !ev_branch      TYPE zif_abapgit_git_definitions=>ty_sha1
+        !eo_branch_list TYPE REF TO zcl_abapgit_git_branch_list
+      RAISING
+        zcx_abapgit_exception .
+
   PROTECTED SECTION.
   PRIVATE SECTION.
-
-    CONSTANTS:
-      BEGIN OF c_service,
-        receive TYPE string VALUE 'receive',                  "#EC NOTEXT
-        upload  TYPE string VALUE 'upload',                   "#EC NOTEXT
-      END OF c_service .
 
     CLASS-METHODS check_report_status
       IMPORTING
@@ -70,17 +82,7 @@ CLASS zcl_abapgit_git_transport DEFINITION
         !eo_branch_list TYPE REF TO zcl_abapgit_git_branch_list
       RAISING
         zcx_abapgit_exception .
-    CLASS-METHODS find_branch
-      IMPORTING
-        !iv_url         TYPE string
-        !iv_service     TYPE string
-        !iv_branch_name TYPE string
-      EXPORTING
-        !eo_client      TYPE REF TO zcl_abapgit_http_client
-        !ev_branch      TYPE zif_abapgit_git_definitions=>ty_sha1
-        !eo_branch_list TYPE REF TO zcl_abapgit_git_branch_list
-      RAISING
-        zcx_abapgit_exception .
+
     CLASS-METHODS parse
       EXPORTING
         !ev_pack TYPE xstring
