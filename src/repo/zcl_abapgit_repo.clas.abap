@@ -185,7 +185,7 @@ ENDCLASS.
 
 
 
-CLASS zcl_abapgit_repo IMPLEMENTATION.
+CLASS ZCL_ABAPGIT_REPO IMPLEMENTATION.
 
 
   METHOD bind_listener.
@@ -797,6 +797,12 @@ CLASS zcl_abapgit_repo IMPLEMENTATION.
     DATA lr_filter TYPE REF TO zcl_abapgit_repo_filter.
 
     rt_files = mt_remote.
+
+    "Remove Ignored Files prior to Any Filter Application
+    IF iv_ignore_files = abap_true.
+      remove_ignored_files( CHANGING ct_files = rt_files ).
+    ENDIF.
+
     IF ii_obj_filter IS NOT INITIAL.
       lt_filter = ii_obj_filter->get_filter( ).
 
@@ -809,10 +815,6 @@ CLASS zcl_abapgit_repo IMPLEMENTATION.
         CHANGING
           ct_files    = rt_files ).
 
-    ENDIF.
-
-    IF iv_ignore_files = abap_true.
-      remove_ignored_files( CHANGING ct_files = rt_files ).
     ENDIF.
 
   ENDMETHOD.
