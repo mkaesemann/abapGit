@@ -554,16 +554,22 @@ CLASS zcl_abapgit_gui_page_diff_base IMPLEMENTATION.
 
     lt_remote = mo_repo->get_files_remote( ).
 
-    data(o_filter) = zcl_abapgit_object_filter_obj=>create_filter(
-                                    io_repo   = mo_repo
-                                    is_file   = is_file
-                                    is_object = is_object
-                                    it_files  = it_files ).
-    lt_local  = mo_repo->get_files_local_filtered(
-                  ii_obj_filter = o_filter ).
-    lt_status = zcl_abapgit_repo_status=>calculate(
-                  ii_repo       = mo_repo
-                  ii_obj_filter = o_filter ).
+    DATA(o_filter) = zcl_abapgit_object_filter_obj=>create_filter(
+                         io_repo   = mo_repo
+                         is_file   = is_file
+                         is_object = is_object
+                         it_files  = it_files ).
+    IF o_filter IS NOT BOUND.
+      lt_local  = mo_repo->get_files_local( ).
+      lt_status = zcl_abapgit_repo_status=>calculate(
+                      mo_repo ).
+    ELSE.
+      lt_local  = mo_repo->get_files_local_filtered(
+                      ii_obj_filter = o_filter ).
+      lt_status = zcl_abapgit_repo_status=>calculate(
+                      ii_repo       = mo_repo
+                      ii_obj_filter = o_filter ).
+    ENDIF.
 
     li_exit = zcl_abapgit_exit=>get_instance( ).
     li_exit->pre_calculate_repo_status(

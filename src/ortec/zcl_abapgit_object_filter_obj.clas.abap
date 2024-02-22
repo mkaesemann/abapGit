@@ -125,7 +125,6 @@ CLASS zcl_abapgit_object_filter_obj IMPLEMENTATION.
   METHOD create_filter.
 
     DATA(lt_objects) = VALUE ty_e071_filter_tt( ).
-    DATA(lt_repo_objects) = io_repo->get_tadir_objects( ).
 
     IF is_file IS NOT INITIAL.
       zcl_abapgit_filename_logic=>file_to_object(
@@ -164,15 +163,13 @@ CLASS zcl_abapgit_object_filter_obj IMPLEMENTATION.
         ) INTO TABLE lt_objects.
     ENDLOOP.
 
-    IF lt_objects IS INITIAL.
-      lt_objects = CORRESPONDING #( lt_repo_objects ).
+    IF lt_objects IS NOT INITIAL.
+      ro_filter = NEW zcl_abapgit_object_filter_obj( ).
+      ro_filter->set_filter_values(
+          iv_package = io_repo->get_package( )
+          it_objects = lt_objects
+      ).
     ENDIF.
-
-    ro_filter = NEW zcl_abapgit_object_filter_obj( ).
-    ro_filter->set_filter_values(
-        iv_package = io_repo->get_package( )
-        it_objects = lt_objects
-    ).
 
   ENDMETHOD.
 
