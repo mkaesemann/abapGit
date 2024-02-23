@@ -137,7 +137,7 @@ ENDCLASS.
 
 
 
-CLASS zcl_abapgit_gui_router IMPLEMENTATION.
+CLASS ZCL_ABAPGIT_GUI_ROUTER IMPLEMENTATION.
 
 
   METHOD abapgit_services_actions.
@@ -260,7 +260,8 @@ CLASS zcl_abapgit_gui_router IMPLEMENTATION.
         lo_repo ?= zcl_abapgit_repo_srv=>get_instance( )->get( lv_key ).
 
         CREATE OBJECT lo_obj_filter_trans.
-        lo_obj_filter_trans->set_filter_values( iv_package  = lo_repo->get_package( )
+
+        lo_obj_filter_trans->set_filter_values( iv_package  = space "lo_repo->get_package( )
                                                 it_r_trkorr = lt_r_trkorr ).
 
         rs_handled-page = get_page_stage( ii_event      = ii_event
