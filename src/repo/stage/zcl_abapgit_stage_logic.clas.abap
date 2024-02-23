@@ -97,7 +97,8 @@ CLASS zcl_abapgit_stage_logic IMPLEMENTATION.
     ENDIF.
 
     rs_files-status = zcl_abapgit_repo_status=>calculate( ii_repo       = io_repo
-                                                          ii_obj_filter = ii_obj_filter ).
+                                                          ii_obj_filter = ii_obj_filter
+                                                          it_local      = rs_files-local ).
 
     remove_identical( CHANGING cs_files = rs_files ).
     remove_ignored( EXPORTING io_repo  = io_repo

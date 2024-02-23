@@ -10,6 +10,7 @@ CLASS zcl_abapgit_repo_status DEFINITION
         !ii_repo          TYPE REF TO zif_abapgit_repo
         !ii_log           TYPE REF TO zif_abapgit_log OPTIONAL
         !ii_obj_filter    TYPE REF TO zif_abapgit_object_filter OPTIONAL
+        !it_local         TYPE zif_abapgit_definitions=>ty_files_item_tt OPTIONAL
       RETURNING
         VALUE(rt_results) TYPE zif_abapgit_definitions=>ty_results_tt
       RAISING
@@ -261,12 +262,17 @@ CLASS zcl_abapgit_repo_status IMPLEMENTATION.
     DATA lo_instance TYPE REF TO zcl_abapgit_repo_status.
     DATA lo_consistency_checks TYPE REF TO lcl_status_consistency_checks.
 
-    IF ii_obj_filter IS INITIAL.
-      lt_local = ii_repo->get_files_local( ii_log ).
+    IF it_local IS NOT INITIAL.
+      lt_local = it_local.
     ELSE.
-      lt_local = ii_repo->get_files_local_filtered(
-        ii_log        = ii_log
-        ii_obj_filter = ii_obj_filter ).
+      IF ii_obj_filter IS INITIAL.
+        lt_local = ii_repo->get_files_local(
+                       ii_log ).
+      ELSE.
+        lt_local = ii_repo->get_files_local_filtered(
+                       ii_log        = ii_log
+                       ii_obj_filter = ii_obj_filter ).
+      ENDIF.
     ENDIF.
 
     IF lines( lt_local ) <= 2.

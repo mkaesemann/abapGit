@@ -562,13 +562,15 @@ CLASS zcl_abapgit_gui_page_diff_base IMPLEMENTATION.
     IF o_filter IS NOT BOUND.
       lt_local  = mo_repo->get_files_local( ).
       lt_status = zcl_abapgit_repo_status=>calculate(
-                      mo_repo ).
+                      ii_repo  = mo_repo
+                      it_local = lt_local ).
     ELSE.
       lt_local  = mo_repo->get_files_local_filtered(
                       ii_obj_filter = o_filter ).
       lt_status = zcl_abapgit_repo_status=>calculate(
                       ii_repo       = mo_repo
-                      ii_obj_filter = o_filter ).
+                      ii_obj_filter = o_filter
+                      it_local      = lt_local ).
     ENDIF.
 
     li_exit = zcl_abapgit_exit=>get_instance( ).
