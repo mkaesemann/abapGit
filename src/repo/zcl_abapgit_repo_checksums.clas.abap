@@ -210,7 +210,19 @@ CLASS ZCL_ABAPGIT_REPO_CHECKSUMS IMPLEMENTATION.
     DATA lt_local_files TYPE zif_abapgit_definitions=>ty_files_item_tt.
 
     lt_checksums   = zif_abapgit_repo_checksums~get( ).
-    lt_local_files = mi_repo->get_files_local( ).
+
+    IF it_updated_files IS NOT INITIAL.
+      lt_local_files = mi_repo->get_files_local_filtered(
+                           ii_obj_filter = zcl_abapgit_object_filter_obj=>create_filter(
+                                               io_repo  = mi_repo
+                                               it_files = VALUE #( FOR <ls_object> IN it_updated_files
+                                                                   ( file-filename = <ls_object>-filename
+                                                                     file-path     = <ls_object>-path
+                                                                     file-sha1     = <ls_object>-sha1 ) )
+                                           ) ).
+    ELSE.
+      lt_local_files = mi_repo->get_files_local( ).
+    ENDIF.
 
     lt_checksums = lcl_update_calculator=>calculate_updated(
       it_current_checksums = lt_checksums
