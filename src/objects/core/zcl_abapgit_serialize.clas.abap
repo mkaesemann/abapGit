@@ -229,10 +229,10 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
     lo_filter->apply( EXPORTING it_filter = it_filter
                       CHANGING  ct_tadir  = lt_tadir ).
 
-* if there are less than 10 objects run in single thread
+* if there are less than 3 objects run in single thread
 * this helps a lot when debugging, plus performance gain
 * with low number of objects does not matter much
-    lv_force = boolc( lines( lt_tadir ) < 10 ).
+    lv_force = boolc( lines( lt_tadir ) < 3 ).
 
     lt_found = serialize(
       iv_package          = iv_package
@@ -391,7 +391,7 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
       <ls_ignored_count> TYPE ty_unsupported_count.
 
     " Ignore logic requires .abapGit.xml
-    IF mo_dot_abapgit IS INITIAL OR iv_package IS INITIAL OR mi_log IS INITIAL.
+    IF mo_dot_abapgit IS INITIAL OR iv_package IS INITIAL. " OR mi_log IS INITIAL.
       RETURN.
     ENDIF.
 
@@ -442,14 +442,16 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
     " remove ignored objects
     DELETE ct_tadir WHERE object IS INITIAL.
 
-    LOOP AT lt_ignored_count ASSIGNING <ls_ignored_count>.
-      IF <ls_ignored_count>-count = 1.
-        mi_log->add_warning( |Object { <ls_ignored_count>-obj_type } { <ls_ignored_count>-obj_name } ignored| ).
-      ELSE.
-        mi_log->add_warning( |Object type { <ls_ignored_count>-obj_type } with | &&
-                             |{ <ls_ignored_count>-count } objects ignored| ).
-      ENDIF.
-    ENDLOOP.
+    IF mi_log IS BOUND.
+      LOOP AT lt_ignored_count ASSIGNING <ls_ignored_count>.
+        IF <ls_ignored_count>-count = 1.
+          mi_log->add_warning( |Object { <ls_ignored_count>-obj_type } { <ls_ignored_count>-obj_name } ignored| ).
+        ELSE.
+          mi_log->add_warning( |Object type { <ls_ignored_count>-obj_type } with | &&
+                               |{ <ls_ignored_count>-count } objects ignored| ).
+        ENDIF.
+      ENDLOOP.
+    ENDIF.
 
   ENDMETHOD.
 
@@ -715,5 +717,4 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
                                          )->function_exists( 'Z_ABAPGIT_SERIALIZE_PARALLEL' ) = abap_true ).
 
   ENDMETHOD.
-
 ENDCLASS.
