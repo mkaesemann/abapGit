@@ -10,7 +10,8 @@ public section.
       !IV_URL type STRING
       !IV_BRANCH_NAME type STRING
     returning
-      value(RS_RESULT) type ZCL_ABAPGIT_GIT_PORCELAIN=>TY_PULL_RESULT .
+      value(RS_RESULT) type ZCL_ABAPGIT_GIT_PORCELAIN=>TY_PULL_RESULT
+    RAISING   zcx_abapgit_exception.
   class-methods STORE_BRANCH_IN_BUFFER
     importing
       !IV_URL type STRING
