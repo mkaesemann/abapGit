@@ -22,7 +22,7 @@ CLASS zcl_abapgit_object_filter_obj DEFINITION
                 et_objects TYPE ty_e071_filter_tt.
 
     CLASS-METHODS create_filter
-      IMPORTING io_repo          TYPE REF TO zcl_abapgit_repo
+      IMPORTING io_repo          TYPE REF TO zif_abapgit_repo
                 is_file          TYPE zif_abapgit_git_definitions=>ty_file OPTIONAL
                 is_object        TYPE zif_abapgit_definitions=>ty_item     OPTIONAL
                 it_files         TYPE zif_abapgit_definitions=>ty_stage_tt OPTIONAL
