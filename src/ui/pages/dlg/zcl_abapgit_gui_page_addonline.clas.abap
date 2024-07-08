@@ -132,6 +132,7 @@ CLASS zcl_abapgit_gui_page_addonline IMPLEMENTATION.
       iv_label       = 'Package'
       iv_hint        = 'SAP package for repository (should be a dedicated one)'
       iv_placeholder = 'Z... / $...'
+      iv_max         = 30
     )->text(
       iv_name        = c_id-branch_name
       iv_side_action = c_event-choose_branch
@@ -229,6 +230,8 @@ CLASS zcl_abapgit_gui_page_addonline IMPLEMENTATION.
             iv_key = c_id-url
             iv_val = lx_err->get_text( ) ).
       ENDTRY.
+
+      zcl_abapgit_http=>check_connection( lv_url ).
     ENDIF.
 
     IF io_form_data->get( c_id-package ) IS NOT INITIAL.

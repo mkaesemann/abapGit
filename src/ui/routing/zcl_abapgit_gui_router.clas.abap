@@ -120,6 +120,11 @@ CLASS zcl_abapgit_gui_router DEFINITION
         !iv_url TYPE csequence
       RAISING
         zcx_abapgit_exception .
+    METHODS call_transaction
+      IMPORTING
+        !iv_tcode TYPE csequence
+      RAISING
+        zcx_abapgit_exception .
     METHODS get_state_settings
       IMPORTING
         !ii_event       TYPE REF TO zif_abapgit_gui_event
@@ -153,6 +158,30 @@ CLASS ZCL_ABAPGIT_GUI_ROUTER IMPLEMENTATION.
   METHOD call_browser.
 
     zcl_abapgit_ui_factory=>get_frontend_services( )->execute( iv_document = |{ iv_url }| ).
+
+  ENDMETHOD.
+
+
+  METHOD call_transaction.
+
+    DATA lv_msg TYPE c LENGTH 200.
+
+    CALL FUNCTION 'ABAP4_CALL_TRANSACTION'
+      DESTINATION 'NONE'
+      STARTING NEW TASK 'ABAPGIT'
+      EXPORTING
+        tcode                 = iv_tcode
+      EXCEPTIONS
+        communication_failure = 1 MESSAGE lv_msg
+        system_failure        = 2 MESSAGE lv_msg
+        OTHERS                = 3.
+    IF sy-subrc <> 0.
+      lv_msg = |Error starting transaction { iv_tcode }: { lv_msg }|.
+      MESSAGE lv_msg TYPE 'I'.
+    ELSE.
+      lv_msg = |Transaction { iv_tcode } opened in a new window|.
+      MESSAGE lv_msg TYPE 'S'.
+    ENDIF.
 
   ENDMETHOD.
 
@@ -374,9 +403,6 @@ CLASS ZCL_ABAPGIT_GUI_ROUTER IMPLEMENTATION.
     ENDIF.
 
     IF ri_page IS INITIAL.
-      " force refresh on stage, to make sure the latest local and remote files are used
-      lo_repo->refresh( ).
-
       ri_page = zcl_abapgit_gui_page_stage=>create(
         io_repo       = lo_repo
         iv_seed       = lv_seed
@@ -568,15 +594,16 @@ CLASS ZCL_ABAPGIT_GUI_ROUTER IMPLEMENTATION.
         rs_handled-state = zcl_abapgit_gui=>c_event_state-no_more_act.
       WHEN zif_abapgit_definitions=>c_action-clipboard.
         lv_clip_content = ii_event->query( )->get( 'CLIPBOARD' ).
+        IF lv_clip_content IS INITIAL.
+          " yank mode sends via form_data
+          lv_clip_content = ii_event->form_data( )->get( 'CLIPBOARD' ).
+        ENDIF.
+        IF lv_clip_content IS INITIAL.
+          zcx_abapgit_exception=>raise( 'Export to clipboard failed, no data' ).
+        ENDIF.
         APPEND lv_clip_content TO lt_clipboard.
         zcl_abapgit_ui_factory=>get_frontend_services( )->clipboard_export( lt_clipboard ).
-        MESSAGE 'Successfully exported URL to Clipboard.' TYPE 'S'.
-        rs_handled-state = zcl_abapgit_gui=>c_event_state-no_more_act.
-      WHEN zif_abapgit_definitions=>c_action-yank_to_clipboard.
-        lv_clip_content = ii_event->form_data( )->get( 'CLIPBOARD' ).
-        APPEND lv_clip_content TO lt_clipboard.
-        zcl_abapgit_ui_factory=>get_frontend_services( )->clipboard_export( lt_clipboard ).
-        MESSAGE 'Successfully exported to Clipboard.' TYPE 'S'.
+        MESSAGE 'Successfully exported to clipboard' TYPE 'S'.
         rs_handled-state = zcl_abapgit_gui=>c_event_state-no_more_act.
     ENDCASE.
 
@@ -679,6 +706,10 @@ CLASS ZCL_ABAPGIT_GUI_ROUTER IMPLEMENTATION.
           iv_line       = ii_event->query( )->get( 'LINE' )
           iv_new_window = ii_event->query( )->get( 'NEW_WINDOW' ) ).
 
+        rs_handled-state = zcl_abapgit_gui=>c_event_state-no_more_act.
+
+      WHEN zif_abapgit_definitions=>c_action-jump_transaction.
+        call_transaction( |{ ii_event->query( )->get( 'TRANSACTION' ) }| ).
         rs_handled-state = zcl_abapgit_gui=>c_event_state-no_more_act.
 
       WHEN zif_abapgit_definitions=>c_action-jump_transport.
@@ -835,6 +866,10 @@ CLASS ZCL_ABAPGIT_GUI_ROUTER IMPLEMENTATION.
         rs_handled-state = zcl_abapgit_gui=>c_event_state-no_more_act.
       WHEN zif_abapgit_definitions=>c_action-zip_object.                      " Export object as ZIP
         rs_handled-page  = zcl_abapgit_gui_page_ex_object=>create( ).
+        rs_handled-state = zcl_abapgit_gui=>c_event_state-new_page.
+      WHEN zif_abapgit_definitions=>c_action-where_used.
+        lo_repo ?= zcl_abapgit_repo_srv=>get_instance( )->get( lv_key ).
+        rs_handled-page  = zcl_abapgit_gui_page_whereused=>create( ii_repo = lo_repo ).
         rs_handled-state = zcl_abapgit_gui=>c_event_state-new_page.
     ENDCASE.
 

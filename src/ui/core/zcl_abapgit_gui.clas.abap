@@ -115,7 +115,7 @@ ENDCLASS.
 
 
 
-CLASS zcl_abapgit_gui IMPLEMENTATION.
+CLASS ZCL_ABAPGIT_GUI IMPLEMENTATION.
 
 
   METHOD back.
@@ -418,7 +418,7 @@ CLASS zcl_abapgit_gui IMPLEMENTATION.
     ENDIF.
 
     li_html = mi_cur_page->render( ).
-    lv_html = li_html->render( abap_true ).
+    lv_html = li_html->render( iv_no_indent_jscss = abap_true ).
 
     IF mi_html_processor IS BOUND.
       lv_html = mi_html_processor->process(
@@ -572,7 +572,7 @@ CLASS zcl_abapgit_gui IMPLEMENTATION.
 
   METHOD zif_abapgit_gui_services~register_page_asset.
 
-    " Maybe forbid registering cacheable existing assets, maybe this is the right place (see also asset_man commments)
+    " Maybe forbid registering cacheable existing assets, maybe this is the right place (see also asset_man comments)
 
     mi_asset_man->register_asset(
       iv_url = iv_url
