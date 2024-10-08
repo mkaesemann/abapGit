@@ -11,6 +11,14 @@
     <FIXPT>X</FIXPT>
     <UNICODE>X</UNICODE>
    </VSEOCLASS>
+   <DESCRIPTIONS_SUB>
+    <SEOSUBCOTX>
+     <CMPNAME>PROPOSE_DEFAULT_TEXTS</CMPNAME>
+     <SCONAME>IO_REPO</SCONAME>
+     <LANGU>E</LANGU>
+     <DESCRIPT>abapGit - Online Repository</DESCRIPT>
+    </SEOSUBCOTX>
+   </DESCRIPTIONS_SUB>
   </asx:values>
  </asx:abap>
 </abapGit>

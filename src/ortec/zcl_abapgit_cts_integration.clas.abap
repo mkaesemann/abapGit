@@ -1,39 +1,46 @@
-CLASS zcl_abapgit_cts_integration DEFINITION
-  PUBLIC FINAL
-  CREATE PRIVATE.
+class ZCL_ABAPGIT_CTS_INTEGRATION definition
+  public
+  final
+  create private .
 
-  PUBLIC SECTION.
-    TYPE-POOLS trsel.
+public section.
+  type-pools TRSEL .
 
-    CLASS-METHODS propose_default_texts
-      IMPORTING it_staged TYPE zif_abapgit_definitions=>ty_stage_tt
-                io_form   TYPE REF TO zcl_abapgit_string_map
-      CHANGING  cs_commit TYPE zif_abapgit_services_git=>ty_commit_fields.
-
-    CLASS-METHODS supplement_task_info
-      IMPORTING it_staged TYPE zif_abapgit_definitions=>ty_stage_tt
-      CHANGING  cs_commit TYPE zif_abapgit_services_git=>ty_commit_fields.
-
-    CLASS-METHODS get_open_user_requests
-      IMPORTING i_tasks            TYPE abap_bool DEFAULT abap_true
-                i_requests         TYPE abap_bool DEFAULT abap_true
-                i_parent_request   TYPE abap_bool DEFAULT abap_true
-                i_recent_days      TYPE i         DEFAULT 2
-                i_eval_os4         TYPE abap_bool DEFAULT abap_true
-      RETURNING VALUE(rt_requests) TYPE trsel_trt_trkorr.
-
-    CLASS-METHODS popup_select_own_tr_requests
-      IMPORTING is_selection        TYPE trwbo_selection
-                iv_title            TYPE trwbo_title
-                iv_username_pattern TYPE any DEFAULT sy-uname
-      RETURNING VALUE(rt_r_trkorr)  TYPE zif_abapgit_definitions=>ty_trrngtrkor_tt
-      RAISING   zcx_abapgit_exception.
-
-    CLASS-METHODS on_event
-      IMPORTING !action  TYPE csequence
-                getdata  TYPE csequence
-                postdata TYPE zif_abapgit_html_viewer=>ty_post_data.
-
+  class-methods PROPOSE_DEFAULT_TEXTS
+    importing
+      !IT_STAGED type ZIF_ABAPGIT_DEFINITIONS=>TY_STAGE_TT
+      !IO_FORM type ref to ZCL_ABAPGIT_STRING_MAP
+      !IO_REPO type ref to ZCL_ABAPGIT_REPO_ONLINE
+    changing
+      !CS_COMMIT type ZIF_ABAPGIT_SERVICES_GIT=>TY_COMMIT_FIELDS .
+  class-methods SUPPLEMENT_TASK_INFO
+    importing
+      !IT_STAGED type ZIF_ABAPGIT_DEFINITIONS=>TY_STAGE_TT
+    changing
+      !CS_COMMIT type ZIF_ABAPGIT_SERVICES_GIT=>TY_COMMIT_FIELDS .
+  class-methods GET_OPEN_USER_REQUESTS
+    importing
+      !I_TASKS type ABAP_BOOL default ABAP_TRUE
+      !I_REQUESTS type ABAP_BOOL default ABAP_TRUE
+      !I_PARENT_REQUEST type ABAP_BOOL default ABAP_TRUE
+      !I_RECENT_DAYS type I default 2
+      !I_EVAL_OS4 type ABAP_BOOL default ABAP_TRUE
+    returning
+      value(RT_REQUESTS) type TRSEL_TRT_TRKORR .
+  class-methods POPUP_SELECT_OWN_TR_REQUESTS
+    importing
+      !IS_SELECTION type TRWBO_SELECTION
+      !IV_TITLE type TRWBO_TITLE
+      !IV_USERNAME_PATTERN type ANY default SY-UNAME
+    returning
+      value(RT_R_TRKORR) type ZIF_ABAPGIT_DEFINITIONS=>TY_TRRNGTRKOR_TT
+    raising
+      ZCX_ABAPGIT_EXCEPTION .
+  class-methods ON_EVENT
+    importing
+      !ACTION type CSEQUENCE
+      !GETDATA type CSEQUENCE
+      !POSTDATA type ZIF_ABAPGIT_HTML_VIEWER=>TY_POST_DATA .
   PROTECTED SECTION.
     TYPES: BEGIN OF ty_trkorr,
              trkorr TYPE trkorr,
@@ -101,7 +108,10 @@ CLASS zcl_abapgit_cts_integration DEFINITION
 ENDCLASS.
 
 
-CLASS zcl_abapgit_cts_integration IMPLEMENTATION.
+
+CLASS ZCL_ABAPGIT_CTS_INTEGRATION IMPLEMENTATION.
+
+
   METHOD get_lock_info.
 
     " Collect Requests of Staged Objects
@@ -246,6 +256,7 @@ CLASS zcl_abapgit_cts_integration IMPLEMENTATION.
 
   ENDMETHOD.
 
+
   METHOD get_lock_text.
     r_text = is_lock_info-task_text.
     IF r_text IS INITIAL.
@@ -253,6 +264,7 @@ CLASS zcl_abapgit_cts_integration IMPLEMENTATION.
       r_text = is_lock_info-transport_text.
     ENDIF.
   ENDMETHOD.
+
 
   METHOD get_task_docu.
 
@@ -288,6 +300,7 @@ CLASS zcl_abapgit_cts_integration IMPLEMENTATION.
 
   ENDMETHOD.
 
+
   METHOD propose_default_body.
 
     DATA lt_docu TYPE STANDARD TABLE OF ty_lock_info WITH EMPTY KEY.
@@ -320,6 +333,7 @@ CLASS zcl_abapgit_cts_integration IMPLEMENTATION.
     ENDLOOP.
 
   ENDMETHOD.
+
 
   METHOD propose_default_comment.
 
@@ -358,6 +372,7 @@ CLASS zcl_abapgit_cts_integration IMPLEMENTATION.
 
   ENDMETHOD.
 
+
   METHOD propose_default_texts.
 
     TYPES: BEGIN OF ty_userdata,
@@ -370,8 +385,25 @@ CLASS zcl_abapgit_cts_integration IMPLEMENTATION.
 
     DATA fixdate TYPE d VALUE '00010101'.
 
+    DATA(lt_staged) = it_staged.
+    LOOP AT lt_staged ASSIGNING FIELD-SYMBOL(<ls_staged>).
+      TRY.
+          zcl_abapgit_filename_logic=>file_to_object(
+            EXPORTING
+              iv_filename = <ls_staged>-file-filename
+              iv_path     = <ls_staged>-file-path
+              io_dot      = io_repo->get_dot_abapgit( )
+            IMPORTING
+              es_item     = DATA(ls_item) ).
+        CATCH zcx_abapgit_exception. " abapGit - Exception
+          ls_item = CORRESPONDING #( <ls_staged>-status ).
+      ENDTRY.
+      <ls_staged>-status-obj_type = ls_item-obj_type.
+      <ls_staged>-status-obj_name = ls_item-obj_name.
+    ENDLOOP.
+
     DATA(lt_lock_info) = get_lock_info(
-                             it_staged = it_staged ).
+      it_staged = lt_staged ).
 
     IF lt_lock_info IS INITIAL.
       RETURN.
@@ -379,7 +411,7 @@ CLASS zcl_abapgit_cts_integration IMPLEMENTATION.
 
     " Propose Comment
     DATA(default_comment) = propose_default_comment(
-                                lt_lock_info ).
+      lt_lock_info ).
     cs_commit-comment = COND #( WHEN cs_commit-comment IS NOT INITIAL AND default_comment IS NOT INITIAL
                                   THEN |{ default_comment } - { cs_commit-comment }|
                                 WHEN cs_commit-comment IS NOT INITIAL AND default_comment IS INITIAL
@@ -387,8 +419,8 @@ CLASS zcl_abapgit_cts_integration IMPLEMENTATION.
                                 ELSE default_comment ).
     TRY.
         io_form->set(
-            iv_key = cs_formid-comment
-            iv_val = cs_commit-comment ).
+          iv_key = cs_formid-comment
+          iv_val = cs_commit-comment ).
       CATCH cx_root.
     ENDTRY.
 
@@ -405,8 +437,8 @@ CLASS zcl_abapgit_cts_integration IMPLEMENTATION.
                              ELSE propose_default_body( lt_lock_info ) ).
     TRY.
         io_form->set(
-            iv_key = cs_formid-body
-            iv_val = cs_commit-body ).
+          iv_key = cs_formid-body
+          iv_val = cs_commit-body ).
       CATCH cx_root.
     ENDTRY.
 
@@ -435,8 +467,8 @@ CLASS zcl_abapgit_cts_integration IMPLEMENTATION.
       cs_commit-committer_name = |{ ls_userdata-name_first } { ls_userdata-name_last }|.
       TRY.
           io_form->set(
-              iv_key = cs_formid-committer_name
-              iv_val = cs_commit-committer_name ).
+            iv_key = cs_formid-committer_name
+            iv_val = cs_commit-committer_name ).
         CATCH cx_root.
       ENDTRY.
     ENDIF.
@@ -444,16 +476,17 @@ CLASS zcl_abapgit_cts_integration IMPLEMENTATION.
     " Propose Commiter eMail
     IF cs_commit-committer_email IS INITIAL.
       cs_commit-committer_email = to_lower(
-                                      ls_userdata-smtp_addr ).
+        ls_userdata-smtp_addr ).
       TRY.
           io_form->set(
-              iv_key = cs_formid-committer_email
-              iv_val = cs_commit-committer_email ).
+            iv_key = cs_formid-committer_email
+            iv_val = cs_commit-committer_email ).
         CATCH cx_root.
       ENDTRY.
     ENDIF.
 
   ENDMETHOD.
+
 
   METHOD supplement_task_info.
 
@@ -510,6 +543,7 @@ CLASS zcl_abapgit_cts_integration IMPLEMENTATION.
                         | ({ tr_links } // { ta_links } )|.
 
   ENDMETHOD.
+
 
   METHOD get_open_user_requests.
 
@@ -606,6 +640,7 @@ CLASS zcl_abapgit_cts_integration IMPLEMENTATION.
 
   ENDMETHOD.
 
+
   METHOD popup_select_own_tr_requests.
 
     DATA lt_request  TYPE trwbo_request_headers.
@@ -680,6 +715,7 @@ CLASS zcl_abapgit_cts_integration IMPLEMENTATION.
     ENDLOOP.
 
   ENDMETHOD.
+
 
   METHOD on_event.
 
