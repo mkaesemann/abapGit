@@ -49,7 +49,7 @@ ENDCLASS.
 
 
 
-CLASS zcl_abapgit_services_git IMPLEMENTATION.
+CLASS ZCL_ABAPGIT_SERVICES_GIT IMPLEMENTATION.
 
 
   METHOD commit.
@@ -93,6 +93,8 @@ CLASS zcl_abapgit_services_git IMPLEMENTATION.
                           io_stage   = io_stage ).
 
     COMMIT WORK.
+
+    zcl_abapgit_exit=>get_instance( )->validate_after_push( ii_repo_online ).
 
   ENDMETHOD.
 
@@ -217,9 +219,9 @@ CLASS zcl_abapgit_services_git IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    IF li_repo_online->get_selected_commit( ) IS NOT INITIAL.
-      li_repo_online->select_commit( space ).
-    ENDIF.
+    " Reset commit and pull request
+    li_repo_online->select_commit( '' ).
+    li_repo_online->switch_origin( '' ).
 
     li_repo_online->select_branch( ls_branch-name ).
     COMMIT WORK AND WAIT.
@@ -239,6 +241,10 @@ CLASS zcl_abapgit_services_git IMPLEMENTATION.
     IF ls_tag IS INITIAL.
       RAISE EXCEPTION TYPE zcx_abapgit_cancel.
     ENDIF.
+
+    " Reset commit and pull request
+    li_repo_online->select_commit( '' ).
+    li_repo_online->switch_origin( '' ).
 
     li_repo_online->select_branch( zcl_abapgit_git_tag=>remove_peel( ls_tag-name ) ).
 

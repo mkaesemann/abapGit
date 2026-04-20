@@ -35,6 +35,7 @@ CLASS zcl_abapgit_gui_page_sett_repo DEFINITION
         main_language    TYPE string VALUE 'main_language',
         i18n_langs       TYPE string VALUE 'i18n_langs',
         use_lxe          TYPE string VALUE 'use_lxe',
+        wo_transaltion   TYPE string VALUE 'wo_translation',
         starting_folder  TYPE string VALUE 'starting_folder',
         folder_logic     TYPE string VALUE 'folder_logic',
         ignore           TYPE string VALUE 'ignore',
@@ -124,8 +125,8 @@ CLASS zcl_abapgit_gui_page_sett_repo IMPLEMENTATION.
   METHOD get_form_schema.
 
     ro_form = zcl_abapgit_html_form=>create(
-                iv_form_id   = 'repo-settings-form'
-                iv_help_page = 'https://docs.abapgit.org/settings-dot-abapgit.html' ).
+      iv_form_id   = 'repo-settings-form'
+      iv_help_page = 'https://docs.abapgit.org/settings-dot-abapgit.html' ).
 
     ro_form->start_group(
       iv_name        = c_id-dot
@@ -155,11 +156,21 @@ CLASS zcl_abapgit_gui_page_sett_repo IMPLEMENTATION.
     )->text(
       iv_name        = c_id-i18n_langs
       iv_label       = 'Serialize Translations for Additional Languages'
-      iv_hint        = 'Comma-separate 2-letter ISO language codes e.g. "DE,ES,..." - should not include main language'
+      iv_hint        = 'Comma-separate 2-letter ISO language codes e.g. "DE,ES,..."'
+                    && ' or "*" as wildcard for all installed languages - should not include main language'
+      iv_placeholder = 'e.g. "DE,ES,..."'
     )->checkbox(
       iv_name        = c_id-use_lxe
       iv_label       = 'Use LXE Approach for Translations'
       iv_hint        = 'It''s mandatory to specify the list of languages above in addition to this setting'
+    )->textarea(
+      iv_name        = c_id-wo_transaltion
+      iv_label       = 'Objects (wildcard) to keep in main language only (without translation)'
+      iv_hint        = |List of patterns to exclude from translation. The check builds a simplified path to object:|
+                    && | like `/src/pkg/subpkg/obj.type` which is then checked versus patterns with CP.|
+                    && | So to exclude specific object use `*/zcl_xy.clas`, object of the specific type - `*.clas`,|
+                    && | all objects in the package `*/pkg/*`. For additional compatibility, if line does NOT start|
+                    && | wildcard `*` or `/` - then `*/` is prepended. So `zcl_xy.clas` = `*/zcl_xy.clas`|
     )->start_group(
       iv_name        = c_id-file_system
       iv_label       = 'Files'
@@ -209,29 +220,27 @@ CLASS zcl_abapgit_gui_page_sett_repo IMPLEMENTATION.
       iv_hint        = 'Sets the source system of objects during deserialize in downstream systems'
                        && ' (use "SID" to force the source system to sy-sysid)' ).
 
-    IF zcl_abapgit_feature=>is_enabled( zcl_abapgit_abap_language_vers=>c_feature_flag ) = abap_true.
-      ro_form->radio(
-        iv_name        = c_id-abap_langu_vers
-        iv_default_value = ''
-        iv_condense    = abap_true
-        iv_label       = 'ABAP Language Version'
-        iv_hint        = 'Define the ABAP language version for objects in the repository'
-      )->option(
-        iv_label       = 'Any (Object-specific ABAP Language Version)'
-        iv_value       = ''
-      )->option(
-        iv_label       = 'Ignore (ABAP Language Version not serialized)'
-        iv_value       = zif_abapgit_dot_abapgit=>c_abap_language_version-ignore
-      )->option(
-        iv_label       = 'Standard ABAP'
-        iv_value       = zif_abapgit_dot_abapgit=>c_abap_language_version-standard
-      )->option(
-        iv_label       = 'ABAP for Key Users'
-        iv_value       = zif_abapgit_dot_abapgit=>c_abap_language_version-key_user
-      )->option(
-        iv_label       = 'ABAP for Cloud Development'
-        iv_value       = zif_abapgit_dot_abapgit=>c_abap_language_version-cloud_development ).
-    ENDIF.
+    ro_form->radio(
+      iv_name        = c_id-abap_langu_vers
+      iv_default_value = ''
+      iv_condense    = abap_true
+      iv_label       = 'ABAP Language Version'
+      iv_hint        = 'Define the ABAP language version for objects in the repository'
+    )->option(
+      iv_label       = 'Any (Object-specific ABAP Language Version)'
+      iv_value       = ''
+    )->option(
+      iv_label       = 'Ignore (ABAP Language Version not serialized)'
+      iv_value       = zif_abapgit_dot_abapgit=>c_abap_language_version-ignore
+    )->option(
+      iv_label       = 'Standard ABAP'
+      iv_value       = zif_abapgit_dot_abapgit=>c_abap_language_version-standard
+    )->option(
+      iv_label       = 'ABAP for Key Users'
+      iv_value       = zif_abapgit_dot_abapgit=>c_abap_language_version-key_user
+    )->option(
+      iv_label       = 'ABAP for Cloud Development'
+      iv_value       = zif_abapgit_dot_abapgit=>c_abap_language_version-cloud_development ).
 
     ro_form->command(
       iv_label       = 'Save Settings'
@@ -274,6 +283,11 @@ CLASS zcl_abapgit_gui_page_sett_repo IMPLEMENTATION.
     ro_form_data->set(
       iv_key = c_id-use_lxe
       iv_val = boolc( lo_dot->use_lxe( ) = abap_true ) ) ##TYPE.
+    ro_form_data->set(
+      iv_key = c_id-wo_transaltion
+      iv_val = concat_lines_of(
+        table = lo_dot->get_objs_without_translation( )
+        sep   = cl_abap_char_utilities=>newline ) ).
     ro_form_data->set(
       iv_key = c_id-folder_logic
       iv_val = ls_dot-folder_logic ).
@@ -333,11 +347,14 @@ CLASS zcl_abapgit_gui_page_sett_repo IMPLEMENTATION.
       iv_key = |{ c_id-requirements }-{ zif_abapgit_html_form=>c_rows }|
       iv_val = |{ mv_requirements_count }| ).
 
-    IF zcl_abapgit_feature=>is_enabled( zcl_abapgit_abap_language_vers=>c_feature_flag ) = abap_true.
-      ro_form_data->set(
-        iv_key = c_id-abap_langu_vers
-        iv_val = ls_dot-abap_language_version ).
+    " In case "undefined" made it to the DB, we reset to initial which is the default
+    IF ls_dot-abap_language_version = zif_abapgit_dot_abapgit=>c_abap_language_version-undefined.
+      CLEAR ls_dot-abap_language_version.
     ENDIF.
+
+    ro_form_data->set(
+      iv_key = c_id-abap_langu_vers
+      iv_val = ls_dot-abap_language_version ).
 
     ro_form_data->set(
       iv_key = c_id-original_system
@@ -349,11 +366,15 @@ CLASS zcl_abapgit_gui_page_sett_repo IMPLEMENTATION.
   METHOD save_settings.
 
     DATA:
-      lo_dot          TYPE REF TO zcl_abapgit_dot_abapgit,
-      lv_ignore       TYPE string,
-      lt_ignore       TYPE STANDARD TABLE OF string WITH DEFAULT KEY,
-      ls_requirements TYPE zif_abapgit_dot_abapgit=>ty_requirement,
-      lt_requirements TYPE zif_abapgit_dot_abapgit=>ty_requirement_tt.
+      lo_dot               TYPE REF TO zcl_abapgit_dot_abapgit,
+      lv_ignore            TYPE string,
+      lt_ignore            TYPE STANDARD TABLE OF string WITH DEFAULT KEY,
+      lt_wo_transl         TYPE STANDARD TABLE OF string WITH DEFAULT KEY,
+      ls_requirements      TYPE zif_abapgit_dot_abapgit=>ty_requirement,
+      lt_requirements      TYPE zif_abapgit_dot_abapgit=>ty_requirement_tt,
+      lt_i18n_langs        TYPE zif_abapgit_definitions=>ty_languages,
+      lt_unsupported_langs TYPE zif_abapgit_definitions=>ty_languages,
+      lv_unsupported_langs TYPE string.
 
     lo_dot = mi_repo->get_dot_abapgit( ).
 
@@ -362,21 +383,34 @@ CLASS zcl_abapgit_gui_page_sett_repo IMPLEMENTATION.
     lo_dot->set_starting_folder( mo_form_data->get( c_id-starting_folder ) ).
     lo_dot->set_version_constant( mo_form_data->get( c_id-version_constant ) ).
     lo_dot->set_original_system( mo_form_data->get( c_id-original_system ) ).
+    lo_dot->set_abap_language_version( mo_form_data->get( c_id-abap_langu_vers ) ).
 
-    IF zcl_abapgit_feature=>is_enabled( zcl_abapgit_abap_language_vers=>c_feature_flag ) = abap_true.
-      lo_dot->set_abap_language_version( mo_form_data->get( c_id-abap_langu_vers ) ).
+    lt_i18n_langs = zcl_abapgit_lxe_texts=>convert_lang_string_to_table(
+      iv_langs              = mo_form_data->get( c_id-i18n_langs )
+      iv_skip_main_language = lo_dot->get_main_language( ) ).
+
+    READ TABLE lt_i18n_langs WITH KEY table_line = '*' TRANSPORTING NO FIELDS.
+    IF sy-subrc <> 0.
+      lt_unsupported_langs = zcl_abapgit_lxe_texts=>detect_unsupported_languages( lt_i18n_langs ).
+
+      IF lines( lt_unsupported_langs ) > 0.
+        lv_unsupported_langs = concat_lines_of( table = lt_unsupported_langs
+                                                sep   = ', ' ).
+        zcx_abapgit_exception=>raise( |Language(s) { lv_unsupported_langs } not supported| ).
+      ENDIF.
     ENDIF.
 
-    lo_dot->set_i18n_languages(
-      zcl_abapgit_lxe_texts=>convert_lang_string_to_table(
-        iv_langs              = mo_form_data->get( c_id-i18n_langs )
-        iv_skip_main_language = lo_dot->get_main_language( ) ) ).
+    lo_dot->set_i18n_languages( lt_i18n_langs ).
     lo_dot->use_lxe( boolc( mo_form_data->get( c_id-use_lxe ) = abap_true ) ).
+
+    lt_wo_transl = zcl_abapgit_i18n_params=>normalize_obj_patterns(
+      zcl_abapgit_convert=>split_string( mo_form_data->get( c_id-wo_transaltion ) ) ).
+    lo_dot->set_objs_without_translation( lt_wo_transl ).
 
     " Remove all ignores
     lt_ignore = lo_dot->get_data( )-ignore.
     LOOP AT lt_ignore INTO lv_ignore.
-      lo_dot->remove_ignore( iv_path = ''
+      lo_dot->remove_ignore( iv_path     = ''
                              iv_filename = lv_ignore ).
     ENDLOOP.
 
@@ -385,7 +419,7 @@ CLASS zcl_abapgit_gui_page_sett_repo IMPLEMENTATION.
     LOOP AT lt_ignore INTO lv_ignore.
       lv_ignore = condense( lv_ignore ).
       IF lv_ignore IS NOT INITIAL.
-        lo_dot->add_ignore( iv_path = ''
+        lo_dot->add_ignore( iv_path     = ''
                             iv_filename = lv_ignore ).
       ENDIF.
     ENDLOOP.
@@ -485,6 +519,15 @@ CLASS zcl_abapgit_gui_page_sett_repo IMPLEMENTATION.
         iv_key = c_id-i18n_langs
         iv_val = 'LXE approach requires a non-empty list of languages' ).
     ENDIF.
+
+    TRY.
+        zcl_abapgit_i18n_params=>normalize_obj_patterns(
+          zcl_abapgit_convert=>split_string( mo_form_data->get( c_id-wo_transaltion ) ) ).
+      CATCH zcx_abapgit_exception INTO lx_exception.
+        ro_validation_log->set(
+          iv_key = c_id-wo_transaltion
+          iv_val = lx_exception->get_text( ) ).
+    ENDTRY.
 
     lv_original_system = io_form_data->get( c_id-original_system ).
     IF lv_original_system CN lc_allowed.

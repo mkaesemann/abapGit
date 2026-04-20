@@ -194,6 +194,10 @@ CLASS zcl_abapgit_object_dtel IMPLEMENTATION.
     io_xml->read( EXPORTING iv_name = 'DD04V'
                   CHANGING cg_data = ls_dd04v ).
 
+    IF ls_dd04v-ddtext IS INITIAL.
+      zcx_abapgit_exception=>raise( |DTEL { ms_item-obj_name }: description is empty| ).
+    ENDIF.
+
     corr_insert( iv_package = iv_package
                  ig_object_class = 'DICT' ).
 
@@ -245,7 +249,8 @@ CLASS zcl_abapgit_object_dtel IMPLEMENTATION.
 
   METHOD zif_abapgit_object~exists.
 
-    DATA: lv_rollname TYPE dd04l-rollname.
+    DATA lv_rollname TYPE dd04l-rollname.
+    DATA ls_x030l    TYPE x030l.
 
     lv_rollname = ms_item-obj_name.
 
@@ -253,10 +258,16 @@ CLASS zcl_abapgit_object_dtel IMPLEMENTATION.
     CALL FUNCTION 'DD_GET_NAMETAB_HEADER'
       EXPORTING
         tabname   = lv_rollname
+      IMPORTING
+        x030l_wa  = ls_x030l
       EXCEPTIONS
         not_found = 1
         OTHERS    = 2.
-    IF sy-subrc <> 0.
+    IF sy-subrc = 0 AND ls_x030l-tabtype <> 'E'.
+      " then its not a data element
+      rv_bool = abap_false.
+      RETURN.
+    ELSEIF sy-subrc <> 0.
       " Check for inactive or modified versions
       SELECT SINGLE rollname FROM dd04l INTO lv_rollname
         WHERE rollname = lv_rollname.
@@ -321,6 +332,8 @@ CLASS zcl_abapgit_object_dtel IMPLEMENTATION.
           ls_extra TYPE ty_extra,
           ls_dd04v TYPE dd04v.
 
+    FIELD-SYMBOLS <lg_field> TYPE any.
+
     lv_name = ms_item-obj_name.
 
     SELECT SINGLE * FROM dd04l
@@ -354,6 +367,15 @@ CLASS zcl_abapgit_object_dtel IMPLEMENTATION.
              ls_dd04v-signflag,
              ls_dd04v-convexit,
              ls_dd04v-entitytab.
+    ENDIF.
+
+    ASSIGN COMPONENT 'ACTFLAG' OF STRUCTURE ls_dd04v TO <lg_field>.
+    IF sy-subrc = 0.
+      CLEAR <lg_field>.
+    ENDIF.
+    ASSIGN COMPONENT 'RESERVEDTE' OF STRUCTURE ls_dd04v TO <lg_field>.
+    IF sy-subrc = 0.
+      CLEAR <lg_field>.
     ENDIF.
 
     IF ls_dd04v-routputlen = ''.

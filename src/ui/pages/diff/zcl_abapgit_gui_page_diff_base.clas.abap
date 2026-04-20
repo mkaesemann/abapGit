@@ -102,6 +102,9 @@ CLASS zcl_abapgit_gui_page_diff_base DEFINITION
         iv_action TYPE clike
       RAISING
         zcx_abapgit_exception .
+    METHODS get_sci_result
+      RETURNING
+        VALUE(rv_sci_result) TYPE zif_abapgit_definitions=>ty_sci_result .
     METHODS refresh_full
       RAISING
         zcx_abapgit_exception .
@@ -295,9 +298,9 @@ CLASS zcl_abapgit_gui_page_diff_base IMPLEMENTATION.
                             iv_typ = zif_abapgit_html=>c_action_type-separator ).
         LOOP AT lt_extensions ASSIGNING <lv_i>.
           lo_sub_filter->add( iv_txt = <lv_i>
-                       iv_typ = zif_abapgit_html=>c_action_type-onclick
-                       iv_aux = 'extension'
-                       iv_chk = abap_true ).
+                              iv_typ = zif_abapgit_html=>c_action_type-onclick
+                              iv_aux = 'extension'
+                              iv_chk = abap_true ).
         ENDLOOP.
       ENDIF.
 
@@ -307,9 +310,9 @@ CLASS zcl_abapgit_gui_page_diff_base IMPLEMENTATION.
                             iv_typ = zif_abapgit_html=>c_action_type-separator ).
         LOOP AT lt_obj_types ASSIGNING <lv_i>.
           lo_sub_filter->add( iv_txt = <lv_i>
-                       iv_typ = zif_abapgit_html=>c_action_type-onclick
-                       iv_aux = 'object-type'
-                       iv_chk = abap_true ).
+                              iv_typ = zif_abapgit_html=>c_action_type-onclick
+                              iv_aux = 'object-type'
+                              iv_chk = abap_true ).
         ENDLOOP.
       ENDIF.
 
@@ -319,9 +322,9 @@ CLASS zcl_abapgit_gui_page_diff_base IMPLEMENTATION.
                             iv_typ = zif_abapgit_html=>c_action_type-separator ).
         LOOP AT lt_users ASSIGNING <lv_i>.
           lo_sub_filter->add( iv_txt = <lv_i>
-                       iv_typ = zif_abapgit_html=>c_action_type-onclick
-                       iv_aux = 'changed-by'
-                       iv_chk = abap_true ).
+                              iv_typ = zif_abapgit_html=>c_action_type-onclick
+                              iv_aux = 'changed-by'
+                              iv_chk = abap_true ).
         ENDLOOP.
       ENDIF.
 
@@ -345,9 +348,9 @@ CLASS zcl_abapgit_gui_page_diff_base IMPLEMENTATION.
       lv_jump_target = <ls_diff>-path && <ls_diff>-filename.
 
       lo_sub_jump->add(
-          iv_id  = |li_jump_{ sy-tabix }|
-          iv_txt = lv_jump_target
-          iv_typ = zif_abapgit_html=>c_action_type-onclick ).
+        iv_id  = |li_jump_{ sy-tabix }|
+        iv_txt = lv_jump_target
+        iv_typ = zif_abapgit_html=>c_action_type-onclick ).
 
     ENDLOOP.
 
@@ -496,7 +499,7 @@ CLASS zcl_abapgit_gui_page_diff_base IMPLEMENTATION.
     FIND FIRST OCCURRENCE OF '.' IN <ls_diff>-type MATCH OFFSET lv_offs.
     <ls_diff>-type = reverse( substring( val = <ls_diff>-type
                                          len = lv_offs ) ).
-    IF <ls_diff>-type <> 'xml' AND <ls_diff>-type <> 'abap'.
+    IF <ls_diff>-type <> 'xml' AND <ls_diff>-type <> 'abap' AND <ls_diff>-type <> 'po'.
       <ls_diff>-type = 'other'.
     ENDIF.
 
@@ -540,12 +543,12 @@ CLASS zcl_abapgit_gui_page_diff_base IMPLEMENTATION.
 
     get_files_and_status(
       EXPORTING
-        is_file    = is_file
-        is_object  = is_object
+        is_file   = is_file
+        is_object = is_object
       IMPORTING
-        et_local   = lt_local
-        et_remote  = lt_remote
-        et_status  = lt_status ).
+        et_local  = lt_local
+        et_remote = lt_remote
+        et_status = lt_status ).
 
     IF is_file IS NOT INITIAL.        " Diff for one file
 
@@ -612,9 +615,9 @@ CLASS zcl_abapgit_gui_page_diff_base IMPLEMENTATION.
 
     IF mi_repo IS NOT INITIAL.
       calculate_diff(
-          is_file   = is_file
-          is_object = is_object
-          it_files  = it_files ).
+        is_file   = is_file
+        is_object = is_object
+        it_files  = it_files ).
 
       IF lines( mt_diff_files ) = 0.
         zcx_abapgit_exception=>raise(
@@ -689,6 +692,13 @@ CLASS zcl_abapgit_gui_page_diff_base IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD get_sci_result.
+
+    rv_sci_result = zif_abapgit_definitions=>c_sci_result-no_run.
+
+  ENDMETHOD.
+
+
   METHOD has_diffs.
 
     LOOP AT it_diffs TRANSPORTING NO FIELDS WHERE result IS NOT INITIAL.
@@ -731,7 +741,7 @@ CLASS zcl_abapgit_gui_page_diff_base IMPLEMENTATION.
 
   METHOD is_refresh.
 
-    FIND FIRST OCCURRENCE OF REGEX |^{ c_actions-refresh_prefix }| IN iv_action.
+    FIND FIRST OCCURRENCE OF REGEX |^{ c_actions-refresh_prefix }| IN iv_action ##REGEX_POSIX.
     rv_is_refrseh = boolc( sy-subrc = 0 ).
 
   ENDMETHOD.
@@ -822,7 +832,7 @@ CLASS zcl_abapgit_gui_page_diff_base IMPLEMENTATION.
 
     FIND FIRST OCCURRENCE OF REGEX lv_regex
       IN iv_action
-      SUBMATCHES lv_obj_type lv_obj_name.
+      SUBMATCHES lv_obj_type lv_obj_name ##REGEX_POSIX.
 
     IF sy-subrc = 0.
       mi_repo->refresh_local_object(
@@ -947,9 +957,16 @@ CLASS zcl_abapgit_gui_page_diff_base IMPLEMENTATION.
         CLEAR: ls_stats-insert, ls_stats-delete.
       ENDIF.
 
+      " Count of updated lines (yellow) is only shown in split view
+      IF mv_unified = abap_true.
+        ls_stats-insert = ls_stats-insert + ls_stats-update.
+        ls_stats-delete = ls_stats-delete + ls_stats-update.
+      ENDIF.
       ri_html->add( |<span class="diff_banner diff_ins">+ { ls_stats-insert }</span>| ).
       ri_html->add( |<span class="diff_banner diff_del">- { ls_stats-delete }</span>| ).
-      ri_html->add( |<span class="diff_banner diff_upd">~ { ls_stats-update }</span>| ).
+      IF mv_unified = abap_false.
+        ri_html->add( |<span class="diff_banner diff_upd">~ { ls_stats-update }</span>| ).
+      ENDIF.
     ENDIF.
 
     " no links for nonexistent or deleted objects
@@ -1000,7 +1017,7 @@ CLASS zcl_abapgit_gui_page_diff_base IMPLEMENTATION.
 
     IF is_diff-fstate = c_fstate-both AND mv_unified = abap_true.
       ii_html->add( '<span class="attention pad-sides">Attention: Unified mode'
-                 && ' highlighting for MM assumes local file is newer ! </span>' ).
+        && ' highlighting for MM assumes local file is newer ! </span>' ).
     ENDIF.
 
     IF is_diff-obj_type IS NOT INITIAL
@@ -1174,10 +1191,10 @@ CLASS zcl_abapgit_gui_page_diff_base IMPLEMENTATION.
     ENDIF.
 
     render_line_split_row(
-        ii_html   = ri_html
-        iv_fstate = iv_fstate
-        iv_old    = lv_old
-        iv_new    = lv_new ).
+      ii_html   = ri_html
+      iv_fstate = iv_fstate
+      iv_old    = lv_old
+      iv_new    = lv_new ).
 
     ri_html->add( '</tr>' ).
 
@@ -1343,7 +1360,7 @@ CLASS zcl_abapgit_gui_page_diff_base IMPLEMENTATION.
 
         mv_unified = zcl_abapgit_persist_factory=>get_user( )->toggle_diff_unified( ).
 
-        rs_handled-page  = zcl_abapgit_gui_page_hoc=>create(
+        rs_handled-page = zcl_abapgit_gui_page_hoc=>create(
           iv_page_title         = 'Diff'
           iv_page_layout        = get_page_layout( )
           ii_page_menu_provider = me
@@ -1439,13 +1456,17 @@ CLASS zcl_abapgit_gui_page_diff_base IMPLEMENTATION.
     DATA: ls_diff_file LIKE LINE OF mt_diff_files,
           li_progress  TYPE REF TO  zif_abapgit_progress.
 
+    register_handlers( ).
+
     CREATE OBJECT ri_html TYPE zcl_abapgit_html.
 
     li_progress = zcl_abapgit_progress=>get_instance( lines( mt_diff_files ) ).
 
     IF mi_repo IS NOT INITIAL.
       ri_html->add( `<div class="repo">` ).
-      ri_html->add( zcl_abapgit_gui_chunk_lib=>render_repo_top( mi_repo ) ).
+      ri_html->add( zcl_abapgit_gui_chunk_lib=>render_repo_top(
+        ii_repo        = mi_repo
+        iv_sci_result  = get_sci_result( ) ) ).
       ri_html->add( `</div>` ).
     ENDIF.
 
@@ -1467,8 +1488,6 @@ CLASS zcl_abapgit_gui_page_diff_base IMPLEMENTATION.
     register_deferred_script( render_scripts( ) ).
 
     li_progress->off( ).
-
-    register_handlers( ).
 
   ENDMETHOD.
 ENDCLASS.

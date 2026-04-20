@@ -5,16 +5,17 @@ CLASS zcl_abapgit_gui_page_codi_base DEFINITION
   PUBLIC SECTION.
     INTERFACES zif_abapgit_html_table.
 
-  PROTECTED SECTION.
-
     CONSTANTS:
       BEGIN OF c_actions,
         rerun        TYPE string VALUE 'rerun',
         stage        TYPE string VALUE 'stage',
+        patch        TYPE string VALUE 'patch',
         commit       TYPE string VALUE 'commit',
         filter_kind  TYPE string VALUE 'filter_kind',
         apply_filter TYPE string VALUE 'apply_filter',
       END OF c_actions .
+
+  PROTECTED SECTION.
 
     DATA mi_repo TYPE REF TO zif_abapgit_repo.
     DATA mt_result TYPE zif_abapgit_code_inspector=>ty_results.
@@ -369,7 +370,7 @@ CLASS zcl_abapgit_gui_page_codi_base IMPLEMENTATION.
     lv_temp = replace(
       val   = ii_event->mv_action
       regex = |^{ c_ci_sig }|
-      with  = `` ).
+      with  = `` ) ##REGEX_POSIX.
 
     IF lv_temp <> ii_event->mv_action. " CI navigation request detected
       handle_navigation( lv_temp ).

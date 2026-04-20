@@ -191,9 +191,6 @@ CLASS ltd_repo_online IMPLEMENTATION.
   METHOD zif_abapgit_repo~get_tadir_objects.
   ENDMETHOD.
 
-  METHOD zif_abapgit_repo~get_unsupported_objects_local.
-  ENDMETHOD.
-
   METHOD zif_abapgit_repo_online~get_url.
   ENDMETHOD.
 
@@ -213,9 +210,6 @@ CLASS ltd_repo_online IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD zif_abapgit_repo~refresh_local_objects.
-  ENDMETHOD.
-
-  METHOD zif_abapgit_repo~remove_ignored_files.
   ENDMETHOD.
 
   METHOD zif_abapgit_repo_online~select_branch.
@@ -240,6 +234,9 @@ CLASS ltd_repo_online IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD zif_abapgit_repo~switch_repo_type.
+  ENDMETHOD.
+
+  METHOD zif_abapgit_repo_online~get_remote_settings.
   ENDMETHOD.
 
 ENDCLASS.
@@ -350,7 +347,7 @@ CLASS ltcl_validate_form IMPLEMENTATION.
         iv_val = c_git_repo_url
       )->set(
         iv_key = zcl_abapgit_gui_page_sett_remo=>c_id-head_type
-        iv_val = zcl_abapgit_gui_page_sett_remo=>c_head_types-branch
+        iv_val = zif_abapgit_git_definitions=>c_head_types-branch
       )->set(
         iv_key = zcl_abapgit_gui_page_sett_remo=>c_id-branch
         iv_val = 'feature' ).
@@ -371,7 +368,7 @@ CLASS ltcl_validate_form IMPLEMENTATION.
         iv_val = c_git_repo_url
       )->set(
         iv_key = zcl_abapgit_gui_page_sett_remo=>c_id-head_type
-        iv_val = zcl_abapgit_gui_page_sett_remo=>c_head_types-branch
+        iv_val = zif_abapgit_git_definitions=>c_head_types-branch
       )->set(
         iv_key = zcl_abapgit_gui_page_sett_remo=>c_id-branch
         iv_val = 'main' ).
@@ -392,7 +389,7 @@ CLASS ltcl_validate_form IMPLEMENTATION.
         iv_val = c_git_repo_url
       )->set(
         iv_key = zcl_abapgit_gui_page_sett_remo=>c_id-head_type
-        iv_val = zcl_abapgit_gui_page_sett_remo=>c_head_types-tag
+        iv_val = zif_abapgit_git_definitions=>c_head_types-tag
       )->set(
         iv_key = zcl_abapgit_gui_page_sett_remo=>c_id-tag
         iv_val = 'inv_tag' ).
@@ -413,7 +410,7 @@ CLASS ltcl_validate_form IMPLEMENTATION.
         iv_val = c_git_repo_url
       )->set(
         iv_key = zcl_abapgit_gui_page_sett_remo=>c_id-head_type
-        iv_val = zcl_abapgit_gui_page_sett_remo=>c_head_types-tag
+        iv_val = zif_abapgit_git_definitions=>c_head_types-tag
       )->set(
         iv_key = zcl_abapgit_gui_page_sett_remo=>c_id-tag
         iv_val = 'v1.1.3' ).
@@ -434,7 +431,7 @@ CLASS ltcl_validate_form IMPLEMENTATION.
         iv_val = c_git_repo_url
       )->set(
         iv_key = zcl_abapgit_gui_page_sett_remo=>c_id-head_type
-        iv_val = zcl_abapgit_gui_page_sett_remo=>c_head_types-pull_request
+        iv_val = zif_abapgit_git_definitions=>c_head_types-pull_request
       )->set(
         iv_key = zcl_abapgit_gui_page_sett_remo=>c_id-pull_request
         iv_val = 'x@inv_pr' ).
@@ -455,7 +452,7 @@ CLASS ltcl_validate_form IMPLEMENTATION.
         iv_val = c_git_repo_url
       )->set(
         iv_key = zcl_abapgit_gui_page_sett_remo=>c_id-head_type
-        iv_val = zcl_abapgit_gui_page_sett_remo=>c_head_types-pull_request
+        iv_val = zif_abapgit_git_definitions=>c_head_types-pull_request
       )->set(
         iv_key = zcl_abapgit_gui_page_sett_remo=>c_id-pull_request
         iv_val = 'x@pr' ).
@@ -476,7 +473,7 @@ CLASS ltcl_validate_form IMPLEMENTATION.
         iv_val = c_git_repo_url
       )->set(
         iv_key = zcl_abapgit_gui_page_sett_remo=>c_id-head_type
-        iv_val = zcl_abapgit_gui_page_sett_remo=>c_head_types-commit
+        iv_val = zif_abapgit_git_definitions=>c_head_types-commit
       )->set(
         iv_key = zcl_abapgit_gui_page_sett_remo=>c_id-commit
         iv_val = 'ABCD1234' ).
@@ -497,7 +494,7 @@ CLASS ltcl_validate_form IMPLEMENTATION.
         iv_val = c_git_repo_url
       )->set(
         iv_key = zcl_abapgit_gui_page_sett_remo=>c_id-head_type
-        iv_val = zcl_abapgit_gui_page_sett_remo=>c_head_types-commit
+        iv_val = zif_abapgit_git_definitions=>c_head_types-commit
       )->set(
         iv_key = zcl_abapgit_gui_page_sett_remo=>c_id-commit
         iv_val = '1d4abf5342a939202ae24ab4a5ad78da3cad24fb' ).

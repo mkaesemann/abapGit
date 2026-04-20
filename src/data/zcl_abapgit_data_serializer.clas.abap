@@ -51,12 +51,12 @@ CLASS zcl_abapgit_data_serializer IMPLEMENTATION.
         lo_ajson->keep_item_order( ).
         lo_ajson->set(
           iv_path = '/'
-          iv_val = <lg_tab> ).
+          iv_val  = <lg_tab> ).
 
         IF iv_skip_initial = abap_true.
           lo_ajson = zcl_abapgit_ajson=>create_from(
             ii_source_json = lo_ajson
-            ii_filter = zcl_abapgit_ajson_filter_lib=>create_empty_filter( ) ).
+            ii_filter      = zcl_abapgit_ajson_filter_lib=>create_empty_filter( ) ).
         ENDIF.
 
         lv_string = lo_ajson->stringify( 2 ).
@@ -124,6 +124,9 @@ CLASS zcl_abapgit_data_serializer IMPLEMENTATION.
         ls_file-data = convert_itab_to_json(
           ir_data         = lr_data
           iv_skip_initial = ls_config-skip_initial ).
+        IF ls_file-data IS INITIAL.
+          ls_file-data = zcl_abapgit_convert=>string_to_xstring_utf8( '[]' ).
+        ENDIF.
       ELSE.
         ls_file-data = zcl_abapgit_convert=>string_to_xstring_utf8( '[]' ).
       ENDIF.

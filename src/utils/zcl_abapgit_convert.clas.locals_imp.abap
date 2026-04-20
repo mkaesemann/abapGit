@@ -18,6 +18,8 @@ CLASS lcl_in IMPLEMENTATION.
 
     DATA lv_class TYPE string.
     DATA lx_error TYPE REF TO cx_root.
+    DATA lv_ignore_cerr TYPE abap_bool.
+
 
     IF go_conv_new IS INITIAL AND go_conv_old IS INITIAL.
       TRY.
@@ -25,12 +27,16 @@ CLASS lcl_in IMPLEMENTATION.
             RECEIVING
               instance = go_conv_new.
         CATCH cx_sy_dyn_call_illegal_class.
+* ignore conversion errors on non-unicode systems
+          lv_ignore_cerr = boolc( cl_abap_char_utilities=>charsize = 1 ).
+
           lv_class = 'CL_ABAP_CONV_IN_CE'.
           CALL METHOD (lv_class)=>create
             EXPORTING
-              encoding = 'UTF-8'
+              encoding    = 'UTF-8'
+              ignore_cerr = lv_ignore_cerr
             RECEIVING
-              conv     = go_conv_old.
+              conv        = go_conv_old.
       ENDTRY.
     ENDIF.
 
@@ -292,6 +298,11 @@ CLASS lcl_bcp47_language_table IMPLEMENTATION.
                            im_sap2  = 'SQ'
                            im_bcp47 = 'sq'
                            iv_text  = 'Albanian' ).
+
+    fill_language_mapping( im_sap1  = 'A'
+                           im_sap2  = 'AR'
+                           im_bcp47 = 'ar-SA'
+                           iv_text  = 'Arabic' ).
 
     fill_language_mapping( im_sap1  = 'BA15'
                            im_sap2  = 'EU'
@@ -588,6 +599,11 @@ CLASS lcl_bcp47_language_table IMPLEMENTATION.
                            im_bcp47 = 'he'
                            iv_text  = 'Hebrew' ).
 
+    fill_language_mapping( im_sap1  = 'BB29'
+                           im_sap2  = 'HI'
+                           im_bcp47 = 'hi'
+                           iv_text  = 'Hindi' ).
+
     fill_language_mapping( im_sap1  = 'H'
                            im_sap2  = 'HU'
                            im_bcp47 = 'hu'
@@ -881,12 +897,12 @@ CLASS lcl_bcp47_language_table IMPLEMENTATION.
     fill_language_mapping( im_sap1  = 'C0C1'
                            im_sap2  = 'WA'
                            im_bcp47 = 'wa'
-                           iv_text  = '' ).
+                           iv_text  = 'Wa' ).
 
-    fill_language_mapping( im_sap1  = 'A'
-                           im_sap2  = 'AR'
-                           im_bcp47 = 'ar-SA'
-                           iv_text  = 'Arabic' ).
+    fill_language_mapping( im_sap1  = 'Z'
+                           im_sap2  = 'Z1'
+                           im_bcp47 = 'z1'
+                           iv_text  = 'Customer reserve' ).
   ENDMETHOD.
 
 

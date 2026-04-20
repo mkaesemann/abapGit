@@ -13,6 +13,7 @@ CLASS zcl_abapgit_gui_page_patch DEFINITION
         !is_file       TYPE zif_abapgit_git_definitions=>ty_file OPTIONAL
         !is_object     TYPE zif_abapgit_definitions=>ty_item OPTIONAL
         !it_files      TYPE zif_abapgit_definitions=>ty_stage_tt OPTIONAL
+        !iv_sci_result TYPE zif_abapgit_definitions=>ty_sci_result DEFAULT zif_abapgit_definitions=>c_sci_result-no_run
       RETURNING
         VALUE(ri_page) TYPE REF TO zif_abapgit_gui_renderable
       RAISING
@@ -20,10 +21,11 @@ CLASS zcl_abapgit_gui_page_patch DEFINITION
 
     METHODS constructor
       IMPORTING
-        !iv_key    TYPE zif_abapgit_persistence=>ty_repo-key
-        !is_file   TYPE zif_abapgit_git_definitions=>ty_file OPTIONAL
-        !is_object TYPE zif_abapgit_definitions=>ty_item OPTIONAL
-        !it_files  TYPE zif_abapgit_definitions=>ty_stage_tt OPTIONAL
+        !iv_key        TYPE zif_abapgit_persistence=>ty_repo-key
+        !is_file       TYPE zif_abapgit_git_definitions=>ty_file OPTIONAL
+        !is_object     TYPE zif_abapgit_definitions=>ty_item OPTIONAL
+        !it_files      TYPE zif_abapgit_definitions=>ty_stage_tt OPTIONAL
+        !iv_sci_result TYPE zif_abapgit_definitions=>ty_sci_result DEFAULT zif_abapgit_definitions=>c_sci_result-no_run
       RAISING
         zcx_abapgit_exception.
 
@@ -46,6 +48,7 @@ CLASS zcl_abapgit_gui_page_patch DEFINITION
     METHODS:
       add_menu_begin REDEFINITION,
       add_menu_end REDEFINITION,
+      get_sci_result REDEFINITION,
       refresh REDEFINITION.
 
   PRIVATE SECTION.
@@ -65,6 +68,7 @@ CLASS zcl_abapgit_gui_page_patch DEFINITION
     DATA mv_section_count TYPE i .
     DATA mv_pushed TYPE abap_bool .
     DATA mi_repo_online TYPE REF TO zif_abapgit_repo_online .
+    DATA mv_sci_result TYPE zif_abapgit_definitions=>ty_sci_result .
 
     METHODS render_patch
       IMPORTING
@@ -144,6 +148,7 @@ ENDCLASS.
 
 
 CLASS zcl_abapgit_gui_page_patch IMPLEMENTATION.
+
 
   METHOD add_menu_begin.
 
@@ -354,6 +359,7 @@ CLASS zcl_abapgit_gui_page_patch IMPLEMENTATION.
     mi_extra = me.
 
     mi_repo_online ?= mi_repo.
+    mv_sci_result = iv_sci_result.
 
     " While patching we always want to be in split mode
     CLEAR mv_unified.
@@ -368,16 +374,24 @@ CLASS zcl_abapgit_gui_page_patch IMPLEMENTATION.
 
     CREATE OBJECT lo_component
       EXPORTING
-        iv_key    = iv_key
-        is_file   = is_file
-        is_object = is_object
-        it_files  = it_files.
+        iv_key        = iv_key
+        is_file       = is_file
+        is_object     = is_object
+        it_files      = it_files
+        iv_sci_result = iv_sci_result.
 
     ri_page = zcl_abapgit_gui_page_hoc=>create(
       iv_page_title         = 'Patch'
       iv_page_layout        = zcl_abapgit_gui_page=>c_page_layout-full_width
       ii_page_menu_provider = lo_component
       ii_child_component    = lo_component ).
+
+  ENDMETHOD.
+
+
+  METHOD get_sci_result.
+
+    rv_sci_result = mv_sci_result.
 
   ENDMETHOD.
 
@@ -426,18 +440,10 @@ CLASS zcl_abapgit_gui_page_patch IMPLEMENTATION.
 
     FIND FIRST OCCURRENCE OF REGEX `patch_line` && `_(.*)_(\d)+_(\d+)`
          IN iv_patch
-         SUBMATCHES ev_filename lv_section ev_line_index.
+         SUBMATCHES ev_filename lv_section ev_line_index ##REGEX_POSIX.
     IF sy-subrc <> 0.
       zcx_abapgit_exception=>raise( |Invalid patch| ).
     ENDIF.
-
-  ENDMETHOD.
-
-
-  METHOD zif_abapgit_gui_diff_extra~insert_nav.
-
-    " add beacon at beginning of file
-    rv_insert_nav = abap_true.
 
   ENDMETHOD.
 
@@ -462,49 +468,6 @@ CLASS zcl_abapgit_gui_page_patch IMPLEMENTATION.
     super->refresh( iv_action ).
 
     restore_patch_flags( lt_diff_files_old ).
-
-  ENDMETHOD.
-
-
-  METHOD zif_abapgit_gui_diff_extra~render_beacon_begin_of_row.
-
-    mv_section_count = mv_section_count + 1.
-
-    ii_html->add( |<th class="patch">| ).
-    ii_html->add_checkbox( |patch_section_{ get_normalized_fname_with_path( is_diff ) }_{ mv_section_count }| ).
-    ii_html->add( '</th>' ).
-
-  ENDMETHOD.
-
-
-  METHOD zif_abapgit_gui_diff_extra~render_diff_head_after_state.
-
-    DATA: lv_act_id TYPE string.
-
-    lv_act_id = |{ c_actions-refresh_local_object }_{ is_diff-obj_type }_{ is_diff-obj_name }|.
-
-    IF is_diff-obj_type IS NOT INITIAL AND is_diff-obj_name IS NOT INITIAL.
-      " Dummy link is handled in JS (based on ID)
-      ii_html->add( '<span class="repo_name">' ).
-      ii_html->add_a( iv_txt   = ii_html->icon( iv_name  = 'redo-alt-solid'
-                                                iv_class = 'pad-sides'
-                                                iv_hint  = 'Local refresh of this object' )
-                      iv_id    = lv_act_id
-                      iv_act   = lv_act_id
-                      iv_typ   = zif_abapgit_html=>c_action_type-dummy
-                      iv_class = |url| ).
-      ii_html->add( '</span>' ).
-    ENDIF.
-
-  ENDMETHOD.
-
-
-  METHOD zif_abapgit_gui_diff_extra~render_line_split_row.
-
-    render_patch( ii_html      = ii_html
-                  iv_filename  = iv_filename
-                  is_diff_line = is_diff_line
-                  iv_index     = iv_index ).
 
   ENDMETHOD.
 
@@ -568,14 +531,6 @@ CLASS zcl_abapgit_gui_page_patch IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_gui_diff_extra~render_table_head_non_unified.
-
-    render_patch_head( ii_html = ii_html
-                       is_diff = is_diff ).
-
-  ENDMETHOD.
-
-
   METHOD restore_patch_flags.
 
     DATA:
@@ -620,6 +575,65 @@ CLASS zcl_abapgit_gui_page_patch IMPLEMENTATION.
 
     apply_patch_from_form_fields( ii_event ).
     add_to_stage( ).
+
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_gui_diff_extra~insert_nav.
+
+    " add beacon at beginning of file
+    rv_insert_nav = abap_true.
+
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_gui_diff_extra~render_beacon_begin_of_row.
+
+    mv_section_count = mv_section_count + 1.
+
+    ii_html->add( |<th class="patch">| ).
+    ii_html->add_checkbox( |patch_section_{ get_normalized_fname_with_path( is_diff ) }_{ mv_section_count }| ).
+    ii_html->add( '</th>' ).
+
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_gui_diff_extra~render_diff_head_after_state.
+
+    DATA: lv_act_id TYPE string.
+
+    lv_act_id = |{ c_actions-refresh_local_object }_{ is_diff-obj_type }_{ is_diff-obj_name }|.
+
+    IF is_diff-obj_type IS NOT INITIAL AND is_diff-obj_name IS NOT INITIAL.
+      " Dummy link is handled in JS (based on ID)
+      ii_html->add( '<span class="repo_name">' ).
+      ii_html->add_a( iv_txt   = ii_html->icon( iv_name  = 'redo-alt-solid'
+                                                iv_class = 'pad-sides'
+                                                iv_hint  = 'Local refresh of this object' )
+                      iv_id    = lv_act_id
+                      iv_act   = lv_act_id
+                      iv_typ   = zif_abapgit_html=>c_action_type-dummy
+                      iv_class = |url| ).
+      ii_html->add( '</span>' ).
+    ENDIF.
+
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_gui_diff_extra~render_line_split_row.
+
+    render_patch( ii_html      = ii_html
+                  iv_filename  = iv_filename
+                  is_diff_line = is_diff_line
+                  iv_index     = iv_index ).
+
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_gui_diff_extra~render_table_head_non_unified.
+
+    render_patch_head( ii_html = ii_html
+                       is_diff = is_diff ).
 
   ENDMETHOD.
 
@@ -682,6 +696,8 @@ CLASS zcl_abapgit_gui_page_patch IMPLEMENTATION.
 
   METHOD zif_abapgit_gui_renderable~render.
 
+    register_handlers( ).
+
     CLEAR mv_section_count.
 
     IF mv_pushed = abap_true.
@@ -689,8 +705,6 @@ CLASS zcl_abapgit_gui_page_patch IMPLEMENTATION.
       calculate_diff( ).
       CLEAR mv_pushed.
     ENDIF.
-
-    register_handlers( ).
 
     ri_html = super->zif_abapgit_gui_renderable~render( ).
 

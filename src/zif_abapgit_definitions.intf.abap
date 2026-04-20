@@ -76,13 +76,14 @@ INTERFACE zif_abapgit_definitions
     END OF ty_transport .
   TYPES:
     BEGIN OF ty_deserialize_checks,
-      overwrite       TYPE ty_overwrite_tt,
-      warning_package TYPE ty_overwrite_tt,
-      data_loss       TYPE ty_overwrite_tt,
-      requirements    TYPE ty_requirements,
-      dependencies    TYPE ty_dependencies,
-      transport       TYPE ty_transport,
-      customizing     TYPE ty_transport,
+      overwrite             TYPE ty_overwrite_tt,
+      warning_package       TYPE ty_overwrite_tt,
+      data_loss             TYPE ty_overwrite_tt,
+      delete_tabl_with_data TYPE ty_overwrite_tt,
+      requirements          TYPE ty_requirements,
+      dependencies          TYPE ty_dependencies,
+      transport             TYPE ty_transport,
+      customizing           TYPE ty_transport,
     END OF ty_deserialize_checks .
   TYPES:
     BEGIN OF ty_delete_checks,
@@ -157,13 +158,6 @@ INTERFACE zif_abapgit_definitions
       remote TYPE zif_abapgit_git_definitions=>ty_files_tt,
       status TYPE ty_results_ts_path,
     END OF ty_stage_files .
-  TYPES:
-    BEGIN OF ty_tpool.
-      INCLUDE TYPE textpool.
-  TYPES: split TYPE c LENGTH 8.
-  TYPES: END OF ty_tpool .
-  TYPES:
-    ty_tpool_tt TYPE STANDARD TABLE OF ty_tpool WITH DEFAULT KEY .
 
   TYPES:
     BEGIN OF ty_transport_to_branch,
@@ -224,17 +218,6 @@ INTERFACE zif_abapgit_definitions
   TYPES:
     ty_dokil_tt TYPE STANDARD TABLE OF dokil
                          WITH NON-UNIQUE DEFAULT KEY .
-  TYPES:
-    BEGIN OF ty_col_spec,
-      tech_name      TYPE string,
-      display_name   TYPE string,
-      css_class      TYPE string,
-      add_tz         TYPE abap_bool,
-      title          TYPE string,
-      allow_order_by TYPE abap_bool,
-    END OF ty_col_spec,
-    ty_col_spec_tt TYPE STANDARD TABLE OF ty_col_spec
-                      WITH NON-UNIQUE KEY tech_name.
   TYPES:
     ty_proxy_bypass_url       TYPE c LENGTH 255,
     ty_range_proxy_bypass_url TYPE RANGE OF ty_proxy_bypass_url.

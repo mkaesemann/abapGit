@@ -11,6 +11,17 @@ CLASS zcl_abapgit_gui_chunk_lib DEFINITION
         name   TYPE string,
       END OF  ty_event_signature .
 
+    TYPES:
+      BEGIN OF ty_col_spec,
+        tech_name      TYPE string,
+        display_name   TYPE string,
+        css_class      TYPE string,
+        add_tz         TYPE abap_bool,
+        title          TYPE string,
+        allow_order_by TYPE abap_bool,
+      END OF ty_col_spec,
+      ty_col_spec_tt TYPE STANDARD TABLE OF ty_col_spec WITH NON-UNIQUE KEY tech_name.
+
     CLASS-METHODS class_constructor .
     CLASS-METHODS render_error
       IMPORTING
@@ -34,6 +45,8 @@ CLASS zcl_abapgit_gui_chunk_lib DEFINITION
         !iv_interactive_branch   TYPE abap_bool DEFAULT abap_false
         !iv_interactive_favorite TYPE abap_bool DEFAULT abap_true
         !io_news                 TYPE REF TO zcl_abapgit_repo_news OPTIONAL
+        !iv_sci_result           TYPE zif_abapgit_definitions=>ty_sci_result
+          DEFAULT zif_abapgit_definitions=>c_sci_result-no_run
       RETURNING
         VALUE(ri_html)           TYPE REF TO zif_abapgit_html
       RAISING
@@ -63,7 +76,7 @@ CLASS zcl_abapgit_gui_chunk_lib DEFINITION
         VALUE(ri_html) TYPE REF TO zif_abapgit_html .
     CLASS-METHODS render_table_header
       IMPORTING
-        !it_col_spec         TYPE zif_abapgit_definitions=>ty_col_spec_tt
+        !it_col_spec         TYPE ty_col_spec_tt
         !iv_order_by         TYPE string
         !iv_order_descending TYPE abap_bool
       RETURNING
@@ -338,7 +351,7 @@ CLASS zcl_abapgit_gui_chunk_lib IMPLEMENTATION.
 
     rv_normalized_program_name = substring_before(
       val   = iv_program_name
-      regex = `(=+CP)?$` ).
+      regex = `(=+CP)?$` ) ##REGEX_POSIX.
 
   ENDMETHOD.
 
@@ -351,6 +364,7 @@ CLASS zcl_abapgit_gui_chunk_lib IMPLEMENTATION.
       lv_selected_commit  TYPE string,
       lv_commit_short_sha TYPE string,
       lv_text             TYPE string,
+      lv_act              TYPE string,
       lv_icon             TYPE string,
       lv_hint             TYPE string,
       lv_class            TYPE string,
@@ -387,15 +401,18 @@ CLASS zcl_abapgit_gui_chunk_lib IMPLEMENTATION.
         lv_class = 'branch branch_branch'.
         lv_icon  = 'code-branch/grey70'.
         lv_hint  = 'Current branch'.
+        lv_act   = zif_abapgit_definitions=>c_action-git_branch_switch.
       WHEN zif_abapgit_git_definitions=>c_git_branch_type-annotated_tag
         OR zif_abapgit_git_definitions=>c_git_branch_type-lightweight_tag.
         lv_class = 'branch'.
         lv_icon  = 'tag-solid/grey70'.
         lv_hint  = 'Current tag'.
+        lv_act   = zif_abapgit_definitions=>c_action-git_tag_switch.
       WHEN OTHERS.
         lv_class = 'branch branch_branch'.
         lv_icon  = 'code-branch/grey70'.
         lv_hint  = 'Current commit'.
+        lv_act   = zif_abapgit_definitions=>c_action-repo_remote_settings.
     ENDCASE.
 
     CREATE OBJECT ri_html TYPE zcl_abapgit_html.
@@ -403,7 +420,7 @@ CLASS zcl_abapgit_gui_chunk_lib IMPLEMENTATION.
     ri_html->add_icon( iv_name = lv_icon
                        iv_hint = lv_hint ).
     IF iv_interactive = abap_true.
-      ri_html->add_a( iv_act = |{ zif_abapgit_definitions=>c_action-git_branch_switch }?key={ lv_key }|
+      ri_html->add_a( iv_act = |{ lv_act }?key={ lv_key }|
                       iv_txt = lv_text ).
     ELSE.
       ri_html->add( lv_text ).
@@ -460,19 +477,19 @@ CLASS zcl_abapgit_gui_chunk_lib IMPLEMENTATION.
 
       REPLACE FIRST OCCURRENCE OF REGEX
         |({ zcx_abapgit_exception=>c_section_text-cause }{ cl_abap_char_utilities=>newline })|
-        IN lv_longtext WITH |<h3>$1</h3>|.
+        IN lv_longtext WITH |<h3>$1</h3>| ##REGEX_POSIX.
 
       REPLACE FIRST OCCURRENCE OF REGEX
         |({ zcx_abapgit_exception=>c_section_text-system_response }{ cl_abap_char_utilities=>newline })|
-        IN lv_longtext WITH |<h3>$1</h3>|.
+        IN lv_longtext WITH |<h3>$1</h3>| ##REGEX_POSIX.
 
       REPLACE FIRST OCCURRENCE OF REGEX
         |({ zcx_abapgit_exception=>c_section_text-what_to_do }{ cl_abap_char_utilities=>newline })|
-        IN lv_longtext WITH |<h3>$1</h3>|.
+        IN lv_longtext WITH |<h3>$1</h3>| ##REGEX_POSIX.
 
       REPLACE FIRST OCCURRENCE OF REGEX
         |({ zcx_abapgit_exception=>c_section_text-sys_admin }{ cl_abap_char_utilities=>newline })|
-        IN lv_longtext WITH |<h3>$1</h3>|.
+        IN lv_longtext WITH |<h3>$1</h3>| ##REGEX_POSIX.
 
       REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>cr_lf
         IN lv_longtext
@@ -1012,6 +1029,11 @@ CLASS zcl_abapgit_gui_chunk_lib IMPLEMENTATION.
     ri_html->add( '</td>' ).
 
     ri_html->add( '<td class="repo_attr right">' ).
+
+    " SCI result
+    render_sci_result(
+      ii_html       = ri_html
+      iv_sci_result = iv_sci_result ).
 
     " Fav
     IF abap_true = zcl_abapgit_persist_factory=>get_user( )->is_favorite_repo( ii_repo->get_key( ) ).

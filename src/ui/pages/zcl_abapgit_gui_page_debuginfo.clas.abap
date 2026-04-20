@@ -170,6 +170,8 @@ CLASS zcl_abapgit_gui_page_debuginfo IMPLEMENTATION.
     ri_html->add( |<tr><td>LCL_TIME:       </td><td>{ zcl_abapgit_git_time=>get_unix( ) }</td></tr>| ).
     ri_html->add( |<tr><td>SY time:        </td><td>{ sy-datum } { sy-uzeit } { sy-tzone }</td></tr>| ).
     ri_html->add( |<tr><td>SY release:     </td><td>{ ls_release-release } SP { ls_release-sp }</td></tr>| ).
+    ri_html->add( |<tr><td>Charsize:       </td><td>{ cl_abap_char_utilities=>charsize }</td></tr>| ).
+    ri_html->add( |<tr><td>Endian:         </td><td>{ cl_abap_char_utilities=>endian }</td></tr>| ).
     ri_html->add( |</table>| ).
     ri_html->add( |<br>| ).
 
@@ -189,21 +191,23 @@ CLASS zcl_abapgit_gui_page_debuginfo IMPLEMENTATION.
 
     IF zcl_abapgit_factory=>get_environment( )->is_merged( ) = abap_true.
       " Standalone version
-      lt_source = zcl_abapgit_factory=>get_sap_report( )->read_report( c_exit_standalone ).
-      IF sy-subrc = 0.
-        resolve_exit_include(
-          CHANGING
-            cv_clsname = ls_class_key-clsname
-            ct_source  = lt_source ).
-        ri_html->add( |<div>User exits are active (include { get_jump_object(
-          iv_obj_type = 'PROG'
-          iv_obj_name = c_exit_standalone ) } found)</div><br>| ).
-        ri_html->add( render_exit_info_methods(
-                        it_source  = lt_source
-                        iv_clsname = to_upper( ls_class_key-clsname ) ) ).
-      ELSE.
-        ri_html->add( |<div>No user exits implemented (include { c_exit_standalone } not found)</div><br>| ).
-      ENDIF.
+      TRY.
+          lt_source = zcl_abapgit_factory=>get_sap_report( )->read_report( c_exit_standalone ).
+
+          resolve_exit_include(
+            CHANGING
+              cv_clsname = ls_class_key-clsname
+              ct_source  = lt_source ).
+          ri_html->add( |<div>User exits are active (include { get_jump_object(
+            iv_obj_type = 'PROG'
+            iv_obj_name = c_exit_standalone ) } found)</div><br>| ).
+          ri_html->add( render_exit_info_methods(
+                          it_source  = lt_source
+                          iv_clsname = to_upper( ls_class_key-clsname ) ) ).
+
+        CATCH zcx_abapgit_exception.
+          ri_html->add( |<div>No user exits implemented (include { c_exit_standalone } not found)</div><br>| ).
+      ENDTRY.
     ELSE.
       " Developer version
       TRY.
@@ -316,7 +320,9 @@ CLASS zcl_abapgit_gui_page_debuginfo IMPLEMENTATION.
           ls_item     TYPE zif_abapgit_definitions=>ty_item,
           ls_metadata TYPE zif_abapgit_definitions=>ty_metadata,
           lv_step     TYPE zif_abapgit_objects=>ty_deserialization_step,
-          lt_steps    TYPE zif_abapgit_objects=>ty_deserialization_step_tt.
+          lt_steps    TYPE zif_abapgit_objects=>ty_deserialization_step_tt,
+          lt_descr    TYPE zif_abapgit_oo_object_fnc=>ty_seoclasstx_tt,
+          ls_descr    LIKE LINE OF lt_descr.
 
     FIELD-SYMBOLS: <ls_obj> TYPE ko100.
 
@@ -353,9 +359,19 @@ CLASS zcl_abapgit_gui_page_debuginfo IMPLEMENTATION.
       IF sy-subrc = 0.
         rv_html = rv_html && |<td>{ <ls_obj>-text }</td>|.
       ELSE.
-        rv_html = rv_html && |<td class="warning">No description</td>|.
-      ENDIF.
+        lt_descr = zcl_abapgit_oo_factory=>get_by_type( 'CLAS' )->read_descriptions_class( lv_class ).
 
+        READ TABLE lt_descr INTO ls_descr WITH KEY langu = sy-langu.
+        IF sy-subrc = 0.
+          ls_descr-descript = replace(
+            val  = ls_descr-descript
+            sub  = 'abapGit - '
+            with = '' ).
+        ELSE.
+          ls_descr-descript = '<span class="warning">No description</span>'.
+        ENDIF.
+        rv_html = rv_html && |<td>abapGit Enhancement: { ls_descr-descript }</td>|.
+      ENDIF.
 
       TRY.
           ls_item-obj_type = lv_type.
@@ -429,11 +445,11 @@ CLASS zcl_abapgit_gui_page_debuginfo IMPLEMENTATION.
     cv_clsname = c_exit_class.
 
     DO.
-      FIND REGEX 'CLASS\s+(.*)\s+DEFINITION' IN TABLE ct_source SUBMATCHES cv_clsname IGNORING CASE.
+      FIND REGEX 'CLASS\s+(.*)\s+DEFINITION' IN TABLE ct_source SUBMATCHES cv_clsname IGNORING CASE ##REGEX_POSIX.
       IF sy-subrc = 0.
         RETURN.
       ENDIF.
-      FIND REGEX 'INCLUDE\s+(.*)\s*\.' IN TABLE ct_source SUBMATCHES lv_include IGNORING CASE.
+      FIND REGEX 'INCLUDE\s+(.*)\s*\.' IN TABLE ct_source SUBMATCHES lv_include IGNORING CASE ##REGEX_POSIX.
       IF sy-subrc = 0.
         TRY.
             ct_source = zcl_abapgit_factory=>get_sap_report( )->read_report( lv_include ).

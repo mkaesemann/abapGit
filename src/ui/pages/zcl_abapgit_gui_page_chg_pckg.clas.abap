@@ -24,6 +24,11 @@ CLASS zcl_abapgit_gui_page_chg_pckg DEFINITION
         zcx_abapgit_exception.
 
   PROTECTED SECTION.
+
+    METHODS check_support
+      RAISING
+        zcx_abapgit_exception.
+
   PRIVATE SECTION.
 
     CONSTANTS:
@@ -178,21 +183,42 @@ CLASS zcl_abapgit_gui_page_chg_pckg IMPLEMENTATION.
       READ TABLE it_mapping ASSIGNING <ls_map> WITH KEY old_package = ls_tadir-devclass.
       ASSERT sy-subrc = 0.
 
-      ls_tadir-devclass = <ls_map>-new_package.
-
-      CALL FUNCTION 'TR_TADIR_INTERFACE'
-        EXPORTING
-          wi_tadir_pgmid    = ls_tadir-pgmid
-          wi_tadir_object   = ls_tadir-object
-          wi_tadir_obj_name = ls_tadir-obj_name
-          wi_tadir_devclass = ls_tadir-devclass
-          wi_test_modus     = abap_false
-        EXCEPTIONS
-          OTHERS            = 1.
-      IF sy-subrc <> 0.
-        zcx_abapgit_exception=>raise_t100( ).
-      ENDIF.
+      zcl_abapgit_factory=>get_tadir( )->insert_single(
+        iv_pgmid    = ls_tadir-pgmid
+        iv_object   = ls_tadir-object
+        iv_obj_name = ls_tadir-obj_name
+        iv_package  = <ls_map>-new_package ).
     ENDLOOP.
+
+  ENDMETHOD.
+
+
+  METHOD check_support.
+
+    DATA lt_packages TYPE zif_abapgit_sap_package=>ty_devclass_tt.
+    DATA lt_local TYPE zif_abapgit_definitions=>ty_files_item_tt.
+
+    IF zcl_abapgit_factory=>get_cts_api( )->is_chrec_possible_for_package( mi_repo->get_package( ) ) = abap_true.
+      zcx_abapgit_exception=>raise( 'Feature only supports local packages (no transport)' ).
+    ENDIF.
+
+    " This is limited to prefix logic, repositories that have only one package, or repositories that have no
+    " local objects (yet)
+    IF mi_repo->get_dot_abapgit( )->get_folder_logic( ) <> zif_abapgit_dot_abapgit=>c_folder_logic-prefix.
+
+      lt_packages = zcl_abapgit_factory=>get_sap_package( mi_repo->get_package( ) )->list_subpackages( ).
+
+      lt_local = mi_repo->get_files_local( ).
+
+      IF lines( lt_packages ) > 1 AND lines( lt_local ) > 2.
+        zcx_abapgit_exception=>raise(
+          iv_text     =
+          'Feature is *not* supported for repositories with full/mixed folder logic'
+          iv_longtext =
+          'It is limited to repositories that have only one package, or repositories that have no local objects' ).
+      ENDIF.
+
+    ENDIF.
 
   ENDMETHOD.
 
@@ -206,13 +232,7 @@ CLASS zcl_abapgit_gui_page_chg_pckg IMPLEMENTATION.
     mo_form = get_form_schema( ).
     mo_form_util = zcl_abapgit_html_form_utils=>create( mo_form ).
 
-    IF mi_repo->get_dot_abapgit( )->get_folder_logic( ) <> zif_abapgit_dot_abapgit=>c_folder_logic-prefix.
-      zcx_abapgit_exception=>raise( 'Feature is only supported repositories with prefix folder logic' ).
-    ENDIF.
-
-    IF zcl_abapgit_factory=>get_cts_api( )->is_chrec_possible_for_package( mi_repo->get_package( ) ) = abap_true.
-      zcx_abapgit_exception=>raise( 'Feature is only supported local packages (no transport)' ).
-    ENDIF.
+    check_support( ).
 
   ENDMETHOD.
 
@@ -251,7 +271,7 @@ CLASS zcl_abapgit_gui_page_chg_pckg IMPLEMENTATION.
         ls_package-parentcl = ls_map-new_package.
       ENDIF.
 
-      zcl_abapgit_factory=>get_sap_package( ls_map-new_package )->create( ls_package ).
+      zcl_abapgit_factory=>get_sap_package( <ls_map>-new_package )->create( ls_package ).
     ENDLOOP.
 
     " TODO: Transportable packages (add to transport and tadir)
@@ -357,7 +377,6 @@ CLASS zcl_abapgit_gui_page_chg_pckg IMPLEMENTATION.
   METHOD update_repo_checksums.
 
     DATA:
-      lv_key       TYPE zif_abapgit_persistence=>ty_repo-key,
       lo_checksums TYPE REF TO zcl_abapgit_repo_checksums,
       lt_checksums TYPE zif_abapgit_persistence=>ty_local_checksum_tt.
 
@@ -365,9 +384,7 @@ CLASS zcl_abapgit_gui_page_chg_pckg IMPLEMENTATION.
       <ls_checksum> LIKE LINE OF lt_checksums,
       <ls_map>      LIKE LINE OF it_mapping.
 
-    lv_key = mi_repo->get_key( ).
-
-    CREATE OBJECT lo_checksums EXPORTING iv_repo_key = lv_key.
+    CREATE OBJECT lo_checksums EXPORTING ii_repo = mi_repo.
 
     lt_checksums = lo_checksums->zif_abapgit_repo_checksums~get( ).
 
@@ -446,7 +463,7 @@ CLASS zcl_abapgit_gui_page_chg_pckg IMPLEMENTATION.
     IF zcl_abapgit_factory=>get_cts_api( )->is_chrec_possible_for_package( lv_new_package ) = abap_true.
       ro_validation_log->set(
         iv_key = c_id-new_package
-        iv_val = 'Feature is only supported local packages (no transport)' ).
+        iv_val = 'Feature only supports local packages (no transport)' ).
     ENDIF.
 
   ENDMETHOD.

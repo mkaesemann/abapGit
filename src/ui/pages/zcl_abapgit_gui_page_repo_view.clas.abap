@@ -138,7 +138,9 @@ CLASS zcl_abapgit_gui_page_repo_view DEFINITION
         VALUE(ri_html) TYPE REF TO zif_abapgit_html .
     METHODS apply_order_by
       CHANGING
-        !ct_repo_items TYPE zif_abapgit_definitions=>ty_repo_item_tt .
+        !ct_repo_items TYPE zif_abapgit_definitions=>ty_repo_item_tt
+      RAISING
+        zcx_abapgit_exception .
     METHODS build_branch_dropdown
       RETURNING
         VALUE(ro_branch_dropdown) TYPE REF TO zcl_abapgit_html_toolbar
@@ -201,7 +203,7 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_GUI_PAGE_REPO_VIEW IMPLEMENTATION.
+CLASS zcl_abapgit_gui_page_repo_view IMPLEMENTATION.
 
 
   METHOD apply_order_by.
@@ -211,7 +213,8 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_REPO_VIEW IMPLEMENTATION.
       ls_sort                        LIKE LINE OF lt_sort,
       lt_non_code_and_metadata_items LIKE ct_repo_items,
       lt_code_items                  LIKE ct_repo_items,
-      lt_diff_items                  LIKE ct_repo_items.
+      lt_diff_items                  LIKE ct_repo_items,
+      li_persist_user                TYPE REF TO zif_abapgit_persist_user.
 
     FIELD-SYMBOLS:
       <ls_repo_item> TYPE zif_abapgit_definitions=>ty_repo_item.
@@ -242,8 +245,6 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_REPO_VIEW IMPLEMENTATION.
       DELETE lt_code_items WHERE changes > 0.
     ENDIF.
 
-    CLEAR: ct_repo_items.
-
     ls_sort-descending = mv_order_descending.
     ls_sort-astext     = abap_true.
     ls_sort-name       = mv_order_by.
@@ -261,8 +262,19 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_REPO_VIEW IMPLEMENTATION.
       INSERT ls_sort INTO TABLE lt_sort.
     ENDIF.
 
-    SORT lt_code_items STABLE BY (lt_sort).
-    SORT lt_diff_items STABLE BY (lt_sort).
+    TRY.
+        SORT lt_code_items STABLE BY (lt_sort).
+        SORT lt_diff_items STABLE BY (lt_sort).
+
+      CATCH cx_sy_dyn_table_ill_comp_val.
+        CLEAR: mv_order_by, mv_order_descending.
+        li_persist_user = zcl_abapgit_persist_factory=>get_user( ).
+        li_persist_user->set_order_by( mv_order_by ).
+        li_persist_user->set_order_descending( mv_order_descending ).
+        RETURN.
+    ENDTRY.
+
+    CLEAR: ct_repo_items.
 
     INSERT LINES OF lt_non_code_and_metadata_items INTO TABLE ct_repo_items.
     INSERT LINES OF lt_diff_items INTO TABLE ct_repo_items.
@@ -497,10 +509,10 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_REPO_VIEW IMPLEMENTATION.
                      iv_act = |{ zif_abapgit_definitions=>c_action-repo_refresh }?key={ mv_key }|
                      iv_opt = zif_abapgit_html=>c_html_opt-strong ).
 
-    ro_toolbar->add( iv_txt   = 'Repo Settings'
-                     iv_act   = |{ zif_abapgit_definitions=>c_action-repo_settings }?key={ mv_key }|
-                     iv_opt   = zif_abapgit_html=>c_html_opt-strong
-                     iv_title = `Repository Settings` ).
+    zcl_abapgit_html_toolbar_lib=>render_repo_settings_dropdown(
+      io_toolbar = ro_toolbar
+      iv_key     = mv_key
+      iv_opt     = zif_abapgit_html=>c_html_opt-strong ).
 
   ENDMETHOD.
 
@@ -1038,8 +1050,8 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_REPO_VIEW IMPLEMENTATION.
   METHOD render_table_header.
 
     DATA:
-      lt_col_spec TYPE zif_abapgit_definitions=>ty_col_spec_tt,
-      ls_col_spec TYPE zif_abapgit_definitions=>ty_col_spec.
+      lt_col_spec TYPE zcl_abapgit_gui_chunk_lib=>ty_col_spec_tt,
+      ls_col_spec TYPE zcl_abapgit_gui_chunk_lib=>ty_col_spec.
 
     CREATE OBJECT ri_html TYPE zcl_abapgit_html.
 
@@ -1214,6 +1226,11 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_REPO_VIEW IMPLEMENTATION.
     ls_hotkey_action-description   = |Show Log|.
     ls_hotkey_action-action = zif_abapgit_definitions=>c_action-repo_log.
     ls_hotkey_action-hotkey = |l|.
+    INSERT ls_hotkey_action INTO TABLE rt_hotkey_actions.
+
+    ls_hotkey_action-description   = |Toggle File Paths|.
+    ls_hotkey_action-action = c_actions-toggle_hide_files.
+    ls_hotkey_action-hotkey = |v|.
     INSERT ls_hotkey_action INTO TABLE rt_hotkey_actions.
 
   ENDMETHOD.

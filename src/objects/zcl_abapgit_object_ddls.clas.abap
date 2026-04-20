@@ -35,12 +35,39 @@ CLASS zcl_abapgit_object_ddls DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
         !cg_data TYPE any
       RAISING
         zcx_abapgit_exception .
+    METHODS clear_baseinfo
+      IMPORTING
+        !iv_json       TYPE string
+      RETURNING
+        VALUE(rv_json) TYPE string.
+    METHODS get_log_uuid
+      RETURNING
+        VALUE(rv_log_uuid) TYPE sysuuid_c32.
 
 ENDCLASS.
 
 
 
 CLASS zcl_abapgit_object_ddls IMPLEMENTATION.
+
+
+  METHOD clear_baseinfo.
+
+    " To prevent diffs across various releases
+    DATA li_json TYPE REF TO zif_abapgit_ajson.
+
+    TRY.
+        li_json = zcl_abapgit_ajson=>parse(
+          iv_json            = iv_json
+          iv_keep_item_order = abap_true ).
+        li_json = li_json->filter( zcl_abapgit_ajson_filter_lib=>create_empty_filter( ) ).
+        rv_json = li_json->stringify( 2 ) && |\n|.
+      CATCH zcx_abapgit_ajson_error.
+        " fallback to original value
+        rv_json = iv_json.
+    ENDTRY.
+
+  ENDMETHOD.
 
 
   METHOD clear_fields.
@@ -117,6 +144,23 @@ CLASS zcl_abapgit_object_ddls IMPLEMENTATION.
           ( lv_lastchar2 <> cl_abap_char_utilities=>cr_lf AND lv_lastchar2 <> cl_abap_char_utilities=>newline ) ).
       cv_string = |{ cv_string }{ cl_abap_char_utilities=>cr_lf }|.
     ENDIF.
+
+  ENDMETHOD.
+
+
+  METHOD get_log_uuid.
+
+    DATA lv_tstmpl       TYPE timestampl.
+    DATA lv_tstmp_string TYPE string.
+
+    TRY.
+        cl_system_uuid=>convert_uuid_x16_static( EXPORTING uuid     = cl_system_uuid=>create_uuid_x16_static( )
+                                                 IMPORTING uuid_c32 = rv_log_uuid ).
+      CATCH cx_uuid_error.
+        GET TIME STAMP FIELD lv_tstmpl.
+        lv_tstmp_string = lv_tstmpl.
+        rv_log_uuid = |{ sy-uname }{ lv_tstmp_string }|.
+    ENDTRY.
 
   ENDMETHOD.
 
@@ -234,10 +278,11 @@ CLASS zcl_abapgit_object_ddls IMPLEMENTATION.
   METHOD zif_abapgit_object~delete.
 
     DATA:
-      lt_deltab TYPE TABLE OF dcdeltb,
-      ls_deltab TYPE dcdeltb,
-      lt_gentab TYPE TABLE OF dcgentb,
-      lv_rc     TYPE sy-subrc.
+      lt_deltab   TYPE TABLE OF dcdeltb,
+      ls_deltab   TYPE dcdeltb,
+      lt_gentab   TYPE TABLE OF dcgentb,
+      lv_rc       TYPE sy-subrc,
+      lv_logname  TYPE ddmass-logname.
 
     " CL_DD_DDL_HANDLER->DELETE does not work for CDS views that reference other views
     " To drop any views regardless of reference, we use delnoref = false
@@ -245,14 +290,23 @@ CLASS zcl_abapgit_object_ddls IMPLEMENTATION.
     ls_deltab-objname = ms_item-obj_name.
     APPEND ls_deltab TO lt_deltab.
 
+    " protname in DDPRS is 40 chars long!
+    lv_logname = |DEL_{ get_log_uuid( ) }|.
+
+    IF ii_log IS NOT INITIAL.
+      ii_log->add_info( |> Mass deletion 1 DDIC object| ).
+      ii_log->add_info( |Log name: { lv_logname }| ).
+    ENDIF.
+
     CALL FUNCTION 'DD_MASS_ACT_C3'
       EXPORTING
         ddmode         = 'O'
         inactive       = abap_true
-        write_log      = abap_false
+        write_log      = abap_true
+        logname        = lv_logname
         delall         = abap_true
         delnoref       = abap_false
-        prid           = -1
+        prid           = 1
       IMPORTING
         act_rc         = lv_rc
       TABLES
@@ -277,6 +331,7 @@ CLASS zcl_abapgit_object_ddls IMPLEMENTATION.
         p_operation   = 'DELETE'
       EXCEPTIONS
         OTHERS        = 0.
+
   ENDMETHOD.
 
 
@@ -300,7 +355,7 @@ CLASS zcl_abapgit_object_ddls IMPLEMENTATION.
 
     TRY.
         io_xml->read( EXPORTING iv_name = 'DDLS'
-                      CHANGING cg_data  = <lg_data> ).
+                      CHANGING  cg_data = <lg_data> ).
 
         ASSIGN COMPONENT 'SOURCE' OF STRUCTURE <lg_data> TO <lg_source>.
         ASSERT sy-subrc = 0.
@@ -430,6 +485,7 @@ CLASS zcl_abapgit_object_ddls IMPLEMENTATION.
 
     DATA: lv_typename   TYPE typename.
     DATA: lv_ddtypekind TYPE ddtypekind.
+    DATA lv_adt_jump_enabled TYPE abap_bool.
 
     lv_typename = ms_item-obj_name.
 
@@ -439,7 +495,9 @@ CLASS zcl_abapgit_object_ddls IMPLEMENTATION.
       IMPORTING
         typekind = lv_ddtypekind.
 
-    IF lv_ddtypekind = 'STOB'.
+    lv_adt_jump_enabled = zcl_abapgit_persist_factory=>get_settings( )->read( )->get_adt_jump_enabled( ).
+
+    IF lv_ddtypekind = 'STOB' AND lv_adt_jump_enabled = abap_true.
       open_adt_stob( ms_item-obj_name ).
       rv_exit = abap_true.
     ENDIF.
@@ -500,7 +558,7 @@ CLASS zcl_abapgit_object_ddls IMPLEMENTATION.
               ASSERT sy-subrc = 0.
               mo_files->add_string(
                 iv_ext    = 'baseinfo'
-                iv_string = <lg_field> ).
+                iv_string = clear_baseinfo( <lg_field> ) ).
               EXIT.
             ENDIF.
           ENDLOOP.

@@ -110,7 +110,7 @@ CLASS lcl_data IMPLEMENTATION.
     ls_main-display_name = zif_abapgit_flow_logic=>c_main.
 
     ls_file-filename = c_filename.
-    ls_file-data = '001122333'.
+    ls_file-data = '00112233'.
     INSERT ls_file INTO TABLE ls_main-files.
 
     INSERT ls_main INTO TABLE mt_branches.
@@ -212,6 +212,9 @@ CLASS lcl_cts IMPLEMENTATION.
   METHOD constructor.
     mo_data = io_data.
   ENDMETHOD.
+  METHOD zif_abapgit_cts_api~read_request_and_tasks.
+    RETURN. " todo, implement method
+  ENDMETHOD.
   METHOD zif_abapgit_cts_api~confirm_transport_messages.
     RETURN. " todo, implement method
   ENDMETHOD.
@@ -231,9 +234,6 @@ CLASS lcl_cts IMPLEMENTATION.
     RETURN. " todo, implement method
   ENDMETHOD.
   METHOD zif_abapgit_cts_api~is_chrec_possible_for_package.
-    RETURN. " todo, implement method
-  ENDMETHOD.
-  METHOD zif_abapgit_cts_api~list_open_requests_by_user.
     RETURN. " todo, implement method
   ENDMETHOD.
   METHOD zif_abapgit_cts_api~list_open_requests.
@@ -256,6 +256,9 @@ CLASS lcl_cts IMPLEMENTATION.
   ENDMETHOD.
   METHOD zif_abapgit_cts_api~change_transport_type.
     RETURN. " todo, implement method
+  ENDMETHOD.
+  METHOD zif_abapgit_cts_api~is_object_type_customizing.
+    RETURN.
   ENDMETHOD.
 ENDCLASS.
 
@@ -319,6 +322,9 @@ CLASS lcl_gitv2 IMPLEMENTATION.
   METHOD zif_abapgit_gitv2_porcelain~fetch_blob.
     RETURN.
   ENDMETHOD.
+  METHOD zif_abapgit_gitv2_porcelain~fetch_blobs.
+    RETURN.
+  ENDMETHOD.
 ENDCLASS.
 
 CLASS lcl_sap_package DEFINITION FINAL.
@@ -328,6 +334,9 @@ ENDCLASS.
 
 CLASS lcl_sap_package IMPLEMENTATION.
   METHOD zif_abapgit_sap_package~get.
+    RETURN.
+  ENDMETHOD.
+  METHOD zif_abapgit_sap_package~check_object_type.
     RETURN.
   ENDMETHOD.
   METHOD zif_abapgit_sap_package~validate_name.
@@ -367,6 +376,9 @@ CLASS lcl_sap_package IMPLEMENTATION.
     RETURN.
   ENDMETHOD.
   METHOD zif_abapgit_sap_package~get_default_transport_layer.
+    RETURN.
+  ENDMETHOD.
+  METHOD zif_abapgit_sap_package~update_tree.
     RETURN.
   ENDMETHOD.
 ENDCLASS.
@@ -448,9 +460,6 @@ CLASS lcl_repo IMPLEMENTATION.
   METHOD zif_abapgit_repo~set_files_remote.
     RETURN.
   ENDMETHOD.
-  METHOD zif_abapgit_repo~get_unsupported_objects_local.
-    RETURN.
-  ENDMETHOD.
   METHOD zif_abapgit_repo~set_local_settings.
     RETURN.
   ENDMETHOD.
@@ -467,9 +476,6 @@ CLASS lcl_repo IMPLEMENTATION.
     RETURN.
   ENDMETHOD.
   METHOD zif_abapgit_repo~bind_listener.
-    RETURN.
-  ENDMETHOD.
-  METHOD zif_abapgit_repo~remove_ignored_files.
     RETURN.
   ENDMETHOD.
   METHOD zif_abapgit_repo_online~get_url.
@@ -506,6 +512,9 @@ CLASS lcl_repo IMPLEMENTATION.
     RETURN.
   ENDMETHOD.
   METHOD zif_abapgit_repo_online~check_for_valid_branch.
+    RETURN.
+  ENDMETHOD.
+  METHOD zif_abapgit_repo_online~get_remote_settings.
     RETURN.
   ENDMETHOD.
 ENDCLASS.
@@ -593,7 +602,10 @@ CLASS lcl_tadir IMPLEMENTATION.
   METHOD zif_abapgit_tadir~read_single.
     rs_tadir-devclass = lcl_data=>c_devclass.
   ENDMETHOD.
-
+  METHOD zif_abapgit_tadir~delete_single.
+  ENDMETHOD.
+  METHOD zif_abapgit_tadir~insert_single.
+  ENDMETHOD.
 ENDCLASS.
 
 ************************************************

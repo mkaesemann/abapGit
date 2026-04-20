@@ -24,6 +24,8 @@ CLASS zcl_abapgit_object_fugr DEFINITION
         update_task       TYPE rs38l-utask,
         short_text        TYPE tftit-stext,
         remote_basxml     TYPE rs38l-basxml_enabled,
+        rfcscope          TYPE c LENGTH 1, " data element not on older releases
+        rfcvers           TYPE c LENGTH 10, " data element not on older releases
         import            TYPE STANDARD TABLE OF rsimp WITH DEFAULT KEY,
         changing          TYPE STANDARD TABLE OF rscha WITH DEFAULT KEY,
         export            TYPE STANDARD TABLE OF rsexp WITH DEFAULT KEY,
@@ -36,13 +38,6 @@ CLASS zcl_abapgit_object_fugr DEFINITION
       ty_function_tt TYPE STANDARD TABLE OF ty_function WITH DEFAULT KEY .
     TYPES:
       ty_sobj_name_tt TYPE STANDARD TABLE OF sobj_name  WITH DEFAULT KEY .
-    TYPES:
-      BEGIN OF ty_tpool_i18n,
-        language TYPE langu,
-        textpool TYPE zif_abapgit_definitions=>ty_tpool_tt,
-      END OF ty_tpool_i18n .
-    TYPES:
-      ty_tpools_i18n TYPE STANDARD TABLE OF ty_tpool_i18n .
 
     DATA mt_includes_cache TYPE ty_sobj_name_tt .
     DATA mt_includes_all TYPE ty_sobj_name_tt .
@@ -227,6 +222,9 @@ CLASS zcl_abapgit_object_fugr IMPLEMENTATION.
           lv_msg       TYPE string,
           lx_error     TYPE REF TO zcx_abapgit_exception.
 
+    DATA lt_tasks TYPE zif_abapgit_cts_api=>ty_request_and_tasks_tt.
+    DATA lv_transport TYPE trkorr.
+
     FIELD-SYMBOLS: <ls_func> LIKE LINE OF it_functions.
 
     LOOP AT it_functions ASSIGNING <ls_func>.
@@ -263,7 +261,7 @@ CLASS zcl_abapgit_object_fugr IMPLEMENTATION.
             OTHERS                   = 2.
         IF sy-subrc <> 0.
           MESSAGE ID sy-msgid TYPE 'S' NUMBER sy-msgno WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4 INTO lv_msg.
-          ii_log->add_error( iv_msg = |Function module { <ls_func>-funcname }: { lv_msg }|
+          ii_log->add_error( iv_msg  = |Function module { <ls_func>-funcname }: { lv_msg }|
                              is_item = ms_item ).
           CONTINUE. "with next function module
         ENDIF.
@@ -278,44 +276,97 @@ CLASS zcl_abapgit_object_fugr IMPLEMENTATION.
           CONTINUE. "with next function module
       ENDTRY.
 
-      CALL FUNCTION 'RS_FUNCTIONMODULE_INSERT'
-        EXPORTING
-          funcname                = <ls_func>-funcname
-          function_pool           = lv_group
-          interface_global        = <ls_func>-global_flag
-          remote_call             = <ls_func>-remote_call
-          short_text              = <ls_func>-short_text
-          update_task             = <ls_func>-update_task
-          exception_class         = <ls_func>-exception_classes
-          namespace               = lv_namespace
-          remote_basxml_supported = <ls_func>-remote_basxml
-          corrnum                 = iv_transport
-        IMPORTING
-          function_include        = lv_include
-        TABLES
-          import_parameter        = <ls_func>-import
-          export_parameter        = <ls_func>-export
-          tables_parameter        = <ls_func>-tables
-          changing_parameter      = <ls_func>-changing
-          exception_list          = <ls_func>-exception
-          parameter_docu          = <ls_func>-documentation
-        EXCEPTIONS
-          double_task             = 1
-          error_message           = 2
-          function_already_exists = 3
-          invalid_function_pool   = 4
-          invalid_name            = 5
-          too_many_functions      = 6
-          no_modify_permission    = 7
-          no_show_permission      = 8
-          enqueue_system_failure  = 9
-          canceled_in_corr        = 10
-          OTHERS                  = 11.
+      TRY.
+          CALL FUNCTION 'RS_FUNCTIONMODULE_INSERT'
+            EXPORTING
+              funcname                = <ls_func>-funcname
+              function_pool           = lv_group
+              interface_global        = <ls_func>-global_flag
+              remote_call             = <ls_func>-remote_call
+              short_text              = <ls_func>-short_text
+              update_task             = <ls_func>-update_task
+              exception_class         = <ls_func>-exception_classes
+              namespace               = lv_namespace
+              remote_basxml_supported = <ls_func>-remote_basxml
+              corrnum                 = iv_transport
+              rfcscope                = <ls_func>-rfcscope " not on lower releases
+              rfcvers                 = <ls_func>-rfcvers " not on lower releases
+              suppress_corr_check     = abap_false
+            IMPORTING
+              function_include        = lv_include
+              corrnum_e               = lv_transport
+            TABLES
+              import_parameter        = <ls_func>-import
+              export_parameter        = <ls_func>-export
+              tables_parameter        = <ls_func>-tables
+              changing_parameter      = <ls_func>-changing
+              exception_list          = <ls_func>-exception
+              parameter_docu          = <ls_func>-documentation
+            EXCEPTIONS
+              double_task             = 1
+              error_message           = 2
+              function_already_exists = 3
+              invalid_function_pool   = 4
+              invalid_name            = 5
+              too_many_functions      = 6
+              no_modify_permission    = 7
+              no_show_permission      = 8
+              enqueue_system_failure  = 9
+              canceled_in_corr        = 10
+              OTHERS                  = 11.
+        CATCH cx_sy_dyn_call_param_not_found.
+          CALL FUNCTION 'RS_FUNCTIONMODULE_INSERT'
+            EXPORTING
+              funcname                = <ls_func>-funcname
+              function_pool           = lv_group
+              interface_global        = <ls_func>-global_flag
+              remote_call             = <ls_func>-remote_call
+              short_text              = <ls_func>-short_text
+              update_task             = <ls_func>-update_task
+              exception_class         = <ls_func>-exception_classes
+              namespace               = lv_namespace
+              remote_basxml_supported = <ls_func>-remote_basxml
+              corrnum                 = iv_transport
+              suppress_corr_check     = abap_false
+            IMPORTING
+              function_include        = lv_include
+              corrnum_e               = lv_transport
+            TABLES
+              import_parameter        = <ls_func>-import
+              export_parameter        = <ls_func>-export
+              tables_parameter        = <ls_func>-tables
+              changing_parameter      = <ls_func>-changing
+              exception_list          = <ls_func>-exception
+              parameter_docu          = <ls_func>-documentation
+            EXCEPTIONS
+              double_task             = 1
+              error_message           = 2
+              function_already_exists = 3
+              invalid_function_pool   = 4
+              invalid_name            = 5
+              too_many_functions      = 6
+              no_modify_permission    = 7
+              no_show_permission      = 8
+              enqueue_system_failure  = 9
+              canceled_in_corr        = 10
+              OTHERS                  = 11.
+      ENDTRY.
       IF sy-subrc <> 0.
         MESSAGE ID sy-msgid TYPE 'S' NUMBER sy-msgno WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4 INTO lv_msg.
-        ii_log->add_error( iv_msg = |Function module { <ls_func>-funcname }: { lv_msg }|
+        ii_log->add_error( iv_msg  = |Function module { <ls_func>-funcname }: { lv_msg }|
                            is_item = ms_item ).
         CONTINUE.  "with next function module
+      ENDIF.
+
+      IF iv_transport IS NOT INITIAL.
+        lt_tasks = zcl_abapgit_factory=>get_cts_api( )->read_request_and_tasks( iv_transport ).
+        READ TABLE lt_tasks WITH KEY trkorr = lv_transport TRANSPORTING NO FIELDS.
+        IF sy-subrc <> 0.
+          " this happens when a FUNC is recorded in a different transport than
+          " what the current user selected
+          ii_log->add_warning( iv_msg  = |FUGR, transport changed to { lv_transport }|
+                               is_item = ms_item ).
+        ENDIF.
       ENDIF.
 
       zcl_abapgit_factory=>get_sap_report( )->insert_report(
@@ -324,7 +375,7 @@ CLASS zcl_abapgit_object_fugr IMPLEMENTATION.
         iv_version = iv_version
         it_source  = lt_source ).
 
-      ii_log->add_success( iv_msg = |Function module { <ls_func>-funcname } imported|
+      ii_log->add_success( iv_msg  = |Function module { <ls_func>-funcname } imported|
                            is_item = ms_item ).
     ENDLOOP.
 
@@ -365,7 +416,7 @@ CLASS zcl_abapgit_object_fugr IMPLEMENTATION.
           ls_progdir   TYPE zif_abapgit_sap_report=>ty_progdir,
           lt_includes  TYPE ty_sobj_name_tt,
           lt_tpool     TYPE textpool_table,
-          lt_tpool_ext TYPE zif_abapgit_definitions=>ty_tpool_tt,
+          lt_tpool_ext TYPE zif_abapgit_lang_definitions=>ty_tpool_tt,
           lt_source    TYPE TABLE OF abaptxt255,
           lx_exc       TYPE REF TO zcx_abapgit_exception.
 
@@ -375,13 +426,13 @@ CLASS zcl_abapgit_object_fugr IMPLEMENTATION.
     tadir_insert( iv_package ).
 
     ii_xml->read( EXPORTING iv_name = 'INCLUDES'
-                  CHANGING cg_data = lt_includes ).
+                  CHANGING  cg_data = lt_includes ).
 
     LOOP AT lt_includes ASSIGNING <lv_include>.
 
       "ignore simple transformation includes (as long as they remain in existing repositories)
       IF strlen( <lv_include> ) = 33 AND <lv_include>+30(3) = 'XTI'.
-        ii_log->add_warning( iv_msg = |Simple Transformation include { <lv_include> } ignored|
+        ii_log->add_warning( iv_msg  = |Simple Transformation include { <lv_include> } ignored|
                              is_item = ms_item ).
         CONTINUE.
       ENDIF.
@@ -392,12 +443,12 @@ CLASS zcl_abapgit_object_fugr IMPLEMENTATION.
           lo_xml = mo_files->read_xml( <lv_include> ).
 
           lo_xml->read( EXPORTING iv_name = 'PROGDIR'
-                        CHANGING cg_data = ls_progdir ).
+                        CHANGING  cg_data = ls_progdir ).
 
           set_abap_language_version( CHANGING cv_abap_language_version = ls_progdir-uccheck ).
 
           lo_xml->read( EXPORTING iv_name = 'TPOOL'
-                        CHANGING cg_data = lt_tpool_ext ).
+                        CHANGING  cg_data = lt_tpool_ext ).
           lt_tpool = read_tpool( lt_tpool_ext ).
 
           deserialize_program( is_progdir = ls_progdir
@@ -409,11 +460,11 @@ CLASS zcl_abapgit_object_fugr IMPLEMENTATION.
                                 it_tpool      = lt_tpool
                                 iv_is_include = abap_true ).
 
-          ii_log->add_success( iv_msg = |Include { ls_progdir-name } imported|
+          ii_log->add_success( iv_msg  = |Include { ls_progdir-name } imported|
                                is_item = ms_item ).
 
         CATCH zcx_abapgit_exception INTO lx_exc.
-          ii_log->add_exception( ix_exc = lx_exc
+          ii_log->add_exception( ix_exc  = lx_exc
                                  is_item = ms_item ).
           CONTINUE.
       ENDTRY.
@@ -424,7 +475,7 @@ CLASS zcl_abapgit_object_fugr IMPLEMENTATION.
 
 
   METHOD deserialize_texts.
-    DATA: lt_tpool_i18n TYPE ty_tpools_i18n,
+    DATA: lt_tpool_i18n TYPE zif_abapgit_lang_definitions=>ty_i18n_tpools,
           lt_tpool      TYPE textpool_table.
 
     FIELD-SYMBOLS <ls_tpool> LIKE LINE OF lt_tpool_i18n.
@@ -447,6 +498,8 @@ CLASS zcl_abapgit_object_fugr IMPLEMENTATION.
           lv_areat     TYPE tlibt-areat,
           lv_stext     TYPE tftit-stext,
           lv_group     TYPE rs38l-area.
+
+    DATA lv_transport TYPE trkorr.
 
     lv_complete = ms_item-obj_name.
 
@@ -474,7 +527,7 @@ CLASS zcl_abapgit_object_fugr IMPLEMENTATION.
     ENDIF.
 
     ii_xml->read( EXPORTING iv_name = 'AREAT'
-                  CHANGING cg_data = lv_areat ).
+                  CHANGING  cg_data = lv_areat ).
     lv_stext = lv_areat.
 
     CALL FUNCTION 'RS_FUNCTION_POOL_INSERT'
@@ -486,6 +539,8 @@ CLASS zcl_abapgit_object_fugr IMPLEMENTATION.
         unicode_checks          = iv_version
         corrnum                 = iv_transport
         suppress_corr_check     = abap_false
+      IMPORTING
+        corrnum                 = lv_transport
       EXCEPTIONS
         name_already_exists     = 1
         name_not_correct        = 2
@@ -575,14 +630,14 @@ CLASS zcl_abapgit_object_fugr IMPLEMENTATION.
     FIELD-SYMBOLS: <lv_include> LIKE LINE OF lt_includes.
 
     ii_xml->read( EXPORTING iv_name = 'INCLUDES'
-                  CHANGING cg_data = lt_includes ).
+                  CHANGING  cg_data = lt_includes ).
 
     LOOP AT lt_includes ASSIGNING <lv_include>.
 
       lo_xml = mo_files->read_xml( <lv_include> ).
 
       lo_xml->read( EXPORTING iv_name = 'PROGDIR'
-                    CHANGING cg_data = ls_progdir ).
+                    CHANGING  cg_data = ls_progdir ).
 
       IF ls_progdir-uccheck IS INITIAL.
         CONTINUE.
@@ -927,6 +982,13 @@ CLASS zcl_abapgit_object_fugr IMPLEMENTATION.
       SELECT SINGLE exten3 INTO ls_function-exception_classes FROM enlfdir
         WHERE funcname = <ls_func>-funcname.              "#EC CI_SUBRC
 
+      " Scope and Interface Contract only for 7.55 or higher
+      TRY.
+          SELECT SINGLE rfcscope rfcvers INTO CORRESPONDING FIELDS OF ls_function FROM ('TFDIR')
+            WHERE funcname = <ls_func>-funcname.          "#EC CI_SUBRC
+        CATCH cx_sy_dynamic_osql_semantics ##NO_HANDLER.
+      ENDTRY.
+
       APPEND ls_function TO rt_functions.
 
       IF NOT lt_new_source IS INITIAL.
@@ -940,6 +1002,7 @@ CLASS zcl_abapgit_object_fugr IMPLEMENTATION.
           iv_extra = <ls_func>-funcname
           it_abap  = lt_source ).
       ENDIF.
+
 
     ENDLOOP.
 
@@ -996,7 +1059,7 @@ CLASS zcl_abapgit_object_fugr IMPLEMENTATION.
 
 
   METHOD serialize_texts.
-    DATA: lt_tpool_i18n TYPE ty_tpools_i18n,
+    DATA: lt_tpool_i18n TYPE zif_abapgit_lang_definitions=>ty_i18n_tpools,
           lt_tpool      TYPE textpool_table.
 
     FIELD-SYMBOLS <ls_tpool> LIKE LINE OF lt_tpool_i18n.
@@ -1020,7 +1083,7 @@ CLASS zcl_abapgit_object_fugr IMPLEMENTATION.
       EXPORTING
         iv_lang_field_name = 'LANGUAGE'
       CHANGING
-        ct_tab = lt_tpool_i18n ).
+        ct_tab             = lt_tpool_i18n ).
 
     SORT lt_tpool_i18n BY language ASCENDING.
     LOOP AT lt_tpool_i18n ASSIGNING <ls_tpool>.
@@ -1245,7 +1308,7 @@ CLASS zcl_abapgit_object_fugr IMPLEMENTATION.
       iv_transport = iv_transport ).
 
     io_xml->read( EXPORTING iv_name = 'FUNCTIONS'
-                  CHANGING cg_data = lt_functions ).
+                  CHANGING  cg_data = lt_functions ).
 
     deserialize_functions(
       it_functions = lt_functions
@@ -1267,15 +1330,15 @@ CLASS zcl_abapgit_object_fugr IMPLEMENTATION.
     ENDIF.
 
     io_xml->read( EXPORTING iv_name = 'DYNPROS'
-                  CHANGING cg_data = lt_dynpros ).
+                  CHANGING  cg_data = lt_dynpros ).
 
     deserialize_dynpros( lt_dynpros ).
 
     io_xml->read( EXPORTING iv_name = 'CUA'
-                  CHANGING cg_data = ls_cua ).
+                  CHANGING  cg_data = ls_cua ).
 
     deserialize_cua( iv_program_name = lv_program_name
-                     is_cua = ls_cua ).
+                     is_cua          = ls_cua ).
 
     deserialize_function_docs(
       iv_prog_name = lv_program_name

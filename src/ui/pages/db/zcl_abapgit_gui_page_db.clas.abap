@@ -26,9 +26,14 @@ CLASS zcl_abapgit_gui_page_db DEFINITION
 
     CONSTANTS:
       BEGIN OF c_action,
-        delete  TYPE string VALUE 'delete',
-        backup  TYPE string VALUE 'backup',
-        restore TYPE string VALUE 'restore',
+        delete                   TYPE string VALUE 'delete',
+        delete_popup_to_confirm  TYPE string VALUE 'delete_popup',
+        delete_confirmed         TYPE string VALUE 'delete_confirmed',
+        backup                   TYPE string VALUE 'backup',
+        restore                  TYPE string VALUE 'restore',
+        restore_popup_to_confirm TYPE string VALUE 'restore_popup',
+        restore_confirmed        TYPE string VALUE 'restore_confirmed',
+        cancel                   TYPE string VALUE 'cancel',
       END OF c_action.
 
     CONSTANTS c_css_url TYPE string VALUE 'css/page_db.css'.
@@ -89,6 +94,13 @@ CLASS zcl_abapgit_gui_page_db DEFINITION
       RAISING
         zcx_abapgit_exception.
     METHODS explain_content_repo_cs
+      IMPORTING
+        !is_data       TYPE zif_abapgit_persistence=>ty_content
+      RETURNING
+        VALUE(rs_expl) TYPE ty_explanation
+      RAISING
+        zcx_abapgit_exception.
+    METHODS explain_content_repo_data
       IMPORTING
         !is_data       TYPE zif_abapgit_persistence=>ty_content
       RETURNING
@@ -159,6 +171,8 @@ CLASS zcl_abapgit_gui_page_db IMPLEMENTATION.
     LOOP AT lt_data ASSIGNING <ls_data>.
       IF <ls_data>-type = zcl_abapgit_persistence_db=>c_type_repo_csum.
         CONCATENATE <ls_data>-type '_' <ls_data>-value '.txt' INTO lv_filename.
+      ELSEIF <ls_data>-type = zcl_abapgit_persistence_db=>c_type_repo_data.
+        CONCATENATE <ls_data>-type '_' <ls_data>-value '.json' INTO lv_filename.
       ELSE.
         CONCATENATE <ls_data>-type '_' <ls_data>-value '.xml' INTO lv_filename.
       ENDIF.
@@ -199,23 +213,7 @@ CLASS zcl_abapgit_gui_page_db IMPLEMENTATION.
 
   METHOD do_delete_entry.
 
-    DATA lv_answer TYPE c LENGTH 1.
-
     ASSERT is_key-type IS NOT INITIAL.
-
-    lv_answer = zcl_abapgit_ui_factory=>get_popups( )->popup_to_confirm(
-      iv_titlebar              = 'Warning'
-      iv_text_question         = |Are you sure you want to delete entry { is_key-type } { is_key-value }?|
-      iv_text_button_1         = 'Yes'
-      iv_icon_button_1         = 'ICON_DELETE'
-      iv_text_button_2         = 'No'
-      iv_icon_button_2         = 'ICON_CANCEL'
-      iv_default_button        = '2'
-      iv_display_cancel_button = abap_false ).
-
-    IF lv_answer = '2'.
-      RAISE EXCEPTION TYPE zcx_abapgit_cancel.
-    ENDIF.
 
     zcl_abapgit_persistence_db=>get_instance( )->delete(
       iv_type  = is_key-type
@@ -226,6 +224,9 @@ CLASS zcl_abapgit_gui_page_db IMPLEMENTATION.
     IF is_key-type = zcl_abapgit_persistence_db=>c_type_repo.
       zcl_abapgit_persistence_db=>get_instance( )->delete(
         iv_type  = zcl_abapgit_persistence_db=>c_type_repo_csum
+        iv_value = is_key-value ).
+      zcl_abapgit_persistence_db=>get_instance( )->delete(
+        iv_type  = zcl_abapgit_persistence_db=>c_type_repo_data
         iv_value = is_key-value ).
 
       " Initialize repo list
@@ -243,7 +244,6 @@ CLASS zcl_abapgit_gui_page_db IMPLEMENTATION.
   METHOD do_restore_db.
 
     DATA:
-      lv_answer   TYPE c LENGTH 1,
       lo_zip      TYPE REF TO cl_abap_zip,
       lv_zip      TYPE xstring,
       lv_path     TYPE string,
@@ -283,9 +283,13 @@ CLASS zcl_abapgit_gui_page_db IMPLEMENTATION.
       lv_filename = <ls_zipfile>-name.
       REPLACE '.xml' IN lv_filename WITH ''.
       REPLACE '.txt' IN lv_filename WITH ''.
+      REPLACE '.json' IN lv_filename WITH ''.
       IF lv_filename CP 'REPO_CS*'.
         ls_data-type  = lv_filename(7).
         ls_data-value = lv_filename+8(*).
+      ELSEIF lv_filename CP 'REPO_DATA*'.
+        ls_data-type  = lv_filename(9).
+        ls_data-value = lv_filename+10(*).
       ELSE.
         SPLIT lv_filename AT '_' INTO ls_data-type ls_data-value.
       ENDIF.
@@ -313,20 +317,6 @@ CLASS zcl_abapgit_gui_page_db IMPLEMENTATION.
       ls_data-data_str = zcl_abapgit_convert=>xstring_to_string_utf8( lv_data ).
       INSERT ls_data INTO TABLE lt_data.
     ENDLOOP.
-
-    lv_answer = zcl_abapgit_ui_factory=>get_popups( )->popup_to_confirm(
-      iv_titlebar              = 'Warning'
-      iv_text_question         = 'All existing repositories and settings will be deleted and overwritten! Continue?'
-      iv_text_button_1         = 'Restore'
-      iv_icon_button_1         = 'ICON_IMPORT'
-      iv_text_button_2         = 'Cancel'
-      iv_icon_button_2         = 'ICON_CANCEL'
-      iv_default_button        = '2'
-      iv_display_cancel_button = abap_false ).
-
-    IF lv_answer <> '1'.
-      RAISE EXCEPTION TYPE zcx_abapgit_cancel.
-    ENDIF.
 
     lt_data_old = zcl_abapgit_persistence_db=>get_instance( )->list( ).
     LOOP AT lt_data_old INTO ls_data.
@@ -385,6 +375,10 @@ CLASS zcl_abapgit_gui_page_db IMPLEMENTATION.
             CHANGING cv_descr       = lv_descr
                      cs_explanation = ls_explanation ).
 
+      WHEN zcl_abapgit_persistence_db=>c_type_repo_data.
+        lv_descr       = 'Repo Data Config'.
+        ls_explanation = explain_content_repo_data( is_data ).
+
       WHEN OTHERS.
         IF strlen( is_data-data_str ) >= 250.
           ls_explanation-value = is_data-data_str(250).
@@ -427,7 +421,7 @@ CLASS zcl_abapgit_gui_page_db IMPLEMENTATION.
     rs_expl-value = |{ zcl_abapgit_repo_srv=>get_instance( )->get( is_data-value )->get_name( ) }|.
 
     FIND FIRST OCCURRENCE OF REGEX '<METHOD>(.*)</METHOD>'
-      IN is_data-data_str IGNORING CASE RESULTS ls_result.
+      IN is_data-data_str IGNORING CASE RESULTS ls_result ##REGEX_POSIX.
     READ TABLE ls_result-submatches INTO ls_match INDEX 1.
     IF sy-subrc = 0.
       lv_class = is_data-data_str+ls_match-offset(ls_match-length).
@@ -455,7 +449,7 @@ CLASS zcl_abapgit_gui_page_db IMPLEMENTATION.
       lv_cnt    TYPE i.
 
     FIND FIRST OCCURRENCE OF REGEX '<OFFLINE/>'
-      IN is_data-data_str IGNORING CASE MATCH COUNT lv_cnt.
+      IN is_data-data_str IGNORING CASE MATCH COUNT lv_cnt ##REGEX_POSIX.
     IF lv_cnt > 0.
       rs_expl-extra = 'Online'.
     ELSE.
@@ -463,13 +457,13 @@ CLASS zcl_abapgit_gui_page_db IMPLEMENTATION.
     ENDIF.
 
     FIND FIRST OCCURRENCE OF REGEX '<DISPLAY_NAME>(.*)</DISPLAY_NAME>'
-      IN is_data-data_str IGNORING CASE RESULTS ls_result.
+      IN is_data-data_str IGNORING CASE RESULTS ls_result ##REGEX_POSIX.
     READ TABLE ls_result-submatches INTO ls_match INDEX 1.
     IF sy-subrc = 0.
       rs_expl-value = is_data-data_str+ls_match-offset(ls_match-length).
     ELSE.
       FIND FIRST OCCURRENCE OF REGEX '<NAME>(.*)</NAME>'
-        IN is_data-data_str IGNORING CASE RESULTS ls_result.
+        IN is_data-data_str IGNORING CASE RESULTS ls_result ##REGEX_POSIX.
       READ TABLE ls_result-submatches INTO ls_match INDEX 1.
       IF sy-subrc = 0.
         rs_expl-value = is_data-data_str+ls_match-offset(ls_match-length).
@@ -478,7 +472,7 @@ CLASS zcl_abapgit_gui_page_db IMPLEMENTATION.
 
     IF rs_expl-value IS INITIAL.
       FIND FIRST OCCURRENCE OF REGEX '<URL>(.*)</URL>'
-        IN is_data-data_str IGNORING CASE RESULTS ls_result.
+        IN is_data-data_str IGNORING CASE RESULTS ls_result ##REGEX_POSIX.
       READ TABLE ls_result-submatches INTO ls_match INDEX 1.
       IF sy-subrc = 0.
         rs_expl-value = is_data-data_str+ls_match-offset(ls_match-length).
@@ -507,6 +501,14 @@ CLASS zcl_abapgit_gui_page_db IMPLEMENTATION.
           format = cl_abap_format=>e_html_attr ).
       ENDIF.
     ENDIF.
+
+  ENDMETHOD.
+
+
+  METHOD explain_content_repo_data.
+
+    rs_expl-extra = 'Data Config'.
+    rs_expl-value = is_data-value.
 
   ENDMETHOD.
 
@@ -540,7 +542,7 @@ CLASS zcl_abapgit_gui_page_db IMPLEMENTATION.
     LOOP AT it_db_entries ASSIGNING <ls_db_entry>.
       IF <ls_db_entry>-type = zcl_abapgit_persistence_db=>c_type_repo.
         FIND FIRST OCCURRENCE OF REGEX '<OFFLINE/>'
-          IN <ls_db_entry>-data_str IGNORING CASE MATCH COUNT lv_cnt.
+          IN <ls_db_entry>-data_str IGNORING CASE MATCH COUNT lv_cnt ##REGEX_POSIX.
         IF lv_cnt > 0.
           lv_online = lv_online + 1.
         ELSE.
@@ -583,17 +585,52 @@ CLASS zcl_abapgit_gui_page_db IMPLEMENTATION.
     DATA lo_query TYPE REF TO zcl_abapgit_string_map.
 
     lo_query = ii_event->query( ).
+
     CASE ii_event->mv_action.
       WHEN c_action-delete.
+
+        lo_query->to_abap( CHANGING cs_container = ls_db ).
+
+        lcl_popup_to_confirm=>create(
+          iv_text_question   = |Are you sure you want to delete the entry "{ ls_db-type } { ls_db-value }"?|
+          iv_action_button_1 = |{ c_action-delete_confirmed }?type={ ls_db-type }&value={ ls_db-value }|
+          iv_action_button_2 = c_action-cancel ).
+
+        rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
+
+      WHEN c_action-delete_confirmed.
+
+        lcl_popup_to_confirm=>close( ).
         lo_query->to_abap( CHANGING cs_container = ls_db ).
         do_delete_entry( ls_db ).
         rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
+
       WHEN c_action-backup.
+
         do_backup_db( ).
         rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
+
       WHEN c_action-restore.
+
+        lcl_popup_to_confirm=>create(
+          iv_text_question   = |All existing repositories and settings will be deleted and overwritten!\n|
+                               && |Are you sure you want to continue?|
+          iv_action_button_1 = c_action-restore_confirmed
+          iv_action_button_2 = c_action-cancel ).
+
+        rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
+
+      WHEN c_action-restore_confirmed.
+
+        lcl_popup_to_confirm=>close( ).
         do_restore_db( ).
         rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
+
+      WHEN c_action-cancel.
+
+        lcl_popup_to_confirm=>close( ).
+        rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
+
     ENDCASE.
 
   ENDMETHOD.
@@ -633,6 +670,8 @@ CLASS zcl_abapgit_gui_page_db IMPLEMENTATION.
     ri_html->add( '<div class="db-list">' ).
     ri_html->add( render_table( lt_db_entries ) ).
     ri_html->add( '</div>' ).
+
+    ri_html->add( lcl_popup_to_confirm=>render( ) ).
 
   ENDMETHOD.
 

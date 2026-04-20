@@ -78,6 +78,18 @@ CLASS zcl_abapgit_cts_api DEFINITION
         !iv_object_type         TYPE trobjtype
       RETURNING
         VALUE(rv_transportable) TYPE abap_bool .
+
+    "! Insert logical object into customizing request
+    "! @parameter iv_transport | Transport
+    "! @parameter iv_object | Object type
+    "! @parameter iv_obj_name | Object Name
+    METHODS insert_cust_logical_object
+      IMPORTING
+        !iv_transport TYPE trkorr
+        !iv_object    TYPE trobjtype
+        !iv_obj_name  TYPE csequence
+      RAISING
+        zcx_abapgit_exception.
 ENDCLASS.
 
 
@@ -143,12 +155,65 @@ CLASS zcl_abapgit_cts_api IMPLEMENTATION.
   METHOD get_current_transport_from_db.
 
     " This method is used for objects that are included in transports but not locked
-    " for example, namespaces (NSPC)
+    " for example, namespaces (NSPC) or table entries (TABU)
+    " Ignore unreleased SAP piece lists
     SELECT SINGLE a~trkorr FROM e070 AS a JOIN e071 AS b ON a~trkorr = b~trkorr
       INTO rv_transport
       WHERE ( a~trstatus = 'D' OR a~trstatus = 'L' )
         AND a~trfunction <> 'G'
+        AND NOT ( a~trfunction = 'F' AND ( a~tarsystem = '' OR a~tarsystem = 'SAP' ) )
         AND b~pgmid = iv_program_id AND b~object = iv_object_type AND b~obj_name = iv_object_name.
+
+  ENDMETHOD.
+
+
+  METHOD insert_cust_logical_object.
+
+    DATA: lt_tasks    TYPE trwbo_request_headers,
+          ls_task     TYPE trwbo_request_header,
+          lv_obj_name TYPE e071-obj_name.
+
+    CALL FUNCTION 'TR_READ_REQUEST_WITH_TASKS'
+      EXPORTING
+        iv_trkorr          = iv_transport
+      IMPORTING
+        et_request_headers = lt_tasks
+      EXCEPTIONS
+        invalid_input      = 1
+        OTHERS             = 2.
+    IF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise_t100( ).
+    ENDIF.
+
+    READ TABLE lt_tasks INTO ls_task WITH KEY strkorr = iv_transport.
+    IF sy-subrc = 0.
+
+      lv_obj_name = iv_obj_name.
+
+      CALL FUNCTION 'TLOGO_OBJECT_APPEND'
+        EXPORTING
+          korrnr                      = ls_task-trkorr
+          objtype                     = iv_object
+          obj_name                    = lv_obj_name
+        EXCEPTIONS
+          korrnr_already_released     = 1
+          korrnr_locked               = 2
+          korrnr_not_exists           = 3
+          korrnr_not_korr             = 4
+          korr_other_user             = 5
+          no_logical_object           = 6
+          object_has_no_tadir         = 7
+          object_locked_in_other_korr = 8
+          obj_name_too_long_or_space  = 9
+          error_append_to_comm        = 10
+          OTHERS                      = 11.
+      IF sy-subrc <> 0.
+        zcx_abapgit_exception=>raise_t100( ).
+      ENDIF.
+    ELSE.
+      zcx_abapgit_exception=>raise(
+        |Error inserting logical object { iv_obj_name } into customizing transport { iv_transport }| ).
+    ENDIF.
 
   ENDMETHOD.
 
@@ -498,7 +563,7 @@ CLASS zcl_abapgit_cts_api IMPLEMENTATION.
             AND lokey <= ls_lock_key-hi.                  "#EC PORTABLE
           IF lv_request IS INITIAL.
             lv_request = <ls_tlock>-trkorr.
-          ELSE.
+          ELSEIF lv_request <> <ls_tlock>-trkorr.
             lv_request = zif_abapgit_definitions=>c_multiple_transports.
             EXIT.
           ENDIF.
@@ -549,22 +614,36 @@ CLASS zcl_abapgit_cts_api IMPLEMENTATION.
 
   METHOD zif_abapgit_cts_api~insert_transport_object.
 
-    CALL FUNCTION 'RS_CORR_INSERT'
-      EXPORTING
-        object              = iv_obj_name
-        object_class        = iv_object
-        devclass            = iv_package
-        master_language     = iv_language
-        mode                = iv_mode
-        global_lock         = abap_true
-        suppress_dialog     = abap_true
-      EXCEPTIONS
-        cancelled           = 1
-        permission_failure  = 2
-        unknown_objectclass = 3
-        OTHERS              = 4.
-    IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise_t100( ).
+    IF zif_abapgit_cts_api~is_object_type_customizing( iv_object ) = abap_true.
+
+      insert_cust_logical_object( iv_transport = iv_transport
+                                  iv_object    = iv_object
+                                  iv_obj_name  = iv_obj_name ).
+
+    ELSE.
+      IF iv_obj_name IS INITIAL.
+        zcx_abapgit_exception=>raise( |RS_CORR_INSERT: Object name must not be empty| ).
+      ENDIF.
+
+      CALL FUNCTION 'RS_CORR_INSERT'
+        EXPORTING
+          object              = iv_obj_name
+          object_class        = iv_object
+          devclass            = iv_package
+          master_language     = iv_language
+          korrnum             = iv_transport
+          mode                = iv_mode
+          global_lock         = abap_true
+          suppress_dialog     = abap_true
+        EXCEPTIONS
+          cancelled           = 1
+          permission_failure  = 2
+          unknown_objectclass = 3
+          OTHERS              = 4.
+      IF sy-subrc <> 0.
+        zcx_abapgit_exception=>raise_t100( ).
+      ENDIF.
+
     ENDIF.
 
   ENDMETHOD.
@@ -577,56 +656,37 @@ CLASS zcl_abapgit_cts_api IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD zif_abapgit_cts_api~list_open_requests_by_user.
+  METHOD zif_abapgit_cts_api~is_object_type_customizing.
 
-    TYPES: BEGIN OF ty_e070,
-             trkorr     TYPE e070-trkorr,
-             trfunction TYPE e070-trfunction,
-             strkorr    TYPE e070-strkorr,
-           END OF ty_e070.
-    DATA lt_e070 TYPE STANDARD TABLE OF ty_e070 WITH DEFAULT KEY.
+    DATA:
+      ls_e071              TYPE e071,
+      lv_is_logical_object TYPE abap_bool,
+      lv_category          TYPE c LENGTH 4.
 
-* find all tasks first
-    SELECT trkorr trfunction strkorr
-      FROM e070 INTO TABLE lt_e070
-      WHERE as4user = iv_user
-      AND trstatus = zif_abapgit_cts_api=>c_transport_status-modifiable
-      AND strkorr <> ''
-      ORDER BY PRIMARY KEY.
+    ls_e071-pgmid  = iv_pgmid.
+    ls_e071-object = iv_object.
 
-    IF lines( lt_e070 ) > 0.
-      SELECT trkorr FROM e070
-        INTO TABLE rt_trkorr
-        FOR ALL ENTRIES IN lt_e070
-        WHERE trkorr = lt_e070-strkorr
-        AND trfunction = zif_abapgit_cts_api=>c_transport_type-wb_request.
-    ENDIF.
+    CALL FUNCTION 'TR_CHECK_TYPE'
+      EXPORTING
+        wi_e071     = ls_e071
+      IMPORTING
+        we_category = lv_category
+        ev_logo_obj = lv_is_logical_object.
+
+    rv_is_customizing_object = boolc(
+      lv_category = zif_abapgit_cts_api~c_transport_category-customizing AND lv_is_logical_object = abap_true ).
 
   ENDMETHOD.
 
+
   METHOD zif_abapgit_cts_api~list_open_requests.
 
-    TYPES: BEGIN OF ty_e070,
-             trkorr     TYPE e070-trkorr,
-             trfunction TYPE e070-trfunction,
-             strkorr    TYPE e070-strkorr,
-           END OF ty_e070.
-    DATA lt_e070 TYPE STANDARD TABLE OF ty_e070 WITH DEFAULT KEY.
-
-* find all tasks first
-    SELECT trkorr trfunction strkorr
-      FROM e070 INTO TABLE lt_e070
+    SELECT trkorr FROM e070
+      INTO TABLE rt_trkorr
       WHERE trstatus = zif_abapgit_cts_api=>c_transport_status-modifiable
-      AND strkorr <> ''
+      AND trfunction = zif_abapgit_cts_api=>c_transport_type-wb_request
+      AND as4date IN it_date
       ORDER BY PRIMARY KEY.
-
-    IF lines( lt_e070 ) > 0.
-      SELECT trkorr FROM e070
-        INTO TABLE rt_trkorr
-        FOR ALL ENTRIES IN lt_e070
-        WHERE trkorr = lt_e070-strkorr
-        AND trfunction = zif_abapgit_cts_api=>c_transport_type-wb_request.
-    ENDIF.
 
   ENDMETHOD.
 
@@ -649,6 +709,7 @@ CLASS zcl_abapgit_cts_api IMPLEMENTATION.
 
     SELECT trkorr FROM e070 INTO TABLE lt_tasks
       WHERE strkorr = iv_request
+      AND trfunction = zif_abapgit_cts_api=>c_transport_type-wb_task
       ORDER BY PRIMARY KEY.
     IF sy-subrc <> 0.
       RETURN.
@@ -720,6 +781,8 @@ CLASS zcl_abapgit_cts_api IMPLEMENTATION.
 
 * move to output structure
     rs_request-trstatus = ls_request-h-trstatus.
+    rs_request-as4date  = ls_request-h-as4date.
+    rs_request-as4user  = ls_request-h-as4user.
     LOOP AT ls_request-keys INTO ls_key.
       APPEND INITIAL LINE TO rs_request-keys ASSIGNING <ls_key>.
       MOVE-CORRESPONDING ls_key TO <ls_key>.
@@ -738,8 +801,38 @@ CLASS zcl_abapgit_cts_api IMPLEMENTATION.
 * fallback to any language
       SELECT SINGLE as4text FROM e07t
         INTO rv_description
-        WHERE trkorr = iv_trkorr ##SUBRC_OK. "#EC CI_NOORDER
+        WHERE trkorr = iv_trkorr ##SUBRC_OK.            "#EC CI_NOORDER
     ENDIF.
+
+  ENDMETHOD.
+
+
+  METHOD zif_abapgit_cts_api~read_request_and_tasks.
+
+    DATA lt_request_headers TYPE trwbo_request_headers.
+    DATA ls_row             LIKE LINE OF lt_request_headers.
+    DATA ls_task            LIKE LINE OF rt_tasks.
+
+    CALL FUNCTION 'TR_READ_REQUEST_WITH_TASKS'
+      EXPORTING
+        iv_trkorr          = iv_request
+      IMPORTING
+        et_request_headers = lt_request_headers
+      EXCEPTIONS
+        invalid_input      = 1
+        OTHERS             = 2.
+    IF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise_t100( ).
+    ENDIF.
+
+    LOOP AT lt_request_headers INTO ls_row.
+      ls_task-trkorr  = ls_row-trkorr.
+      ls_task-as4user = ls_row-as4user.
+      ls_task-as4date = ls_row-as4date.
+      ls_task-as4time = ls_row-as4time.
+
+      INSERT ls_task INTO TABLE rt_tasks.
+    ENDLOOP.
 
   ENDMETHOD.
 

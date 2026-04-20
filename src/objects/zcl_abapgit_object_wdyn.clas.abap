@@ -46,6 +46,12 @@ CLASS zcl_abapgit_object_wdyn DEFINITION
       recover_view
         IMPORTING is_view TYPE wdy_md_view_meta_data
         RAISING   zcx_abapgit_exception,
+      unlock_definition
+        IMPORTING is_component_key TYPE wdy_md_component_key,
+      unlock_controller
+        IMPORTING is_controller_key TYPE wdy_md_controller_key,
+      unlock_view
+        IMPORTING is_view_key TYPE wdy_md_view_key,
       delta_controller
         IMPORTING is_controller   TYPE wdy_md_controller_meta_data
         RETURNING VALUE(rs_delta) TYPE svrs2_xversionable_object
@@ -180,14 +186,14 @@ CLASS zcl_abapgit_object_wdyn IMPLEMENTATION.
     ls_key-controller_name = is_controller-definition-controller_name.
 
     lv_found = cl_wdy_md_controller=>check_existency(
-          component_name  = ls_key-component_name
-          controller_name = ls_key-controller_name ).
+      component_name  = ls_key-component_name
+      controller_name = ls_key-controller_name ).
     IF lv_found = abap_false.
       TRY.
           li_controller ?= cl_wdy_md_controller=>create_complete(
-                component_name  = ls_key-component_name
-                controller_name = ls_key-controller_name
-                controller_type = is_controller-definition-controller_type ).
+            component_name  = ls_key-component_name
+            controller_name = ls_key-controller_name
+            controller_type = is_controller-definition-controller_type ).
           li_controller->save_to_database( ).
           li_controller->unlock( ).
         CATCH cx_wdy_md_exception INTO lx_error.
@@ -331,14 +337,14 @@ CLASS zcl_abapgit_object_wdyn IMPLEMENTATION.
     ls_key-view_name      = is_view-definition-view_name.
 
     lv_found = cl_wdy_md_abstract_view=>check_existency(
-                 component_name = ls_key-component_name
-                 name           = ls_key-view_name ).
+      component_name = ls_key-component_name
+      name           = ls_key-view_name ).
     IF lv_found = abap_false.
       TRY.
           li_view = cl_wdy_md_abstract_view=>create(
-                      component_name = is_view-definition-component_name
-                      view_name      = is_view-definition-view_name
-                      type           = is_view-definition-type ).
+            component_name = is_view-definition-component_name
+            view_name      = is_view-definition-view_name
+            type           = is_view-definition-type ).
           li_view->save_to_database( ).
           li_view->unlock( ).
         CATCH cx_wdy_md_exception INTO lx_error.
@@ -400,23 +406,23 @@ CLASS zcl_abapgit_object_wdyn IMPLEMENTATION.
       ls_sources LIKE LINE OF mt_sources.
 
     " Old format
-    ii_xml->read( EXPORTING iv_name  = 'SOURCES'
-                  CHANGING cg_data = mt_sources ).
+    ii_xml->read( EXPORTING iv_name = 'SOURCES'
+                  CHANGING  cg_data = mt_sources ).
 
     IF mt_sources IS NOT INITIAL.
       RETURN.
     ENDIF.
 
     " New format
-    ii_xml->read( EXPORTING iv_name  = 'FILES'
-                  CHANGING cg_data = lt_extra ).
+    ii_xml->read( EXPORTING iv_name = 'FILES'
+                  CHANGING  cg_data = lt_extra ).
 
     LOOP AT lt_extra INTO lv_extra.
       lv_line = 0.
       lt_abap = mo_files->read_abap( iv_extra = lv_extra ).
       LOOP AT lt_abap INTO ls_abap.
         " Start of method
-        FIND REGEX '\s*method\s+(.*)\s*\.' IN ls_abap-line IGNORING CASE SUBMATCHES lv_cmpname.
+        FIND REGEX '\s*method\s+(.*)\s*\.' IN ls_abap-line IGNORING CASE SUBMATCHES lv_cmpname ##REGEX_POSIX.
         IF sy-subrc = 0.
           lv_line = 1.
         ENDIF.
@@ -433,7 +439,7 @@ CLASS zcl_abapgit_object_wdyn IMPLEMENTATION.
         ENDIF.
 
         " End of method
-        FIND REGEX '\s*endmethod\s*\.' IN ls_abap-line IGNORING CASE.
+        FIND REGEX '\s*endmethod\s*\.' IN ls_abap-line IGNORING CASE ##REGEX_POSIX.
         IF sy-subrc = 0.
           lv_line = 0.
         ENDIF.
@@ -573,76 +579,76 @@ CLASS zcl_abapgit_object_wdyn IMPLEMENTATION.
 *   Calling FM dynamically because version 702 has less parameters
 
 *   FM parameters
-    add_fm_param_exporting( EXPORTING iv_name     = 'CONTROLLER_KEY'
-                                      ig_value    = is_key
+    add_fm_param_exporting( EXPORTING iv_name  = 'CONTROLLER_KEY'
+                                      ig_value = is_key
                             CHANGING  ct_param = lt_fm_param ).
-    add_fm_param_exporting( EXPORTING iv_name     = 'GET_ALL_TRANSLATIONS'
-                                      ig_value    = abap_false
+    add_fm_param_exporting( EXPORTING iv_name  = 'GET_ALL_TRANSLATIONS'
+                                      ig_value = abap_false
                             CHANGING  ct_param = lt_fm_param ).
-    add_fm_param_tables( EXPORTING iv_name = 'DEFINITION'
+    add_fm_param_tables( EXPORTING iv_name  = 'DEFINITION'
                          CHANGING  ct_value = lt_definition
                                    ct_param = lt_fm_param ).
-    add_fm_param_tables( EXPORTING iv_name = 'DESCRIPTIONS'
-                         CHANGING ct_value = rs_controller-descriptions
-                                  ct_param = lt_fm_param ).
-    add_fm_param_tables( EXPORTING iv_name = 'CONTROLLER_USAGES'
-                         CHANGING ct_value = rs_controller-controller_usages
-                                  ct_param = lt_fm_param ).
-    add_fm_param_tables( EXPORTING iv_name = 'CONTROLLER_COMPONENTS'
-                         CHANGING ct_value = lt_components
-                                  ct_param = lt_fm_param ).
-    add_fm_param_tables( EXPORTING iv_name = 'CONTROLLER_COMPONENT_SOURCES'
-                         CHANGING ct_value = lt_sources
-                                  ct_param = lt_fm_param ).
-    add_fm_param_tables( EXPORTING iv_name = 'CONTROLLER_COMPONENT_TEXTS'
-                         CHANGING ct_value = rs_controller-controller_component_texts
-                                  ct_param = lt_fm_param ).
-    add_fm_param_tables( EXPORTING iv_name = 'CONTROLLER_PARAMETERS'
-                         CHANGING ct_value = rs_controller-controller_parameters
-                                  ct_param = lt_fm_param ).
-    add_fm_param_tables( EXPORTING iv_name = 'CONTROLLER_PARAMETER_TEXTS'
-                         CHANGING ct_value = rs_controller-controller_parameter_texts
-                                  ct_param = lt_fm_param ).
-    add_fm_param_tables( EXPORTING iv_name = 'CONTEXT_NODES'
-                         CHANGING ct_value = rs_controller-context_nodes
-                                  ct_param = lt_fm_param ).
-    add_fm_param_tables( EXPORTING iv_name = 'CONTEXT_ATTRIBUTES'
-                         CHANGING ct_value = rs_controller-context_attributes
-                                  ct_param = lt_fm_param ).
-    add_fm_param_tables( EXPORTING iv_name = 'CONTEXT_MAPPINGS'
-                         CHANGING ct_value = rs_controller-context_mappings
-                                  ct_param = lt_fm_param ).
-    add_fm_param_tables( EXPORTING iv_name = 'FIELDGROUPS'
-                         CHANGING ct_value = rs_controller-fieldgroups
-                                  ct_param = lt_fm_param ).
+    add_fm_param_tables( EXPORTING iv_name  = 'DESCRIPTIONS'
+                         CHANGING  ct_value = rs_controller-descriptions
+                                   ct_param = lt_fm_param ).
+    add_fm_param_tables( EXPORTING iv_name  = 'CONTROLLER_USAGES'
+                         CHANGING  ct_value = rs_controller-controller_usages
+                                   ct_param = lt_fm_param ).
+    add_fm_param_tables( EXPORTING iv_name  = 'CONTROLLER_COMPONENTS'
+                         CHANGING  ct_value = lt_components
+                                   ct_param = lt_fm_param ).
+    add_fm_param_tables( EXPORTING iv_name  = 'CONTROLLER_COMPONENT_SOURCES'
+                         CHANGING  ct_value = lt_sources
+                                   ct_param = lt_fm_param ).
+    add_fm_param_tables( EXPORTING iv_name  = 'CONTROLLER_COMPONENT_TEXTS'
+                         CHANGING  ct_value = rs_controller-controller_component_texts
+                                   ct_param = lt_fm_param ).
+    add_fm_param_tables( EXPORTING iv_name  = 'CONTROLLER_PARAMETERS'
+                         CHANGING  ct_value = rs_controller-controller_parameters
+                                   ct_param = lt_fm_param ).
+    add_fm_param_tables( EXPORTING iv_name  = 'CONTROLLER_PARAMETER_TEXTS'
+                         CHANGING  ct_value = rs_controller-controller_parameter_texts
+                                   ct_param = lt_fm_param ).
+    add_fm_param_tables( EXPORTING iv_name  = 'CONTEXT_NODES'
+                         CHANGING  ct_value = rs_controller-context_nodes
+                                   ct_param = lt_fm_param ).
+    add_fm_param_tables( EXPORTING iv_name  = 'CONTEXT_ATTRIBUTES'
+                         CHANGING  ct_value = rs_controller-context_attributes
+                                   ct_param = lt_fm_param ).
+    add_fm_param_tables( EXPORTING iv_name  = 'CONTEXT_MAPPINGS'
+                         CHANGING  ct_value = rs_controller-context_mappings
+                                   ct_param = lt_fm_param ).
+    add_fm_param_tables( EXPORTING iv_name  = 'FIELDGROUPS'
+                         CHANGING  ct_value = rs_controller-fieldgroups
+                                   ct_param = lt_fm_param ).
 *   Version 702 doesn't have these two attributes so we
 *   use them dynamically for downward compatibility
     ASSIGN COMPONENT 'CONTROLLER_EXCEPTIONS' OF STRUCTURE rs_controller TO <lt_ctrl_exceptions>.
     IF sy-subrc = 0.
-      add_fm_param_tables( EXPORTING iv_name = 'CONTROLLER_EXCEPTIONS'
-                           CHANGING ct_value = <lt_ctrl_exceptions>
-                                    ct_param = lt_fm_param ).
+      add_fm_param_tables( EXPORTING iv_name  = 'CONTROLLER_EXCEPTIONS'
+                           CHANGING  ct_value = <lt_ctrl_exceptions>
+                                     ct_param = lt_fm_param ).
     ENDIF.
     ASSIGN COMPONENT 'CONTROLLER_EXCEPTION_TEXTS' OF STRUCTURE rs_controller TO <lt_ctrl_exception_texts>.
     IF sy-subrc = 0.
-      add_fm_param_tables( EXPORTING iv_name = 'CONTROLLER_EXCEPTION_TEXTS'
-                           CHANGING ct_value = <lt_ctrl_exception_texts>
-                                    ct_param = lt_fm_param ).
+      add_fm_param_tables( EXPORTING iv_name  = 'CONTROLLER_EXCEPTION_TEXTS'
+                           CHANGING  ct_value = <lt_ctrl_exception_texts>
+                                     ct_param = lt_fm_param ).
     ENDIF.
-    add_fm_param_tables( EXPORTING iv_name = 'PSMODILOG'
-                         CHANGING ct_value = lt_psmodilog
-                                  ct_param = lt_fm_param ).
-    add_fm_param_tables( EXPORTING iv_name = 'PSMODISRC'
-                         CHANGING ct_value = lt_psmodisrc
-                                  ct_param = lt_fm_param ).
+    add_fm_param_tables( EXPORTING iv_name  = 'PSMODILOG'
+                         CHANGING  ct_value = lt_psmodilog
+                                   ct_param = lt_fm_param ).
+    add_fm_param_tables( EXPORTING iv_name  = 'PSMODISRC'
+                         CHANGING  ct_value = lt_psmodisrc
+                                   ct_param = lt_fm_param ).
 
 *   FM exceptions
-    add_fm_exception( EXPORTING iv_name = 'NOT_EXISTING'
-                                iv_value = 1
-                      CHANGING ct_exception = lt_fm_exception ).
-    add_fm_exception( EXPORTING iv_name = 'OTHERS'
-                                iv_value = 2
-                      CHANGING ct_exception = lt_fm_exception ).
+    add_fm_exception( EXPORTING iv_name      = 'NOT_EXISTING'
+                                iv_value     = 1
+                      CHANGING  ct_exception = lt_fm_exception ).
+    add_fm_exception( EXPORTING iv_name      = 'OTHERS'
+                                iv_value     = 2
+                      CHANGING  ct_exception = lt_fm_exception ).
 
     CALL FUNCTION 'WDYC_GET_OBJECT'
       PARAMETER-TABLE
@@ -675,6 +681,7 @@ CLASS zcl_abapgit_object_wdyn IMPLEMENTATION.
           lt_psmodilog  TYPE TABLE OF smodilog,
           lt_psmodisrc  TYPE TABLE OF smodisrc.
 
+    FIELD-SYMBOLS <lv_field> TYPE any.
 
     CALL FUNCTION 'WDYD_GET_OBJECT'
       EXPORTING
@@ -710,6 +717,11 @@ CLASS zcl_abapgit_object_wdyn IMPLEMENTATION.
            rs_definition-definition-changedon,
            rs_definition-definition-gendate,
            rs_definition-definition-gentime.
+
+    ASSIGN COMPONENT 'GENVERSION' OF STRUCTURE rs_definition-definition TO <lv_field>.
+    IF sy-subrc = 0.
+      CLEAR <lv_field>.
+    ENDIF.
 
   ENDMETHOD.
 
@@ -790,6 +802,8 @@ CLASS zcl_abapgit_object_wdyn IMPLEMENTATION.
         zcx_abapgit_exception=>raise( |Error recovering version of controller: { lx_error->get_text( ) }| ).
     ENDTRY.
 
+    unlock_controller( ls_key ).
+
   ENDMETHOD.
 
 
@@ -818,6 +832,8 @@ CLASS zcl_abapgit_object_wdyn IMPLEMENTATION.
         zcx_abapgit_exception=>raise( |Error recovering version of component: { lx_error->get_text( ) }| ).
     ENDTRY.
 
+    unlock_definition( ls_key ).
+
   ENDMETHOD.
 
 
@@ -843,6 +859,8 @@ CLASS zcl_abapgit_object_wdyn IMPLEMENTATION.
       CATCH cx_wdy_md_exception INTO lx_error.
         zcx_abapgit_exception=>raise( |Error recovering version of abstract view: { lx_error->get_text( ) }| ).
     ENDTRY.
+
+    unlock_view( ls_key ).
 
   ENDMETHOD.
 
@@ -884,6 +902,56 @@ CLASS zcl_abapgit_object_wdyn IMPLEMENTATION.
     ii_xml->add(
       iv_name = 'FILES'
       ig_data = lt_extra ).
+
+  ENDMETHOD.
+
+
+  METHOD unlock_controller.
+
+    DATA lo_controller TYPE REF TO cl_wdy_md_controller.
+
+    TRY.
+        lo_controller ?= cl_wdy_md_controller=>get_object_by_key(
+          component_name  = is_controller_key-component_name
+          controller_name = is_controller_key-controller_name ).
+        lo_controller->if_wdy_md_lockable_object~unlock( ).
+      CATCH cx_wdy_md_permission_failure cx_wdy_md_not_existing ##NO_HANDLER.
+    ENDTRY.
+
+  ENDMETHOD.
+
+
+  METHOD unlock_definition.
+
+    DATA: lo_component     TYPE REF TO cl_wdy_md_component,
+          lo_comp_intf_def TYPE REF TO cl_wdy_md_component_intf_def.
+
+    TRY.
+        lo_component ?= cl_wdy_md_component=>get_object_by_key( name = is_component_key-component_name ).
+        lo_component->if_wdy_md_component~unlock( ).
+      CATCH cx_wdy_md_not_existing.
+        TRY.
+            lo_comp_intf_def ?= cl_wdy_md_component_intf_def=>get_object_by_key( name = is_component_key-component_name ).
+            lo_comp_intf_def->if_wdy_md_component_intf_def~unlock( ).
+          CATCH cx_wdy_md_permission_failure cx_wdy_md_not_existing ##NO_HANDLER.
+        ENDTRY.
+      CATCH cx_wdy_md_permission_failure ##NO_HANDLER.
+    ENDTRY.
+
+  ENDMETHOD.
+
+
+  METHOD unlock_view.
+
+    DATA lo_view TYPE REF TO cl_wdy_md_abstract_view.
+
+    TRY.
+        lo_view ?= cl_wdy_md_abstract_view=>get_object_by_key(
+          component_name = is_view_key-component_name
+          view_name      = is_view_key-view_name ).
+        lo_view->if_wdy_md_lockable_object~unlock( ).
+      CATCH cx_wdy_md_permission_failure cx_wdy_md_not_existing ##NO_HANDLER.
+    ENDTRY.
 
   ENDMETHOD.
 
@@ -930,9 +998,9 @@ CLASS zcl_abapgit_object_wdyn IMPLEMENTATION.
                    <ls_controller> LIKE LINE OF ls_component-ctlr_metadata.
 
     io_xml->read( EXPORTING iv_name = 'COMPONENT'
-                  CHANGING cg_data = ls_component ).
-    io_xml->read( EXPORTING iv_name  = 'COMPONENTS'
-                  CHANGING cg_data = mt_components ).
+                  CHANGING  cg_data = ls_component ).
+    io_xml->read( EXPORTING iv_name = 'COMPONENTS'
+                  CHANGING  cg_data = mt_components ).
 
     deserialize_sources( io_xml ).
 
@@ -1053,11 +1121,11 @@ CLASS zcl_abapgit_object_wdyn IMPLEMENTATION.
     READ TABLE ls_component-comp_metadata-descriptions INTO ls_description INDEX 1.
     IF sy-subrc = 0.
       zcl_abapgit_sotr_handler=>read_sotr(
-        iv_pgmid    = 'LIMU'
-        iv_object   = 'WDYV'
-        iv_obj_name = ms_item-obj_name
+        iv_pgmid       = 'LIMU'
+        iv_object      = 'WDYV'
+        iv_obj_name    = ms_item-obj_name
         io_i18n_params = mo_i18n_params
-        io_xml      = io_xml ).
+        io_xml         = io_xml ).
     ENDIF.
 
     serialize_longtexts(

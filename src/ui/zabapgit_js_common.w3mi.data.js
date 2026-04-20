@@ -131,7 +131,13 @@ function submitSapeventForm(params, action, method, form) {
     || document.createElement("form");
 
   form.setAttribute("method", method || "post");
-  if (/sapevent/i.test(action)) {
+  var form_action = form.getAttribute("action");
+
+  // SAP GUI for HTML: inside an HTML control, form actions look as follows:
+  // ~control=116&~event=OnSAPEvent&ALINK=1&frameName=&PARAMS=stage_commit
+  if (/~control=/i.test(form_action)) {
+    form.setAttribute("action", form_action.replace(/PARAMS=.*$/, "PARAMS=" + action));
+  } else if (/sapevent/i.test(action)) {
     form.setAttribute("action", action);
   } else {
     form.setAttribute("action", getSapeventPrefix() + "SAPEVENT:" + action);
@@ -302,16 +308,16 @@ RepoOverViewHelper.prototype.registerKeyboardShortcuts = function() {
     var indexOfSelected = rows.indexOf(selected);
     var lastRow         = rows.length - 1;
 
-    if (keycode == 13 && document.activeElement.tagName.toLowerCase() != "input") {
+    if (keycode === 13 && document.activeElement.tagName.toLowerCase() !== "input") {
       // "enter" to open, unless command field has focus
       self.openSelectedRepo();
-    } else if ((keycode == 52 || keycode == 56) && indexOfSelected > 0) {
+    } else if ((keycode === 52 || keycode === 56) && indexOfSelected > 0) {
       // "4,8" for previous, digits are the numlock keys
       // NB: numpad must be activated, keypress does not detect arrows
       //     if we need arrows it will be keydown. But then mind the keycodes, they may change !
       //     e.g. 100 is 'd' with keypress (and conflicts with diff hotkey), and also it is arrow-left keydown
       self.selectRowByIndex(indexOfSelected - 1);
-    } else if ((keycode == 54 || keycode == 50) && indexOfSelected < lastRow) {
+    } else if ((keycode === 54 || keycode === 50) && indexOfSelected < lastRow) {
       // "6,2" for next
       self.selectRowByIndex(indexOfSelected + 1);
     }
@@ -359,11 +365,19 @@ RepoOverViewHelper.prototype.updateActionLinks = function(selectedRow) {
   // now we have a repo selected, determine which action buttons are relevant
   var selectedRepoKey       = selectedRow.dataset.key;
   var selectedRepoIsOffline = selectedRow.dataset.offline === "X";
+  var reKey                 = /key=(#|\d+)$/;
+  var newKey                = "key=" + selectedRepoKey;
 
   var actionLinks = document.querySelectorAll("a.action_link");
   actionLinks.forEach(function(link) {
     // adjust repo key in urls
-    link.href = link.href.replace(/\?key=(#|\d+)/, "?key=" + selectedRepoKey);
+    link.href = link.href.replace(reKey, newKey);
+
+    // SAP GUI for HTML rewrites links and saves the original in hrefsav
+    // see /sap/public/icmandir/its/lsgui/js/htmlviewer.js
+    if (link.hrefsav) {
+      link.hrefsav = link.hrefsav.replace(reKey, newKey);
+    }
 
     // toggle button visibility
     if (link.classList.contains("action_offline_repo")) {
@@ -502,7 +516,7 @@ function StageHelper(params) {
     remove : "R",
     ignore : "I",
     reset  : "?",
-    isValid: function(status) { return "ARI?".indexOf(status) == -1 }
+    isValid: function(status) { return "ARI?".indexOf(status) === -1 }
   };
 
   this.TEMPLATES = {
@@ -617,7 +631,7 @@ StageHelper.prototype.onTableClick = function(event) {
     } else return;
   } else return;
 
-  if (["TD", "TH"].indexOf(td.tagName) == -1 || td.className != "cmd") return;
+  if (["TD", "TH"].indexOf(td.tagName) === -1 || td.className !== "cmd") return;
 
   var status    = this.STATUS[target.innerText]; // Convert anchor text to status
   var targetRow = td.parentNode;
@@ -745,7 +759,7 @@ StageHelper.prototype.updateRowStatus = function(row, status) {
 StageHelper.prototype.updateRowCommand = function(row, status) {
   var cell = row.cells[this.colIndex["cmd"]];
   if (status === this.STATUS.reset) {
-    cell.innerHTML = (row.className == "local")
+    cell.innerHTML = (row.className === "local")
       ? this.TEMPLATES.cmdLocal
       :     this.TEMPLATES.cmdRemote;
   } else {
@@ -1123,8 +1137,8 @@ DiffColumnSelection.prototype.mousedownEventListener = function(e) {
 
   var td = e.target;
 
-  while (td != undefined && td.tagName != "TD" && td.tagName != "TBODY") td = td.parentElement;
-  if (td == undefined) return;
+  while (td !== null && td !== undefined && td.tagName !== "TD" && td.tagName !== "TBODY") td = td.parentElement;
+  if (td === null || td === undefined) return;
   var table = td.parentElement.parentElement;
 
   var patchColumnCount = 0;
@@ -1135,7 +1149,7 @@ DiffColumnSelection.prototype.mousedownEventListener = function(e) {
   if (td.classList.contains("diff_left")) {
     table.classList.remove("diff_select_right");
     table.classList.add("diff_select_left");
-    if (window.getSelection() && this.selectedColumnIdx != splitCodeLeftColumnIdx + patchColumnCount) {
+    if (window.getSelection() && this.selectedColumnIdx !== splitCodeLeftColumnIdx + patchColumnCount) {
       // De-select to avoid effect of dragging selection in case the right column was first selected
       if (document.body.createTextRange) { // All IE but Edge
         // document.getSelection().removeAllRanges() may trigger error
@@ -1154,7 +1168,7 @@ DiffColumnSelection.prototype.mousedownEventListener = function(e) {
   } else if (td.classList.contains("diff_right")) {
     table.classList.remove("diff_select_left");
     table.classList.add("diff_select_right");
-    if (window.getSelection() && this.selectedColumnIdx != splitCodeRightColumnIdx + patchColumnCount) {
+    if (window.getSelection() && this.selectedColumnIdx !== splitCodeRightColumnIdx + patchColumnCount) {
       if (document.body.createTextRange) { // All IE but Edge
         // document.getSelection().removeAllRanges() may trigger error
         // so use this code which is equivalent but does not fail
@@ -1184,11 +1198,11 @@ DiffColumnSelection.prototype.copyEventListener = function(e) {
   // (https://stackoverflow.com/questions/6619805/select-text-in-a-column-of-an-html-table)
   var td = e.target;
 
-  while (td != undefined && td.tagName != "TD" && td.tagName != "TBODY") td = td.parentElement;
-  if (td != undefined) {
+  while (td !== null && td !== undefined && td.tagName !== "TD" && td.tagName !== "TBODY") td = td.parentElement;
+  if (td !== null && td !== undefined) {
     // Use window.clipboardData instead of e.clipboardData
     // (https://stackoverflow.com/questions/23470958/ie-10-copy-paste-issue)
-    var clipboardData = (e.clipboardData == undefined ? window.clipboardData : e.clipboardData);
+    var clipboardData = (e.clipboardData === undefined ? window.clipboardData : e.clipboardData);
     var text          = this.getSelectedText();
     clipboardData.setData("text", text);
     e.preventDefault();
@@ -1949,7 +1963,7 @@ Patch.prototype.getAllCheckboxesForId = function(sId, sIdPrefix, sNewIdPrefix) {
 };
 
 Patch.prototype.getToggledCheckbox = function(oEvent) {
-  var elCheckbox = null;
+  var elCheckbox;
 
   // We have either an input element or any element with input child
   // in the latter case we have to toggle the checkbox manually
@@ -2356,7 +2370,7 @@ function enumerateUiActions() {
     });
 
   items = items.map(function(item) {
-    var action = "";
+    var action;
     var anchor = item[0];
     if (anchor.href.includes("#")) {
       action = function() {
@@ -2506,7 +2520,7 @@ function toggleSticky() {
 
 // Toggle display of warning message when using Edge (based on Chromium) browser control
 // Todo: Remove once https://github.com/abapGit/abapGit/issues/4841 is fixed
-function toggleBrowserControlWarning(){
+function toggleBrowserControlWarning() {
   if (!navigator.userAgent.includes("Edg")){
     var elBrowserControlWarning = document.getElementById("browser-control-warning");
     if (elBrowserControlWarning) {
@@ -2519,4 +2533,57 @@ function toggleBrowserControlWarning(){
 function displayBrowserControlFooter() {
   var out = document.getElementById("browser-control-footer");
   out.innerHTML = " - " + ( navigator.userAgent.includes("Edg") ? "Edge" : "IE"  );
+}
+
+/**********************************************************
+ * Popup Control
+ **********************************************************/
+
+// Prevents keyboard navigation to elements outside the modal popup
+// eslint-disable-next-line no-unused-vars
+function trapFocus() {
+  const modal = document.getElementById("modal");
+  if (!modal) return;
+
+  var focusableSelectors = "button, [href], input, select, textarea, [tabindex]";
+  var focusableElements = modal.querySelectorAll(focusableSelectors);
+
+  // Filter out elements with tabindex="-1"
+  var focusable = [];
+  for (var i = 0; i < focusableElements.length; i++) {
+    if (focusableElements[i].getAttribute("tabindex") !== "-1") {
+      focusable.push(focusableElements[i]);
+    }
+  }
+
+  if (focusable.length === 0) return;
+
+  var firstElement = focusable[0];
+  var lastElement = focusable[focusable.length - 1];
+
+  // Focus the main button when modal opens, if it exists
+  if (document.querySelector(".main-button")) {
+    setInitialFocus("main-button");
+  }
+
+  modal.onkeydown = function(e) {
+    var keyCode = e.keyCode || e.which;
+
+    // Tab key
+    if (keyCode === 9) {
+      if (e.shiftKey) {
+        // Shift + Tab
+        if (document.activeElement === firstElement) {
+          e.preventDefault();
+          lastElement.focus();
+        }
+      } else {
+        // Tab only
+        if (document.activeElement === lastElement) {
+          e.preventDefault();
+          firstElement.focus();
+        }
+      }
+    }
+  };
 }

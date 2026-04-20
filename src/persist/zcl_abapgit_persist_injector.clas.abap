@@ -1,7 +1,6 @@
 CLASS zcl_abapgit_persist_injector DEFINITION
   PUBLIC
-  CREATE PRIVATE
-  FOR TESTING .
+  CREATE PRIVATE.
 
   PUBLIC SECTION.
 
@@ -12,6 +11,10 @@ CLASS zcl_abapgit_persist_injector DEFINITION
     CLASS-METHODS set_repo_cs
       IMPORTING
         !ii_repo_cs TYPE REF TO zif_abapgit_persist_repo_cs .
+
+    CLASS-METHODS set_repo_data
+      IMPORTING
+        !ii_repo_data TYPE REF TO zif_abapgit_persist_repo_data.
 
     CLASS-METHODS set_settings
       IMPORTING
@@ -71,6 +74,13 @@ CLASS zcl_abapgit_persist_injector IMPLEMENTATION.
   METHOD set_repo_cs.
 
     zcl_abapgit_persist_factory=>gi_repo_cs = ii_repo_cs.
+
+  ENDMETHOD.
+
+
+  METHOD set_repo_data.
+
+    zcl_abapgit_persist_factory=>gi_repo_data = ii_repo_data.
 
   ENDMETHOD.
 

@@ -103,6 +103,7 @@ CLASS lcl_object_decision_list DEFINITION FINAL.
         it_scope      TYPE lvc_t_fidx
       RETURNING
         VALUE(rv_yes) TYPE abap_bool.
+    METHODS refresh.
 
 ENDCLASS.
 
@@ -115,6 +116,17 @@ CLASS lcl_object_decision_list IMPLEMENTATION.
     IF mv_cancel = abap_true.
       RAISE EXCEPTION TYPE zcx_abapgit_cancel.
     ENDIF.
+
+  ENDMETHOD.
+
+  METHOD refresh.
+
+    DATA ls_stable TYPE lvc_s_stbl.
+
+    ls_stable-row = 'X'.
+    ls_stable-col = 'X'.
+
+    mo_alv->refresh( ls_stable ).
 
   ENDMETHOD.
 
@@ -398,19 +410,19 @@ CLASS lcl_object_decision_list IMPLEMENTATION.
 
       WHEN 'SALL' OR 'SEL_ALL'.
         mark_visible( abap_true ).
-        mo_alv->refresh( ).
+        refresh( ).
 
       WHEN 'DSEL' OR 'SEL_DEL'.
         mark_visible( abap_false ).
-        mo_alv->refresh( ).
+        refresh( ).
 
       WHEN 'SEL_KEY'.
         mark_selected( ).
-        mo_alv->refresh( ).
+        refresh( ).
 
       WHEN 'SEL_CAT'.
         mark_category( ask_user_for_obj_category( ) ).
-        mo_alv->refresh( ).
+        refresh( ).
 
       WHEN OTHERS.
         mv_cancel = abap_true.
@@ -663,7 +675,7 @@ CLASS lcl_object_decision_list IMPLEMENTATION.
 
     ENDIF.
 
-    mo_alv->refresh( ).
+    refresh( ).
 
   ENDMETHOD.
 
