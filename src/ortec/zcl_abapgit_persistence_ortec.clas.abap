@@ -90,11 +90,15 @@ CLASS zcl_abapgit_persistence_ortec DEFINITION
 ENDCLASS.
 
 
-CLASS zcl_abapgit_persistence_ortec IMPLEMENTATION.
+
+CLASS ZCL_ABAPGIT_PERSISTENCE_ORTEC IMPLEMENTATION.
+
+
   METHOD constructor.
     mv_user = iv_user.
     read( ).
   ENDMETHOD.
+
 
   METHOD from_xml.
 
@@ -113,6 +117,7 @@ CLASS zcl_abapgit_persistence_ortec IMPLEMENTATION.
 
   ENDMETHOD.
 
+
   METHOD get_instance.
 
     IF iv_user = sy-uname ##USER_OK.
@@ -125,6 +130,7 @@ CLASS zcl_abapgit_persistence_ortec IMPLEMENTATION.
     ENDIF.
 
   ENDMETHOD.
+
 
   METHOD read.
 
@@ -143,6 +149,7 @@ CLASS zcl_abapgit_persistence_ortec IMPLEMENTATION.
 
   ENDMETHOD.
 
+
   METHOD read_repo_config.
     DATA lv_url TYPE string.
 
@@ -151,11 +158,13 @@ CLASS zcl_abapgit_persistence_ortec IMPLEMENTATION.
     READ TABLE ms_user-repo_config INTO rs_repo_config WITH KEY url = lv_url.
   ENDMETHOD.
 
+
   METHOD to_xml.
     CALL TRANSFORMATION id
          SOURCE user = is_user
          RESULT XML rv_xml.
   ENDMETHOD.
+
 
   METHOD update.
 
@@ -172,6 +181,7 @@ CLASS zcl_abapgit_persistence_ortec IMPLEMENTATION.
     COMMIT WORK AND WAIT.
 
   ENDMETHOD.
+
 
   METHOD update_repo_config.
 
@@ -193,12 +203,14 @@ CLASS zcl_abapgit_persistence_ortec IMPLEMENTATION.
 
   ENDMETHOD.
 
+
   METHOD get_repo_user_branch.
 
     rv_branch = read_repo_config(
                     iv_url )-user_branch.
 
   ENDMETHOD.
+
 
   METHOD set_repo_user_branch.
 
@@ -213,11 +225,13 @@ CLASS zcl_abapgit_persistence_ortec IMPLEMENTATION.
 
   ENDMETHOD.
 
+
   METHOD get_settings.
 
     rs_user_settings = ms_user-settings.
 
   ENDMETHOD.
+
 
   METHOD set_settings.
 
@@ -226,6 +240,7 @@ CLASS zcl_abapgit_persistence_ortec IMPLEMENTATION.
 
   ENDMETHOD.
 
+
   METHOD get_db_explanation.
 
     cv_descr = 'ORTEC User Settings'.
@@ -233,8 +248,7 @@ CLASS zcl_abapgit_persistence_ortec IMPLEMENTATION.
     ASSIGN COMPONENT 'VALUE' OF STRUCTURE cs_explanation
            TO FIELD-SYMBOL(<value>).
     IF sy-subrc = 0.
-      <value> = zcl_abapgit_user_record=>get_instance(
-                    is_data-value )->get_name( ).
+       <value> = zcl_abapgit_env_factory=>get_user_record( )->get_name( is_data-value ).
     ENDIF.
 
   ENDMETHOD.

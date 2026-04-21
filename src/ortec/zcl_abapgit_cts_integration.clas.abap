@@ -1,46 +1,46 @@
-class ZCL_ABAPGIT_CTS_INTEGRATION definition
-  public
-  final
-  create private .
+CLASS zcl_abapgit_cts_integration DEFINITION
+  PUBLIC
+  FINAL
+  CREATE PRIVATE .
 
-public section.
-  type-pools TRSEL .
+  PUBLIC SECTION.
+    TYPE-POOLS trsel .
 
-  class-methods PROPOSE_DEFAULT_TEXTS
-    importing
-      !IT_STAGED type ZIF_ABAPGIT_DEFINITIONS=>TY_STAGE_TT
-      !IO_FORM type ref to ZCL_ABAPGIT_STRING_MAP
-      !IO_REPO type ref to ZCL_ABAPGIT_REPO_ONLINE
-    changing
-      !CS_COMMIT type ZIF_ABAPGIT_SERVICES_GIT=>TY_COMMIT_FIELDS .
-  class-methods SUPPLEMENT_TASK_INFO
-    importing
-      !IT_STAGED type ZIF_ABAPGIT_DEFINITIONS=>TY_STAGE_TT
-    changing
-      !CS_COMMIT type ZIF_ABAPGIT_SERVICES_GIT=>TY_COMMIT_FIELDS .
-  class-methods GET_OPEN_USER_REQUESTS
-    importing
-      !I_TASKS type ABAP_BOOL default ABAP_TRUE
-      !I_REQUESTS type ABAP_BOOL default ABAP_TRUE
-      !I_PARENT_REQUEST type ABAP_BOOL default ABAP_TRUE
-      !I_RECENT_DAYS type I default 2
-      !I_EVAL_OS4 type ABAP_BOOL default ABAP_TRUE
-    returning
-      value(RT_REQUESTS) type TRSEL_TRT_TRKORR .
-  class-methods POPUP_SELECT_OWN_TR_REQUESTS
-    importing
-      !IS_SELECTION type TRWBO_SELECTION
-      !IV_TITLE type TRWBO_TITLE
-      !IV_USERNAME_PATTERN type ANY default SY-UNAME
-    returning
-      value(RT_R_TRKORR) type ZIF_ABAPGIT_DEFINITIONS=>TY_TRRNGTRKOR_TT
-    raising
-      ZCX_ABAPGIT_EXCEPTION .
-  class-methods ON_EVENT
-    importing
-      !ACTION type CSEQUENCE
-      !GETDATA type CSEQUENCE
-      !POSTDATA type ZIF_ABAPGIT_HTML_VIEWER=>TY_POST_DATA .
+    CLASS-METHODS propose_default_texts
+      IMPORTING
+        !it_staged TYPE zif_abapgit_definitions=>ty_stage_tt
+        !io_form   TYPE REF TO zcl_abapgit_string_map
+        !io_repo   TYPE REF TO zif_abapgit_repo_online
+      CHANGING
+        !cs_commit TYPE zif_abapgit_services_git=>ty_commit_fields .
+    CLASS-METHODS supplement_task_info
+      IMPORTING
+        !it_staged TYPE zif_abapgit_definitions=>ty_stage_tt
+      CHANGING
+        !cs_commit TYPE zif_abapgit_services_git=>ty_commit_fields .
+    CLASS-METHODS get_open_user_requests
+      IMPORTING
+        !i_tasks           TYPE abap_bool DEFAULT abap_true
+        !i_requests        TYPE abap_bool DEFAULT abap_true
+        !i_parent_request  TYPE abap_bool DEFAULT abap_true
+        !i_recent_days     TYPE i DEFAULT 2
+        !i_eval_os4        TYPE abap_bool DEFAULT abap_true
+      RETURNING
+        VALUE(rt_requests) TYPE trsel_trt_trkorr .
+    CLASS-METHODS popup_select_own_tr_requests
+      IMPORTING
+        !is_selection        TYPE trwbo_selection
+        !iv_title            TYPE trwbo_title
+        !iv_username_pattern TYPE any DEFAULT sy-uname
+      RETURNING
+        VALUE(rt_r_trkorr)   TYPE zif_abapgit_definitions=>ty_trrngtrkor_tt
+      RAISING
+        zcx_abapgit_exception .
+    CLASS-METHODS on_event
+      IMPORTING
+        !action   TYPE csequence
+        !getdata  TYPE csequence
+        !postdata TYPE zif_abapgit_html_viewer=>ty_post_data .
   PROTECTED SECTION.
     TYPES: BEGIN OF ty_trkorr,
              trkorr TYPE trkorr,
@@ -319,7 +319,7 @@ CLASS ZCL_ABAPGIT_CTS_INTEGRATION IMPLEMENTATION.
     LOOP AT lt_docu INTO DATA(ls_docu).
 
       DATA(docu) = get_task_docu(
-                       ls_docu-task ).
+        ls_docu-task ).
 
       r_body = COND #( WHEN r_body IS INITIAL AND docu IS INITIAL
                          THEN space
@@ -352,7 +352,7 @@ CLASS ZCL_ABAPGIT_CTS_INTEGRATION IMPLEMENTATION.
     IF sy-subrc = 0.
       " We found the latest open task of this user: Best Match
       r_comment = get_lock_text(
-                      ls_docu ).
+        ls_docu ).
       RETURN.
     ENDIF.
 
@@ -362,7 +362,7 @@ CLASS ZCL_ABAPGIT_CTS_INTEGRATION IMPLEMENTATION.
     IF sy-subrc = 0.
       " We found the latest released task of this user: Propose
       r_comment = get_lock_text(
-                      ls_docu ).
+        ls_docu ).
       RETURN.
     ENDIF.
 
@@ -385,6 +385,8 @@ CLASS ZCL_ABAPGIT_CTS_INTEGRATION IMPLEMENTATION.
 
     DATA fixdate TYPE d VALUE '00010101'.
 
+    DATA(lo_repo) = CAST zcl_abapgit_repo_online( io_repo ).
+
     DATA(lt_staged) = it_staged.
     LOOP AT lt_staged ASSIGNING FIELD-SYMBOL(<ls_staged>).
       TRY.
@@ -392,7 +394,7 @@ CLASS ZCL_ABAPGIT_CTS_INTEGRATION IMPLEMENTATION.
             EXPORTING
               iv_filename = <ls_staged>-file-filename
               iv_path     = <ls_staged>-file-path
-              io_dot      = io_repo->get_dot_abapgit( )
+              io_dot      = lo_repo->get_dot_abapgit( )
             IMPORTING
               es_item     = DATA(ls_item) ).
         CATCH zcx_abapgit_exception. " abapGit - Exception
@@ -496,7 +498,7 @@ CLASS ZCL_ABAPGIT_CTS_INTEGRATION IMPLEMENTATION.
     " Supplement Transport Request/Task Lock Links in Comment
 
     DATA(lt_lock_info) = get_lock_info(
-                             it_staged = it_staged ).
+      it_staged = it_staged ).
 
     IF lt_lock_info IS INITIAL.
       RETURN.
@@ -577,8 +579,8 @@ CLASS ZCL_ABAPGIT_CTS_INTEGRATION IMPLEMENTATION.
     IF i_recent_days > 0.
       TRY.
           earliest = cl_abap_tstmp=>subtractsecs_to_short(
-                         tstmp = now
-                         secs  = ( i_recent_days * c_secsofday ) ).
+            tstmp = now
+            secs  = ( i_recent_days * c_secsofday ) ).
         CATCH cx_root.
           earliest = now.
       ENDTRY.
@@ -648,8 +650,8 @@ CLASS ZCL_ABAPGIT_CTS_INTEGRATION IMPLEMENTATION.
     DATA ls_r_trkorr TYPE LINE OF zif_abapgit_definitions=>ty_trrngtrkor_tt.
 
     DATA(ls_position) = zcl_abapgit_popups=>center(
-                            iv_width  = 120
-                            iv_height = 10 ).
+      iv_width  = 120
+      iv_height = 10 ).
 
     DATA(ls_selection) = is_selection.
     DATA(ls_ranges) = VALUE trsel_ts_ranges( trkorr = zcl_abapgit_cts_integration=>get_open_user_requests(
@@ -720,9 +722,9 @@ CLASS ZCL_ABAPGIT_CTS_INTEGRATION IMPLEMENTATION.
   METHOD on_event.
 
     DATA(o_gui_event) = zcl_abapgit_gui_event=>new(
-                            iv_action   = action
-                            iv_getdata  = getdata
-                            it_postdata = postdata ).
+      iv_action   = action
+      iv_getdata  = getdata
+      it_postdata = postdata ).
 
     IF o_gui_event->zif_abapgit_gui_event~mv_action = zif_abapgit_definitions=>c_action-go_stage_transport.
       TRY.

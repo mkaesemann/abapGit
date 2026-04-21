@@ -542,7 +542,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_COMMIT IMPLEMENTATION.
         EXPORTING
           it_staged = mo_stage->get_all( )
           io_form   = mo_form_data
-          io_repo   = mo_repo
+          io_repo   = mi_repo_online
         CHANGING
           cs_commit = ms_commit ).
 

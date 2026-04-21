@@ -1,26 +1,33 @@
-class ZCL_ABAPGIT_PULL_BUFFER definition
-  public
-  final
-  create protected .
+CLASS zcl_abapgit_pull_buffer DEFINITION
+  PUBLIC
+  FINAL
+  CREATE PROTECTED .
 
-public section.
+  PUBLIC SECTION.
 
-  class-methods PULL_BUFFERED_BRANCH
-    importing
-      !IV_URL type STRING
-      !IV_BRANCH_NAME type STRING
-    returning
-      value(RS_RESULT) type ZCL_ABAPGIT_GIT_PORCELAIN=>TY_PULL_RESULT
-    RAISING   zcx_abapgit_exception.
-  class-methods STORE_BRANCH_IN_BUFFER
-    importing
-      !IV_URL type STRING
-      !IV_BRANCH_NAME type STRING
-      !IV_COMMIT type ZIF_ABAPGIT_GIT_DEFINITIONS=>TY_SHA1
-      !IT_OBJECTS type ANY TABLE
-      !IT_FILES type ANY TABLE .
-protected section.
-private section.
+    "This needs to mirror ZCL_ABAPGIT_GIT_TRANSPORT=>C_SERVICE
+    CONSTANTS:
+      BEGIN OF c_service,
+        receive TYPE string VALUE 'receive',                                    "#EC NOTEXT
+        upload  TYPE string VALUE 'upload',                                     "#EC NOTEXT
+      END OF c_service .
+
+    CLASS-METHODS pull_buffered_branch
+      IMPORTING
+                !iv_url          TYPE string
+                !iv_branch_name  TYPE string
+      RETURNING
+                VALUE(rs_result) TYPE zcl_abapgit_git_porcelain=>ty_pull_result
+      RAISING   zcx_abapgit_exception.
+    CLASS-METHODS store_branch_in_buffer
+      IMPORTING
+        !iv_url         TYPE string
+        !iv_branch_name TYPE string
+        !iv_commit      TYPE zif_abapgit_git_definitions=>ty_sha1
+        !it_objects     TYPE ANY TABLE
+        !it_files       TYPE ANY TABLE .
+  PROTECTED SECTION.
+  PRIVATE SECTION.
 ENDCLASS.
 
 
@@ -30,10 +37,10 @@ CLASS ZCL_ABAPGIT_PULL_BUFFER IMPLEMENTATION.
 
   METHOD pull_buffered_branch.
 
-    zcl_abapgit_git_transport=>find_branch(
+    zcl_abapgit_git_transport=>find_branch_ortec(
       EXPORTING
         iv_url         = iv_url
-        iv_service     = zcl_abapgit_git_transport=>c_service-upload
+        iv_service     = c_service-upload
         iv_branch_name = iv_branch_name
       IMPORTING
         ev_branch      = DATA(remote_sha) ).

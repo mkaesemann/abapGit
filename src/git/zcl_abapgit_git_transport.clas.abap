@@ -7,12 +7,6 @@ CLASS zcl_abapgit_git_transport DEFINITION
     INTERFACES:
       zif_abapgit_git_transport.
 
-    CONSTANTS:
-      BEGIN OF c_service,
-        receive TYPE string VALUE 'receive',                  "#EC NOTEXT
-        upload  TYPE string VALUE 'upload',                   "#EC NOTEXT
-      END OF c_service .
-
 * remote to local
     CLASS-METHODS upload_pack_by_branch
       IMPORTING
@@ -53,7 +47,8 @@ CLASS zcl_abapgit_git_transport DEFINITION
       RAISING
         zcx_abapgit_exception .
 
-    CLASS-METHODS find_branch
+* ortec extension (mirror find_branch in public interface)
+    CLASS-METHODS find_branch_ortec
       IMPORTING
         !iv_url         TYPE string
         !iv_service     TYPE string
@@ -61,12 +56,18 @@ CLASS zcl_abapgit_git_transport DEFINITION
       EXPORTING
         !eo_client      TYPE REF TO zcl_abapgit_http_client
         !ev_branch      TYPE zif_abapgit_git_definitions=>ty_sha1
-        !eo_branch_list TYPE REF TO zcl_abapgit_git_branch_list
+        !ei_branch_list TYPE REF TO zif_abapgit_git_branch_list
       RAISING
         zcx_abapgit_exception .
 
   PROTECTED SECTION.
   PRIVATE SECTION.
+
+    CONSTANTS:
+      BEGIN OF c_service,
+        receive TYPE string VALUE 'receive',                                    "#EC NOTEXT
+        upload  TYPE string VALUE 'upload',                                     "#EC NOTEXT
+      END OF c_service .
 
     CLASS-METHODS get_request_uri
       IMPORTING
@@ -91,7 +92,17 @@ CLASS zcl_abapgit_git_transport DEFINITION
         !ei_branch_list TYPE REF TO zif_abapgit_git_branch_list
       RAISING
         zcx_abapgit_exception .
-
+    CLASS-METHODS find_branch
+      IMPORTING
+        !iv_url         TYPE string
+        !iv_service     TYPE string
+        !iv_branch_name TYPE string
+      EXPORTING
+        !eo_client      TYPE REF TO zcl_abapgit_http_client
+        !ev_branch      TYPE zif_abapgit_git_definitions=>ty_sha1
+        !ei_branch_list TYPE REF TO zif_abapgit_git_branch_list
+      RAISING
+        zcx_abapgit_exception .
     CLASS-METHODS parse
       EXPORTING
         !ev_pack TYPE xstring
@@ -113,7 +124,7 @@ ENDCLASS.
 
 
 
-CLASS zcl_abapgit_git_transport IMPLEMENTATION.
+CLASS ZCL_ABAPGIT_GIT_TRANSPORT IMPLEMENTATION.
 
 
   METHOD branches.
@@ -147,8 +158,8 @@ CLASS zcl_abapgit_git_transport IMPLEMENTATION.
     REPLACE '<service>' IN lv_expected_content_type WITH iv_service.
 
     eo_client->check_smart_response(
-        iv_expected_content_type = lv_expected_content_type
-        iv_content_regex         = lc_content_regex ).
+      iv_expected_content_type = lv_expected_content_type
+      iv_content_regex         = lc_content_regex ).
 
     lv_data = eo_client->get_cdata( ).
 
@@ -242,11 +253,11 @@ CLASS zcl_abapgit_git_transport IMPLEMENTATION.
 
     branch_list(
       EXPORTING
-        iv_url          = iv_url
-        iv_service      = iv_service
+        iv_url         = iv_url
+        iv_service     = iv_service
       IMPORTING
-        eo_client       = eo_client
-        ei_branch_list  = ei_branch_list ).
+        eo_client      = eo_client
+        ei_branch_list = ei_branch_list ).
 
     IF ev_branch IS SUPPLIED.
       ev_branch = ei_branch_list->find_by_name( iv_branch_name )-sha1.
@@ -477,6 +488,22 @@ CLASS zcl_abapgit_git_transport IMPLEMENTATION.
         ei_branch_list = ri_branch_list ).
 
     lo_client->close( ).
+
+  ENDMETHOD.
+
+
+  METHOD find_branch_ortec.
+
+    "Forward Call
+    find_branch(
+      EXPORTING
+        iv_url         = iv_url
+        iv_service     = iv_service
+        iv_branch_name = iv_branch_name
+      IMPORTING
+        eo_client      = eo_client
+        ev_branch      = ev_branch
+        ei_branch_list = ei_branch_list ).
 
   ENDMETHOD.
 ENDCLASS.
