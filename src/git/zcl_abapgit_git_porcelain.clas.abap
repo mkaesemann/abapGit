@@ -191,7 +191,7 @@ ENDCLASS.
 
 
 
-CLASS zcl_abapgit_git_porcelain IMPLEMENTATION.
+CLASS ZCL_ABAPGIT_GIT_PORCELAIN IMPLEMENTATION.
 
 
   METHOD build_trees.
@@ -617,10 +617,11 @@ CLASS zcl_abapgit_git_porcelain IMPLEMENTATION.
           READ TABLE lt_expanded ASSIGNING <ls_exp> WITH TABLE KEY path_name COMPONENTS
             name = <ls_stage>-file-filename
             path = <ls_stage>-file-path.
-          ASSERT sy-subrc = 0.
+          IF sy-subrc = 0.
+            CLEAR <ls_exp>-sha1.     " Mark as deleted
+          ENDIF.
 
-          CLEAR <ls_exp>-sha1.           " Mark as deleted
-          CLEAR <ls_updated>-sha1.       " Mark as deleted
+          CLEAR <ls_updated>-sha1.   " Deleted from checksum/update result either way
 
         WHEN OTHERS.
           zcx_abapgit_exception=>raise( 'stage method not supported, todo' ).

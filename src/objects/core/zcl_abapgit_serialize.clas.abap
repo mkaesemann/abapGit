@@ -140,7 +140,7 @@ ENDCLASS.
 
 
 
-CLASS zcl_abapgit_serialize IMPLEMENTATION.
+CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
 
 
   METHOD add_apack.
@@ -334,16 +334,17 @@ CLASS zcl_abapgit_serialize IMPLEMENTATION.
     ASSERT rv_processes >= 1.
 
     " Avoid going over the maximum available user sessions
-    IF sy-batch IS INITIAL.
-      lv_available_sessions = zcl_abapgit_factory=>get_environment( )->get_available_user_sessions( ).
-
-      IF lv_available_sessions = 0.
-        " No available session -> disable parallel processing
-        rv_processes = 1.
-      ELSEIF rv_processes > lv_available_sessions.
-        rv_processes = lv_available_sessions.
-      ENDIF.
-    ENDIF.
+** The maximum number of user sessions is 16 and we want more processes to run
+**    IF sy-batch IS INITIAL.
+**      lv_available_sessions = zcl_abapgit_factory=>get_environment( )->get_available_user_sessions( ).
+**
+**      IF lv_available_sessions = 0.
+**        " No available session -> disable parallel processing
+**        rv_processes = 1.
+**      ELSEIF rv_processes > lv_available_sessions.
+**        rv_processes = lv_available_sessions.
+**      ENDIF.
+**    ENDIF.
 
     ASSERT rv_processes >= 1.
 

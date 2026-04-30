@@ -84,17 +84,24 @@ CLASS zcl_abapgit_blob_buffer IMPLEMENTATION.
     ls_key-type  = mc_type_branch_key.
     ls_key-keyid = get_db_key(
                        is_branch ).
-    EXPORT commit = i_commit
-           TO DATA BUFFER ls_key-data
-           COMPRESSION ON.
 
     ls_data-type  = mc_type_branch_data.
     ls_data-keyid = get_db_key(
                         is_branch ).
-    EXPORT object = it_objects
-           files  = it_files
-           TO DATA BUFFER ls_data-data
-           COMPRESSION ON.
+
+    TRY.
+        EXPORT commit = i_commit
+               TO DATA BUFFER ls_key-data
+               COMPRESSION ON.
+
+        EXPORT object = it_objects
+               files  = it_files
+               TO DATA BUFFER ls_data-data
+               COMPRESSION ON.
+      CATCH cx_sy_compression_error.
+        " Buffering is an optimization; skip cache write if payload is too large
+        RETURN.
+    ENDTRY.
 
     MODIFY zabapgit_blob FROM ls_key.
     MODIFY zabapgit_blob FROM ls_data.
