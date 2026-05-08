@@ -218,21 +218,29 @@ CLASS zcl_abapgit_git_pack IMPLEMENTATION.
           zcx_abapgit_exception=>raise( |Decompression failed| ).
         ENDIF.
 
-        cl_abap_gzip=>compress_binary(
-          EXPORTING
-            raw_in         = lv_decompressed
-          IMPORTING
-            gzip_out       = lv_compressed
-            gzip_out_len   = lv_compressed_len ).
-
-        IF xstrlen( lv_data ) <= lv_compressed_len OR
-          lv_compressed(lv_compressed_len) <> lv_data(lv_compressed_len).
-          "Lets try with zlib before error in out for good
-          "This fixes issues with TFS 2017 and visualstudio.com Git repos
-          zlib_decompress( CHANGING cv_data = lv_data
-                                    cv_decompressed = lv_decompressed ).
-        ELSE.
+        IF zcl_abapgit_git_pack_ortec=>allow_simplified_decompress( ).
+          lv_compressed_len = xstrlen( lv_data ).
           lv_data = lv_data+lv_compressed_len.
+
+        ELSE.
+
+            cl_abap_gzip=>compress_binary(
+              EXPORTING
+                raw_in         = lv_decompressed
+              IMPORTING
+                gzip_out       = lv_compressed
+                gzip_out_len   = lv_compressed_len ).
+
+            IF xstrlen( lv_data ) <= lv_compressed_len OR
+              lv_compressed(lv_compressed_len) <> lv_data(lv_compressed_len).
+              "Lets try with zlib before error in out for good
+              "This fixes issues with TFS 2017 and visualstudio.com Git repos
+              zlib_decompress( CHANGING cv_data = lv_data
+                                        cv_decompressed = lv_decompressed ).
+            ELSE.
+              lv_data = lv_data+lv_compressed_len.
+            ENDIF.
+
         ENDIF.
 
       ELSEIF lv_zlib = c_zlib_hmm.
