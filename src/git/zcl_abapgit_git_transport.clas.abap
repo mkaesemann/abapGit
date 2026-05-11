@@ -420,6 +420,22 @@ CLASS ZCL_ABAPGIT_GIT_TRANSPORT IMPLEMENTATION.
 
     rt_objects = zcl_abapgit_git_pack=>decode( lv_pack ).
 
+* ORTEC: persist decoded objects incrementally for crash resume
+    TRY.
+        IF zcl_abapgit_ortec_git_switch=>is_active( ) = abap_true
+          AND zcl_abapgit_ortec_git_switch=>is_decode_active( ) = abap_true.
+          DATA lv_ortec_rk TYPE zcl_abapgit_ortec_pack_dec=>ty_repo_key.
+          lv_ortec_rk = zcl_abapgit_ortec_repo_state=>get_repo_key_for_url( iv_url ).
+          IF lv_ortec_rk IS NOT INITIAL.
+            zcl_abapgit_ortec_pack_dec=>decode_and_persist(
+              iv_data     = lv_pack
+              iv_repo_key = lv_ortec_rk ).
+          ENDIF.
+        ENDIF.
+      CATCH zcx_abapgit_exception.
+* ORTEC: persistence error is non-critical
+    ENDTRY.
+
   ENDMETHOD.
 
 

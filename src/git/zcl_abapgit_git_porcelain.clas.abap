@@ -520,6 +520,19 @@ CLASS ZCL_ABAPGIT_GIT_PORCELAIN IMPLEMENTATION.
 
   METHOD pull_by_branch.
 
+* ORTEC: try fast-path reconstitution from persistent object store
+    TRY.
+        rs_result = zcl_abapgit_ortec_fastpath=>pull_by_branch(
+          iv_url          = iv_url
+          iv_branch_name  = iv_branch_name
+          iv_deepen_level = iv_deepen_level ).
+        IF rs_result IS NOT INITIAL.
+          RETURN.
+        ENDIF.
+      CATCH zcx_abapgit_ortec_git.
+* ORTEC: fast-path failed, continue with standard behavior
+    ENDTRY.
+
     rs_result = zcl_abapgit_pull_buffer=>pull_buffered_branch(
       iv_url         = iv_url
       iv_branch_name = iv_branch_name ).
@@ -795,7 +808,22 @@ CLASS ZCL_ABAPGIT_GIT_PORCELAIN IMPLEMENTATION.
             type = zif_abapgit_git_definitions=>c_type-blob
             sha1 = <ls_node>-sha1.
         IF sy-subrc <> 0.
-          zcx_abapgit_exception=>raise( 'Walk, blob not found' ).
+* ORTEC: try persistent object store for blob
+          TRY.
+              DATA ls_ortec_blob TYPE zif_abapgit_definitions=>ty_object.
+              ls_ortec_blob = zcl_abapgit_ortec_obj_store=>get_object(
+                iv_repo_key = ''
+                iv_sha1     = <ls_node>-sha1 ).
+              CLEAR ls_file.
+              ls_file-path     = iv_path.
+              ls_file-filename = <ls_node>-name.
+              ls_file-data     = ls_ortec_blob-data.
+              ls_file-sha1     = ls_ortec_blob-sha1.
+              APPEND ls_file TO ct_files.
+              CONTINUE.
+            CATCH zcx_abapgit_ortec_git.
+              zcx_abapgit_exception=>raise( 'Walk, blob not found' ).
+          ENDTRY.
         ENDIF.
 
         CLEAR ls_file.

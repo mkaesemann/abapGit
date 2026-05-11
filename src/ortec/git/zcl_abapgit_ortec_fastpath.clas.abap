@@ -69,18 +69,94 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
 
   METHOD pull_by_branch.
 
+    DATA lv_repo_key   TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key.
+    DATA ls_state      TYPE zcl_abapgit_ortec_repo_state=>ty_state.
+    DATA lv_remote_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA li_branches   TYPE REF TO zif_abapgit_git_branch_list.
+    DATA ls_file       TYPE zif_abapgit_git_definitions=>ty_file.
+    DATA lt_expanded   TYPE zif_abapgit_git_definitions=>ty_expanded_tt.
+
+    FIELD-SYMBOLS <ls_exp>  LIKE LINE OF lt_expanded.
+    FIELD-SYMBOLS <ls_blob> LIKE LINE OF rs_result-objects.
+
     " Check master switch
     IF zcl_abapgit_ortec_git_switch=>is_active( ) = abap_false.
-      RETURN. " INITIAL - caller continues with standard
+      RETURN.
     ENDIF.
 
-    " For the first implementation phase, fast-path pull
-    " delegates to standard abapGit (returns INITIAL).
-    " The value comes from want/have negotiation (Hook 2)
-    " and post-pull persistence (Hook 6) being active.
-    " A full fast-path reconstitution from the object store
-    " will be implemented in a later phase.
-    RETURN.
+    " Resolve repo key
+    lv_repo_key = zcl_abapgit_ortec_repo_state=>get_repo_key_for_url( iv_url ).
+    IF lv_repo_key IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    " Phase 1: Check for incomplete decode session and attempt resume
+    IF zcl_abapgit_ortec_git_switch=>is_decode_active( ) = abap_true.
+      TRY.
+          DATA lt_resumed TYPE zif_abapgit_definitions=>ty_objects_tt.
+          lt_resumed = zcl_abapgit_ortec_pack_dec=>resume_decode( lv_repo_key ).
+          " Resume completed (or nothing to resume) - objects are now in store
+        CATCH zcx_abapgit_exception.
+          " Resume failed - continue normally
+      ENDTRY.
+    ENDIF.
+
+    " Phase 2: Check if remote tip matches stored state
+    ls_state = zcl_abapgit_ortec_repo_state=>get_state(
+      iv_repo_key    = lv_repo_key
+      iv_branch_name = iv_branch_name ).
+    IF ls_state-fetch_commit IS INITIAL.
+      RETURN. " No previous fetch -> standard path
+    ENDIF.
+
+    " Discover remote branch tip
+    TRY.
+        li_branches = zcl_abapgit_git_transport=>branches( iv_url ).
+        lv_remote_sha = li_branches->find_by_name( iv_branch_name )-sha1.
+      CATCH zcx_abapgit_exception.
+        RETURN.
+    ENDTRY.
+
+    " Remote changed -> standard path (negotiation reduces pack size)
+    IF lv_remote_sha <> ls_state-fetch_commit.
+      RETURN.
+    ENDIF.
+
+    " Phase 3: Reconstitute from stored objects
+    rs_result-objects = zcl_abapgit_ortec_obj_store=>get_all_objects( lv_repo_key ).
+    rs_result-commit  = ls_state-fetch_commit.
+
+    IF rs_result-objects IS INITIAL.
+      CLEAR rs_result.
+      RETURN.
+    ENDIF.
+
+    " Phase 4: Walk tree to produce files
+    TRY.
+        lt_expanded = zcl_abapgit_git_porcelain=>full_tree(
+          it_objects = rs_result-objects
+          iv_parent  = rs_result-commit ).
+
+        LOOP AT lt_expanded ASSIGNING <ls_exp>
+          WHERE chmod = zif_abapgit_git_definitions=>c_chmod-file.
+          READ TABLE rs_result-objects ASSIGNING <ls_blob>
+            WITH KEY type COMPONENTS
+              type = zif_abapgit_git_definitions=>c_type-blob
+              sha1 = <ls_exp>-sha1.
+          IF sy-subrc = 0.
+            CLEAR ls_file.
+            ls_file-path     = <ls_exp>-path.
+            ls_file-filename = <ls_exp>-name.
+            ls_file-data     = <ls_blob>-data.
+            ls_file-sha1     = <ls_exp>-sha1.
+            APPEND ls_file TO rs_result-files.
+          ENDIF.
+        ENDLOOP.
+
+      CATCH zcx_abapgit_exception.
+        CLEAR rs_result.
+        RETURN.
+    ENDTRY.
 
   ENDMETHOD.
 
@@ -102,14 +178,40 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
     ENDIF.
 
     IF lv_repo_key IS INITIAL.
-      " No repo key resolved - cannot persist without identity
       RETURN.
     ENDIF.
 
-    " Store all objects
-    zcl_abapgit_ortec_obj_store=>store_objects(
-      iv_repo_key = lv_repo_key
-      it_objects  = it_objects ).
+    " If decode persistence is active, objects were already persisted
+    " during decode_and_persist in upload_pack (Hook 3).
+    " We only need to store objects that aren't already in the store.
+    DATA ls_dummy TYPE zaog_obj_store.
+    DATA lt_new   TYPE STANDARD TABLE OF zaog_obj_store.
+    DATA ls_row   TYPE zaog_obj_store.
+    DATA lv_ts    TYPE timestampl.
+    FIELD-SYMBOLS <ls_obj> LIKE LINE OF it_objects.
+
+    GET TIME STAMP FIELD lv_ts.
+
+    LOOP AT it_objects ASSIGNING <ls_obj>.
+      SELECT SINGLE obj_sha1 FROM zaog_obj_store INTO ls_dummy-obj_sha1
+        WHERE repo_key = lv_repo_key AND obj_sha1 = <ls_obj>-sha1.
+      IF sy-subrc <> 0.
+        " Not yet stored — add it
+        CLEAR ls_row.
+        ls_row-repo_key   = lv_repo_key.
+        ls_row-obj_sha1   = <ls_obj>-sha1.
+        ls_row-obj_type   = <ls_obj>-type.
+        ls_row-obj_data   = <ls_obj>-data.
+        ls_row-obj_size   = xstrlen( <ls_obj>-data ).
+        ls_row-created_at = lv_ts.
+        ls_row-status     = 'R'.
+        APPEND ls_row TO lt_new.
+      ENDIF.
+    ENDLOOP.
+
+    IF lt_new IS NOT INITIAL.
+      MODIFY zaog_obj_store FROM TABLE lt_new.
+    ENDIF.
 
     " Update repo state
     zcl_abapgit_ortec_repo_state=>update_after_fetch(
@@ -118,7 +220,6 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
       iv_url         = iv_url
       iv_commit      = iv_commit ).
 
-    " Commit to make persistent
     COMMIT WORK.
 
   ENDMETHOD.
