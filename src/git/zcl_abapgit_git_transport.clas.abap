@@ -390,6 +390,21 @@ CLASS ZCL_ABAPGIT_GIT_TRANSPORT IMPLEMENTATION.
         cl_abap_char_utilities=>newline ).
     ENDIF.
 
+* ORTEC: insert have lines for known commits (want/have negotiation)
+    TRY.
+        DATA lt_ortec_haves TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+        lt_ortec_haves = zcl_abapgit_ortec_fetch_neg=>get_have_commits(
+          iv_url         = iv_url
+          it_want_hashes = it_hashes ).
+        FIELD-SYMBOLS <lv_ortec_have> LIKE LINE OF lt_ortec_haves.
+        LOOP AT lt_ortec_haves ASSIGNING <lv_ortec_have>.
+          lv_buffer = lv_buffer && zcl_abapgit_git_utils=>pkt_string(
+            |have { <lv_ortec_have> }{ cl_abap_char_utilities=>newline }| ).
+        ENDLOOP.
+      CATCH zcx_abapgit_ortec_git.
+* ORTEC: fallback - continue without have lines
+    ENDTRY.
+
     lv_buffer = lv_buffer
              && '0000'
              && '0009done' && cl_abap_char_utilities=>newline.

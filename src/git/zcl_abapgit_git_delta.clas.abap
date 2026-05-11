@@ -87,8 +87,20 @@ CLASS zcl_abapgit_git_delta IMPLEMENTATION.
     READ TABLE ct_objects ASSIGNING <ls_object>
       WITH KEY sha COMPONENTS sha1 = is_object-sha1.
     IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( |Base not found, { is_object-sha1 }| ).
-    ELSEIF <ls_object>-type = zif_abapgit_git_definitions=>c_type-ref_d.
+* ORTEC: try persistent object store for delta base
+      TRY.
+          DATA ls_ortec_base TYPE zif_abapgit_definitions=>ty_object.
+          ls_ortec_base = zcl_abapgit_ortec_obj_store=>get_object(
+            iv_repo_key = ''    " repo_key is resolved internally
+            iv_sha1     = is_object-sha1 ).
+          APPEND ls_ortec_base TO ct_objects.
+          READ TABLE ct_objects ASSIGNING <ls_object>
+            WITH KEY sha COMPONENTS sha1 = is_object-sha1.
+        CATCH zcx_abapgit_ortec_git.
+          zcx_abapgit_exception=>raise( |Base not found, { is_object-sha1 }| ).
+      ENDTRY.
+    ENDIF.
+    IF <ls_object>-type = zif_abapgit_git_definitions=>c_type-ref_d.
 * sanity check
       zcx_abapgit_exception=>raise( |Delta, base eq delta| ).
     ENDIF.

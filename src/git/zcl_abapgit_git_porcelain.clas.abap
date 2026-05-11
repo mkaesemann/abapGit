@@ -546,6 +546,17 @@ CLASS ZCL_ABAPGIT_GIT_PORCELAIN IMPLEMENTATION.
         it_files       = rs_result-files
       ).
 
+* ORTEC: persist objects in persistent store after successful pull
+      TRY.
+          zcl_abapgit_ortec_fastpath=>persist_pull_result(
+            iv_url         = iv_url
+            iv_branch_name = iv_branch_name
+            iv_commit      = rs_result-commit
+            it_objects     = rs_result-objects ).
+        CATCH zcx_abapgit_ortec_git.
+* ORTEC: persistence failure is non-critical, continue normally
+      ENDTRY.
+
     ENDIF.
 
   ENDMETHOD.
