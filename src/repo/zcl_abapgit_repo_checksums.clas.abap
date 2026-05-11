@@ -27,6 +27,8 @@ CLASS zcl_abapgit_repo_checksums DEFINITION
 
     DATA mv_repo_key TYPE zif_abapgit_persistence=>ty_repo-key.
     DATA mi_repo TYPE REF TO zif_abapgit_repo.
+    DATA mt_checksums_cached TYPE zif_abapgit_persistence=>ty_local_checksum_tt.
+    DATA mv_cache_valid TYPE abap_bool VALUE abap_false.
 
     METHODS remove_non_code_related_files
       CHANGING
@@ -209,6 +211,11 @@ CLASS zcl_abapgit_repo_checksums IMPLEMENTATION.
 
     DATA lv_cs_blob TYPE string.
 
+    IF mv_cache_valid = abap_true.
+      rt_checksums = mt_checksums_cached.
+      RETURN.
+    ENDIF.
+
     TRY.
         lv_cs_blob = zcl_abapgit_persist_factory=>get_repo_cs( )->read( mv_repo_key ).
       CATCH zcx_abapgit_exception zcx_abapgit_not_found.
@@ -218,7 +225,9 @@ CLASS zcl_abapgit_repo_checksums IMPLEMENTATION.
 
     IF lv_cs_blob IS NOT INITIAL.
       extract_meta( CHANGING cv_cs_blob = lv_cs_blob ).
-      rt_checksums = lcl_checksum_serializer=>deserialize( lv_cs_blob ).
+      mt_checksums_cached = lcl_checksum_serializer=>deserialize( lv_cs_blob ).
+      mv_cache_valid = abap_true.
+      rt_checksums = mt_checksums_cached.
     ENDIF.
 
   ENDMETHOD.
@@ -249,6 +258,9 @@ CLASS zcl_abapgit_repo_checksums IMPLEMENTATION.
     lt_checksums = build_checksums_from_files( lt_local ).
     save_checksums( lt_checksums ).
 
+    mv_cache_valid = abap_false.
+    CLEAR mt_checksums_cached.
+
   ENDMETHOD.
 
 
@@ -269,6 +281,9 @@ CLASS zcl_abapgit_repo_checksums IMPLEMENTATION.
       it_updated_files     = it_updated_files ).
 
     save_checksums( lt_checksums ).
+
+    mv_cache_valid = abap_false.
+    CLEAR mt_checksums_cached.
 
   ENDMETHOD.
 ENDCLASS.

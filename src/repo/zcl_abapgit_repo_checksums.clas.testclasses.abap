@@ -191,6 +191,9 @@ CLASS ltcl_test_checksums DEFINITION FINAL
     METHODS rebuild_simple FOR TESTING RAISING zcx_abapgit_exception.
     METHODS rebuild_w_dot_abapgit FOR TESTING RAISING zcx_abapgit_exception.
     METHODS update_simple FOR TESTING RAISING zcx_abapgit_exception.
+    METHODS cache_hit_on_repeated_get FOR TESTING RAISING zcx_abapgit_exception.
+    METHODS cache_invalidation_on_update FOR TESTING RAISING zcx_abapgit_exception.
+    METHODS cache_invalidation_on_rebuild FOR TESTING RAISING zcx_abapgit_exception.
 
 ENDCLASS.
 
@@ -494,10 +497,17 @@ CLASS ltcl_test_checksums IMPLEMENTATION.
 
   METHOD zif_abapgit_persist_repo_cs~read.
 
-    IF iv_key = '1'.
+    IF iv_key <> '1'.
+      RETURN.
+    ENDIF.
+
+    IF mv_last_update_cs_blob IS NOT INITIAL.
+      rv_cs_blob = mv_last_update_cs_blob.
+      RETURN.
+    ENDIF.
+
       ltcl_test_checksum_serializer=>get_mock( IMPORTING ev_str = rv_cs_blob ).
       rv_cs_blob = |#repo_name#test\n{ rv_cs_blob }|.
-    ENDIF.
 
   ENDMETHOD.
 
@@ -547,6 +557,97 @@ CLASS ltcl_test_checksums IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals(
       act = mv_last_update_cs_blob
       exp = lv_cs_exp ).
+
+  ENDMETHOD.
+
+  METHOD cache_hit_on_repeated_get.
+
+    DATA lo_mock TYPE REF TO lcl_repo_mock.
+    DATA li_cut TYPE REF TO zif_abapgit_repo_checksums.
+    DATA lt_result1 TYPE zif_abapgit_persistence=>ty_local_checksum_tt.
+    DATA lt_result2 TYPE zif_abapgit_persistence=>ty_local_checksum_tt.
+
+    CREATE OBJECT lo_mock.
+    zcl_abapgit_repo_srv=>inject_instance( lo_mock ).
+    zcl_abapgit_persist_injector=>set_repo_cs( me ).
+
+    ltcl_test_checksum_serializer=>get_mock( IMPORTING et_checksums = lt_result1 ).
+
+    CREATE OBJECT li_cut TYPE zcl_abapgit_repo_checksums
+      EXPORTING
+        ii_repo = lo_mock.
+
+    lt_result1 = li_cut->get( ).
+    lt_result2 = li_cut->get( ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lt_result2
+      exp = lt_result1 ).
+
+  ENDMETHOD.
+
+  METHOD cache_invalidation_on_update.
+
+    DATA lo_mock TYPE REF TO lcl_repo_mock.
+    DATA li_cut TYPE REF TO zif_abapgit_repo_checksums.
+    DATA lt_result_before TYPE zif_abapgit_persistence=>ty_local_checksum_tt.
+    DATA lt_result_after TYPE zif_abapgit_persistence=>ty_local_checksum_tt.
+    DATA lo_f_builder TYPE REF TO lcl_file_sig_builder.
+
+    CREATE OBJECT lo_mock.
+    zcl_abapgit_repo_srv=>inject_instance( lo_mock ).
+    zcl_abapgit_persist_injector=>set_repo_cs( me ).
+
+    CREATE OBJECT li_cut TYPE zcl_abapgit_repo_checksums
+      EXPORTING
+        ii_repo = lo_mock.
+
+    lt_result_before = li_cut->get( ).
+
+    CREATE OBJECT lo_f_builder.
+    lo_f_builder->add( '/ zhello.prog.abap hash_updated' ).
+    lo_f_builder->add( '/ zhello.prog.xml  hash_updated_2' ).
+
+    li_cut->update( lo_f_builder->mt_tab ).
+
+    lt_result_after = li_cut->get( ).
+
+    cl_abap_unit_assert=>assert_true(
+      act = xsdbool( lt_result_after <> lt_result_before ) ).
+
+  ENDMETHOD.
+
+  METHOD cache_invalidation_on_rebuild.
+
+    DATA lo_mock TYPE REF TO lcl_repo_mock.
+    DATA li_cut TYPE REF TO zif_abapgit_repo_checksums.
+    DATA lt_result TYPE zif_abapgit_persistence=>ty_local_checksum_tt.
+    DATA lo_l_builder TYPE REF TO lcl_local_file_builder.
+    DATA lo_r_builder TYPE REF TO lcl_remote_file_builder.
+
+    CREATE OBJECT lo_mock.
+    zcl_abapgit_repo_srv=>inject_instance( lo_mock ).
+    zcl_abapgit_persist_injector=>set_repo_cs( me ).
+
+    CREATE OBJECT lo_l_builder.
+    lo_l_builder->add( '$PKG PROG ZHELLO / zhello.prog.abap hash1' ).
+    lo_l_builder->add( '$PKG DEVC $PKG   / $pkg.devc.xml    hash3' ).
+    lo_mock->mt_local_files = lo_l_builder->mt_tab.
+
+    CREATE OBJECT lo_r_builder.
+    lo_r_builder->add( '/ zhello.prog.abap hash1' ).
+    lo_r_builder->add( '/ $pkg.devc.xml    hash3' ).
+    lo_mock->mt_remote_files = lo_r_builder->mt_tab.
+
+    CREATE OBJECT li_cut TYPE zcl_abapgit_repo_checksums
+      EXPORTING
+        ii_repo = lo_mock.
+
+    li_cut->rebuild( ).
+
+    lt_result = li_cut->get( ).
+
+    cl_abap_unit_assert=>assert_not_initial( lt_result ).
 
   ENDMETHOD.
 
