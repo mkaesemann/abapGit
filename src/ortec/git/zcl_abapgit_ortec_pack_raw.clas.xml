@@ -3,9 +3,9 @@
  <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
   <asx:values>
    <VSEOCLASS>
-    <CLSNAME>ZCL_ABAPGIT_ORTEC_OBJ_STORE</CLSNAME>
+    <CLSNAME>ZCL_ABAPGIT_ORTEC_PACK_RAW</CLSNAME>
     <LANGU>E</LANGU>
-    <DESCRIPT>ORTEC Git Object Store - Performance Optimized</DESCRIPT>
+    <DESCRIPT>ORTEC Raw Pack Storage Access</DESCRIPT>
     <STATE>1</STATE>
     <CLSCCINCL>X</CLSCCINCL>
     <FIXPT>X</FIXPT>

@@ -418,23 +418,25 @@ CLASS ZCL_ABAPGIT_GIT_TRANSPORT IMPLEMENTATION.
       zcx_abapgit_exception=>raise( 'Response could not be parsed - empty pack returned.' ).
     ENDIF.
 
-    rt_objects = zcl_abapgit_git_pack=>decode( lv_pack ).
-
-* ORTEC: persist decoded objects incrementally for crash resume
+    "ORTEC: persist decoded objects + pack metadata for crash resume and delta tracking
     TRY.
-        IF zcl_abapgit_ortec_git_switch=>is_active( ) = abap_true
-          AND zcl_abapgit_ortec_git_switch=>is_decode_active( ) = abap_true.
+        IF zcl_abapgit_ortec_git_switch=>is_active_for_repo( iv_url ) = abap_true.
           DATA lv_ortec_rk TYPE zcl_abapgit_ortec_pack_dec=>ty_repo_key.
-          lv_ortec_rk = zcl_abapgit_ortec_repo_state=>get_repo_key_for_url( iv_url ).
+          lv_ortec_rk = zcl_abapgit_ortec_repo_state=>get_or_create_repo_key_for_url( iv_url ).
           IF lv_ortec_rk IS NOT INITIAL.
-            zcl_abapgit_ortec_pack_dec=>decode_and_persist(
+            rt_objects = zcl_abapgit_ortec_pack_dec=>decode_and_persist(
               iv_data     = lv_pack
               iv_repo_key = lv_ortec_rk ).
+            IF rt_objects IS NOT INITIAL.
+              RETURN.
+            ENDIF.
           ENDIF.
         ENDIF.
       CATCH zcx_abapgit_exception.
-* ORTEC: persistence error is non-critical
+        "ORTEC: persistence error is non-critical
     ENDTRY.
+
+    rt_objects = zcl_abapgit_git_pack=>decode( lv_pack ).
 
   ENDMETHOD.
 

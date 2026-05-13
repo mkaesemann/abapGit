@@ -1,222 +1,903 @@
 "! <p class="shorttext synchronized">ORTEC Incremental Pack Decoder with Persistence</p>
-"! Wraps standard abapGit pack decode but persists each object
-"! to ZAOG_OBJ_STORE during decode. Stores raw packfile and tracks
-"! progress in ZAOG_FETCH_SESS for crash resume.
+"! Decodes a Git packfile object by object, persisting intermediate state so that
+"! a timeout or crash can be resumed without re-downloading from the remote.
+"! <ul>
+"!   <li>Raw packfile → <em>ZAOG_RAW_PACK</em> (survives HTTP timeout)</li>
+"!   <li>Per-object progress → <em>ZAOG_PACK_IDX</em> + <em>ZAOG_FETCH_SESS</em></li>
+"!   <li>Fully-resolved objects → <em>ZAOG_OBJ_STORE</em></li>
+"! </ul>
 CLASS zcl_abapgit_ortec_pack_dec DEFINITION
-  PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC FINAL
+  CREATE PUBLIC.
+
   PUBLIC SECTION.
     TYPES ty_repo_key   TYPE c LENGTH 12.
     TYPES ty_session_id TYPE c LENGTH 32.
     TYPES ty_pack_id    TYPE c LENGTH 32.
+
+    "! Decode a raw packfile and persist all results for crash-safe resume.
+    "! <p>If <em>it_objects</em> is supplied the decode step is skipped and the
+    "! pre-decoded objects are persisted directly (the raw packfile is still
+    "! stored so a future resume can re-decode if needed).</p>
+    "! @parameter iv_data |
+    "! Raw packfile bytes received from the Git server
+    "! @parameter iv_repo_key |
+    "! Repository key (12-char identifier)
+    "! @parameter iv_commit_interval |
+    "! Commit every N objects during the persist phase (default 50)
+    "! @parameter it_objects |
+    "! Pre-decoded objects; if supplied the pack decode is skipped
+    "! @parameter rt_objects |
+    "! Fully decoded and delta-resolved objects
+    "! @raising zcx_abapgit_exception |
+    "! On decode or persistence error
     CLASS-METHODS decode_and_persist
       IMPORTING iv_data            TYPE xstring
                 iv_repo_key        TYPE ty_repo_key
                 iv_commit_interval TYPE i DEFAULT 50
+                it_objects         TYPE zif_abapgit_definitions=>ty_objects_tt OPTIONAL
       RETURNING VALUE(rt_objects)  TYPE zif_abapgit_definitions=>ty_objects_tt
       RAISING   zcx_abapgit_exception.
+
+    "! Resume an incomplete decode session started by a previous call to
+    "! {@link METH:decode_and_persist} that was aborted (timeout/short dump).
+    "! Loads the raw packfile from ZAOG_RAW_PACK, re-decodes it in memory,
+    "! and persists only the objects that were not yet stored.
+    "! Returns an empty table if no active session exists.
+    "! @parameter iv_repo_key |
+    "! Repository key
+    "! @parameter rt_objects |
+    "! Decoded objects (all, including already-stored ones)
+    "! @raising zcx_abapgit_exception |
+    "! On decode error
     CLASS-METHODS resume_decode
       IMPORTING iv_repo_key       TYPE ty_repo_key
       RETURNING VALUE(rt_objects) TYPE zif_abapgit_definitions=>ty_objects_tt
       RAISING   zcx_abapgit_exception.
+
   PROTECTED SECTION.
+    CONSTANTS c_pack_start TYPE x LENGTH 4 VALUE '5041434B' ##NO_TEXT.
+    CONSTANTS c_zlib       TYPE x LENGTH 2 VALUE '789C' ##NO_TEXT.
+    CONSTANTS c_zlib_hmm   TYPE x LENGTH 2 VALUE '7801' ##NO_TEXT.
+    CONSTANTS c_version    TYPE x LENGTH 4 VALUE '00000002' ##NO_TEXT.
+
+    "! Decode a raw packfile into an in-memory object table.
+    "! All delta references are resolved before returning.
+    "! @parameter iv_data |
+    "! Raw packfile bytes (full PACK stream including header and trailing SHA1)
+    "! @parameter iv_repo_key |
+    "! Repository key used for persistence and resume checkpoints
+    "! @parameter iv_pack_id |
+    "! Pack identifier linked to ZAOG_RAW_PACK / ZAOG_PACK_IDX / ZAOG_OBJ_STORE
+    "! @parameter iv_session_id |
+    "! Active fetch session that stores curr_offset and decoded-object progress
+    "! @parameter iv_commit_interval |
+    "! Commit frequency for checkpoint writes during the decode loop
+    "! @parameter rt_objects |
+    "! Decoded and delta-resolved objects
+    "! @raising zcx_abapgit_exception |
+    "! On format or checksum error
+    CLASS-METHODS resumable_decode
+      IMPORTING iv_data            TYPE xstring
+                iv_repo_key        TYPE ty_repo_key
+                iv_pack_id         TYPE ty_pack_id
+                iv_session_id      TYPE ty_session_id
+                iv_commit_interval TYPE i DEFAULT 50
+      RETURNING VALUE(rt_objects)  TYPE zif_abapgit_definitions=>ty_objects_tt
+      RAISING   zcx_abapgit_exception.
+
   PRIVATE SECTION.
+    CLASS-DATA gv_resume_branch TYPE string.
+    CLASS-DATA gv_resume_deepen TYPE i.
+
+    CLASS-METHODS acquire_repo_lock
+      IMPORTING iv_repo_key       TYPE ty_repo_key
+                iv_max_attempts   TYPE i DEFAULT 7
+                iv_base_wait_ms   TYPE i DEFAULT 50
+      RETURNING VALUE(rv_lock_id) TYPE ty_session_id
+      RAISING   zcx_abapgit_exception.
+
+    CLASS-METHODS release_repo_lock
+      IMPORTING iv_lock_id TYPE ty_session_id.
+
+    CLASS-METHODS get_type
+      IMPORTING iv_x           TYPE x
+      RETURNING VALUE(rv_type) TYPE zif_abapgit_git_definitions=>ty_type
+      RAISING   zcx_abapgit_exception.
+
+    CLASS-METHODS get_length
+      EXPORTING ev_length TYPE i
+      CHANGING  cv_data   TYPE xstring.
+
+    CLASS-METHODS zlib_decompress
+      CHANGING cv_data           TYPE xstring
+               cv_decompressed   TYPE xstring
+               cv_compressed_len TYPE i OPTIONAL
+      RAISING  zcx_abapgit_exception.
+
     CLASS-METHODS create_session
-      IMPORTING iv_repo_key TYPE ty_repo_key iv_obj_total TYPE i iv_pack_id TYPE ty_pack_id
+      IMPORTING iv_repo_key          TYPE ty_repo_key
+                iv_obj_total         TYPE i
+                iv_pack_id           TYPE ty_pack_id
       RETURNING VALUE(rv_session_id) TYPE ty_session_id.
+
     CLASS-METHODS update_session_progress
-      IMPORTING iv_session_id TYPE ty_session_id iv_obj_done TYPE i.
+      IMPORTING iv_session_id TYPE ty_session_id
+                iv_obj_done   TYPE i
+                iv_curr_offset TYPE i OPTIONAL.
+
     CLASS-METHODS fail_session
-      IMPORTING iv_session_id TYPE ty_session_id iv_obj_done TYPE i.
+      IMPORTING iv_session_id TYPE ty_session_id
+                iv_obj_done   TYPE i.
+
     CLASS-METHODS complete_session
       IMPORTING iv_session_id TYPE ty_session_id.
+
     CLASS-METHODS find_active_session
-      IMPORTING iv_repo_key TYPE ty_repo_key
-      EXPORTING ev_session_id TYPE ty_session_id ev_pack_id TYPE ty_pack_id ev_obj_done TYPE i.
+      IMPORTING iv_repo_key   TYPE ty_repo_key
+      EXPORTING ev_session_id TYPE ty_session_id
+                ev_pack_id    TYPE ty_pack_id
+                ev_obj_done   TYPE i
+                ev_branch_name TYPE string
+                ev_deepen_level TYPE i.
+
     CLASS-METHODS persist_objects
-      IMPORTING iv_repo_key TYPE ty_repo_key iv_pack_id TYPE ty_pack_id
-                iv_session_id TYPE ty_session_id iv_skip_count TYPE i DEFAULT 0
+      IMPORTING iv_repo_key        TYPE ty_repo_key
+                iv_pack_id         TYPE ty_pack_id
+                iv_session_id      TYPE ty_session_id
+                iv_skip_count      TYPE i DEFAULT 0
                 iv_commit_interval TYPE i DEFAULT 50
-                it_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
+                it_objects         TYPE zif_abapgit_definitions=>ty_objects_tt.
+
     CLASS-METHODS complete_pack
-      IMPORTING iv_repo_key TYPE ty_repo_key iv_pack_id TYPE ty_pack_id iv_count TYPE i.
+      IMPORTING iv_repo_key TYPE ty_repo_key
+                iv_pack_id  TYPE ty_pack_id
+                iv_count    TYPE i.
 ENDCLASS.
+
 
 CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
 
   METHOD decode_and_persist.
-    DATA lv_pack_id TYPE ty_pack_id.
+    DATA lv_pack_id    TYPE ty_pack_id.
+    DATA lv_ts         TYPE timestampl.
+    DATA ls_meta       TYPE zaog_pack_meta.
     DATA lv_session_id TYPE ty_session_id.
-    DATA lv_ts TYPE timestampl.
-    DATA ls_raw TYPE zaog_raw_pack.
-    DATA ls_meta TYPE zaog_pack_meta.
+    DATA lv_obj_count  TYPE i.
+    DATA lv_obj_count_x TYPE xstring.
+    DATA lv_repo_lock_id TYPE zcl_abapgit_ortec_pack_raw=>ty_session_id.
 
-    rt_objects = zcl_abapgit_git_pack=>decode( iv_data ).
+    lv_repo_lock_id = acquire_repo_lock( iv_repo_key = iv_repo_key ).
 
+    TRY.
+
+    " Generate a unique pack ID for this packfile
     TRY.
         lv_pack_id = cl_system_uuid=>create_uuid_c32_static( ).
       CATCH cx_uuid_error.
-        RETURN.
+        zcx_abapgit_exception=>raise( 'Failed to generate pack UUID' ).
     ENDTRY.
 
-    ls_raw-repo_key = iv_repo_key.
-    ls_raw-pack_id  = lv_pack_id.
-    ls_raw-raw_data = iv_data.
-    MODIFY zaog_raw_pack FROM ls_raw.
+    " STEP 1: Store raw packfile immediately.
+    "   This is the most critical step: if a timeout occurs during decode or
+    "   persist, resume_decode can reload this instead of repeating the HTTP call.
+    zcl_abapgit_ortec_pack_raw=>store(
+      iv_repo_key = iv_repo_key
+      iv_pack_id  = lv_pack_id
+      iv_raw_data = iv_data ).
+    COMMIT WORK.
 
+    " STEP 2: Decode the packfile (or use pre-decoded objects if supplied).
+    "   For raw pack decode we resume from persisted checkpoints in the same
+    "   session (curr_offset + already decoded temp objects).
+    IF it_objects IS SUPPLIED AND it_objects IS NOT INITIAL.
+      rt_objects = it_objects.
+    ENDIF.
+
+    IF rt_objects IS INITIAL AND xstrlen( iv_data ) >= 12.
+      lv_obj_count_x = iv_data+8(4).
+      lv_obj_count = zcl_abapgit_convert=>xstring_to_int( lv_obj_count_x ).
+    ELSE.
+      lv_obj_count = lines( rt_objects ).
+    ENDIF.
+
+    " STEP 3: Register pack metadata (status P = in progress)
     GET TIME STAMP FIELD lv_ts.
     ls_meta-repo_key    = iv_repo_key.
     ls_meta-pack_id     = lv_pack_id.
-    ls_meta-obj_count   = lines( rt_objects ).
+    ls_meta-obj_count   = lv_obj_count.
     ls_meta-obj_decoded = 0.
     ls_meta-total_size  = xstrlen( iv_data ).
     ls_meta-status      = 'P'.
     ls_meta-raw_stored  = abap_true.
     ls_meta-received_at = lv_ts.
-    INSERT zaog_pack_meta FROM ls_meta.
+    MODIFY zaog_pack_meta FROM ls_meta.
 
-    lv_session_id = create_session( iv_repo_key = iv_repo_key iv_obj_total = lines( rt_objects ) iv_pack_id = lv_pack_id ).
+    " STEP 4: Create fetch session for crash-resume tracking
+    lv_session_id = create_session(
+                        iv_repo_key  = iv_repo_key
+                        iv_obj_total = lv_obj_count
+                        iv_pack_id   = lv_pack_id ).
     COMMIT WORK.
 
-    persist_objects( iv_repo_key = iv_repo_key iv_pack_id = lv_pack_id iv_session_id = lv_session_id
-                     iv_skip_count = 0 iv_commit_interval = iv_commit_interval it_objects = rt_objects ).
+    IF rt_objects IS INITIAL.
+      rt_objects = resumable_decode(
+        iv_data            = iv_data
+        iv_repo_key        = iv_repo_key
+        iv_pack_id         = lv_pack_id
+        iv_session_id      = lv_session_id
+        iv_commit_interval = iv_commit_interval ).
+      lv_obj_count = lines( rt_objects ).
+    ENDIF.
 
-    complete_pack( iv_repo_key = iv_repo_key iv_pack_id = lv_pack_id iv_count = lines( rt_objects ) ).
+    " STEP 5: Persist decoded objects.
+    "   - raw decode path: persisted incrementally inside resumable_decode
+    "   - pre-decoded path: persist here
+    IF it_objects IS SUPPLIED AND it_objects IS NOT INITIAL.
+      persist_objects(
+          iv_repo_key        = iv_repo_key
+          iv_pack_id         = lv_pack_id
+          iv_session_id      = lv_session_id
+          iv_skip_count      = 0
+          iv_commit_interval = iv_commit_interval
+          it_objects         = rt_objects ).
+    ENDIF.
+
+    " STEP 6: Mark pack and session as complete
+    complete_pack(
+        iv_repo_key = iv_repo_key
+        iv_pack_id  = lv_pack_id
+        iv_count    = lv_obj_count ).
     complete_session( lv_session_id ).
-    DELETE FROM zaog_raw_pack WHERE repo_key = iv_repo_key AND pack_id = lv_pack_id.
+
+    " STEP 7: Raw packfile no longer needed — all objects are in OBJ_STORE
+    zcl_abapgit_ortec_pack_raw=>delete(
+      iv_repo_key = iv_repo_key
+      iv_pack_id  = lv_pack_id ).
     COMMIT WORK.
+
+      release_repo_lock( lv_repo_lock_id ).
+    CATCH zcx_abapgit_exception INTO DATA(lx_decode).
+      release_repo_lock( lv_repo_lock_id ).
+      RAISE EXCEPTION lx_decode.
+    ENDTRY.
+
   ENDMETHOD.
+
 
   METHOD resume_decode.
     DATA lv_session_id TYPE ty_session_id.
-    DATA lv_pack_id TYPE ty_pack_id.
-    DATA lv_obj_done TYPE i.
-    DATA lv_raw TYPE xstring.
+    DATA lv_pack_id    TYPE ty_pack_id.
+    DATA lv_obj_done   TYPE i.
+    DATA lv_raw        TYPE xstring.
 
-    find_active_session( EXPORTING iv_repo_key = iv_repo_key
-      IMPORTING ev_session_id = lv_session_id ev_pack_id = lv_pack_id ev_obj_done = lv_obj_done ).
-    IF lv_session_id IS INITIAL.
-      RETURN.
-    ENDIF.
+    DATA lv_repo_lock_id TYPE zcl_abapgit_ortec_pack_raw=>ty_session_id.
 
-    SELECT SINGLE raw_data FROM zaog_raw_pack INTO lv_raw
-      WHERE repo_key = iv_repo_key AND pack_id = lv_pack_id.
-    IF sy-subrc <> 0 OR lv_raw IS INITIAL.
-      fail_session( iv_session_id = lv_session_id iv_obj_done = lv_obj_done ).
-      COMMIT WORK.
-      RETURN.
-    ENDIF.
+    lv_repo_lock_id = acquire_repo_lock( iv_repo_key = iv_repo_key ).
 
-    rt_objects = zcl_abapgit_git_pack=>decode( lv_raw ).
+    TRY.
+        " Find an active (incomplete) session for this repository
+        find_active_session(
+          EXPORTING
+            iv_repo_key   = iv_repo_key
+          IMPORTING
+            ev_session_id = lv_session_id
+            ev_pack_id    = lv_pack_id
+            ev_obj_done   = lv_obj_done
+            ev_branch_name = DATA(lv_branch_name)
+            ev_deepen_level = DATA(lv_deepen_level) ).
+        IF lv_session_id IS INITIAL.
+          release_repo_lock( lv_repo_lock_id ).
+          RETURN. " Nothing to resume
+        ENDIF.
 
-    persist_objects( iv_repo_key = iv_repo_key iv_pack_id = lv_pack_id iv_session_id = lv_session_id
-                     iv_skip_count = lv_obj_done it_objects = rt_objects ).
+    " Load the stored raw packfile (avoids re-downloading from remote)
+        TRY.
+            lv_raw = zcl_abapgit_ortec_pack_raw=>load(
+              iv_repo_key = iv_repo_key
+              iv_pack_id  = lv_pack_id ).
+          CATCH zcx_abapgit_exception.
+          " Raw pack was lost — cannot resume; mark session failed
+          fail_session( iv_session_id = lv_session_id iv_obj_done = lv_obj_done ).
+          COMMIT WORK.
+          release_repo_lock( lv_repo_lock_id ).
+          RETURN.
+        ENDTRY.
 
-    complete_pack( iv_repo_key = iv_repo_key iv_pack_id = lv_pack_id iv_count = lines( rt_objects ) ).
-    complete_session( lv_session_id ).
-    DELETE FROM zaog_raw_pack WHERE repo_key = iv_repo_key AND pack_id = lv_pack_id.
-    COMMIT WORK.
+    " Continue decoding from last checkpoint (curr_offset + temp decoded rows)
+    rt_objects = resumable_decode(
+      iv_data       = lv_raw
+      iv_repo_key   = iv_repo_key
+      iv_pack_id    = lv_pack_id
+      iv_session_id = lv_session_id ).
+
+        complete_pack(
+            iv_repo_key = iv_repo_key
+            iv_pack_id  = lv_pack_id
+            iv_count    = lines( rt_objects ) ).
+        complete_session( lv_session_id ).
+
+    " Raw pack no longer needed
+        zcl_abapgit_ortec_pack_raw=>delete(
+          iv_repo_key = iv_repo_key
+          iv_pack_id  = lv_pack_id ).
+        COMMIT WORK.
+
+        release_repo_lock( lv_repo_lock_id ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_resume).
+        release_repo_lock( lv_repo_lock_id ).
+        RAISE EXCEPTION lx_resume.
+    ENDTRY.
   ENDMETHOD.
 
+
+  METHOD acquire_repo_lock.
+    DATA ls_lock TYPE zaog_fetch_sess.
+    DATA lv_ts TYPE timestampl.
+    DATA lv_wait_s TYPE f.
+    DATA lv_jitter_ms TYPE i.
+
+    rv_lock_id = |LOCK_{ iv_repo_key }|.
+
+    IF iv_max_attempts <= 0.
+      zcx_abapgit_exception=>raise( 'Repo lock: invalid max attempts' ).
+    ENDIF.
+
+    DO iv_max_attempts TIMES.
+      GET TIME STAMP FIELD lv_ts.
+
+      CLEAR ls_lock.
+      ls_lock-session_id = rv_lock_id.
+      ls_lock-repo_key   = iv_repo_key.
+      ls_lock-phase      = 'L'.
+      ls_lock-status     = 'L'.
+      ls_lock-error_text = 'MUTEX'.
+      ls_lock-created_at = lv_ts.
+      ls_lock-updated_at = lv_ts.
+      ls_lock-changed_by = sy-uname.
+
+      INSERT zaog_fetch_sess FROM ls_lock.
+      IF sy-subrc = 0.
+        RETURN.
+      ENDIF.
+
+      lv_jitter_ms = ( sy-index * 31 + strlen( iv_repo_key ) * 17 ) MOD 41.
+      lv_wait_s = ( iv_base_wait_ms * ( 2 ** ( sy-index - 1 ) ) + lv_jitter_ms ) / 1000.
+      IF lv_wait_s > 2.
+        lv_wait_s = 2.
+      ENDIF.
+      WAIT UP TO lv_wait_s SECONDS.
+    ENDDO.
+
+    zcx_abapgit_exception=>raise( |Repo lock timeout for key { iv_repo_key }| ).
+  ENDMETHOD.
+
+
+  METHOD release_repo_lock.
+    IF iv_lock_id IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    DELETE FROM zaog_fetch_sess
+      WHERE session_id = iv_lock_id
+        AND status     = 'L'.
+  ENDMETHOD.
+
+
   METHOD persist_objects.
-    DATA ls_row TYPE zaog_obj_store.
+    DATA lv_ts    TYPE timestampl.
     DATA lv_count TYPE i.
+    DATA ls_row   TYPE zaog_obj_store.
+    DATA ls_idx   TYPE zcl_abapgit_ortec_pack_index=>ty_index_entry.
+    DATA lt_idx   TYPE zcl_abapgit_ortec_pack_index=>ty_index_entries.
     FIELD-SYMBOLS <ls_obj> LIKE LINE OF it_objects.
+
+    GET TIME STAMP FIELD lv_ts.
+
     LOOP AT it_objects ASSIGNING <ls_obj>.
-      lv_count = lv_count + 1.
+      lv_count += 1.
+      " Skip objects that were already persisted in a previous run
       IF lv_count <= iv_skip_count.
         CONTINUE.
       ENDIF.
+
+      " 1. Write to object store (keyed by SHA1, idempotent via MODIFY)
       CLEAR ls_row.
-      ls_row-repo_key = iv_repo_key.
-      ls_row-obj_sha1 = <ls_obj>-sha1.
-      ls_row-obj_type = <ls_obj>-type.
-      ls_row-obj_data = <ls_obj>-data.
-      ls_row-obj_size = xstrlen( <ls_obj>-data ).
-      ls_row-pack_id  = iv_pack_id.
-      GET TIME STAMP FIELD ls_row-created_at.
-      ls_row-status   = 'R'.
+      ls_row-repo_key   = iv_repo_key.
+      ls_row-obj_sha1   = <ls_obj>-sha1.
+      ls_row-obj_type   = <ls_obj>-type.
+      ls_row-obj_data   = <ls_obj>-data.
+      ls_row-obj_size   = xstrlen( <ls_obj>-data ).
+      ls_row-pack_id    = iv_pack_id.
+      ls_row-created_at = lv_ts.
+      ls_row-status     = 'R'. " R = resolved
       MODIFY zaog_obj_store FROM ls_row.
+
+      " 2. Accumulate pack index entry (obj_index = sequential position in pack)
+      CLEAR ls_idx.
+      ls_idx-obj_index  = <ls_obj>-index.
+      ls_idx-obj_sha1   = <ls_obj>-sha1.
+      ls_idx-obj_type   = <ls_obj>-type.
+      ls_idx-uncomp_len = xstrlen( <ls_obj>-data ).
+      ls_idx-adler32    = <ls_obj>-adler32.
+      ls_idx-dec_status = 'D'. " D = decoded
+      APPEND ls_idx TO lt_idx.
+
+      " 3. Periodic commit: flush index batch, update session progress, commit
       IF lv_count MOD iv_commit_interval = 0.
-        update_session_progress( iv_session_id = iv_session_id iv_obj_done = lv_count ).
+        TRY.
+            zcl_abapgit_ortec_pack_index=>store_entries(
+                iv_repo_key = iv_repo_key
+                iv_pack_id  = iv_pack_id
+                it_entries  = lt_idx ).
+          CATCH zcx_abapgit_ortec_git. " non-critical; index is for resume only
+        ENDTRY.
+        CLEAR lt_idx.
+        update_session_progress(
+            iv_session_id = iv_session_id
+            iv_obj_done   = lv_count ).
         COMMIT WORK.
+        GET TIME STAMP FIELD lv_ts.
       ENDIF.
     ENDLOOP.
-    update_session_progress( iv_session_id = iv_session_id iv_obj_done = lv_count ).
+
+    " Flush remaining index entries
+    IF lt_idx IS NOT INITIAL.
+      TRY.
+          zcl_abapgit_ortec_pack_index=>store_entries(
+              iv_repo_key = iv_repo_key
+              iv_pack_id  = iv_pack_id
+              it_entries  = lt_idx ).
+        CATCH zcx_abapgit_ortec_git.
+      ENDTRY.
+    ENDIF.
+
+    update_session_progress(
+        iv_session_id = iv_session_id
+        iv_obj_done   = lv_count ).
     COMMIT WORK.
   ENDMETHOD.
 
+
   METHOD complete_pack.
-    DATA ls_meta TYPE zaog_pack_meta.
-    ls_meta-status      = 'C'.
-    ls_meta-obj_decoded = iv_count.
-    UPDATE zaog_pack_meta SET status = ls_meta-status obj_decoded = ls_meta-obj_decoded
+    UPDATE zaog_pack_meta
+      SET status = 'C' obj_decoded = iv_count
       WHERE repo_key = iv_repo_key AND pack_id = iv_pack_id.
   ENDMETHOD.
 
+
   METHOD create_session.
-    DATA ls_sess TYPE zaog_fetch_sess.
-    DATA lv_ts TYPE timestampl.
-    GET TIME STAMP FIELD lv_ts.
-    TRY.
-        rv_session_id = cl_system_uuid=>create_uuid_c32_static( ).
-      CATCH cx_uuid_error.
-        RETURN.
-    ENDTRY.
-    ls_sess-session_id = rv_session_id.
-    ls_sess-repo_key   = iv_repo_key.
-    ls_sess-pack_id    = iv_pack_id.
-    ls_sess-phase      = 'D'.
-    ls_sess-obj_done   = 0.
-    ls_sess-obj_total  = iv_obj_total.
-    ls_sess-status     = 'A'.
-    ls_sess-created_at = lv_ts.
-    ls_sess-updated_at = lv_ts.
-    ls_sess-changed_by = sy-uname.
-    INSERT zaog_fetch_sess FROM ls_sess.
+    IF gv_resume_deepen IS INITIAL.
+      gv_resume_deepen = 1.
+    ENDIF.
+
+    rv_session_id = zcl_abapgit_ortec_pack_raw=>create_session(
+      iv_repo_key     = iv_repo_key
+      iv_pack_id      = iv_pack_id
+      iv_obj_total    = iv_obj_total
+      iv_branch_name  = gv_resume_branch
+      iv_deepen_level = gv_resume_deepen ).
   ENDMETHOD.
+
 
   METHOD update_session_progress.
-    DATA ls_upd TYPE zaog_fetch_sess.
-    DATA lv_ts TYPE timestampl.
-    GET TIME STAMP FIELD lv_ts.
-    ls_upd-obj_done   = iv_obj_done.
-    ls_upd-updated_at = lv_ts.
-    UPDATE zaog_fetch_sess SET obj_done = ls_upd-obj_done updated_at = ls_upd-updated_at
-      WHERE session_id = iv_session_id.
+    zcl_abapgit_ortec_pack_raw=>update_session_progress(
+      iv_session_id  = iv_session_id
+      iv_obj_done    = iv_obj_done
+      iv_curr_offset = iv_curr_offset ).
   ENDMETHOD.
+
 
   METHOD fail_session.
-    DATA ls_upd TYPE zaog_fetch_sess.
-    DATA lv_ts TYPE timestampl.
-    GET TIME STAMP FIELD lv_ts.
-    ls_upd-obj_done   = iv_obj_done.
-    ls_upd-status     = 'F'.
-    ls_upd-updated_at = lv_ts.
-    UPDATE zaog_fetch_sess SET obj_done = ls_upd-obj_done status = ls_upd-status updated_at = ls_upd-updated_at
-      WHERE session_id = iv_session_id.
+    zcl_abapgit_ortec_pack_raw=>fail_session(
+      iv_session_id = iv_session_id
+      iv_obj_done   = iv_obj_done ).
   ENDMETHOD.
+
 
   METHOD complete_session.
-    DATA ls_upd TYPE zaog_fetch_sess.
-    DATA lv_ts TYPE timestampl.
-    GET TIME STAMP FIELD lv_ts.
-    ls_upd-phase      = 'C'.
-    ls_upd-status     = 'C'.
-    ls_upd-updated_at = lv_ts.
-    UPDATE zaog_fetch_sess SET phase = ls_upd-phase status = ls_upd-status updated_at = ls_upd-updated_at
-      WHERE session_id = iv_session_id.
+    zcl_abapgit_ortec_pack_raw=>complete_session( iv_session_id ).
   ENDMETHOD.
 
+
   METHOD find_active_session.
-    DATA ls_sess TYPE zaog_fetch_sess.
-    CLEAR: ev_session_id, ev_pack_id, ev_obj_done.
-    SELECT SINGLE * FROM zaog_fetch_sess INTO ls_sess
-      WHERE repo_key = iv_repo_key AND status = 'A'.
-    IF sy-subrc = 0.
+    DATA ls_sess TYPE zcl_abapgit_ortec_pack_raw=>ty_session_info.
+
+    CLEAR: ev_session_id,
+           ev_pack_id,
+           ev_obj_done,
+           ev_branch_name,
+           ev_deepen_level.
+    ls_sess = zcl_abapgit_ortec_pack_raw=>find_active_session( iv_repo_key ).
+    IF ls_sess-session_id IS NOT INITIAL.
       ev_session_id = ls_sess-session_id.
       ev_pack_id    = ls_sess-pack_id.
       ev_obj_done   = ls_sess-obj_done.
+      ev_branch_name = ls_sess-branch_name.
+      ev_deepen_level = ls_sess-deepen_level.
+    ENDIF.
+  ENDMETHOD.
+
+
+  METHOD resumable_decode.
+    DATA lv_data            TYPE xstring.
+    DATA lv_xstring         TYPE xstring.
+    DATA lv_objects         TYPE i.
+    DATA lv_uindex          TYPE sy-index.
+    DATA lv_x               TYPE x LENGTH 1.
+    DATA lv_type            TYPE zif_abapgit_git_definitions=>ty_type.
+    DATA lv_expected        TYPE i.
+    DATA lv_ref_delta       TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_zlib            TYPE x LENGTH 2.
+    DATA lv_decompressed    TYPE xstring.
+    DATA lv_decompress_len  TYPE i.
+    DATA lv_compressed      TYPE xstring.
+    DATA lv_compressed_len  TYPE i.
+    DATA lv_len             TYPE i.
+    DATA lv_sha1            TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_ts              TYPE timestampl.
+    DATA lv_obj_done        TYPE i.
+    DATA lv_start_offset    TYPE i.
+    DATA lv_curr_offset     TYPE i.
+    DATA lv_commit_interval TYPE i.
+    DATA lv_temp_sha1       TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA ls_object          LIKE LINE OF rt_objects.
+    DATA ls_tmp_obj         TYPE zaog_obj_store.
+    DATA ls_idx             TYPE zcl_abapgit_ortec_pack_index=>ty_index_entry.
+    DATA lt_idx             TYPE zcl_abapgit_ortec_pack_index=>ty_index_entries.
+    DATA lt_done_idx        TYPE STANDARD TABLE OF zaog_pack_idx.
+    DATA ls_done_idx        TYPE zaog_pack_idx.
+    DATA ls_row             TYPE zaog_obj_store.
+
+    lv_commit_interval = iv_commit_interval.
+    IF lv_commit_interval <= 0.
+      lv_commit_interval = 50.
+    ENDIF.
+
+    " Resume checkpoint from active decode session
+    DATA(ls_session) = zcl_abapgit_ortec_pack_raw=>get_session( iv_session_id ).
+    IF ls_session-session_id IS INITIAL.
+      CLEAR: lv_obj_done, lv_start_offset.
+    ELSE.
+      lv_obj_done = ls_session-obj_done.
+      lv_start_offset = ls_session-curr_offset.
+    ENDIF.
+
+    lv_data = iv_data.
+
+    IF xstrlen( lv_data ) < 12.
+      zcx_abapgit_exception=>raise( |Unexpected pack header, short reply| ).
+    ENDIF.
+    IF lv_data(4) <> c_pack_start.
+      zcx_abapgit_exception=>raise( |Unexpected pack header, { lv_data(4) }| ).
+    ENDIF.
+    lv_data = lv_data+4.
+
+    IF lv_data(4) <> c_version.
+      zcx_abapgit_exception=>raise( |Version not supported, { lv_data(4) }| ).
+    ENDIF.
+    lv_data = lv_data+4.
+
+    lv_xstring = lv_data(4).
+    lv_objects = zcl_abapgit_convert=>xstring_to_int( lv_xstring ).
+    lv_data = lv_data+4.
+
+    " Rehydrate already decoded objects for delta resolution at finalization
+    IF lv_obj_done > 0.
+      SELECT * FROM zaog_pack_idx
+        INTO TABLE lt_done_idx
+        WHERE repo_key = iv_repo_key
+          AND pack_id  = iv_pack_id
+          AND dec_status = 'P'
+          AND obj_index <= lv_obj_done
+        ORDER BY obj_index.
+
+      LOOP AT lt_done_idx INTO ls_done_idx.
+        SELECT SINGLE * FROM zaog_obj_store
+          INTO ls_tmp_obj
+          WHERE repo_key = iv_repo_key
+            AND pack_id  = iv_pack_id
+            AND obj_sha1 = ls_done_idx-obj_sha1
+            AND status   = 'P'.
+        IF sy-subrc <> 0.
+          CONTINUE.
+        ENDIF.
+
+        CLEAR ls_object.
+        ls_object-type    = ls_done_idx-obj_type.
+        ls_object-data    = ls_tmp_obj-obj_data.
+        ls_object-index   = ls_done_idx-obj_index.
+        ls_object-adler32 = ls_done_idx-adler32.
+
+        IF ls_object-type = zif_abapgit_git_definitions=>c_type-ref_d.
+          ls_object-sha1 = ls_done_idx-delta_base.
+        ELSE.
+          ls_object-sha1 = zcl_abapgit_hash=>sha1(
+                             iv_type = ls_object-type
+                             iv_data = ls_object-data ).
+        ENDIF.
+        APPEND ls_object TO rt_objects.
+      ENDLOOP.
+    ENDIF.
+
+    IF lv_start_offset <= 0.
+      lv_start_offset = 12.
+    ENDIF.
+    IF lv_start_offset > xstrlen( iv_data ) - 20.
+      zcx_abapgit_exception=>raise( |Invalid decode checkpoint offset| ).
+    ENDIF.
+
+    lv_data = iv_data+lv_start_offset.
+
+    DO lv_objects - lv_obj_done TIMES.
+
+      lv_uindex = lv_obj_done + sy-index.
+      lv_curr_offset = xstrlen( iv_data ) - xstrlen( lv_data ).
+      lv_x = lv_data(1).
+      lv_type = get_type( lv_x ).
+
+      get_length(
+        IMPORTING ev_length = lv_expected
+        CHANGING  cv_data   = lv_data ).
+
+      IF lv_type = zif_abapgit_git_definitions=>c_type-ref_d.
+        lv_ref_delta = lv_data(20).
+        lv_data = lv_data+20.
+      ELSE.
+        CLEAR lv_ref_delta.
+      ENDIF.
+
+      lv_zlib = lv_data(2).
+      IF lv_zlib <> c_zlib AND lv_zlib <> c_zlib_hmm.
+        zcx_abapgit_exception=>raise( |Unexpected zlib header| ).
+      ENDIF.
+      lv_data = lv_data+2.
+
+      CASE lv_zlib.
+        WHEN c_zlib.
+          cl_abap_gzip=>decompress_binary(
+            EXPORTING gzip_in     = lv_data
+            IMPORTING raw_out     = lv_decompressed
+                      raw_out_len = lv_decompress_len ).
+
+          IF lv_expected <> lv_decompress_len.
+            zcx_abapgit_exception=>raise( |Decompression failed| ).
+          ENDIF.
+
+          cl_abap_gzip=>compress_binary(
+            EXPORTING raw_in       = lv_decompressed
+            IMPORTING gzip_out     = lv_compressed
+                      gzip_out_len = lv_compressed_len ).
+
+          IF    xstrlen( lv_data )               <= lv_compressed_len
+             OR lv_compressed(lv_compressed_len) <> lv_data(lv_compressed_len).
+            zlib_decompress(
+              CHANGING cv_data         = lv_data
+                       cv_decompressed = lv_decompressed ).
+          ELSE.
+            lv_data = lv_data+lv_compressed_len.
+          ENDIF.
+
+        WHEN c_zlib_hmm.
+          zlib_decompress(
+            CHANGING cv_data         = lv_data
+                     cv_decompressed = lv_decompressed ).
+
+        WHEN OTHERS.
+          zcx_abapgit_exception=>raise( |Unexpected zlib header| ).
+      ENDCASE.
+
+      CLEAR ls_object.
+      ls_object-adler32 = lv_data(4).
+      lv_data = lv_data+4.
+
+      IF lv_type = zif_abapgit_git_definitions=>c_type-ref_d.
+        ls_object-sha1 = lv_ref_delta.
+        TRANSLATE ls_object-sha1 TO LOWER CASE.
+      ELSE.
+        ls_object-sha1 = zcl_abapgit_hash=>sha1(
+                             iv_type = lv_type
+                             iv_data = lv_decompressed ).
+      ENDIF.
+      ls_object-type  = lv_type.
+      ls_object-data  = lv_decompressed.
+      ls_object-index = lv_uindex.
+      APPEND ls_object TO rt_objects.
+
+      " Persist parsed object payload with a temporary key for resume
+      lv_temp_sha1 = iv_pack_id && |{ lv_uindex WIDTH = 8 PAD = '0' }|.
+      GET TIME STAMP FIELD lv_ts.
+
+      CLEAR ls_row.
+      ls_row-repo_key   = iv_repo_key.
+      ls_row-pack_id    = iv_pack_id.
+      ls_row-obj_sha1   = lv_temp_sha1.
+      ls_row-obj_type   = lv_type.
+      ls_row-obj_data   = lv_decompressed.
+      ls_row-obj_size   = xstrlen( lv_decompressed ).
+      ls_row-created_at = lv_ts.
+      ls_row-status     = 'P'.
+      MODIFY zaog_obj_store FROM ls_row.
+
+      CLEAR ls_idx.
+      ls_idx-obj_index   = lv_uindex.
+      ls_idx-obj_sha1    = lv_temp_sha1.
+      ls_idx-obj_type    = lv_type.
+      ls_idx-pack_offset = lv_curr_offset.
+      ls_idx-uncomp_len  = xstrlen( lv_decompressed ).
+      ls_idx-adler32     = ls_object-adler32.
+      ls_idx-dec_status  = 'P'.
+      ls_idx-delta_base  = lv_ref_delta.
+      APPEND ls_idx TO lt_idx.
+
+      IF lv_uindex MOD lv_commit_interval = 0.
+        TRY.
+            zcl_abapgit_ortec_pack_index=>store_entries(
+              iv_repo_key = iv_repo_key
+              iv_pack_id  = iv_pack_id
+              it_entries  = lt_idx ).
+          CATCH zcx_abapgit_ortec_git.
+        ENDTRY.
+        CLEAR lt_idx.
+
+        lv_curr_offset = xstrlen( iv_data ) - xstrlen( lv_data ).
+        update_session_progress(
+          iv_session_id  = iv_session_id
+          iv_obj_done    = lv_uindex
+          iv_curr_offset = lv_curr_offset ).
+        COMMIT WORK.
+      ENDIF.
+
+    ENDDO.
+
+    IF lt_idx IS NOT INITIAL.
+      TRY.
+          zcl_abapgit_ortec_pack_index=>store_entries(
+            iv_repo_key = iv_repo_key
+            iv_pack_id  = iv_pack_id
+            it_entries  = lt_idx ).
+        CATCH zcx_abapgit_ortec_git.
+      ENDTRY.
+    ENDIF.
+
+    lv_curr_offset = xstrlen( iv_data ) - xstrlen( lv_data ).
+    update_session_progress(
+      iv_session_id  = iv_session_id
+      iv_obj_done    = lv_objects
+      iv_curr_offset = lv_curr_offset ).
+    COMMIT WORK.
+
+    lv_len = xstrlen( iv_data ) - 20.
+    lv_xstring = iv_data(lv_len).
+    lv_sha1 = zcl_abapgit_hash=>sha1_raw( lv_xstring ).
+    IF to_upper( lv_sha1 ) <> lv_data.
+      zcx_abapgit_exception=>raise( |SHA1 at end of pack doesn't match| ).
+    ENDIF.
+
+    zcl_abapgit_git_delta=>decode_deltas( CHANGING ct_objects = rt_objects ).
+
+    " Promote temp rows to resolved object store rows and close index status
+    GET TIME STAMP FIELD lv_ts.
+    LOOP AT rt_objects INTO ls_object.
+      CLEAR ls_row.
+      ls_row-repo_key   = iv_repo_key.
+      ls_row-pack_id    = iv_pack_id.
+      ls_row-obj_sha1   = ls_object-sha1.
+      ls_row-obj_type   = ls_object-type.
+      ls_row-obj_data   = ls_object-data.
+      ls_row-obj_size   = xstrlen( ls_object-data ).
+      ls_row-created_at = lv_ts.
+      ls_row-status     = 'R'.
+      MODIFY zaog_obj_store FROM ls_row.
+
+      zcl_abapgit_ortec_pack_index=>mark_decoded(
+        iv_repo_key  = iv_repo_key
+        iv_pack_id   = iv_pack_id
+        iv_obj_index = ls_object-index
+        iv_obj_sha1  = ls_object-sha1 ).
+    ENDLOOP.
+
+    DELETE FROM zaog_obj_store
+      WHERE repo_key = iv_repo_key
+        AND pack_id  = iv_pack_id
+        AND status   = 'P'.
+    COMMIT WORK.
+
+  ENDMETHOD.
+
+
+  METHOD get_length.
+
+    " https://github.com/git/git/blob/master/Documentation/technical/pack-format.txt
+    " Variable-length size encoding: first byte = type(3 bits) + size bits(4),
+    " subsequent bytes = 7 more size bits each while MSB is set.
+
+    CONSTANTS lc_msb  TYPE x LENGTH 1 VALUE '80'.
+    CONSTANTS lc_low4 TYPE x LENGTH 1 VALUE '0F'.
+    CONSTANTS lc_low7 TYPE x LENGTH 1 VALUE '7F'.
+    CONSTANTS lc_zero TYPE x LENGTH 1 VALUE '00'.
+
+    DATA lv_byte     TYPE x LENGTH 1.
+    DATA lv_bits     TYPE x LENGTH 1.
+    DATA lv_factor   TYPE i.
+    DATA lv_bits_int TYPE i.
+
+    lv_byte = cv_data(1).
+    cv_data = cv_data+1.
+
+    lv_bits   = lv_byte BIT-AND lc_low4.
+    ev_length = lv_bits.
+    lv_factor = 16.
+
+    WHILE lv_byte BIT-AND lc_msb <> lc_zero.
+      IF sy-index > 1.
+        lv_factor *= 128.
+      ENDIF.
+      IF xstrlen( cv_data ) = 0.
+        EXIT.
+      ENDIF.
+      lv_byte = cv_data(1).
+      cv_data = cv_data+1.
+      lv_bits = lv_byte BIT-AND lc_low7.
+      lv_bits_int = lv_bits.
+      ev_length += lv_bits_int * lv_factor.
+    ENDWHILE.
+
+  ENDMETHOD.
+
+
+  METHOD get_type.
+
+    CONSTANTS lc_mask TYPE x LENGTH 1 VALUE 112.
+
+    DATA lv_xtype TYPE x LENGTH 1.
+
+    lv_xtype = iv_x BIT-AND lc_mask.
+
+    CASE lv_xtype.
+      WHEN 16.
+        rv_type = zif_abapgit_git_definitions=>c_type-commit.
+      WHEN 32.
+        rv_type = zif_abapgit_git_definitions=>c_type-tree.
+      WHEN 48.
+        rv_type = zif_abapgit_git_definitions=>c_type-blob.
+      WHEN 64.
+        rv_type = zif_abapgit_git_definitions=>c_type-tag.
+      WHEN 112.
+        rv_type = zif_abapgit_git_definitions=>c_type-ref_d.
+      WHEN OTHERS.
+        zcx_abapgit_exception=>raise( |Todo, unknown git pack type| ).
+    ENDCASE.
+
+  ENDMETHOD.
+
+
+  METHOD zlib_decompress.
+
+    DATA ls_data    TYPE zcl_abapgit_zlib=>ty_decompress.
+    DATA lv_adler32 TYPE zif_abapgit_git_definitions=>ty_adler32.
+
+    ls_data = zcl_abapgit_zlib=>decompress( cv_data ).
+    cv_compressed_len = ls_data-compressed_len.
+    cv_decompressed = ls_data-raw.
+
+    IF cv_compressed_len IS INITIAL.
+      zcx_abapgit_exception=>raise( |Decompression failed :o/| ).
+    ENDIF.
+
+    cv_data = cv_data+cv_compressed_len.
+
+    lv_adler32 = zcl_abapgit_hash=>adler32( cv_decompressed ).
+    IF cv_data(4) <> lv_adler32.
+      cv_data = cv_data+1.
+    ENDIF.
+    IF cv_data(4) <> lv_adler32.
+      cv_data = cv_data+1.
+    ENDIF.
+    IF cv_data(4) <> lv_adler32.
+      zcx_abapgit_exception=>raise( |Wrong Adler checksum| ).
     ENDIF.
   ENDMETHOD.
 
 ENDCLASS.
+

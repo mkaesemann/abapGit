@@ -121,6 +121,7 @@ CLASS zcl_abapgit_git_porcelain DEFINITION
       IMPORTING
         !iv_commit      TYPE zif_abapgit_git_definitions=>ty_sha1
         !it_objects     TYPE zif_abapgit_definitions=>ty_objects_tt
+        !iv_repo_key    TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key OPTIONAL
       RETURNING
         VALUE(rt_files) TYPE zif_abapgit_git_definitions=>ty_files_tt
       RAISING
@@ -130,6 +131,7 @@ CLASS zcl_abapgit_git_porcelain DEFINITION
         !it_objects TYPE zif_abapgit_definitions=>ty_objects_tt
         !iv_sha1    TYPE zif_abapgit_git_definitions=>ty_sha1
         !iv_path    TYPE string
+        !iv_repo_key TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key OPTIONAL
       CHANGING
         !ct_files   TYPE zif_abapgit_git_definitions=>ty_files_tt
       RAISING
@@ -510,9 +512,10 @@ CLASS ZCL_ABAPGIT_GIT_PORCELAIN IMPLEMENTATION.
 
     ls_commit = zcl_abapgit_git_pack=>decode_commit( ls_object-data ).
 
-    walk( EXPORTING it_objects = it_objects
-                    iv_sha1    = ls_commit-tree
-                    iv_path    = '/'
+    walk( EXPORTING it_objects  = it_objects
+                    iv_sha1     = ls_commit-tree
+                    iv_path     = '/'
+                    iv_repo_key = iv_repo_key
           CHANGING  ct_files   = rt_files ).
 
   ENDMETHOD.
@@ -520,7 +523,7 @@ CLASS ZCL_ABAPGIT_GIT_PORCELAIN IMPLEMENTATION.
 
   METHOD pull_by_branch.
 
-* ORTEC: try fast-path reconstitution from persistent object store
+    " ORTEC: Try fast-path reconstitution from persistent object store
     TRY.
         rs_result = zcl_abapgit_ortec_fastpath=>pull_by_branch(
           iv_url          = iv_url
@@ -530,12 +533,18 @@ CLASS ZCL_ABAPGIT_GIT_PORCELAIN IMPLEMENTATION.
           RETURN.
         ENDIF.
       CATCH zcx_abapgit_ortec_git.
-* ORTEC: fast-path failed, continue with standard behavior
+        "ORTEC: fast-path failed, continue with standard behavior
     ENDTRY.
 
-    rs_result = zcl_abapgit_pull_buffer=>pull_buffered_branch(
-      iv_url         = iv_url
-      iv_branch_name = iv_branch_name ).
+* ORTEC: when fastpath is active, skip old in-memory pull buffer
+* so that the full fetch+persist path runs (hooks 2-6).
+* The ORTEC persistent store replaces the pull buffer's role.
+**    IF zcl_abapgit_ortec_git_switch=>is_active( ) = abap_false.
+**      rs_result = zcl_abapgit_pull_buffer=>pull_buffered_branch(
+**        iv_url         = iv_url
+**        iv_branch_name = iv_branch_name ).
+**    ENDIF.
+
     IF rs_result IS INITIAL.
 
       zcl_abapgit_git_transport=>upload_pack_by_branch(
@@ -548,16 +557,17 @@ CLASS ZCL_ABAPGIT_GIT_PORCELAIN IMPLEMENTATION.
           ev_branch       = rs_result-commit ).
 
       rs_result-files = pull(
-        iv_commit  = rs_result-commit
-        it_objects = rs_result-objects ).
-
-      zcl_abapgit_pull_buffer=>store_branch_in_buffer(
-        iv_url         = iv_url
-        iv_branch_name = iv_branch_name
-        iv_commit      = rs_result-commit
-        it_objects     = rs_result-objects
-        it_files       = rs_result-files
-      ).
+        iv_commit   = rs_result-commit
+        it_objects  = rs_result-objects
+        iv_repo_key = zcl_abapgit_ortec_repo_state=>get_repo_key_for_url( iv_url ) ).
+**
+**      zcl_abapgit_pull_buffer=>store_branch_in_buffer(
+**        iv_url         = iv_url
+**        iv_branch_name = iv_branch_name
+**        iv_commit      = rs_result-commit
+**        it_objects     = rs_result-objects
+**        it_files       = rs_result-files
+**      ).
 
 * ORTEC: persist objects in persistent store after successful pull
       TRY.
@@ -586,8 +596,9 @@ CLASS ZCL_ABAPGIT_GIT_PORCELAIN IMPLEMENTATION.
         et_objects      = rs_result-objects
         ev_commit       = rs_result-commit ).
 
-    rs_result-files = pull( iv_commit  = rs_result-commit
-                            it_objects = rs_result-objects ).
+    rs_result-files = pull( iv_commit   = rs_result-commit
+                            it_objects  = rs_result-objects
+                            iv_repo_key = zcl_abapgit_ortec_repo_state=>get_repo_key_for_url( iv_url ) ).
 
   ENDMETHOD.
 
@@ -812,7 +823,7 @@ CLASS ZCL_ABAPGIT_GIT_PORCELAIN IMPLEMENTATION.
           TRY.
               DATA ls_ortec_blob TYPE zif_abapgit_definitions=>ty_object.
               ls_ortec_blob = zcl_abapgit_ortec_obj_store=>get_object(
-                iv_repo_key = ''
+                iv_repo_key = iv_repo_key
                 iv_sha1     = <ls_node>-sha1 ).
               CLEAR ls_file.
               ls_file-path     = iv_path.
@@ -838,9 +849,10 @@ CLASS ZCL_ABAPGIT_GIT_PORCELAIN IMPLEMENTATION.
     LOOP AT lt_nodes ASSIGNING <ls_node> WHERE chmod = zif_abapgit_git_definitions=>c_chmod-dir.
       CONCATENATE iv_path <ls_node>-name '/' INTO lv_path.
 
-      walk( EXPORTING it_objects = it_objects
-                      iv_sha1    = <ls_node>-sha1
-                      iv_path    = lv_path
+      walk( EXPORTING it_objects  = it_objects
+                      iv_sha1     = <ls_node>-sha1
+                      iv_path     = lv_path
+                      iv_repo_key = iv_repo_key
             CHANGING  ct_files   = ct_files ).
     ENDLOOP.
 
@@ -890,3 +902,4 @@ CLASS ZCL_ABAPGIT_GIT_PORCELAIN IMPLEMENTATION.
 
   ENDMETHOD.
 ENDCLASS.
+

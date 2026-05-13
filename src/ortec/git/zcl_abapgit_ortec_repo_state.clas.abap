@@ -81,6 +81,16 @@ CLASS zcl_abapgit_ortec_repo_state DEFINITION
       IMPORTING iv_url        TYPE string
       RETURNING VALUE(rv_key) TYPE ty_repo_key.
 
+    "! Derive repo_key from URL, creating a new key if none exists.
+    "! Uses first 12 chars of SHA1(URL) as key.
+    "! @parameter iv_url |
+    "! Remote URL
+    "! @parameter rv_key |
+    "! Repository key (always non-empty)
+    CLASS-METHODS get_or_create_repo_key_for_url
+      IMPORTING iv_url        TYPE string
+      RETURNING VALUE(rv_key) TYPE ty_repo_key.
+
   PROTECTED SECTION.
   PRIVATE SECTION.
 ENDCLASS.
@@ -155,6 +165,22 @@ CLASS zcl_abapgit_ortec_repo_state IMPLEMENTATION.
     ENDTRY.
     SELECT SINGLE repo_key FROM zaog_repo_state INTO rv_key
       WHERE url_hash = lv_url_hash.
+  ENDMETHOD.
+
+  METHOD get_or_create_repo_key_for_url.
+    " Try existing lookup first
+    rv_key = get_repo_key_for_url( iv_url ).
+    IF rv_key IS NOT INITIAL.
+      RETURN.
+    ENDIF.
+    " Generate new key: first 12 chars of SHA1(URL)
+    DATA lv_sha TYPE c LENGTH 40.
+    TRY.
+        lv_sha = zcl_abapgit_hash=>sha1_string( iv_url ).
+      CATCH zcx_abapgit_exception.
+        lv_sha = '000000000000'.
+    ENDTRY.
+    rv_key = lv_sha(12).
   ENDMETHOD.
 
 ENDCLASS.

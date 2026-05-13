@@ -93,25 +93,29 @@ CLASS zcl_abapgit_ortec_pack_store IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD store_raw_pack.
-    DATA ls_raw TYPE zaog_raw_pack.
-    ls_raw-repo_key = iv_repo_key.
-    ls_raw-pack_id  = iv_pack_id.
-    ls_raw-raw_data = iv_raw_data.
-    MODIFY zaog_raw_pack FROM ls_raw.
+    TRY.
+        zcl_abapgit_ortec_pack_raw=>store(
+          iv_repo_key = iv_repo_key
+          iv_pack_id  = iv_pack_id
+          iv_raw_data = iv_raw_data ).
+      CATCH zcx_abapgit_exception.
+        zcx_abapgit_ortec_git=>raise( |Failed to store raw pack| ).
+    ENDTRY.
   ENDMETHOD.
 
   METHOD get_raw_pack.
-    SELECT SINGLE raw_data FROM zaog_raw_pack INTO rv_raw
-      WHERE repo_key = iv_repo_key
-        AND pack_id  = iv_pack_id.
-    IF sy-subrc <> 0.
-      zcx_abapgit_ortec_git=>raise( |Raw pack not found| ).
-    ENDIF.
+    TRY.
+        rv_raw = zcl_abapgit_ortec_pack_raw=>load(
+          iv_repo_key = iv_repo_key
+          iv_pack_id  = iv_pack_id ).
+      CATCH zcx_abapgit_exception.
+        zcx_abapgit_ortec_git=>raise( |Raw pack not found| ).
+    ENDTRY.
   ENDMETHOD.
 
   METHOD cleanup_repo.
     DELETE FROM zaog_pack_meta WHERE repo_key = iv_repo_key.
-    DELETE FROM zaog_raw_pack  WHERE repo_key = iv_repo_key.
+    zcl_abapgit_ortec_pack_raw=>delete_repo( iv_repo_key ).
   ENDMETHOD.
 
 ENDCLASS.

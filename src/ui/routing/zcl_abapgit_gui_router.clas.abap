@@ -676,9 +676,10 @@ CLASS ZCL_ABAPGIT_GUI_ROUTER IMPLEMENTATION.
   METHOD repository_services.
 
     DATA:
-      lv_key  TYPE zif_abapgit_persistence=>ty_repo-key,
-      li_repo TYPE REF TO zif_abapgit_repo,
-      li_log  TYPE REF TO zif_abapgit_log.
+      lv_key          TYPE zif_abapgit_persistence=>ty_repo-key,
+      li_repo         TYPE REF TO zif_abapgit_repo,
+      li_log          TYPE REF TO zif_abapgit_log,
+      ls_clear_result TYPE zcl_abapgit_ortec_git_switch=>ty_clear_result.
 
     lv_key = ii_event->query( )->get( 'KEY' ).
     IF lv_key IS NOT INITIAL.
@@ -731,6 +732,15 @@ CLASS ZCL_ABAPGIT_GUI_ROUTER IMPLEMENTATION.
         rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
       WHEN zif_abapgit_definitions=>c_action-repo_transport_to_branch.        " Transport to branch
         zcl_abapgit_services_repo=>transport_to_branch( lv_key ).
+        rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
+      WHEN 'clear_cache'.                                                     " ORTEC clear repository cache
+        TRY.
+            ls_clear_result = zcl_abapgit_ortec_git_switch=>clear_repo_cache(
+              iv_repo_key = lv_key ).
+            MESSAGE zcl_abapgit_ortec_git_switch=>format_clear_result( ls_clear_result ) TYPE 'S'.
+          CATCH zcx_abapgit_ortec_git INTO DATA(lx_ortec).
+            MESSAGE lx_ortec->get_text( ) TYPE 'E'.
+        ENDTRY.
         rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
       WHEN zif_abapgit_definitions=>c_action-repo_settings.                   " Repo settings
         rs_handled-page  = zcl_abapgit_gui_page_sett_repo=>create( li_repo ).

@@ -34,11 +34,6 @@ CLASS zcl_abapgit_ortec_fetch_neg IMPLEMENTATION.
 
     DATA lv_repo_key TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key.
 
-    " Check if negotiation is active
-    IF zcl_abapgit_ortec_git_switch=>is_negotiation_active( ) = abap_false.
-      RETURN.
-    ENDIF.
-
     " Resolve URL to repo key
     lv_repo_key = zcl_abapgit_ortec_repo_state=>get_repo_key_for_url( iv_url ).
     IF lv_repo_key IS INITIAL.
