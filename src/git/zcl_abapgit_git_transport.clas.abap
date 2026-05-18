@@ -420,16 +420,19 @@ CLASS ZCL_ABAPGIT_GIT_TRANSPORT IMPLEMENTATION.
            ev_branch.
 
     IF zcl_abapgit_ortec_git_switch=>is_active_for_repo( iv_url ) = abap_true.
-      zcl_abapgit_ortec_fastpath=>upload_pack_by_branch(
-        EXPORTING
-          iv_url          = iv_url
-          iv_branch_name  = iv_branch_name
-          iv_deepen_level = iv_deepen_level
-          it_branches     = it_branches
-        IMPORTING
-          et_objects      = et_objects
-          ev_branch       = ev_branch ).
-      RETURN.
+      TRY.
+          zcl_abapgit_ortec_fastpath=>upload_pack_by_branch(
+            EXPORTING
+              iv_url          = iv_url
+              iv_branch_name  = iv_branch_name
+              iv_deepen_level = iv_deepen_level
+              it_branches     = it_branches
+            IMPORTING
+              et_objects      = et_objects
+              ev_branch       = ev_branch ).
+          RETURN.
+        CATCH zcx_abapgit_ortec_git.
+      ENDTRY.
     ENDIF.
 
     find_branch(

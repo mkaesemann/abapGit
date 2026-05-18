@@ -85,6 +85,7 @@ CLASS zcl_abapgit_ortec_fastpath DEFINITION
 
     CLASS-METHODS upload_pack
       IMPORTING
+        io_client       TYPE REF TO zcl_abapgit_http_client
         iv_url          TYPE string
         iv_deepen_level TYPE i DEFAULT 0
         it_hashes       TYPE zif_abapgit_git_definitions=>ty_sha1_tt
@@ -118,6 +119,8 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
     DATA ls_commit_obj  LIKE LINE OF lt_resumed.
     DATA ls_file        TYPE zif_abapgit_git_definitions=>ty_file.
     DATA ls_state       TYPE zcl_abapgit_ortec_repo_state=>ty_state.
+    DATA lo_fp_timer    TYPE REF TO zcl_abapgit_timer.
+    DATA lv_fp_duration TYPE string.
 
     FIELD-SYMBOLS <ls_exp>  LIKE LINE OF lt_expanded.
     FIELD-SYMBOLS <ls_blob> LIKE LINE OF rs_result-objects.
@@ -175,6 +178,7 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
         rs_result-objects = lt_resumed.
         rs_result-commit  = lv_remote_sha.
 
+        lo_fp_timer = zcl_abapgit_timer=>create( )->start( ).
         TRY.
             lt_expanded = zcl_abapgit_git_porcelain=>full_tree(
                               it_objects = rs_result-objects
@@ -207,6 +211,9 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
                 " State update non-critical
             ENDTRY.
 
+            lv_fp_duration = lo_fp_timer->end( ).
+            MESSAGE s000(oo) WITH 'Fastpath:'
+              |{ lines( rs_result-objects ) } git objects (resumed), { lv_fp_duration }|.
             RETURN. " Success! Avoid redundant GET from remote.
           CATCH zcx_abapgit_exception.
             CLEAR rs_result.
@@ -229,6 +236,7 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
     ENDIF.
 
     " Phase 3: Reconstitute from stored objects
+    lo_fp_timer = zcl_abapgit_timer=>create( )->start( ).
     rs_result-objects = zcl_abapgit_ortec_obj_store=>get_all_objects( lv_repo_key ).
     rs_result-commit  = ls_state-fetch_commit.
 
@@ -263,6 +271,10 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
         RETURN.
     ENDTRY.
 
+    lv_fp_duration = lo_fp_timer->end( ).
+    MESSAGE s000(oo) WITH 'Fastpath:'
+      |{ lines( rs_result-objects ) } git objects, { lv_fp_duration }|.
+
   ENDMETHOD.
 
 
@@ -270,6 +282,7 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
 
     DATA ls_pull TYPE zcl_abapgit_git_porcelain=>ty_pull_result.
     DATA lt_hashes TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lo_client TYPE REF TO zcl_abapgit_http_client.
     FIELD-SYMBOLS <ls_branch> LIKE LINE OF it_branches.
 
 
@@ -287,16 +300,29 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
     ENDIF.
 
     IF it_branches IS INITIAL.
-      ev_branch = zcl_abapgit_git_transport=>branches( iv_url )->find_by_name( iv_branch_name )-sha1.
-      APPEND ev_branch TO lt_hashes.
+      APPEND iv_branch_name TO lt_hashes.
     ELSE.
       LOOP AT it_branches ASSIGNING <ls_branch>.
         APPEND <ls_branch>-sha1 TO lt_hashes.
       ENDLOOP.
-      ev_branch = zcl_abapgit_git_transport=>branches( iv_url )->find_by_name( iv_branch_name )-sha1.
+    ENDIF.
+
+    zcl_abapgit_git_transport=>find_branch_ortec(
+      EXPORTING
+        iv_url         = iv_url
+        iv_service     = 'upload'
+        iv_branch_name = iv_branch_name
+      IMPORTING
+        eo_client      = lo_client
+        ev_branch      = ev_branch ).
+
+    IF it_branches IS INITIAL.
+      CLEAR lt_hashes.
+      APPEND ev_branch TO lt_hashes.
     ENDIF.
 
     et_objects = upload_pack(
+      io_client       = lo_client
       iv_url          = iv_url
       iv_deepen_level = iv_deepen_level
       it_hashes       = lt_hashes ).
@@ -307,6 +333,9 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
   METHOD upload_pack_by_commit.
 
     DATA lt_hashes TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_headers TYPE zcl_abapgit_http=>ty_headers.
+    DATA ls_header  LIKE LINE OF lt_headers.
+    DATA lo_client TYPE REF TO zcl_abapgit_http_client.
 
 
     CLEAR: et_objects,
@@ -315,7 +344,16 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
     APPEND iv_hash TO lt_hashes.
     ev_commit = iv_hash.
 
+    ls_header-key   = '~request_uri'.
+    ls_header-value = zcl_abapgit_url=>path_name( iv_url ) && |/info/refs?service=git-upload-pack|.
+    APPEND ls_header TO lt_headers.
+
+    lo_client = zcl_abapgit_http=>create_by_url(
+      iv_url     = iv_url
+      it_headers = lt_headers ).
+
     et_objects = upload_pack(
+      io_client       = lo_client
       iv_url          = iv_url
       iv_deepen_level = iv_deepen_level
       it_hashes       = lt_hashes ).
@@ -325,9 +363,6 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
 
   METHOD upload_pack.
 
-    DATA lo_client TYPE REF TO zcl_abapgit_http_client.
-    DATA lt_headers TYPE zcl_abapgit_http=>ty_headers.
-    DATA ls_header  LIKE LINE OF lt_headers.
     DATA lv_capa    TYPE string.
     DATA lv_line    TYPE string.
     DATA lv_buffer  TYPE string.
@@ -336,19 +371,14 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
     DATA lv_repo_key TYPE zcl_abapgit_ortec_repo_state=>ty_repo_key.
     DATA lt_ortec_haves TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
 
+    DATA lo_fetch_timer   TYPE REF TO zcl_abapgit_timer.
+    DATA lv_fetch_duration TYPE string.
+
     FIELD-SYMBOLS <lv_hash> LIKE LINE OF it_hashes.
     FIELD-SYMBOLS <lv_ortec_have> LIKE LINE OF lt_ortec_haves.
 
 
-    ls_header-key   = '~request_uri'.
-    ls_header-value = zcl_abapgit_url=>path_name( iv_url ) && |/git-upload-pack|.
-    APPEND ls_header TO lt_headers.
-
-    lo_client = zcl_abapgit_http=>create_by_url(
-      iv_url     = iv_url
-      it_headers = lt_headers ).
-
-    lo_client->set_headers(
+    io_client->set_headers(
       iv_url     = iv_url
       iv_service = 'upload' ).
 
@@ -369,6 +399,8 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
         cl_abap_char_utilities=>newline ).
     ENDIF.
 
+    lv_buffer = lv_buffer && '0000'.
+
     TRY.
         lt_ortec_haves = zcl_abapgit_ortec_fetch_neg=>get_have_commits(
           iv_url         = iv_url
@@ -380,11 +412,10 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
       CATCH zcx_abapgit_ortec_git.
     ENDTRY.
 
-    lv_buffer = lv_buffer
-             && '0000'
-             && '0009done' && cl_abap_char_utilities=>newline.
+    lv_buffer = lv_buffer && '0009done' && cl_abap_char_utilities=>newline.
 
-    lv_xstring = lo_client->send_receive_close( zcl_abapgit_convert=>string_to_xstring_utf8( lv_buffer ) ).
+    lo_fetch_timer = zcl_abapgit_timer=>create( )->start( ).
+    lv_xstring = io_client->send_receive_close( zcl_abapgit_convert=>string_to_xstring_utf8( lv_buffer ) ).
 
     parse( IMPORTING ev_pack = lv_pack
            CHANGING  cv_data = lv_xstring ).
@@ -393,9 +424,23 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
       lv_repo_key = zcl_abapgit_ortec_repo_state=>get_repo_key_for_url( iv_url ).
       IF lv_repo_key IS NOT INITIAL.
         TRY.
-            rt_objects = zcl_abapgit_ortec_obj_store=>get_all_objects( lv_repo_key ).
-            IF rt_objects IS NOT INITIAL.
-              RETURN.
+            DATA lt_cached   TYPE zif_abapgit_definitions=>ty_objects_tt.
+            DATA lv_want_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+            lt_cached = zcl_abapgit_ortec_obj_store=>get_all_objects( lv_repo_key ).
+            IF lt_cached IS NOT INITIAL.
+              READ TABLE it_hashes INTO lv_want_sha INDEX 1.
+              IF sy-subrc = 0.
+                READ TABLE lt_cached TRANSPORTING NO FIELDS
+                     WITH KEY type = zif_abapgit_git_definitions=>c_type-commit
+                              sha1 = lv_want_sha.
+                IF sy-subrc = 0.
+                  rt_objects = lt_cached.
+                  lv_fetch_duration = lo_fetch_timer->end( ).
+                  MESSAGE s000(oo) WITH 'Fastpath:'
+                    |{ lines( rt_objects ) } git objects (cached), { lv_fetch_duration }|.
+                  RETURN.
+                ENDIF.
+              ENDIF.
             ENDIF.
           CATCH zcx_abapgit_ortec_git.
         ENDTRY.
@@ -413,6 +458,9 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
               iv_data     = lv_pack
               iv_repo_key = lv_ortec_rk ).
             IF rt_objects IS NOT INITIAL.
+              lv_fetch_duration = lo_fetch_timer->end( ).
+              MESSAGE s000(oo) WITH 'Fetch:'
+                |{ lines( rt_objects ) } git objects, { lv_fetch_duration }|.
               RETURN.
             ENDIF.
           ENDIF.
@@ -421,6 +469,8 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
     ENDTRY.
 
     rt_objects = zcl_abapgit_git_pack=>decode( lv_pack ).
+    lv_fetch_duration = lo_fetch_timer->end( ).
+    MESSAGE s000(oo) WITH 'Fetch:' |{ lines( rt_objects ) } git objects, { lv_fetch_duration }|.
 
   ENDMETHOD.
 
