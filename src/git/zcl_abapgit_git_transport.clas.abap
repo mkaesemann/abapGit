@@ -364,8 +364,8 @@ CLASS ZCL_ABAPGIT_GIT_TRANSPORT IMPLEMENTATION.
     DATA: lv_capa    TYPE string,
           lv_line    TYPE string,
           lv_buffer  TYPE string,
-          lv_xstring TYPE xstring,
-          lv_pack    TYPE xstring.
+        lv_xstring TYPE xstring,
+        lv_pack    TYPE xstring.
 
     FIELD-SYMBOLS: <lv_hash> LIKE LINE OF it_hashes.
 
@@ -390,21 +390,6 @@ CLASS ZCL_ABAPGIT_GIT_TRANSPORT IMPLEMENTATION.
         cl_abap_char_utilities=>newline ).
     ENDIF.
 
-* ORTEC: insert have lines for known commits (want/have negotiation)
-    TRY.
-        DATA lt_ortec_haves TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
-        lt_ortec_haves = zcl_abapgit_ortec_fetch_neg=>get_have_commits(
-          iv_url         = iv_url
-          it_want_hashes = it_hashes ).
-        FIELD-SYMBOLS <lv_ortec_have> LIKE LINE OF lt_ortec_haves.
-        LOOP AT lt_ortec_haves ASSIGNING <lv_ortec_have>.
-          lv_buffer = lv_buffer && zcl_abapgit_git_utils=>pkt_string(
-            |have { <lv_ortec_have> }{ cl_abap_char_utilities=>newline }| ).
-        ENDLOOP.
-      CATCH zcx_abapgit_ortec_git.
-* ORTEC: fallback - continue without have lines
-    ENDTRY.
-
     lv_buffer = lv_buffer
              && '0000'
              && '0009done' && cl_abap_char_utilities=>newline.
@@ -417,24 +402,6 @@ CLASS ZCL_ABAPGIT_GIT_TRANSPORT IMPLEMENTATION.
     IF lv_pack IS INITIAL.
       zcx_abapgit_exception=>raise( 'Response could not be parsed - empty pack returned.' ).
     ENDIF.
-
-    "ORTEC: persist decoded objects + pack metadata for crash resume and delta tracking
-    TRY.
-        IF zcl_abapgit_ortec_git_switch=>is_active_for_repo( iv_url ) = abap_true.
-          DATA lv_ortec_rk TYPE zcl_abapgit_ortec_pack_dec=>ty_repo_key.
-          lv_ortec_rk = zcl_abapgit_ortec_repo_state=>get_or_create_repo_key_for_url( iv_url ).
-          IF lv_ortec_rk IS NOT INITIAL.
-            rt_objects = zcl_abapgit_ortec_pack_dec=>decode_and_persist(
-              iv_data     = lv_pack
-              iv_repo_key = lv_ortec_rk ).
-            IF rt_objects IS NOT INITIAL.
-              RETURN.
-            ENDIF.
-          ENDIF.
-        ENDIF.
-      CATCH zcx_abapgit_exception.
-        "ORTEC: persistence error is non-critical
-    ENDTRY.
 
     rt_objects = zcl_abapgit_git_pack=>decode( lv_pack ).
 
@@ -451,6 +418,19 @@ CLASS ZCL_ABAPGIT_GIT_TRANSPORT IMPLEMENTATION.
 
     CLEAR: et_objects,
            ev_branch.
+
+    IF zcl_abapgit_ortec_git_switch=>is_active_for_repo( iv_url ) = abap_true.
+      zcl_abapgit_ortec_fastpath=>upload_pack_by_branch(
+        EXPORTING
+          iv_url          = iv_url
+          iv_branch_name  = iv_branch_name
+          iv_deepen_level = iv_deepen_level
+          it_branches     = it_branches
+        IMPORTING
+          et_objects      = et_objects
+          ev_branch       = ev_branch ).
+      RETURN.
+    ENDIF.
 
     find_branch(
       EXPORTING
@@ -486,6 +466,18 @@ CLASS ZCL_ABAPGIT_GIT_TRANSPORT IMPLEMENTATION.
 
     CLEAR: et_objects,
            ev_commit.
+
+    IF zcl_abapgit_ortec_git_switch=>is_active_for_repo( iv_url ) = abap_true.
+      zcl_abapgit_ortec_fastpath=>upload_pack_by_commit(
+        EXPORTING
+          iv_url          = iv_url
+          iv_hash         = iv_hash
+          iv_deepen_level = iv_deepen_level
+        IMPORTING
+          et_objects      = et_objects
+          ev_commit       = ev_commit ).
+      RETURN.
+    ENDIF.
 
     APPEND iv_hash TO lt_hashes.
     ev_commit = iv_hash.

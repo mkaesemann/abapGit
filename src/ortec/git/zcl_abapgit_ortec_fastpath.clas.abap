@@ -26,6 +26,31 @@ CLASS zcl_abapgit_ortec_fastpath DEFINITION
       RETURNING VALUE(rs_result) TYPE zcl_abapgit_git_porcelain=>ty_pull_result
       RAISING   zcx_abapgit_ortec_git.
 
+    "! ORTEC-aware upload-pack by branch.
+    CLASS-METHODS upload_pack_by_branch
+      IMPORTING
+        iv_url          TYPE string
+        iv_branch_name  TYPE string
+        iv_deepen_level TYPE i DEFAULT 1
+        it_branches     TYPE zif_abapgit_git_definitions=>ty_git_branch_list_tt OPTIONAL
+      EXPORTING
+        et_objects      TYPE zif_abapgit_definitions=>ty_objects_tt
+        ev_branch       TYPE zif_abapgit_git_definitions=>ty_sha1
+      RAISING
+        zcx_abapgit_ortec_git.
+
+    "! ORTEC-aware upload-pack by commit.
+    CLASS-METHODS upload_pack_by_commit
+      IMPORTING
+        iv_url          TYPE string
+        iv_hash         TYPE zif_abapgit_git_definitions=>ty_sha1
+        iv_deepen_level TYPE i DEFAULT 0
+      EXPORTING
+        et_objects      TYPE zif_abapgit_definitions=>ty_objects_tt
+        ev_commit       TYPE zif_abapgit_git_definitions=>ty_sha1
+      RAISING
+        zcx_abapgit_ortec_git.
+
     "! Persist objects and state after a successful pull.
     "! Called as post-pull hook. Silently ignored on error.
     "! @parameter iv_url |
@@ -57,6 +82,24 @@ CLASS zcl_abapgit_ortec_fastpath DEFINITION
     CLASS-METHODS resolve_repo_key
       IMPORTING iv_url        TYPE string
       RETURNING VALUE(rv_key) TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key.
+
+    CLASS-METHODS upload_pack
+      IMPORTING
+        iv_url          TYPE string
+        iv_deepen_level TYPE i DEFAULT 0
+        it_hashes       TYPE zif_abapgit_git_definitions=>ty_sha1_tt
+      RETURNING
+        VALUE(rt_objects) TYPE zif_abapgit_definitions=>ty_objects_tt
+      RAISING
+        zcx_abapgit_ortec_git.
+
+    CLASS-METHODS parse
+      EXPORTING
+        ev_pack TYPE xstring
+      CHANGING
+        cv_data TYPE xstring
+      RAISING
+        zcx_abapgit_ortec_git.
 
 ENDCLASS.
 
@@ -219,6 +262,201 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
         CLEAR rs_result.
         RETURN.
     ENDTRY.
+
+  ENDMETHOD.
+
+
+  METHOD upload_pack_by_branch.
+
+    DATA ls_pull TYPE zcl_abapgit_git_porcelain=>ty_pull_result.
+    DATA lt_hashes TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    FIELD-SYMBOLS <ls_branch> LIKE LINE OF it_branches.
+
+
+    CLEAR: et_objects,
+           ev_branch.
+
+    ls_pull = pull_by_branch(
+      iv_url          = iv_url
+      iv_branch_name  = iv_branch_name
+      iv_deepen_level = iv_deepen_level ).
+    IF ls_pull IS NOT INITIAL.
+      et_objects = ls_pull-objects.
+      ev_branch  = ls_pull-commit.
+      RETURN.
+    ENDIF.
+
+    IF it_branches IS INITIAL.
+      ev_branch = zcl_abapgit_git_transport=>branches( iv_url )->find_by_name( iv_branch_name )-sha1.
+      APPEND ev_branch TO lt_hashes.
+    ELSE.
+      LOOP AT it_branches ASSIGNING <ls_branch>.
+        APPEND <ls_branch>-sha1 TO lt_hashes.
+      ENDLOOP.
+      ev_branch = zcl_abapgit_git_transport=>branches( iv_url )->find_by_name( iv_branch_name )-sha1.
+    ENDIF.
+
+    et_objects = upload_pack(
+      iv_url          = iv_url
+      iv_deepen_level = iv_deepen_level
+      it_hashes       = lt_hashes ).
+
+  ENDMETHOD.
+
+
+  METHOD upload_pack_by_commit.
+
+    DATA lt_hashes TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+
+
+    CLEAR: et_objects,
+           ev_commit.
+
+    APPEND iv_hash TO lt_hashes.
+    ev_commit = iv_hash.
+
+    et_objects = upload_pack(
+      iv_url          = iv_url
+      iv_deepen_level = iv_deepen_level
+      it_hashes       = lt_hashes ).
+
+  ENDMETHOD.
+
+
+  METHOD upload_pack.
+
+    DATA lo_client TYPE REF TO zcl_abapgit_http_client.
+    DATA lt_headers TYPE zcl_abapgit_http=>ty_headers.
+    DATA ls_header  LIKE LINE OF lt_headers.
+    DATA lv_capa    TYPE string.
+    DATA lv_line    TYPE string.
+    DATA lv_buffer  TYPE string.
+    DATA lv_xstring TYPE xstring.
+    DATA lv_pack    TYPE xstring.
+    DATA lv_repo_key TYPE zcl_abapgit_ortec_repo_state=>ty_repo_key.
+    DATA lt_ortec_haves TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+
+    FIELD-SYMBOLS <lv_hash> LIKE LINE OF it_hashes.
+    FIELD-SYMBOLS <lv_ortec_have> LIKE LINE OF lt_ortec_haves.
+
+
+    ls_header-key   = '~request_uri'.
+    ls_header-value = zcl_abapgit_url=>path_name( iv_url ) && |/git-upload-pack|.
+    APPEND ls_header TO lt_headers.
+
+    lo_client = zcl_abapgit_http=>create_by_url(
+      iv_url     = iv_url
+      it_headers = lt_headers ).
+
+    lo_client->set_headers(
+      iv_url     = iv_url
+      iv_service = 'upload' ).
+
+    LOOP AT it_hashes FROM 1 ASSIGNING <lv_hash>.
+      IF sy-tabix = 1.
+        lv_capa = 'side-band-64k no-progress multi_ack'.
+        lv_line = 'want' && ` ` && <lv_hash>
+          && ` ` && lv_capa && cl_abap_char_utilities=>newline.
+      ELSE.
+        lv_line = 'want' && ` ` && <lv_hash>
+          && cl_abap_char_utilities=>newline.
+      ENDIF.
+      lv_buffer = lv_buffer && zcl_abapgit_git_utils=>pkt_string( lv_line ).
+    ENDLOOP.
+
+    IF iv_deepen_level > 0.
+      lv_buffer = lv_buffer && zcl_abapgit_git_utils=>pkt_string( |deepen { iv_deepen_level }| &&
+        cl_abap_char_utilities=>newline ).
+    ENDIF.
+
+    TRY.
+        lt_ortec_haves = zcl_abapgit_ortec_fetch_neg=>get_have_commits(
+          iv_url         = iv_url
+          it_want_hashes = it_hashes ).
+        LOOP AT lt_ortec_haves ASSIGNING <lv_ortec_have>.
+          lv_buffer = lv_buffer && zcl_abapgit_git_utils=>pkt_string(
+            |have { <lv_ortec_have> }{ cl_abap_char_utilities=>newline }| ).
+        ENDLOOP.
+      CATCH zcx_abapgit_ortec_git.
+    ENDTRY.
+
+    lv_buffer = lv_buffer
+             && '0000'
+             && '0009done' && cl_abap_char_utilities=>newline.
+
+    lv_xstring = lo_client->send_receive_close( zcl_abapgit_convert=>string_to_xstring_utf8( lv_buffer ) ).
+
+    parse( IMPORTING ev_pack = lv_pack
+           CHANGING  cv_data = lv_xstring ).
+
+    IF lv_pack IS INITIAL.
+      lv_repo_key = zcl_abapgit_ortec_repo_state=>get_repo_key_for_url( iv_url ).
+      IF lv_repo_key IS NOT INITIAL.
+        TRY.
+            rt_objects = zcl_abapgit_ortec_obj_store=>get_all_objects( lv_repo_key ).
+            IF rt_objects IS NOT INITIAL.
+              RETURN.
+            ENDIF.
+          CATCH zcx_abapgit_ortec_git.
+        ENDTRY.
+      ENDIF.
+
+      zcx_abapgit_ortec_git=>raise( 'Response could not be parsed - empty pack returned.' ).
+    ENDIF.
+
+    TRY.
+        IF zcl_abapgit_ortec_git_switch=>is_active_for_repo( iv_url ) = abap_true.
+          DATA lv_ortec_rk TYPE zcl_abapgit_ortec_pack_dec=>ty_repo_key.
+          lv_ortec_rk = zcl_abapgit_ortec_repo_state=>get_or_create_repo_key_for_url( iv_url ).
+          IF lv_ortec_rk IS NOT INITIAL.
+            rt_objects = zcl_abapgit_ortec_pack_dec=>decode_and_persist(
+              iv_data     = lv_pack
+              iv_repo_key = lv_ortec_rk ).
+            IF rt_objects IS NOT INITIAL.
+              RETURN.
+            ENDIF.
+          ENDIF.
+        ENDIF.
+      CATCH zcx_abapgit_exception.
+    ENDTRY.
+
+    rt_objects = zcl_abapgit_git_pack=>decode( lv_pack ).
+
+  ENDMETHOD.
+
+
+  METHOD parse.
+
+    CONSTANTS lc_band1 TYPE x VALUE '01'.
+
+    DATA lv_len      TYPE i.
+    DATA lv_contents TYPE xstring.
+    DATA lv_pack     TYPE xstring.
+
+
+    WHILE xstrlen( cv_data ) >= 4.
+      lv_len = zcl_abapgit_git_utils=>length_utf8_hex( cv_data ).
+
+      IF lv_len > xstrlen( cv_data ).
+        zcx_abapgit_ortec_git=>raise( 'parse, string length too large' ).
+      ENDIF.
+
+      lv_contents = cv_data(lv_len).
+      IF lv_len = 0.
+        cv_data = cv_data+4.
+        CONTINUE.
+      ELSE.
+        cv_data = cv_data+lv_len.
+      ENDIF.
+
+      lv_contents = lv_contents+4.
+
+      IF xstrlen( lv_contents ) > 1 AND lv_contents(1) = lc_band1.
+        CONCATENATE lv_pack lv_contents+1 INTO lv_pack IN BYTE MODE.
+      ENDIF.
+    ENDWHILE.
+
+    ev_pack = lv_pack.
 
   ENDMETHOD.
 
