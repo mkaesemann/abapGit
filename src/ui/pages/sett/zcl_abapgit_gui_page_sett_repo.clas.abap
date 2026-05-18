@@ -47,7 +47,8 @@ CLASS zcl_abapgit_gui_page_sett_repo DEFINITION
       END OF c_id.
     CONSTANTS:
       BEGIN OF c_event,
-        save TYPE string VALUE 'save',
+        save        TYPE string VALUE 'save',
+        clear_cache TYPE string VALUE 'clear_cache',
       END OF c_event .
     CONSTANTS c_empty_rows TYPE i VALUE 2 ##NO_TEXT.
 
@@ -83,6 +84,7 @@ CLASS zcl_abapgit_gui_page_sett_repo DEFINITION
     METHODS save_settings
       RAISING
         zcx_abapgit_exception .
+
 ENDCLASS.
 
 
@@ -242,10 +244,18 @@ CLASS zcl_abapgit_gui_page_sett_repo IMPLEMENTATION.
       iv_label       = 'ABAP for Cloud Development'
       iv_value       = zif_abapgit_dot_abapgit=>c_abap_language_version-cloud_development ).
 
+    ro_form->checkbox(
+      iv_name  = zcl_abapgit_ortec_git_switch=>cs_info-settings-name
+      iv_label = zcl_abapgit_ortec_git_switch=>cs_info-settings-label
+      iv_hint  = zcl_abapgit_ortec_git_switch=>cs_info-settings-hint ).
+
     ro_form->command(
       iv_label       = 'Save Settings'
       iv_cmd_type    = zif_abapgit_html_form=>c_cmd_type-input_main
       iv_action      = c_event-save
+    )->command(
+      iv_label  = 'Clear ORTEC Cache'
+      iv_action = c_event-clear_cache
     )->command(
       iv_label       = 'Back'
       iv_action      = zif_abapgit_definitions=>c_action-go_back ).
@@ -360,6 +370,10 @@ CLASS zcl_abapgit_gui_page_sett_repo IMPLEMENTATION.
       iv_key = c_id-original_system
       iv_val = ls_dot-original_system ).
 
+    ro_form_data->set(
+      iv_key = zcl_abapgit_ortec_git_switch=>cs_info-settings-name
+      iv_val = |{ zcl_abapgit_ortec_git_switch=>get_use_repo_cache( mi_repo->ms_data-url ) }| ).
+
   ENDMETHOD.
 
 
@@ -384,6 +398,10 @@ CLASS zcl_abapgit_gui_page_sett_repo IMPLEMENTATION.
     lo_dot->set_version_constant( mo_form_data->get( c_id-version_constant ) ).
     lo_dot->set_original_system( mo_form_data->get( c_id-original_system ) ).
     lo_dot->set_abap_language_version( mo_form_data->get( c_id-abap_langu_vers ) ).
+
+    zcl_abapgit_ortec_git_switch=>set_use_repo_cache(
+      iv_url     = mi_repo->ms_data-url
+      iv_enabled = CONV abap_bool( mo_form_data->get( zcl_abapgit_ortec_git_switch=>cs_info-settings-name ) ) ).
 
     lt_i18n_langs = zcl_abapgit_lxe_texts=>convert_lang_string_to_table(
       iv_langs              = mo_form_data->get( c_id-i18n_langs )
@@ -448,7 +466,6 @@ CLASS zcl_abapgit_gui_page_sett_repo IMPLEMENTATION.
     mo_form_data = read_settings( ).
 
   ENDMETHOD.
-
 
   METHOD validate_form.
 
@@ -580,6 +597,16 @@ CLASS zcl_abapgit_gui_page_sett_repo IMPLEMENTATION.
           save_settings( ).
         ENDIF.
 
+        rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
+
+      WHEN c_event-clear_cache.
+        TRY.
+            DATA(ls_clear) = zcl_abapgit_ortec_git_switch=>clear_repo_cache( mi_repo->get_key( ) ).
+            DATA(lv_msg)   = zcl_abapgit_ortec_git_switch=>format_clear_result( ls_clear ).
+            MESSAGE s000(oo) WITH lv_msg.
+          CATCH zcx_abapgit_ortec_git INTO DATA(lx_error).
+            MESSAGE lx_error->get_text( ) TYPE 'E'.
+        ENDTRY.
         rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
 
     ENDCASE.

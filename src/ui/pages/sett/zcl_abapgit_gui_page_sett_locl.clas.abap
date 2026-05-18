@@ -219,7 +219,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_SETT_LOCL IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD get_form_schema.
+METHOD get_form_schema.
 
     DATA: li_package TYPE REF TO zif_abapgit_sap_package.
 
@@ -349,7 +349,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_SETT_LOCL IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD read_settings.
+METHOD read_settings.
 
     DATA li_package TYPE REF TO zif_abapgit_sap_package.
     DATA lv_excl_rem TYPE string.
@@ -415,7 +415,7 @@ CLASS ZCL_ABAPGIT_GUI_PAGE_SETT_LOCL IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD save_settings.
+METHOD save_settings.
 
     ms_settings-display_name                 = mo_form_data->get( c_id-display_name ).
     ms_settings-transport_request            = mo_form_data->get( c_id-transport_request ).

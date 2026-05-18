@@ -106,7 +106,7 @@ ENDCLASS.
 
 
 CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
-  METHOD pull_by_branch.
+METHOD pull_by_branch.
 
     DATA lt_resumed     TYPE zif_abapgit_definitions=>ty_objects_tt.
     DATA lt_expanded    TYPE zif_abapgit_git_definitions=>ty_expanded_tt.
@@ -361,7 +361,7 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD upload_pack.
+METHOD upload_pack.
 
     DATA lv_capa    TYPE string.
     DATA lv_line    TYPE string.
@@ -530,8 +530,6 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    "! STRATEGY 1: Batch existence check (replaces N+1 SELECT pattern).
-    "! Load all existing SHA1s once, check membership in memory (O(1) hash lookup).
     GET TIME STAMP FIELD lv_ts.
     SELECT obj_sha1 FROM zaog_obj_store INTO TABLE lt_existing_shas
       WHERE repo_key = lv_repo_key

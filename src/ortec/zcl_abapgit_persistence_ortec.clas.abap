@@ -29,6 +29,28 @@ CLASS zcl_abapgit_persistence_ortec DEFINITION
                 iv_branch TYPE string
       RAISING   zcx_abapgit_exception.
 
+    "! Reads the per-repository cache usage flag for the current user.
+    "! Missing entries are normalized to ABAP_FALSE.
+    "! @parameter iv_url |
+    "! Repository URL.
+    "! @parameter rv_use_cache |
+    "! ABAP_TRUE when cache usage is enabled for the repository.
+    METHODS get_repo_use_cache
+      IMPORTING iv_url                TYPE zif_abapgit_persistence=>ty_repo-url
+      RETURNING VALUE(rv_use_cache)   TYPE abap_bool
+      RAISING   zcx_abapgit_exception.
+
+    "! Persists the per-repository cache usage flag for the current user.
+    "! The value is normalized to ABAP_TRUE or ABAP_FALSE before save.
+    "! @parameter iv_url |
+    "! Repository URL.
+    "! @parameter iv_use_cache |
+    "! Requested cache usage flag.
+    METHODS set_repo_use_cache
+      IMPORTING iv_url       TYPE zif_abapgit_persistence=>ty_repo-url
+                iv_use_cache TYPE csequence
+      RAISING   zcx_abapgit_exception.
+
     METHODS get_settings
       RETURNING VALUE(rs_user_settings) TYPE ty_user_settings
       RAISING   zcx_abapgit_exception.
@@ -49,6 +71,7 @@ CLASS zcl_abapgit_persistence_ortec DEFINITION
       BEGIN OF ty_repo_config,
         url         TYPE zif_abapgit_persistence=>ty_repo-url,
         user_branch TYPE string,
+        use_cache   TYPE abap_bool,
       END OF ty_repo_config.
     TYPES ty_repo_configs TYPE STANDARD TABLE OF ty_repo_config WITH DEFAULT KEY.
     TYPES:
@@ -219,6 +242,32 @@ CLASS ZCL_ABAPGIT_PERSISTENCE_ORTEC IMPLEMENTATION.
     ls_repo_config = read_repo_config(
                          iv_url ).
     ls_repo_config-user_branch = iv_branch.
+    update_repo_config(
+        iv_url         = iv_url
+        is_repo_config = ls_repo_config ).
+
+  ENDMETHOD.
+
+
+  METHOD get_repo_use_cache.
+
+    rv_use_cache = SWITCH #( read_repo_config( iv_url )-use_cache
+                             WHEN abap_true
+                             THEN abap_true
+                             ELSE abap_false ).
+
+  ENDMETHOD.
+
+
+  METHOD set_repo_use_cache.
+
+    DATA ls_repo_config TYPE ty_repo_config.
+
+    ls_repo_config = read_repo_config( iv_url ).
+    ls_repo_config-use_cache = SWITCH #( iv_use_cache
+                                         WHEN abap_true
+                                         THEN abap_true
+                                         ELSE abap_false ).
     update_repo_config(
         iv_url         = iv_url
         is_repo_config = ls_repo_config ).
