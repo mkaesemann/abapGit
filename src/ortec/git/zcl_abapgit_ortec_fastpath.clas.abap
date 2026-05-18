@@ -121,6 +121,7 @@ METHOD pull_by_branch.
     DATA ls_state       TYPE zcl_abapgit_ortec_repo_state=>ty_state.
     DATA lo_fp_timer    TYPE REF TO zcl_abapgit_timer.
     DATA lv_fp_duration TYPE string.
+    DATA li_progress    TYPE REF TO zif_abapgit_progress.
 
     FIELD-SYMBOLS <ls_exp>  LIKE LINE OF lt_expanded.
     FIELD-SYMBOLS <ls_blob> LIKE LINE OF rs_result-objects.
@@ -212,8 +213,10 @@ METHOD pull_by_branch.
             ENDTRY.
 
             lv_fp_duration = lo_fp_timer->end( ).
-            MESSAGE s000(oo) WITH 'Fastpath:'
-              |{ lines( rs_result-objects ) } git objects (resumed), { lv_fp_duration }|.
+            li_progress = zcl_abapgit_progress=>get_instance( 1 ).
+            li_progress->show(
+              iv_current = 1
+              iv_text    = |Fastpath: { lines( rs_result-objects ) } git objects (resumed), { lv_fp_duration }| ).
             RETURN. " Success! Avoid redundant GET from remote.
           CATCH zcx_abapgit_exception.
             CLEAR rs_result.
@@ -272,8 +275,10 @@ METHOD pull_by_branch.
     ENDTRY.
 
     lv_fp_duration = lo_fp_timer->end( ).
-    MESSAGE s000(oo) WITH 'Fastpath:'
-      |{ lines( rs_result-objects ) } git objects, { lv_fp_duration }|.
+    li_progress = zcl_abapgit_progress=>get_instance( 1 ).
+    li_progress->show(
+      iv_current = 1
+      iv_text    = |Fastpath: { lines( rs_result-objects ) } git objects, { lv_fp_duration }| ).
 
   ENDMETHOD.
 
@@ -288,6 +293,11 @@ METHOD pull_by_branch.
 
     CLEAR: et_objects,
            ev_branch.
+
+    data(li_progress) = zcl_abapgit_progress=>get_instance( 1 ).
+
+    li_progress->show( iv_current = 2
+                       iv_text    = 'Fetch remote files (Fastpath)' ).
 
     ls_pull = pull_by_branch(
       iv_url          = iv_url
@@ -373,6 +383,7 @@ METHOD upload_pack.
 
     DATA lo_fetch_timer   TYPE REF TO zcl_abapgit_timer.
     DATA lv_fetch_duration TYPE string.
+    DATA li_progress      TYPE REF TO zif_abapgit_progress.
 
     FIELD-SYMBOLS <lv_hash> LIKE LINE OF it_hashes.
     FIELD-SYMBOLS <lv_ortec_have> LIKE LINE OF lt_ortec_haves.
@@ -436,8 +447,10 @@ METHOD upload_pack.
                 IF sy-subrc = 0.
                   rt_objects = lt_cached.
                   lv_fetch_duration = lo_fetch_timer->end( ).
-                  MESSAGE s000(oo) WITH 'Fastpath:'
-                    |{ lines( rt_objects ) } git objects (cached), { lv_fetch_duration }|.
+                  li_progress = zcl_abapgit_progress=>get_instance( 1 ).
+                  li_progress->show(
+                    iv_current = 1
+                    iv_text    = |Fastpath: { lines( rt_objects ) } git objects (cached), { lv_fetch_duration }| ).
                   RETURN.
                 ENDIF.
               ENDIF.
@@ -459,8 +472,10 @@ METHOD upload_pack.
               iv_repo_key = lv_ortec_rk ).
             IF rt_objects IS NOT INITIAL.
               lv_fetch_duration = lo_fetch_timer->end( ).
-              MESSAGE s000(oo) WITH 'Fetch:'
-                |{ lines( rt_objects ) } git objects, { lv_fetch_duration }|.
+              li_progress = zcl_abapgit_progress=>get_instance( 1 ).
+              li_progress->show(
+                iv_current = 1
+                iv_text    = |Fetch: { lines( rt_objects ) } git objects, { lv_fetch_duration }| ).
               RETURN.
             ENDIF.
           ENDIF.
@@ -470,7 +485,10 @@ METHOD upload_pack.
 
     rt_objects = zcl_abapgit_git_pack=>decode( lv_pack ).
     lv_fetch_duration = lo_fetch_timer->end( ).
-    MESSAGE s000(oo) WITH 'Fetch:' |{ lines( rt_objects ) } git objects, { lv_fetch_duration }|.
+    li_progress = zcl_abapgit_progress=>get_instance( 1 ).
+    li_progress->show(
+      iv_current = 1
+      iv_text    = |Fetch: { lines( rt_objects ) } git objects, { lv_fetch_duration }| ).
 
   ENDMETHOD.
 
