@@ -34,7 +34,7 @@ CLASS zcl_abapgit_ortec_pack_dec DEFINITION
     CLASS-METHODS decode_and_persist
       IMPORTING iv_data            TYPE xstring
                 iv_repo_key        TYPE ty_repo_key
-                iv_commit_interval TYPE i DEFAULT 50
+                iv_commit_interval TYPE i                                      DEFAULT 50
                 it_objects         TYPE zif_abapgit_definitions=>ty_objects_tt OPTIONAL
       RETURNING VALUE(rt_objects)  TYPE zif_abapgit_definitions=>ty_objects_tt
       RAISING   zcx_abapgit_exception.
@@ -56,19 +56,19 @@ CLASS zcl_abapgit_ortec_pack_dec DEFINITION
       RAISING   zcx_abapgit_exception.
 
   PROTECTED SECTION.
-    CONSTANTS c_pack_start         TYPE x LENGTH 4 VALUE '5041434B' ##NO_TEXT.
-    CONSTANTS c_zlib               TYPE x LENGTH 2 VALUE '789C' ##NO_TEXT.
-    CONSTANTS c_zlib_hmm           TYPE x LENGTH 2 VALUE '7801' ##NO_TEXT.
-    CONSTANTS c_version            TYPE x LENGTH 4 VALUE '00000002' ##NO_TEXT.
+    CONSTANTS c_pack_start             TYPE x LENGTH 4 VALUE '5041434B' ##NO_TEXT.
+    CONSTANTS c_zlib                   TYPE x LENGTH 2 VALUE '789C' ##NO_TEXT.
+    CONSTANTS c_zlib_hmm               TYPE x LENGTH 2 VALUE '7801' ##NO_TEXT.
+    CONSTANTS c_version                TYPE x LENGTH 4 VALUE '00000002' ##NO_TEXT.
     "! Interval in seconds between TH_REDISPATCH calls inside the decode loop.
     "! Default 300 s = 5 minutes.  Increase for systems with longer WP timeouts.
-    CONSTANTS c_redispatch_interval TYPE i VALUE 300 ##NO_TEXT.
+    CONSTANTS c_redispatch_interval    TYPE i          VALUE 300 ##NO_TEXT.
     "! Optimization #1: Use kernel decompress + Adler32-scan to find compressed
     "! stream boundaries instead of pure-ABAP zlib inflate.
     "! Toggle: abap_true = enabled (fast kernel path), abap_false = disabled (legacy).
     "! NOTE: Adler32 scan has a small false-positive risk if the 4-byte checksum
     "! value appears in the compressed data before the actual trailer.
-    CONSTANTS c_opt1_kernel_adler_scan TYPE abap_bool VALUE abap_false ##NO_TEXT.
+    CONSTANTS c_opt1_kernel_adler_scan TYPE abap_bool  VALUE abap_false ##NO_TEXT.
     "! Optimization #6: CL_ABAP_UNGZIP_BINARY_STREAM-based streaming decompression.
     "! Kernel-backed, returns exact consumed-length via gzip_in_off — eliminates
     "! both re-compress trick and Adler32 guessing. Works for 789C and 7801.
@@ -76,12 +76,12 @@ CLASS zcl_abapgit_ortec_pack_dec DEFINITION
     "! Uses a fixed 64 KB TYPE X output buffer to prevent unbounded allocation
     "! (SET_OUT_BUF reliably derives ME->OUT_BUF_LEN from DESCRIBE FIELD LENGTH
     "! for TYPE X, independent of EXPORTING-param runtime semantics).
-    CONSTANTS c_opt6_stream_decompress TYPE abap_bool VALUE abap_false ##NO_TEXT.
+    CONSTANTS c_opt6_stream_decompress TYPE abap_bool  VALUE abap_true ##NO_TEXT.
     "! Fixed output buffer size for opt6 streaming decompression (bytes).
     "! The kernel fills this buffer per chunk and calls the output handler.
     "! 65535 = max TYPE X flat field length; good trade-off between memory
     "! and callback frequency.
-    CONSTANTS c_opt6_out_buf_size TYPE i VALUE 65535 ##NO_TEXT.
+    CONSTANTS c_opt6_out_buf_size      TYPE i          VALUE 65535 ##NO_TEXT.
 
     "! Decode a raw packfile into an in-memory object table.
     "! All delta references are resolved before returning.
@@ -140,20 +140,28 @@ CLASS zcl_abapgit_ortec_pack_dec DEFINITION
     "! Kernel-based streaming decompression using CL_ABAP_UNGZIP_BINARY_STREAM.
     "! Returns both decompressed data and exact consumed compressed byte count.
     "! Works for any DEFLATE stream (789C / 7801) without header-specific tricks.
+    "!
+    "! @parameter iv_data |
+    "! @parameter iv_expected_len |
+    "! @parameter ev_decompressed |
+    "! @parameter ev_compressed_len |
+    "! @raising zcx_abapgit_exception |
     CLASS-METHODS stream_decompress
-      IMPORTING iv_data               TYPE xstring
-                iv_expected_len       TYPE i
-      EXPORTING ev_decompressed       TYPE xstring
-                ev_compressed_len     TYPE i
-      RAISING   zcx_abapgit_exception.    CLASS-METHODS create_session
+      IMPORTING iv_data           TYPE xstring
+                iv_expected_len   TYPE i
+      EXPORTING ev_decompressed   TYPE xstring
+                ev_compressed_len TYPE i
+      RAISING   zcx_abapgit_exception.
+
+    CLASS-METHODS create_session
       IMPORTING iv_repo_key          TYPE ty_repo_key
                 iv_obj_total         TYPE i
                 iv_pack_id           TYPE ty_pack_id
       RETURNING VALUE(rv_session_id) TYPE ty_session_id.
 
     CLASS-METHODS update_session_progress
-      IMPORTING iv_session_id TYPE ty_session_id
-                iv_obj_done   TYPE i
+      IMPORTING iv_session_id  TYPE ty_session_id
+                iv_obj_done    TYPE i
                 iv_curr_offset TYPE i OPTIONAL.
 
     CLASS-METHODS fail_session
@@ -164,11 +172,11 @@ CLASS zcl_abapgit_ortec_pack_dec DEFINITION
       IMPORTING iv_session_id TYPE ty_session_id.
 
     CLASS-METHODS find_active_session
-      IMPORTING iv_repo_key   TYPE ty_repo_key
-      EXPORTING ev_session_id TYPE ty_session_id
-                ev_pack_id    TYPE ty_pack_id
-                ev_obj_done   TYPE i
-                ev_branch_name TYPE string
+      IMPORTING iv_repo_key     TYPE ty_repo_key
+      EXPORTING ev_session_id   TYPE ty_session_id
+                ev_pack_id      TYPE ty_pack_id
+                ev_obj_done     TYPE i
+                ev_branch_name  TYPE string
                 ev_deepen_level TYPE i.
 
     CLASS-METHODS persist_objects
@@ -187,121 +195,118 @@ ENDCLASS.
 
 
 CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
-
   METHOD decode_and_persist.
-    DATA lv_pack_id    TYPE ty_pack_id.
-    DATA lv_ts         TYPE timestampl.
-    DATA ls_meta       TYPE zaog_pack_meta.
-    DATA lv_session_id TYPE ty_session_id.
-    DATA lv_obj_count  TYPE i.
-    DATA lv_obj_count_x TYPE xstring.
     DATA lv_repo_lock_id TYPE zcl_abapgit_ortec_pack_raw=>ty_session_id.
+    DATA lv_pack_id      TYPE ty_pack_id.
+    DATA lv_obj_count_x  TYPE xstring.
+    DATA lv_obj_count    TYPE i.
+    DATA lv_ts           TYPE timestampl.
+    DATA ls_meta         TYPE zaog_pack_meta.
+    DATA lv_session_id   TYPE ty_session_id.
 
     lv_repo_lock_id = acquire_repo_lock( iv_repo_key = iv_repo_key ).
 
     TRY.
 
-    " Generate a unique pack ID for this packfile
-    TRY.
-        lv_pack_id = cl_system_uuid=>create_uuid_c32_static( ).
-      CATCH cx_uuid_error.
-        zcx_abapgit_exception=>raise( 'Failed to generate pack UUID' ).
-    ENDTRY.
+        " Generate a unique pack ID for this packfile
+        TRY.
+            lv_pack_id = cl_system_uuid=>create_uuid_c32_static( ).
+          CATCH cx_uuid_error.
+            zcx_abapgit_exception=>raise( 'Failed to generate pack UUID' ).
+        ENDTRY.
 
-    " STEP 1: Store raw packfile immediately.
-    "   This is the most critical step: if a timeout occurs during decode or
-    "   persist, resume_decode can reload this instead of repeating the HTTP call.
-    zcl_abapgit_ortec_pack_raw=>store(
-      iv_repo_key = iv_repo_key
-      iv_pack_id  = lv_pack_id
-      iv_raw_data = iv_data ).
-    COMMIT WORK.
+        " STEP 1: Store raw packfile immediately.
+        "   This is the most critical step: if a timeout occurs during decode or
+        "   persist, resume_decode can reload this instead of repeating the HTTP call.
+        zcl_abapgit_ortec_pack_raw=>store(
+            iv_repo_key = iv_repo_key
+            iv_pack_id  = lv_pack_id
+            iv_raw_data = iv_data ).
+        COMMIT WORK.
 
-    " STEP 2: Decode the packfile (or use pre-decoded objects if supplied).
-    "   For raw pack decode we resume from persisted checkpoints in the same
-    "   session (curr_offset + already decoded temp objects).
-    IF it_objects IS SUPPLIED AND it_objects IS NOT INITIAL.
-      rt_objects = it_objects.
-    ENDIF.
+        " STEP 2: Decode the packfile (or use pre-decoded objects if supplied).
+        "   For raw pack decode we resume from persisted checkpoints in the same
+        "   session (curr_offset + already decoded temp objects).
+        IF it_objects IS SUPPLIED AND it_objects IS NOT INITIAL.
+          rt_objects = it_objects.
+        ENDIF.
 
-    IF rt_objects IS INITIAL AND xstrlen( iv_data ) >= 12.
-      lv_obj_count_x = iv_data+8(4).
-      lv_obj_count = zcl_abapgit_convert=>xstring_to_int( lv_obj_count_x ).
-    ELSE.
-      lv_obj_count = lines( rt_objects ).
-    ENDIF.
+        IF rt_objects IS INITIAL AND xstrlen( iv_data ) >= 12.
+          lv_obj_count_x = iv_data+8(4).
+          lv_obj_count = zcl_abapgit_convert=>xstring_to_int( lv_obj_count_x ).
+        ELSE.
+          lv_obj_count = lines( rt_objects ).
+        ENDIF.
 
-    " STEP 3: Register pack metadata (status P = in progress)
-    GET TIME STAMP FIELD lv_ts.
-    ls_meta-repo_key    = iv_repo_key.
-    ls_meta-pack_id     = lv_pack_id.
-    ls_meta-obj_count   = lv_obj_count.
-    ls_meta-obj_decoded = 0.
-    ls_meta-total_size  = xstrlen( iv_data ).
-    ls_meta-status      = 'P'.
-    ls_meta-raw_stored  = abap_true.
-    ls_meta-received_at = lv_ts.
-    MODIFY zaog_pack_meta FROM ls_meta.
+        " STEP 3: Register pack metadata (status P = in progress)
+        GET TIME STAMP FIELD lv_ts.
+        ls_meta-repo_key    = iv_repo_key.
+        ls_meta-pack_id     = lv_pack_id.
+        ls_meta-obj_count   = lv_obj_count.
+        ls_meta-obj_decoded = 0.
+        ls_meta-total_size  = xstrlen( iv_data ).
+        ls_meta-status      = 'P'.
+        ls_meta-raw_stored  = abap_true.
+        ls_meta-received_at = lv_ts.
+        MODIFY zaog_pack_meta FROM ls_meta.
 
-    " STEP 4: Create fetch session for crash-resume tracking
-    lv_session_id = create_session(
-                        iv_repo_key  = iv_repo_key
-                        iv_obj_total = lv_obj_count
-                        iv_pack_id   = lv_pack_id ).
-    COMMIT WORK.
+        " STEP 4: Create fetch session for crash-resume tracking
+        lv_session_id = create_session(
+                            iv_repo_key  = iv_repo_key
+                            iv_obj_total = lv_obj_count
+                            iv_pack_id   = lv_pack_id ).
+        COMMIT WORK.
 
-    IF rt_objects IS INITIAL.
-      rt_objects = resumable_decode(
-        iv_data            = iv_data
-        iv_repo_key        = iv_repo_key
-        iv_pack_id         = lv_pack_id
-        iv_session_id      = lv_session_id
-        iv_commit_interval = iv_commit_interval ).
-      lv_obj_count = lines( rt_objects ).
-    ENDIF.
+        IF rt_objects IS INITIAL.
+          rt_objects = resumable_decode(
+                           iv_data            = iv_data
+                           iv_repo_key        = iv_repo_key
+                           iv_pack_id         = lv_pack_id
+                           iv_session_id      = lv_session_id
+                           iv_commit_interval = iv_commit_interval ).
+          lv_obj_count = lines( rt_objects ).
+        ENDIF.
 
-    " STEP 5: Persist decoded objects.
-    "   - raw decode path: persisted incrementally inside resumable_decode
-    "   - pre-decoded path: persist here
-    IF it_objects IS SUPPLIED AND it_objects IS NOT INITIAL.
-      persist_objects(
-          iv_repo_key        = iv_repo_key
-          iv_pack_id         = lv_pack_id
-          iv_session_id      = lv_session_id
-          iv_skip_count      = 0
-          iv_commit_interval = iv_commit_interval
-          it_objects         = rt_objects ).
-    ENDIF.
+        " STEP 5: Persist decoded objects.
+        "   - raw decode path: persisted incrementally inside resumable_decode
+        "   - pre-decoded path: persist here
+        IF it_objects IS SUPPLIED AND it_objects IS NOT INITIAL.
+          persist_objects(
+              iv_repo_key        = iv_repo_key
+              iv_pack_id         = lv_pack_id
+              iv_session_id      = lv_session_id
+              iv_skip_count      = 0
+              iv_commit_interval = iv_commit_interval
+              it_objects         = rt_objects ).
+        ENDIF.
 
-    " STEP 6: Mark pack and session as complete
-    complete_pack(
-        iv_repo_key = iv_repo_key
-        iv_pack_id  = lv_pack_id
-        iv_count    = lv_obj_count ).
-    complete_session( lv_session_id ).
+        " STEP 6: Mark pack and session as complete
+        complete_pack(
+            iv_repo_key = iv_repo_key
+            iv_pack_id  = lv_pack_id
+            iv_count    = lv_obj_count ).
+        complete_session( lv_session_id ).
 
-    " STEP 7: Raw packfile no longer needed — all objects are in OBJ_STORE
-    zcl_abapgit_ortec_pack_raw=>delete(
-      iv_repo_key = iv_repo_key
-      iv_pack_id  = lv_pack_id ).
-    COMMIT WORK.
+        " STEP 7: Raw packfile no longer needed — all objects are in OBJ_STORE
+        zcl_abapgit_ortec_pack_raw=>delete(
+            iv_repo_key = iv_repo_key
+            iv_pack_id  = lv_pack_id ).
+        COMMIT WORK.
 
-      release_repo_lock( lv_repo_lock_id ).
-    CATCH zcx_abapgit_exception INTO DATA(lx_decode).
-      release_repo_lock( lv_repo_lock_id ).
-      RAISE EXCEPTION lx_decode.
+        release_repo_lock( lv_repo_lock_id ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_decode).
+        release_repo_lock( lv_repo_lock_id ).
+        RAISE EXCEPTION lx_decode.
     ENDTRY.
 
   ENDMETHOD.
 
-
   METHOD resume_decode.
-    DATA lv_session_id TYPE ty_session_id.
-    DATA lv_pack_id    TYPE ty_pack_id.
-    DATA lv_obj_done   TYPE i.
-    DATA lv_raw        TYPE xstring.
-
     DATA lv_repo_lock_id TYPE zcl_abapgit_ortec_pack_raw=>ty_session_id.
+    DATA lv_session_id   TYPE ty_session_id.
+    DATA lv_pack_id      TYPE ty_pack_id.
+    DATA lv_obj_done     TYPE i.
+    DATA lv_raw          TYPE xstring.
 
     lv_repo_lock_id = acquire_repo_lock( iv_repo_key = iv_repo_key ).
 
@@ -309,37 +314,39 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
         " Find an active (incomplete) session for this repository
         find_active_session(
           EXPORTING
-            iv_repo_key   = iv_repo_key
+            iv_repo_key     = iv_repo_key
           IMPORTING
-            ev_session_id = lv_session_id
-            ev_pack_id    = lv_pack_id
-            ev_obj_done   = lv_obj_done
-            ev_branch_name = DATA(lv_branch_name)
+            ev_session_id   = lv_session_id
+            ev_pack_id      = lv_pack_id
+            ev_obj_done     = lv_obj_done
+          " TODO: variable is assigned but never used (ABAP cleaner)
+            ev_branch_name  = DATA(lv_branch_name)
+          " TODO: variable is assigned but never used (ABAP cleaner)
             ev_deepen_level = DATA(lv_deepen_level) ).
         IF lv_session_id IS INITIAL.
           release_repo_lock( lv_repo_lock_id ).
           RETURN. " Nothing to resume
         ENDIF.
 
-    " Load the stored raw packfile (avoids re-downloading from remote)
+        " Load the stored raw packfile (avoids re-downloading from remote)
         TRY.
             lv_raw = zcl_abapgit_ortec_pack_raw=>load(
-              iv_repo_key = iv_repo_key
-              iv_pack_id  = lv_pack_id ).
+                         iv_repo_key = iv_repo_key
+                         iv_pack_id  = lv_pack_id ).
           CATCH zcx_abapgit_exception.
-          " Raw pack was lost — cannot resume; mark session failed
-          fail_session( iv_session_id = lv_session_id iv_obj_done = lv_obj_done ).
-          COMMIT WORK.
-          release_repo_lock( lv_repo_lock_id ).
-          RETURN.
+            " Raw pack was lost — cannot resume; mark session failed
+            fail_session( iv_session_id = lv_session_id iv_obj_done = lv_obj_done ).
+            COMMIT WORK.
+            release_repo_lock( lv_repo_lock_id ).
+            RETURN.
         ENDTRY.
 
-    " Continue decoding from last checkpoint (curr_offset + temp decoded rows)
-    rt_objects = resumable_decode(
-      iv_data       = lv_raw
-      iv_repo_key   = iv_repo_key
-      iv_pack_id    = lv_pack_id
-      iv_session_id = lv_session_id ).
+        " Continue decoding from last checkpoint (curr_offset + temp decoded rows)
+        rt_objects = resumable_decode(
+                         iv_data       = lv_raw
+                         iv_repo_key   = iv_repo_key
+                         iv_pack_id    = lv_pack_id
+                         iv_session_id = lv_session_id ).
 
         complete_pack(
             iv_repo_key = iv_repo_key
@@ -347,10 +354,10 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
             iv_count    = lines( rt_objects ) ).
         complete_session( lv_session_id ).
 
-    " Raw pack no longer needed
+        " Raw pack no longer needed
         zcl_abapgit_ortec_pack_raw=>delete(
-          iv_repo_key = iv_repo_key
-          iv_pack_id  = lv_pack_id ).
+            iv_repo_key = iv_repo_key
+            iv_pack_id  = lv_pack_id ).
         COMMIT WORK.
 
         release_repo_lock( lv_repo_lock_id ).
@@ -360,15 +367,15 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
     ENDTRY.
   ENDMETHOD.
 
-
   METHOD acquire_repo_lock.
     " Uses SAP enqueue server lock object EZAOG_REPO_LOCK (SE11).
     " SESSION_ID is set to iv_repo_key (C12 padded to C32) — one unique lock
     " entry per repository.  _SCOPE = '2': survives COMMIT WORK inside the
     " decode loop but is automatically released by the enqueue server if the
     " work process ends (crash, timeout, short dump) — no stale lock possible.
-    DATA lv_wait_s    TYPE f.
+
     DATA lv_jitter_ms TYPE i.
+    DATA lv_wait_s    TYPE f.
 
     " Return the repo key as the lock token; release_repo_lock passes it back
     " as SESSION_ID to DEQUEUE (C12 → C32 left-aligned, same value).
@@ -402,14 +409,12 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
           ENDIF.
           WAIT UP TO lv_wait_s SECONDS.
         WHEN OTHERS. " system_failure or unexpected return code
-          zcx_abapgit_exception=>raise(
-            |Repo lock system failure for key { iv_repo_key } (sy-subrc={ sy-subrc })| ).
+          zcx_abapgit_exception=>raise( |Repo lock system failure for key { iv_repo_key } (sy-subrc={ sy-subrc })| ).
       ENDCASE.
     ENDDO.
 
     zcx_abapgit_exception=>raise( |Repo lock timeout for key { iv_repo_key }| ).
   ENDMETHOD.
-
 
   METHOD release_repo_lock.
     " Releases the enqueue server lock set by acquire_repo_lock.
@@ -426,7 +431,6 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
         _synchron            = space
         _collect             = space.
   ENDMETHOD.
-
 
   METHOD persist_objects.
     DATA lv_ts    TYPE timestampl.
@@ -502,13 +506,11 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
     COMMIT WORK.
   ENDMETHOD.
 
-
   METHOD complete_pack.
     UPDATE zaog_pack_meta
       SET status = 'C' obj_decoded = iv_count
       WHERE repo_key = iv_repo_key AND pack_id = iv_pack_id.
   ENDMETHOD.
-
 
   METHOD create_session.
     IF gv_resume_deepen IS INITIAL.
@@ -516,33 +518,29 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
     ENDIF.
 
     rv_session_id = zcl_abapgit_ortec_pack_raw=>create_session(
-      iv_repo_key     = iv_repo_key
-      iv_pack_id      = iv_pack_id
-      iv_obj_total    = iv_obj_total
-      iv_branch_name  = gv_resume_branch
-      iv_deepen_level = gv_resume_deepen ).
+                        iv_repo_key     = iv_repo_key
+                        iv_pack_id      = iv_pack_id
+                        iv_obj_total    = iv_obj_total
+                        iv_branch_name  = gv_resume_branch
+                        iv_deepen_level = gv_resume_deepen ).
   ENDMETHOD.
-
 
   METHOD update_session_progress.
     zcl_abapgit_ortec_pack_raw=>update_session_progress(
-      iv_session_id  = iv_session_id
-      iv_obj_done    = iv_obj_done
-      iv_curr_offset = iv_curr_offset ).
+        iv_session_id  = iv_session_id
+        iv_obj_done    = iv_obj_done
+        iv_curr_offset = iv_curr_offset ).
   ENDMETHOD.
-
 
   METHOD fail_session.
     zcl_abapgit_ortec_pack_raw=>fail_session(
-      iv_session_id = iv_session_id
-      iv_obj_done   = iv_obj_done ).
+        iv_session_id = iv_session_id
+        iv_obj_done   = iv_obj_done ).
   ENDMETHOD.
-
 
   METHOD complete_session.
     zcl_abapgit_ortec_pack_raw=>complete_session( iv_session_id ).
   ENDMETHOD.
-
 
   METHOD find_active_session.
     DATA ls_sess TYPE zcl_abapgit_ortec_pack_raw=>ty_session_info.
@@ -562,44 +560,43 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
     ENDIF.
   ENDMETHOD.
 
-
   METHOD resumable_decode.
+    DATA lv_commit_interval TYPE i.
+    DATA lv_obj_done        TYPE i.
+    DATA lv_start_offset    TYPE i.
     DATA lv_data            TYPE xstring.
     DATA lv_xstring         TYPE xstring.
     DATA lv_objects         TYPE i.
+    DATA lt_done_idx        TYPE STANDARD TABLE OF zaog_pack_idx.
+    DATA ls_done_idx        TYPE zaog_pack_idx.
+    DATA ls_tmp_obj         TYPE zaog_obj_store.
+    DATA lv_last_redispatch TYPE timestampl.
     DATA lv_uindex          TYPE sy-index.
+    DATA lv_curr_offset     TYPE i.
     DATA lv_x               TYPE x LENGTH 1.
     DATA lv_type            TYPE zif_abapgit_git_definitions=>ty_type.
     DATA lv_expected        TYPE i.
     DATA lv_ref_delta       TYPE zif_abapgit_git_definitions=>ty_sha1.
     DATA lv_zlib            TYPE x LENGTH 2.
     DATA lv_decompressed    TYPE xstring.
+    DATA lv_compressed_len  TYPE i.
     DATA lv_decompress_len  TYPE i.
     DATA lv_compressed      TYPE xstring.
-    DATA lv_compressed_len  TYPE i.
-    DATA lv_len             TYPE i.
-    DATA lv_sha1            TYPE zif_abapgit_git_definitions=>ty_sha1.
-    DATA lv_ts              TYPE timestampl.
-    DATA lv_last_redispatch TYPE timestampl.
-    DATA lv_redispatch_now  TYPE timestampl.
-    DATA lv_elapsed         TYPE decfloat34.
-    DATA lv_obj_done        TYPE i.
-    DATA lv_start_offset    TYPE i.
-    DATA lv_curr_offset     TYPE i.
-    DATA lv_commit_interval TYPE i.
-    DATA lv_temp_sha1       TYPE zif_abapgit_git_definitions=>ty_sha1.
     DATA lv_adler_scan      TYPE zif_abapgit_git_definitions=>ty_adler32.
     DATA lv_scan_start      TYPE i.
     DATA lv_scan_found      TYPE abap_bool.
-    DATA lv_scan_offset     TYPE i.
     DATA lv_scan_limit      TYPE i.
-    DATA ls_object          LIKE LINE OF rt_objects.
-    DATA ls_tmp_obj         TYPE zaog_obj_store.
+    DATA lv_scan_offset     TYPE i.
+    DATA lv_temp_sha1       TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_ts              TYPE timestampl.
+    DATA ls_row             TYPE zaog_obj_store.
     DATA ls_idx             TYPE zcl_abapgit_ortec_pack_index=>ty_index_entry.
     DATA lt_idx             TYPE zcl_abapgit_ortec_pack_index=>ty_index_entries.
-    DATA lt_done_idx        TYPE STANDARD TABLE OF zaog_pack_idx.
-    DATA ls_done_idx        TYPE zaog_pack_idx.
-    DATA ls_row             TYPE zaog_obj_store.
+    DATA lv_redispatch_now  TYPE timestampl.
+    DATA lv_elapsed         TYPE decfloat34.
+    DATA lv_len             TYPE i.
+    DATA lv_sha1            TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA ls_object          LIKE LINE OF rt_objects.
 
     lv_commit_interval = iv_commit_interval.
     IF lv_commit_interval <= 0.
@@ -609,7 +606,8 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
     " Resume checkpoint from active decode session
     DATA(ls_session) = zcl_abapgit_ortec_pack_raw=>get_session( iv_session_id ).
     IF ls_session-session_id IS INITIAL.
-      CLEAR: lv_obj_done, lv_start_offset.
+      CLEAR: lv_obj_done,
+             lv_start_offset.
     ELSE.
       lv_obj_done = ls_session-obj_done.
       lv_start_offset = ls_session-curr_offset.
@@ -638,10 +636,10 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
     IF lv_obj_done > 0.
       SELECT * FROM zaog_pack_idx
         INTO TABLE lt_done_idx
-        WHERE repo_key = iv_repo_key
-          AND pack_id  = iv_pack_id
-          AND dec_status = 'P'
-          AND obj_index <= lv_obj_done
+        WHERE repo_key    = iv_repo_key
+          AND pack_id     = iv_pack_id
+          AND dec_status  = 'P'
+          AND obj_index  <= lv_obj_done
         ORDER BY obj_index.
 
       LOOP AT lt_done_idx INTO ls_done_idx.
@@ -665,8 +663,8 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
           ls_object-sha1 = ls_done_idx-delta_base.
         ELSE.
           ls_object-sha1 = zcl_abapgit_hash=>sha1(
-                             iv_type = ls_object-type
-                             iv_data = ls_object-data ).
+                               iv_type = ls_object-type
+                               iv_data = ls_object-data ).
         ENDIF.
         APPEND ls_object TO rt_objects.
       ENDLOOP.
@@ -692,8 +690,10 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
       lv_type = get_type( lv_x ).
 
       get_length(
-        IMPORTING ev_length = lv_expected
-        CHANGING  cv_data   = lv_data ).
+        IMPORTING
+          ev_length = lv_expected
+        CHANGING
+          cv_data   = lv_data ).
 
       IF lv_type = zif_abapgit_git_definitions=>c_type-ref_d.
         lv_ref_delta = lv_data(20).
@@ -713,10 +713,12 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
         " Feeds raw DEFLATE bytes (after 2-byte zlib header) to the kernel stream
         " inflater which returns decompressed data + consumed byte count.
         stream_decompress(
-          EXPORTING iv_data           = lv_data
-                    iv_expected_len   = lv_expected
-          IMPORTING ev_decompressed   = lv_decompressed
-                    ev_compressed_len = lv_compressed_len ).
+          EXPORTING
+            iv_data           = lv_data
+            iv_expected_len   = lv_expected
+          IMPORTING
+            ev_decompressed   = lv_decompressed
+            ev_compressed_len = lv_compressed_len ).
 
         IF lv_expected <> xstrlen( lv_decompressed ).
           zcx_abapgit_exception=>raise( |Decompression failed (stream path)| ).
@@ -726,30 +728,84 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
         lv_data = lv_data+lv_compressed_len.
 
       ELSE.
-      CASE lv_zlib.
-        WHEN c_zlib.
-          cl_abap_gzip=>decompress_binary(
-            EXPORTING gzip_in     = lv_data
-            IMPORTING raw_out     = lv_decompressed
-                      raw_out_len = lv_decompress_len ).
+        CASE lv_zlib.
+          WHEN c_zlib.
+            cl_abap_gzip=>decompress_binary(
+              EXPORTING
+                gzip_in     = lv_data
+              IMPORTING
+                raw_out     = lv_decompressed
+                raw_out_len = lv_decompress_len ).
 
-          IF lv_expected <> lv_decompress_len.
-            zcx_abapgit_exception=>raise( |Decompression failed| ).
-          ENDIF.
+            IF lv_expected <> lv_decompress_len.
+              zcx_abapgit_exception=>raise( |Decompression failed| ).
+            ENDIF.
 
-          cl_abap_gzip=>compress_binary(
-            EXPORTING raw_in       = lv_decompressed
-            IMPORTING gzip_out     = lv_compressed
-                      gzip_out_len = lv_compressed_len ).
+            cl_abap_gzip=>compress_binary(
+              EXPORTING
+                raw_in       = lv_decompressed
+              IMPORTING
+                gzip_out     = lv_compressed
+                gzip_out_len = lv_compressed_len ).
 
-          IF    xstrlen( lv_data )               <= lv_compressed_len
-             OR lv_compressed(lv_compressed_len) <> lv_data(lv_compressed_len).
+            IF    xstrlen( lv_data )               <= lv_compressed_len
+               OR lv_compressed(lv_compressed_len) <> lv_data(lv_compressed_len).
+              IF c_opt1_kernel_adler_scan = abap_true.
+                " Opt #1 fallback: scan for Adler32 instead of pure-ABAP inflate
+                lv_adler_scan = zcl_abapgit_hash=>adler32( lv_decompressed ).
+                lv_scan_start = nmax( val1 = 1 val2 = lv_decompress_len / 1032 ).
+                lv_scan_found = abap_false.
+                lv_scan_limit = xstrlen( lv_data ) - 4.
+                lv_scan_offset = lv_scan_start.
+                WHILE lv_scan_offset <= lv_scan_limit.
+                  IF lv_data+lv_scan_offset(4) = lv_adler_scan.
+                    lv_data = lv_data+lv_scan_offset.
+                    lv_scan_found = abap_true.
+                    EXIT.
+                  ENDIF.
+                  lv_scan_offset += 1.
+                ENDWHILE.
+                IF lv_scan_found = abap_false.
+                  zlib_decompress(
+                    CHANGING
+                      cv_data         = lv_data
+                      cv_decompressed = lv_decompressed ).
+                ENDIF.
+              ELSE.
+                zlib_decompress(
+                  CHANGING
+                    cv_data         = lv_data
+                    cv_decompressed = lv_decompressed ).
+              ENDIF.
+            ELSE.
+              lv_data = lv_data+lv_compressed_len.
+            ENDIF.
+
+          WHEN c_zlib_hmm.
             IF c_opt1_kernel_adler_scan = abap_true.
-              " Opt #1 fallback: scan for Adler32 instead of pure-ABAP inflate
+              " Optimization #1: kernel decompress + Adler32 boundary scan.
+              " cl_abap_gzip works for raw DEFLATE regardless of zlib header byte.
+              " The only missing piece is consumed-length — recovered by scanning
+              " for the known 4-byte Adler32 trailer in the compressed stream.
+              cl_abap_gzip=>decompress_binary(
+                EXPORTING
+                  gzip_in     = lv_data
+                IMPORTING
+                  raw_out     = lv_decompressed
+                  raw_out_len = lv_decompress_len ).
+
+              IF lv_expected <> lv_decompress_len.
+                zcx_abapgit_exception=>raise( |Decompression failed (7801 kernel path)| ).
+              ENDIF.
+
               lv_adler_scan = zcl_abapgit_hash=>adler32( lv_decompressed ).
+
+              " Scan for the Adler32 trailer. Start from a minimum offset to avoid
+              " false positives in the header area. DEFLATE minimum ratio ~ 1:1032.
               lv_scan_start = nmax( val1 = 1 val2 = lv_decompress_len / 1032 ).
               lv_scan_found = abap_false.
               lv_scan_limit = xstrlen( lv_data ) - 4.
+
               lv_scan_offset = lv_scan_start.
               WHILE lv_scan_offset <= lv_scan_limit.
                 IF lv_data+lv_scan_offset(4) = lv_adler_scan.
@@ -759,69 +815,25 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
                 ENDIF.
                 lv_scan_offset += 1.
               ENDWHILE.
+
               IF lv_scan_found = abap_false.
+                " Extremely rare fallback: Adler32 not found — use pure ABAP inflate
                 zlib_decompress(
-                  CHANGING cv_data         = lv_data
-                           cv_decompressed = lv_decompressed ).
+                  CHANGING
+                    cv_data         = lv_data
+                    cv_decompressed = lv_decompressed ).
               ENDIF.
             ELSE.
+              " Legacy path: pure ABAP zlib inflate for 7801 streams
               zlib_decompress(
-                CHANGING cv_data         = lv_data
-                         cv_decompressed = lv_decompressed ).
-            ENDIF.
-          ELSE.
-            lv_data = lv_data+lv_compressed_len.
-          ENDIF.
-
-        WHEN c_zlib_hmm.
-          IF c_opt1_kernel_adler_scan = abap_true.
-            " Optimization #1: kernel decompress + Adler32 boundary scan.
-            " cl_abap_gzip works for raw DEFLATE regardless of zlib header byte.
-            " The only missing piece is consumed-length — recovered by scanning
-            " for the known 4-byte Adler32 trailer in the compressed stream.
-            cl_abap_gzip=>decompress_binary(
-              EXPORTING gzip_in     = lv_data
-              IMPORTING raw_out     = lv_decompressed
-                        raw_out_len = lv_decompress_len ).
-
-            IF lv_expected <> lv_decompress_len.
-              zcx_abapgit_exception=>raise( |Decompression failed (7801 kernel path)| ).
+                CHANGING
+                  cv_data         = lv_data
+                  cv_decompressed = lv_decompressed ).
             ENDIF.
 
-            lv_adler_scan = zcl_abapgit_hash=>adler32( lv_decompressed ).
-
-            " Scan for the Adler32 trailer. Start from a minimum offset to avoid
-            " false positives in the header area. DEFLATE minimum ratio ~ 1:1032.
-            lv_scan_start = nmax( val1 = 1 val2 = lv_decompress_len / 1032 ).
-            lv_scan_found = abap_false.
-            lv_scan_limit = xstrlen( lv_data ) - 4.
-
-            lv_scan_offset = lv_scan_start.
-            WHILE lv_scan_offset <= lv_scan_limit.
-              IF lv_data+lv_scan_offset(4) = lv_adler_scan.
-                lv_data = lv_data+lv_scan_offset.
-                lv_scan_found = abap_true.
-                EXIT.
-              ENDIF.
-              lv_scan_offset += 1.
-            ENDWHILE.
-
-            IF lv_scan_found = abap_false.
-              " Extremely rare fallback: Adler32 not found — use pure ABAP inflate
-              zlib_decompress(
-                CHANGING cv_data         = lv_data
-                         cv_decompressed = lv_decompressed ).
-            ENDIF.
-          ELSE.
-            " Legacy path: pure ABAP zlib inflate for 7801 streams
-            zlib_decompress(
-              CHANGING cv_data         = lv_data
-                       cv_decompressed = lv_decompressed ).
-          ENDIF.
-
-        WHEN OTHERS.
-          zcx_abapgit_exception=>raise( |Unexpected zlib header| ).
-      ENDCASE.
+          WHEN OTHERS.
+            zcx_abapgit_exception=>raise( |Unexpected zlib header| ).
+        ENDCASE.
       ENDIF. " c_opt6_stream_decompress
 
       CLEAR ls_object.
@@ -842,7 +854,7 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
       APPEND ls_object TO rt_objects.
 
       " Persist parsed object payload with a temporary key for resume
-      lv_temp_sha1 = iv_pack_id && |{ lv_uindex WIDTH = 8 PAD = '0' }|.
+      lv_temp_sha1 = |{ iv_pack_id }{ lv_uindex WIDTH = 8 PAD = '0' }|.
       GET TIME STAMP FIELD lv_ts.
 
       CLEAR ls_row.
@@ -870,26 +882,27 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
       IF lv_uindex MOD lv_commit_interval = 0.
         TRY.
             zcl_abapgit_ortec_pack_index=>store_entries(
-              iv_repo_key = iv_repo_key
-              iv_pack_id  = iv_pack_id
-              it_entries  = lt_idx ).
+                iv_repo_key = iv_repo_key
+                iv_pack_id  = iv_pack_id
+                it_entries  = lt_idx ).
           CATCH zcx_abapgit_ortec_git.
         ENDTRY.
         CLEAR lt_idx.
 
         lv_curr_offset = xstrlen( iv_data ) - xstrlen( lv_data ).
         update_session_progress(
-          iv_session_id  = iv_session_id
-          iv_obj_done    = lv_uindex
-          iv_curr_offset = lv_curr_offset ).
+            iv_session_id  = iv_session_id
+            iv_obj_done    = lv_uindex
+            iv_curr_offset = lv_curr_offset ).
         COMMIT WORK.
       ENDIF.
 
       " Prevent work process timeout: call TH_REDISPATCH every c_redispatch_interval seconds.
       " TH_REDISPATCH resets the WP runtime counter without stopping execution.
       GET TIME STAMP FIELD lv_redispatch_now.
-      lv_elapsed = cl_abap_tstmp=>subtract( tstmp1 = lv_redispatch_now
-                                            tstmp2 = lv_last_redispatch ).
+      lv_elapsed = cl_abap_tstmp=>subtract(
+                       tstmp1 = lv_redispatch_now
+                       tstmp2 = lv_last_redispatch ).
       IF lv_elapsed >= c_redispatch_interval.
         CALL FUNCTION 'TH_REDISPATCH'.
         lv_last_redispatch = lv_redispatch_now.
@@ -900,18 +913,18 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
     IF lt_idx IS NOT INITIAL.
       TRY.
           zcl_abapgit_ortec_pack_index=>store_entries(
-            iv_repo_key = iv_repo_key
-            iv_pack_id  = iv_pack_id
-            it_entries  = lt_idx ).
+              iv_repo_key = iv_repo_key
+              iv_pack_id  = iv_pack_id
+              it_entries  = lt_idx ).
         CATCH zcx_abapgit_ortec_git.
       ENDTRY.
     ENDIF.
 
     lv_curr_offset = xstrlen( iv_data ) - xstrlen( lv_data ).
     update_session_progress(
-      iv_session_id  = iv_session_id
-      iv_obj_done    = lv_objects
-      iv_curr_offset = lv_curr_offset ).
+        iv_session_id  = iv_session_id
+        iv_obj_done    = lv_objects
+        iv_curr_offset = lv_curr_offset ).
     COMMIT WORK.
 
     lv_len = xstrlen( iv_data ) - 20.
@@ -938,10 +951,10 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
       MODIFY zaog_obj_store FROM ls_row.
 
       zcl_abapgit_ortec_pack_index=>mark_decoded(
-        iv_repo_key  = iv_repo_key
-        iv_pack_id   = iv_pack_id
-        iv_obj_index = ls_object-index
-        iv_obj_sha1  = ls_object-sha1 ).
+          iv_repo_key  = iv_repo_key
+          iv_pack_id   = iv_pack_id
+          iv_obj_index = ls_object-index
+          iv_obj_sha1  = ls_object-sha1 ).
     ENDLOOP.
 
     DELETE FROM zaog_obj_store
@@ -951,7 +964,6 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
     COMMIT WORK.
 
   ENDMETHOD.
-
 
   METHOD get_length.
 
@@ -992,7 +1004,6 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
 
   ENDMETHOD.
 
-
   METHOD get_type.
 
     CONSTANTS lc_mask TYPE x LENGTH 1 VALUE 112.
@@ -1017,7 +1028,6 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
     ENDCASE.
 
   ENDMETHOD.
-
 
   METHOD zlib_decompress.
 
@@ -1046,33 +1056,27 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
     ENDIF.
   ENDMETHOD.
 
-
   METHOD stream_decompress.
     " Optimization #6: CL_ABAP_UNGZIP_BINARY_STREAM kernel-backed streaming inflate.
-    " Uses a FIXED-SIZE TYPE X output buffer (c_opt6_out_buf_size = 65535 bytes).
-    " The kernel fills this buffer per chunk, calls back to the handler which
-    " accumulates data, then continues until the DEFLATE stream ends.
-    " This prevents unbounded memory allocation (SYSTEM_NO_ROLL) because:
-    "   - SET_OUT_BUF uses DESCRIBE FIELD LENGTH to derive me->out_buf_len from
-    "     the fixed X field — reliable regardless of EXPORTING-param semantics.
-    "   - The kernel never allocates more than 65535 bytes per iteration.
+    " Uses the enhanced method DECOMPRESS_BINARY_STREAM_GIT which exposes the
+    " consumed input byte count (gzip_in_off) directly from the kernel —
+    " eliminating the expensive Adler32 computation + scan entirely.
+    " Fixed 64 KB TYPE X output buffer prevents unbounded allocation (SYSTEM_NO_ROLL).
 
+    DATA lv_in_len  TYPE i.
+    DATA lv_input   TYPE xstring.
+    " TODO: variable is assigned but never used (ABAP cleaner)
+    DATA lv_buf_len TYPE i.
     DATA lo_handler TYPE REF TO lcl_ungzip_handler.
     DATA lo_stream  TYPE REF TO cl_abap_ungzip_binary_stream.
-    " Fixed-size output buffer: kernel writes at most 65535 bytes per chunk.
-    " For objects > 65535 bytes the handler callback accumulates multiple chunks.
+    " TODO: variable is assigned but never used (ABAP cleaner)
     DATA lv_out_buf TYPE x LENGTH 65535.
-    DATA lv_buf_len TYPE i.
-    DATA lv_input   TYPE xstring.
-    DATA lv_in_len  TYPE i.
 
     " Bound the input slice to avoid copying the entire remaining packfile
-    " into decompress_binary_stream_end's internal l_xstr variable.
-    " DEFLATE compressed size is nearly always ≤ uncompressed size;
-    " 2× expected + 4 KB headroom covers all practical cases.
-    lv_in_len = nmin( val1 = xstrlen( iv_data )
-                      val2 = iv_expected_len * 2 + 4096 ).
-    " Absolute minimum: at least 256 bytes to handle tiny objects
+    " into the method's internal l_xstr variable.
+    lv_in_len = nmin(
+                    val1 = xstrlen( iv_data )
+                    val2 = iv_expected_len * 2 + 4096 ).
     IF lv_in_len < 256 AND xstrlen( iv_data ) >= 256.
       lv_in_len = 256.
     ENDIF.
@@ -1080,29 +1084,27 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
 
     " Use -1 to instruct SET_OUT_BUF to derive buffer size from the
     " declared X field length via DESCRIBE FIELD (always 65535 here).
-    " This path is independent of EXPORTING-param runtime semantics.
     lv_buf_len = -1.
 
     lcl_ungzip_handler=>reset( ).
 
-    CREATE OBJECT lo_handler.
+    lo_handler = NEW #( ).
     TRY.
-        CREATE OBJECT lo_stream
-          EXPORTING
-            output_handler = lo_handler.
+        lo_stream = NEW #( output_handler = lo_handler ).
 
         lo_stream->set_out_buf(
           IMPORTING
             out_buf     = lv_out_buf
             out_buf_len = lv_buf_len ).
 
-        " Feed bounded input; stream_end signals end of DEFLATE stream.
-        " The kernel reads only the bytes belonging to this DEFLATE stream
-        " and stops — it does NOT process beyond the stream boundary.
-        lo_stream->decompress_binary_stream_end(
+        " Enhanced method: exposes gzip_in_off as ev_compressed_len.
+        " No Adler32 computation or scan needed.
+        lo_stream->decompress_binary_stream_git(
           EXPORTING
-            gzip_in     = lv_input
-            gzip_in_len = lv_in_len ).
+            gzip_in           = lv_input
+            gzip_in_len       = lv_in_len
+          IMPORTING
+            ev_compressed_len = ev_compressed_len ).
 
       CATCH cx_parameter_invalid_range
             cx_sy_buffer_overflow
@@ -1112,34 +1114,5 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
     ENDTRY.
 
     ev_decompressed = lcl_ungzip_handler=>get_data( ).
-
-    " Determine consumed compressed byte count by scanning for the Adler32
-    " trailer within the BOUNDED input slice (not the full packfile).
-    " Within a ~6 KB window the false-positive probability is negligible
-    " (~6000 positions / 2^32 ≈ 0.000001%).
-    DATA lv_adler32 TYPE x LENGTH 4.
-    lv_adler32 = zcl_abapgit_hash=>adler32( ev_decompressed ).
-
-    DATA lv_min_pos TYPE i.
-    lv_min_pos = nmax( val1 = 1 val2 = iv_expected_len / 1032 ).
-    DATA lv_pos TYPE i.
-    DATA lv_limit TYPE i.
-    " Scan within the bounded input + small overshoot for alignment
-    lv_limit = nmin( val1 = xstrlen( iv_data ) - 4
-                     val2 = lv_in_len + 16 ).
-    lv_pos = lv_min_pos.
-
-    WHILE lv_pos <= lv_limit.
-      IF iv_data+lv_pos(4) = lv_adler32.
-        ev_compressed_len = lv_pos.
-        RETURN.
-      ENDIF.
-      lv_pos += 1.
-    ENDWHILE.
-
-    " Should not happen — kernel decompressed successfully so trailer must exist
-    zcx_abapgit_exception=>raise( |Stream decompress: Adler32 trailer not found| ).
   ENDMETHOD.
-
 ENDCLASS.
-
