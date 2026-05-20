@@ -736,7 +736,7 @@ CLASS ZCL_ABAPGIT_GUI_ROUTER IMPLEMENTATION.
       WHEN 'clear_cache'.                                                     " ORTEC clear repository cache
         TRY.
             ls_clear_result = zcl_abapgit_ortec_git_switch=>clear_repo_cache(
-              iv_repo_key = lv_key ).
+              iv_url = li_repo->ms_data-url ).
             MESSAGE zcl_abapgit_ortec_git_switch=>format_clear_result( ls_clear_result ) TYPE 'S'.
           CATCH zcx_abapgit_ortec_git INTO DATA(lx_ortec).
             MESSAGE lx_ortec->get_text( ) TYPE 'E'.

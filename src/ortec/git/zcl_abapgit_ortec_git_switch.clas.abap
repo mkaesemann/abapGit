@@ -54,13 +54,14 @@ CLASS zcl_abapgit_ortec_git_switch DEFINITION
                 iv_enabled TYPE abap_bool.
 
     "! Clear all ZAOG_* cache rows for one repository.
-    "! @parameter iv_repo_key |
-    "! Repository key
+    "! Resolves the ORTEC repo_key from the repository URL (via SHA1 hash lookup).
+    "! @parameter iv_url |
+    "! Repository URL (used to derive ORTEC repo_key)
     "! @parameter rs_result |
     "! Number of deleted rows per table
     "! @raising zcx_abapgit_ortec_git |
     CLASS-METHODS clear_repo_cache
-      IMPORTING iv_repo_key      TYPE zif_abapgit_persistence=>ty_repo-key
+      IMPORTING iv_url           TYPE string
       RETURNING VALUE(rs_result) TYPE ty_clear_result
       RAISING   zcx_abapgit_ortec_git.
 
@@ -79,41 +80,40 @@ ENDCLASS.
 
 CLASS zcl_abapgit_ortec_git_switch IMPLEMENTATION.
   METHOD clear_repo_cache.
-    IF iv_repo_key IS INITIAL.
+    DATA lv_repo_key TYPE zcl_abapgit_ortec_repo_state=>ty_repo_key.
+
+    IF iv_url IS INITIAL.
       RETURN.
     ENDIF.
 
-    rs_result-repo_key = iv_repo_key.
+    " Resolve ORTEC repo_key from the repository URL
+    lv_repo_key = zcl_abapgit_ortec_repo_state=>get_repo_key_for_url( iv_url ).
+    IF lv_repo_key IS INITIAL.
+      zcx_abapgit_ortec_git=>raise( |No ORTEC cache found for this repository URL| ).
+    ENDIF.
 
-    SELECT COUNT( * ) INTO @rs_result-obj_store
-      FROM zaog_obj_store
-      WHERE repo_key = @iv_repo_key.
-    DELETE FROM zaog_obj_store WHERE repo_key = iv_repo_key.
+    rs_result-repo_key = lv_repo_key.
 
-    SELECT COUNT( * ) INTO @rs_result-pack_idx
-      FROM zaog_pack_idx
-      WHERE repo_key = @iv_repo_key.
-    DELETE FROM zaog_pack_idx WHERE repo_key = iv_repo_key.
+    DELETE FROM zaog_obj_store WHERE repo_key = lv_repo_key.
+    rs_result-obj_store = sy-dbcnt.
 
-    SELECT COUNT( * ) INTO @rs_result-pack_meta
-      FROM zaog_pack_meta
-      WHERE repo_key = @iv_repo_key.
-    DELETE FROM zaog_pack_meta WHERE repo_key = iv_repo_key.
+    DELETE FROM zaog_pack_idx WHERE repo_key = lv_repo_key.
+    rs_result-pack_idx = sy-dbcnt.
 
-    SELECT COUNT( * ) INTO @rs_result-raw_pack
-      FROM zaog_raw_pack
-      WHERE repo_key = @iv_repo_key.
-    DELETE FROM zaog_raw_pack WHERE repo_key = iv_repo_key.
+    DELETE FROM zaog_pack_meta WHERE repo_key = lv_repo_key.
+    rs_result-pack_meta = sy-dbcnt.
 
-    SELECT COUNT( * ) INTO @rs_result-fetch_sess
-      FROM zaog_fetch_sess
-      WHERE repo_key = @iv_repo_key.
-    DELETE FROM zaog_fetch_sess WHERE repo_key = iv_repo_key.
+    DELETE FROM zaog_raw_pack WHERE repo_key = lv_repo_key.
+    rs_result-raw_pack = sy-dbcnt.
 
-    SELECT COUNT( * ) INTO @rs_result-repo_state
-      FROM zaog_repo_state
-      WHERE repo_key = @iv_repo_key.
-    DELETE FROM zaog_repo_state WHERE repo_key = iv_repo_key.
+    DELETE FROM zaog_fetch_sess WHERE repo_key = lv_repo_key.
+    rs_result-fetch_sess = sy-dbcnt.
+
+    DELETE FROM zaog_repo_state WHERE repo_key = lv_repo_key.
+    rs_result-repo_state = sy-dbcnt.
+
+    " Invalidate in-memory session cache
+    zcl_abapgit_ortec_obj_store=>invalidate_cache( ).
 
     COMMIT WORK AND WAIT.
   ENDMETHOD.

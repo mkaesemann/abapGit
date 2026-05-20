@@ -436,8 +436,9 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
     DATA lv_ts    TYPE timestampl.
     DATA lv_count TYPE i.
     DATA ls_row   TYPE zaog_obj_store.
+    DATA lt_rows  TYPE STANDARD TABLE OF zaog_obj_store.
     DATA ls_idx   TYPE zcl_abapgit_ortec_pack_index=>ty_index_entry.
-    DATA lt_idx   TYPE zcl_abapgit_ortec_pack_index=>ty_index_entries.
+    DATA lt_idx   TYPE zcl_abapgit_ortec_pack_index=>tty_index_entries.
     FIELD-SYMBOLS <ls_obj> LIKE LINE OF it_objects.
 
     GET TIME STAMP FIELD lv_ts.
@@ -449,7 +450,7 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
         CONTINUE.
       ENDIF.
 
-      " 1. Write to object store (keyed by SHA1, idempotent via MODIFY)
+      " 1. Accumulate object store row
       CLEAR ls_row.
       ls_row-repo_key   = iv_repo_key.
       ls_row-obj_sha1   = <ls_obj>-sha1.
@@ -459,7 +460,7 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
       ls_row-pack_id    = iv_pack_id.
       ls_row-created_at = lv_ts.
       ls_row-status     = 'R'. " R = resolved
-      MODIFY zaog_obj_store FROM ls_row.
+      APPEND ls_row TO lt_rows.
 
       " 2. Accumulate pack index entry (obj_index = sequential position in pack)
       CLEAR ls_idx.
@@ -471,8 +472,10 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
       ls_idx-dec_status = 'D'. " D = decoded
       APPEND ls_idx TO lt_idx.
 
-      " 3. Periodic commit: flush index batch, update session progress, commit
+      " 3. Periodic commit: flush batched rows, update session progress, commit
       IF lv_count MOD iv_commit_interval = 0.
+        MODIFY zaog_obj_store FROM TABLE lt_rows.
+        CLEAR lt_rows.
         TRY.
             zcl_abapgit_ortec_pack_index=>store_entries(
                 iv_repo_key = iv_repo_key
@@ -489,7 +492,10 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
       ENDIF.
     ENDLOOP.
 
-    " Flush remaining index entries
+    " Flush remaining rows
+    IF lt_rows IS NOT INITIAL.
+      MODIFY zaog_obj_store FROM TABLE lt_rows.
+    ENDIF.
     IF lt_idx IS NOT INITIAL.
       TRY.
           zcl_abapgit_ortec_pack_index=>store_entries(
@@ -590,12 +596,14 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
     DATA lv_temp_sha1       TYPE zif_abapgit_git_definitions=>ty_sha1.
     DATA lv_ts              TYPE timestampl.
     DATA ls_row             TYPE zaog_obj_store.
+    DATA lt_obj_batch       TYPE STANDARD TABLE OF zaog_obj_store.
     DATA ls_idx             TYPE zcl_abapgit_ortec_pack_index=>ty_index_entry.
-    DATA lt_idx             TYPE zcl_abapgit_ortec_pack_index=>ty_index_entries.
+    DATA lt_idx             TYPE zcl_abapgit_ortec_pack_index=>tty_index_entries.
     DATA lv_redispatch_now  TYPE timestampl.
     DATA lv_elapsed         TYPE decfloat34.
     DATA lv_len             TYPE i.
     DATA lv_sha1            TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lt_final_rows      TYPE STANDARD TABLE OF zaog_obj_store.
     DATA ls_object          LIKE LINE OF rt_objects.
 
     lv_commit_interval = iv_commit_interval.
@@ -866,7 +874,7 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
       ls_row-obj_size   = xstrlen( lv_decompressed ).
       ls_row-created_at = lv_ts.
       ls_row-status     = 'P'.
-      MODIFY zaog_obj_store FROM ls_row.
+      APPEND ls_row TO lt_obj_batch.
 
       CLEAR ls_idx.
       ls_idx-obj_index   = lv_uindex.
@@ -880,6 +888,11 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
       APPEND ls_idx TO lt_idx.
 
       IF lv_uindex MOD lv_commit_interval = 0.
+        " Batch flush: write accumulated temp objects in one DB roundtrip
+        IF lt_obj_batch IS NOT INITIAL.
+          MODIFY zaog_obj_store FROM TABLE lt_obj_batch.
+          CLEAR lt_obj_batch.
+        ENDIF.
         TRY.
             zcl_abapgit_ortec_pack_index=>store_entries(
                 iv_repo_key = iv_repo_key
@@ -910,14 +923,17 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
 
     ENDDO.
 
+    " Flush remaining batched temp object rows
+    IF lt_obj_batch IS NOT INITIAL.
+      MODIFY zaog_obj_store FROM TABLE lt_obj_batch.
+      CLEAR lt_obj_batch.
+    ENDIF.
+
     IF lt_idx IS NOT INITIAL.
-      TRY.
-          zcl_abapgit_ortec_pack_index=>store_entries(
-              iv_repo_key = iv_repo_key
-              iv_pack_id  = iv_pack_id
-              it_entries  = lt_idx ).
-        CATCH zcx_abapgit_ortec_git.
-      ENDTRY.
+      zcl_abapgit_ortec_pack_index=>store_entries(
+          iv_repo_key = iv_repo_key
+          iv_pack_id  = iv_pack_id
+          it_entries  = lt_idx ).
     ENDIF.
 
     lv_curr_offset = xstrlen( iv_data ) - xstrlen( lv_data ).
@@ -936,7 +952,7 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
 
     zcl_abapgit_git_delta=>decode_deltas( CHANGING ct_objects = rt_objects ).
 
-    " Promote temp rows to resolved object store rows and close index status
+    " Promote temp rows to resolved object store rows (batched for performance)
     GET TIME STAMP FIELD lv_ts.
     LOOP AT rt_objects INTO ls_object.
       CLEAR ls_row.
@@ -948,14 +964,21 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
       ls_row-obj_size   = xstrlen( ls_object-data ).
       ls_row-created_at = lv_ts.
       ls_row-status     = 'R'.
-      MODIFY zaog_obj_store FROM ls_row.
-
-      zcl_abapgit_ortec_pack_index=>mark_decoded(
-          iv_repo_key  = iv_repo_key
-          iv_pack_id   = iv_pack_id
-          iv_obj_index = ls_object-index
-          iv_obj_sha1  = ls_object-sha1 ).
+      APPEND ls_row TO lt_final_rows.
     ENDLOOP.
+    IF lt_final_rows IS NOT INITIAL.
+      MODIFY zaog_obj_store FROM TABLE lt_final_rows.
+    ENDIF.
+
+    " Batch update pack index status to 'D' (decoded)
+    zcl_abapgit_ortec_pack_index=>update_entries(
+        iv_repo_key = iv_repo_key
+        iv_pack_id  = iv_pack_id
+        it_entries  = VALUE #( FOR <ls_object> IN rt_objects
+                               ( dec_status          = 'D'
+                                 obj_sha1            = <ls_object>-sha1
+                                 _control-dec_status = if_abap_behv=>mk-on
+                                 _control-obj_sha1   = if_abap_behv=>mk-on ) ) ).
 
     DELETE FROM zaog_obj_store
       WHERE repo_key = iv_repo_key
