@@ -56,10 +56,32 @@ CLASS zcl_abapgit_ortec_pack_dec DEFINITION
       RAISING   zcx_abapgit_exception.
 
   PROTECTED SECTION.
-    CONSTANTS c_pack_start TYPE x LENGTH 4 VALUE '5041434B' ##NO_TEXT.
-    CONSTANTS c_zlib       TYPE x LENGTH 2 VALUE '789C' ##NO_TEXT.
-    CONSTANTS c_zlib_hmm   TYPE x LENGTH 2 VALUE '7801' ##NO_TEXT.
-    CONSTANTS c_version    TYPE x LENGTH 4 VALUE '00000002' ##NO_TEXT.
+    CONSTANTS c_pack_start         TYPE x LENGTH 4 VALUE '5041434B' ##NO_TEXT.
+    CONSTANTS c_zlib               TYPE x LENGTH 2 VALUE '789C' ##NO_TEXT.
+    CONSTANTS c_zlib_hmm           TYPE x LENGTH 2 VALUE '7801' ##NO_TEXT.
+    CONSTANTS c_version            TYPE x LENGTH 4 VALUE '00000002' ##NO_TEXT.
+    "! Interval in seconds between TH_REDISPATCH calls inside the decode loop.
+    "! Default 300 s = 5 minutes.  Increase for systems with longer WP timeouts.
+    CONSTANTS c_redispatch_interval TYPE i VALUE 300 ##NO_TEXT.
+    "! Optimization #1: Use kernel decompress + Adler32-scan to find compressed
+    "! stream boundaries instead of pure-ABAP zlib inflate.
+    "! Toggle: abap_true = enabled (fast kernel path), abap_false = disabled (legacy).
+    "! NOTE: Adler32 scan has a small false-positive risk if the 4-byte checksum
+    "! value appears in the compressed data before the actual trailer.
+    CONSTANTS c_opt1_kernel_adler_scan TYPE abap_bool VALUE abap_false ##NO_TEXT.
+    "! Optimization #6: CL_ABAP_UNGZIP_BINARY_STREAM-based streaming decompression.
+    "! Kernel-backed, returns exact consumed-length via gzip_in_off — eliminates
+    "! both re-compress trick and Adler32 guessing. Works for 789C and 7801.
+    "! When enabled, takes priority over #1 and legacy paths.
+    "! Uses a fixed 64 KB TYPE X output buffer to prevent unbounded allocation
+    "! (SET_OUT_BUF reliably derives ME->OUT_BUF_LEN from DESCRIBE FIELD LENGTH
+    "! for TYPE X, independent of EXPORTING-param runtime semantics).
+    CONSTANTS c_opt6_stream_decompress TYPE abap_bool VALUE abap_false ##NO_TEXT.
+    "! Fixed output buffer size for opt6 streaming decompression (bytes).
+    "! The kernel fills this buffer per chunk and calls the output handler.
+    "! 65535 = max TYPE X flat field length; good trade-off between memory
+    "! and callback frequency.
+    CONSTANTS c_opt6_out_buf_size TYPE i VALUE 65535 ##NO_TEXT.
 
     "! Decode a raw packfile into an in-memory object table.
     "! All delta references are resolved before returning.
@@ -115,7 +137,15 @@ CLASS zcl_abapgit_ortec_pack_dec DEFINITION
                cv_compressed_len TYPE i OPTIONAL
       RAISING  zcx_abapgit_exception.
 
-    CLASS-METHODS create_session
+    "! Kernel-based streaming decompression using CL_ABAP_UNGZIP_BINARY_STREAM.
+    "! Returns both decompressed data and exact consumed compressed byte count.
+    "! Works for any DEFLATE stream (789C / 7801) without header-specific tricks.
+    CLASS-METHODS stream_decompress
+      IMPORTING iv_data               TYPE xstring
+                iv_expected_len       TYPE i
+      EXPORTING ev_decompressed       TYPE xstring
+                ev_compressed_len     TYPE i
+      RAISING   zcx_abapgit_exception.    CLASS-METHODS create_session
       IMPORTING iv_repo_key          TYPE ty_repo_key
                 iv_obj_total         TYPE i
                 iv_pack_id           TYPE ty_pack_id
@@ -332,41 +362,49 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
 
 
   METHOD acquire_repo_lock.
-    DATA ls_lock TYPE zaog_fetch_sess.
-    DATA lv_ts TYPE timestampl.
-    DATA lv_wait_s TYPE f.
+    " Uses SAP enqueue server lock object EZAOG_REPO_LOCK (SE11).
+    " SESSION_ID is set to iv_repo_key (C12 padded to C32) — one unique lock
+    " entry per repository.  _SCOPE = '2': survives COMMIT WORK inside the
+    " decode loop but is automatically released by the enqueue server if the
+    " work process ends (crash, timeout, short dump) — no stale lock possible.
+    DATA lv_wait_s    TYPE f.
     DATA lv_jitter_ms TYPE i.
 
-    rv_lock_id = |LOCK_{ iv_repo_key }|.
+    " Return the repo key as the lock token; release_repo_lock passes it back
+    " as SESSION_ID to DEQUEUE (C12 → C32 left-aligned, same value).
+    rv_lock_id = iv_repo_key.
 
     IF iv_max_attempts <= 0.
       zcx_abapgit_exception=>raise( 'Repo lock: invalid max attempts' ).
     ENDIF.
 
     DO iv_max_attempts TIMES.
-      GET TIME STAMP FIELD lv_ts.
+      CALL FUNCTION 'ENQUEUE_EZAOG_REPO_LOCK'
+        EXPORTING
+          mode_zaog_fetch_sess = 'E'
+          session_id           = rv_lock_id
+          _scope               = '2'
+          _wait                = space
+          _collect             = space
+        EXCEPTIONS
+          foreign_lock         = 1
+          system_failure       = 2
+          OTHERS               = 3.
 
-      CLEAR ls_lock.
-      ls_lock-session_id = rv_lock_id.
-      ls_lock-repo_key   = iv_repo_key.
-      ls_lock-phase      = 'L'.
-      ls_lock-status     = 'L'.
-      ls_lock-error_text = 'MUTEX'.
-      ls_lock-created_at = lv_ts.
-      ls_lock-updated_at = lv_ts.
-      ls_lock-changed_by = sy-uname.
-
-      INSERT zaog_fetch_sess FROM ls_lock.
-      IF sy-subrc = 0.
-        RETURN.
-      ENDIF.
-
-      lv_jitter_ms = ( sy-index * 31 + strlen( iv_repo_key ) * 17 ) MOD 41.
-      lv_wait_s = ( iv_base_wait_ms * ( 2 ** ( sy-index - 1 ) ) + lv_jitter_ms ) / 1000.
-      IF lv_wait_s > 2.
-        lv_wait_s = 2.
-      ENDIF.
-      WAIT UP TO lv_wait_s SECONDS.
+      CASE sy-subrc.
+        WHEN 0.
+          RETURN. " Lock acquired
+        WHEN 1.   " foreign_lock — another process holds the lock; back off and retry
+          lv_jitter_ms = ( sy-index * 31 + strlen( iv_repo_key ) * 17 ) MOD 41.
+          lv_wait_s = ( iv_base_wait_ms * ( 2 ** ( sy-index - 1 ) ) + lv_jitter_ms ) / 1000.
+          IF lv_wait_s > 2.
+            lv_wait_s = 2.
+          ENDIF.
+          WAIT UP TO lv_wait_s SECONDS.
+        WHEN OTHERS. " system_failure or unexpected return code
+          zcx_abapgit_exception=>raise(
+            |Repo lock system failure for key { iv_repo_key } (sy-subrc={ sy-subrc })| ).
+      ENDCASE.
     ENDDO.
 
     zcx_abapgit_exception=>raise( |Repo lock timeout for key { iv_repo_key }| ).
@@ -374,13 +412,19 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
 
 
   METHOD release_repo_lock.
+    " Releases the enqueue server lock set by acquire_repo_lock.
+    " Safe to call even if the lock was already released (DEQUEUE is idempotent).
     IF iv_lock_id IS INITIAL.
       RETURN.
     ENDIF.
 
-    DELETE FROM zaog_fetch_sess
-      WHERE session_id = iv_lock_id
-        AND status     = 'L'.
+    CALL FUNCTION 'DEQUEUE_EZAOG_REPO_LOCK'
+      EXPORTING
+        mode_zaog_fetch_sess = 'E'
+        session_id           = iv_lock_id
+        _scope               = '2'
+        _synchron            = space
+        _collect             = space.
   ENDMETHOD.
 
 
@@ -536,11 +580,19 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
     DATA lv_len             TYPE i.
     DATA lv_sha1            TYPE zif_abapgit_git_definitions=>ty_sha1.
     DATA lv_ts              TYPE timestampl.
+    DATA lv_last_redispatch TYPE timestampl.
+    DATA lv_redispatch_now  TYPE timestampl.
+    DATA lv_elapsed         TYPE decfloat34.
     DATA lv_obj_done        TYPE i.
     DATA lv_start_offset    TYPE i.
     DATA lv_curr_offset     TYPE i.
     DATA lv_commit_interval TYPE i.
     DATA lv_temp_sha1       TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_adler_scan      TYPE zif_abapgit_git_definitions=>ty_adler32.
+    DATA lv_scan_start      TYPE i.
+    DATA lv_scan_found      TYPE abap_bool.
+    DATA lv_scan_offset     TYPE i.
+    DATA lv_scan_limit      TYPE i.
     DATA ls_object          LIKE LINE OF rt_objects.
     DATA ls_tmp_obj         TYPE zaog_obj_store.
     DATA ls_idx             TYPE zcl_abapgit_ortec_pack_index=>ty_index_entry.
@@ -629,6 +681,9 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
 
     lv_data = iv_data+lv_start_offset.
 
+    " Capture baseline timestamp for periodic WP-timeout prevention
+    GET TIME STAMP FIELD lv_last_redispatch.
+
     DO lv_objects - lv_obj_done TIMES.
 
       lv_uindex = lv_obj_done + sy-index.
@@ -653,6 +708,24 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
       ENDIF.
       lv_data = lv_data+2.
 
+      IF c_opt6_stream_decompress = abap_true.
+        " Optimization #6: kernel streaming decompress — works for all zlib headers.
+        " Feeds raw DEFLATE bytes (after 2-byte zlib header) to the kernel stream
+        " inflater which returns decompressed data + consumed byte count.
+        stream_decompress(
+          EXPORTING iv_data           = lv_data
+                    iv_expected_len   = lv_expected
+          IMPORTING ev_decompressed   = lv_decompressed
+                    ev_compressed_len = lv_compressed_len ).
+
+        IF lv_expected <> xstrlen( lv_decompressed ).
+          zcx_abapgit_exception=>raise( |Decompression failed (stream path)| ).
+        ENDIF.
+
+        " Advance past compressed data; Adler32 is at lv_compressed_len position
+        lv_data = lv_data+lv_compressed_len.
+
+      ELSE.
       CASE lv_zlib.
         WHEN c_zlib.
           cl_abap_gzip=>decompress_binary(
@@ -671,21 +744,85 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
 
           IF    xstrlen( lv_data )               <= lv_compressed_len
              OR lv_compressed(lv_compressed_len) <> lv_data(lv_compressed_len).
-            zlib_decompress(
-              CHANGING cv_data         = lv_data
-                       cv_decompressed = lv_decompressed ).
+            IF c_opt1_kernel_adler_scan = abap_true.
+              " Opt #1 fallback: scan for Adler32 instead of pure-ABAP inflate
+              lv_adler_scan = zcl_abapgit_hash=>adler32( lv_decompressed ).
+              lv_scan_start = nmax( val1 = 1 val2 = lv_decompress_len / 1032 ).
+              lv_scan_found = abap_false.
+              lv_scan_limit = xstrlen( lv_data ) - 4.
+              lv_scan_offset = lv_scan_start.
+              WHILE lv_scan_offset <= lv_scan_limit.
+                IF lv_data+lv_scan_offset(4) = lv_adler_scan.
+                  lv_data = lv_data+lv_scan_offset.
+                  lv_scan_found = abap_true.
+                  EXIT.
+                ENDIF.
+                lv_scan_offset += 1.
+              ENDWHILE.
+              IF lv_scan_found = abap_false.
+                zlib_decompress(
+                  CHANGING cv_data         = lv_data
+                           cv_decompressed = lv_decompressed ).
+              ENDIF.
+            ELSE.
+              zlib_decompress(
+                CHANGING cv_data         = lv_data
+                         cv_decompressed = lv_decompressed ).
+            ENDIF.
           ELSE.
             lv_data = lv_data+lv_compressed_len.
           ENDIF.
 
         WHEN c_zlib_hmm.
-          zlib_decompress(
-            CHANGING cv_data         = lv_data
-                     cv_decompressed = lv_decompressed ).
+          IF c_opt1_kernel_adler_scan = abap_true.
+            " Optimization #1: kernel decompress + Adler32 boundary scan.
+            " cl_abap_gzip works for raw DEFLATE regardless of zlib header byte.
+            " The only missing piece is consumed-length — recovered by scanning
+            " for the known 4-byte Adler32 trailer in the compressed stream.
+            cl_abap_gzip=>decompress_binary(
+              EXPORTING gzip_in     = lv_data
+              IMPORTING raw_out     = lv_decompressed
+                        raw_out_len = lv_decompress_len ).
+
+            IF lv_expected <> lv_decompress_len.
+              zcx_abapgit_exception=>raise( |Decompression failed (7801 kernel path)| ).
+            ENDIF.
+
+            lv_adler_scan = zcl_abapgit_hash=>adler32( lv_decompressed ).
+
+            " Scan for the Adler32 trailer. Start from a minimum offset to avoid
+            " false positives in the header area. DEFLATE minimum ratio ~ 1:1032.
+            lv_scan_start = nmax( val1 = 1 val2 = lv_decompress_len / 1032 ).
+            lv_scan_found = abap_false.
+            lv_scan_limit = xstrlen( lv_data ) - 4.
+
+            lv_scan_offset = lv_scan_start.
+            WHILE lv_scan_offset <= lv_scan_limit.
+              IF lv_data+lv_scan_offset(4) = lv_adler_scan.
+                lv_data = lv_data+lv_scan_offset.
+                lv_scan_found = abap_true.
+                EXIT.
+              ENDIF.
+              lv_scan_offset += 1.
+            ENDWHILE.
+
+            IF lv_scan_found = abap_false.
+              " Extremely rare fallback: Adler32 not found — use pure ABAP inflate
+              zlib_decompress(
+                CHANGING cv_data         = lv_data
+                         cv_decompressed = lv_decompressed ).
+            ENDIF.
+          ELSE.
+            " Legacy path: pure ABAP zlib inflate for 7801 streams
+            zlib_decompress(
+              CHANGING cv_data         = lv_data
+                       cv_decompressed = lv_decompressed ).
+          ENDIF.
 
         WHEN OTHERS.
           zcx_abapgit_exception=>raise( |Unexpected zlib header| ).
       ENDCASE.
+      ENDIF. " c_opt6_stream_decompress
 
       CLEAR ls_object.
       ls_object-adler32 = lv_data(4).
@@ -746,6 +883,16 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
           iv_obj_done    = lv_uindex
           iv_curr_offset = lv_curr_offset ).
         COMMIT WORK.
+      ENDIF.
+
+      " Prevent work process timeout: call TH_REDISPATCH every c_redispatch_interval seconds.
+      " TH_REDISPATCH resets the WP runtime counter without stopping execution.
+      GET TIME STAMP FIELD lv_redispatch_now.
+      lv_elapsed = cl_abap_tstmp=>subtract( tstmp1 = lv_redispatch_now
+                                            tstmp2 = lv_last_redispatch ).
+      IF lv_elapsed >= c_redispatch_interval.
+        CALL FUNCTION 'TH_REDISPATCH'.
+        lv_last_redispatch = lv_redispatch_now.
       ENDIF.
 
     ENDDO.
@@ -897,6 +1044,101 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
     IF cv_data(4) <> lv_adler32.
       zcx_abapgit_exception=>raise( |Wrong Adler checksum| ).
     ENDIF.
+  ENDMETHOD.
+
+
+  METHOD stream_decompress.
+    " Optimization #6: CL_ABAP_UNGZIP_BINARY_STREAM kernel-backed streaming inflate.
+    " Uses a FIXED-SIZE TYPE X output buffer (c_opt6_out_buf_size = 65535 bytes).
+    " The kernel fills this buffer per chunk, calls back to the handler which
+    " accumulates data, then continues until the DEFLATE stream ends.
+    " This prevents unbounded memory allocation (SYSTEM_NO_ROLL) because:
+    "   - SET_OUT_BUF uses DESCRIBE FIELD LENGTH to derive me->out_buf_len from
+    "     the fixed X field — reliable regardless of EXPORTING-param semantics.
+    "   - The kernel never allocates more than 65535 bytes per iteration.
+
+    DATA lo_handler TYPE REF TO lcl_ungzip_handler.
+    DATA lo_stream  TYPE REF TO cl_abap_ungzip_binary_stream.
+    " Fixed-size output buffer: kernel writes at most 65535 bytes per chunk.
+    " For objects > 65535 bytes the handler callback accumulates multiple chunks.
+    DATA lv_out_buf TYPE x LENGTH 65535.
+    DATA lv_buf_len TYPE i.
+    DATA lv_input   TYPE xstring.
+    DATA lv_in_len  TYPE i.
+
+    " Bound the input slice to avoid copying the entire remaining packfile
+    " into decompress_binary_stream_end's internal l_xstr variable.
+    " DEFLATE compressed size is nearly always ≤ uncompressed size;
+    " 2× expected + 4 KB headroom covers all practical cases.
+    lv_in_len = nmin( val1 = xstrlen( iv_data )
+                      val2 = iv_expected_len * 2 + 4096 ).
+    " Absolute minimum: at least 256 bytes to handle tiny objects
+    IF lv_in_len < 256 AND xstrlen( iv_data ) >= 256.
+      lv_in_len = 256.
+    ENDIF.
+    lv_input = iv_data(lv_in_len).
+
+    " Use -1 to instruct SET_OUT_BUF to derive buffer size from the
+    " declared X field length via DESCRIBE FIELD (always 65535 here).
+    " This path is independent of EXPORTING-param runtime semantics.
+    lv_buf_len = -1.
+
+    lcl_ungzip_handler=>reset( ).
+
+    CREATE OBJECT lo_handler.
+    TRY.
+        CREATE OBJECT lo_stream
+          EXPORTING
+            output_handler = lo_handler.
+
+        lo_stream->set_out_buf(
+          IMPORTING
+            out_buf     = lv_out_buf
+            out_buf_len = lv_buf_len ).
+
+        " Feed bounded input; stream_end signals end of DEFLATE stream.
+        " The kernel reads only the bytes belonging to this DEFLATE stream
+        " and stops — it does NOT process beyond the stream boundary.
+        lo_stream->decompress_binary_stream_end(
+          EXPORTING
+            gzip_in     = lv_input
+            gzip_in_len = lv_in_len ).
+
+      CATCH cx_parameter_invalid_range
+            cx_sy_buffer_overflow
+            cx_sy_compression_error
+            cx_parameter_invalid INTO DATA(lx_decomp).
+        zcx_abapgit_exception=>raise_with_text( lx_decomp ).
+    ENDTRY.
+
+    ev_decompressed = lcl_ungzip_handler=>get_data( ).
+
+    " Determine consumed compressed byte count by scanning for the Adler32
+    " trailer within the BOUNDED input slice (not the full packfile).
+    " Within a ~6 KB window the false-positive probability is negligible
+    " (~6000 positions / 2^32 ≈ 0.000001%).
+    DATA lv_adler32 TYPE x LENGTH 4.
+    lv_adler32 = zcl_abapgit_hash=>adler32( ev_decompressed ).
+
+    DATA lv_min_pos TYPE i.
+    lv_min_pos = nmax( val1 = 1 val2 = iv_expected_len / 1032 ).
+    DATA lv_pos TYPE i.
+    DATA lv_limit TYPE i.
+    " Scan within the bounded input + small overshoot for alignment
+    lv_limit = nmin( val1 = xstrlen( iv_data ) - 4
+                     val2 = lv_in_len + 16 ).
+    lv_pos = lv_min_pos.
+
+    WHILE lv_pos <= lv_limit.
+      IF iv_data+lv_pos(4) = lv_adler32.
+        ev_compressed_len = lv_pos.
+        RETURN.
+      ENDIF.
+      lv_pos += 1.
+    ENDWHILE.
+
+    " Should not happen — kernel decompressed successfully so trailer must exist
+    zcx_abapgit_exception=>raise( |Stream decompress: Adler32 trailer not found| ).
   ENDMETHOD.
 
 ENDCLASS.

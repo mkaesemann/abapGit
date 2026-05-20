@@ -1,0 +1,43 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_ENQU" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values>
+   <DD25V>
+    <VIEWNAME>EZAOG_REPO_LOCK</VIEWNAME>
+    <DDLANGUAGE>E</DDLANGUAGE>
+    <AGGTYPE>E</AGGTYPE>
+    <ROOTTAB>ZAOG_FETCH_SESS</ROOTTAB>
+    <DDTEXT>Object Store Lock</DDTEXT>
+   </DD25V>
+   <DD26E_TABLE>
+    <DD26E>
+     <VIEWNAME>EZAOG_REPO_LOCK</VIEWNAME>
+     <TABNAME>ZAOG_FETCH_SESS</TABNAME>
+     <TABPOS>0001</TABPOS>
+     <FORTABNAME>ZAOG_FETCH_SESS</FORTABNAME>
+     <ENQMODE>X</ENQMODE>
+    </DD26E>
+   </DD26E_TABLE>
+   <DD27P_TABLE>
+    <DD27P>
+     <VIEWNAME>EZAOG_REPO_LOCK</VIEWNAME>
+     <OBJPOS>0001</OBJPOS>
+     <VIEWFIELD>CLIENT</VIEWFIELD>
+     <TABNAME>ZAOG_FETCH_SESS</TABNAME>
+     <FIELDNAME>CLIENT</FIELDNAME>
+     <KEYFLAG>X</KEYFLAG>
+     <ENQMODE>X</ENQMODE>
+    </DD27P>
+    <DD27P>
+     <VIEWNAME>EZAOG_REPO_LOCK</VIEWNAME>
+     <OBJPOS>0002</OBJPOS>
+     <VIEWFIELD>SESSION_ID</VIEWFIELD>
+     <TABNAME>ZAOG_FETCH_SESS</TABNAME>
+     <FIELDNAME>SESSION_ID</FIELDNAME>
+     <KEYFLAG>X</KEYFLAG>
+     <ENQMODE>X</ENQMODE>
+    </DD27P>
+   </DD27P_TABLE>
+  </asx:values>
+ </asx:abap>
+</abapGit>

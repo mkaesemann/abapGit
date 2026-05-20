@@ -35,6 +35,10 @@ CLASS zcl_abapgit_zlib_stream DEFINITION
       RETURNING
         VALUE(rv_bytes) TYPE xstring .
     METHODS clear_bits .
+    "! Enable integer-based bit I/O (optimization #2 + #4).
+    "! When enabled, take_bit and take_int use an integer accumulator
+    "! instead of string-based bit manipulation — significantly faster.
+    METHODS enable_fast_mode .
   PROTECTED SECTION.
   PRIVATE SECTION.
 
@@ -42,6 +46,10 @@ CLASS zcl_abapgit_zlib_stream DEFINITION
     DATA mv_bits TYPE string .
     DATA mv_compressed TYPE xstring .
     DATA mv_offset TYPE i.
+    " Integer bit accumulator for fast mode (#2)
+    DATA mv_fast_mode   TYPE abap_bool.
+    DATA mv_bit_buf     TYPE i.   " current byte value (0-255)
+    DATA mv_bits_left   TYPE i.   " bits remaining in mv_bit_buf (0-8)
 ENDCLASS.
 
 
@@ -71,8 +79,18 @@ CLASS zcl_abapgit_zlib_stream IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD enable_fast_mode.
+    mv_fast_mode = abap_true.
+    mv_bits_left = 0.
+  ENDMETHOD.
+
+
   METHOD clear_bits.
-    CLEAR mv_bits.
+    IF mv_fast_mode = abap_true.
+      mv_bits_left = 0.
+    ELSE.
+      CLEAR mv_bits.
+    ENDIF.
   ENDMETHOD.
 
 
@@ -96,6 +114,29 @@ CLASS zcl_abapgit_zlib_stream IMPLEMENTATION.
     DATA:
       lv_left  TYPE i,
       lv_index TYPE i.
+
+    IF mv_fast_mode = abap_true.
+      " Fast-mode path: read bits from integer accumulator and build
+      " the result string in the same format as the legacy path.
+      " Bits are extracted LSB-first; the result string has the first
+      " extracted bit at the rightmost position (same as legacy layout).
+      DATA lv_bit TYPE i.
+      DATA lv_bit_c TYPE c LENGTH 1.
+      WHILE strlen( rv_bits ) < iv_length.
+        IF mv_bits_left = 0.
+          mv_bit_buf = mv_compressed+mv_offset(1).
+          mv_offset += 1.
+          mv_bits_left = 8.
+        ENDIF.
+        lv_bit = mv_bit_buf MOD 2.
+        mv_bit_buf = mv_bit_buf DIV 2.
+        mv_bits_left -= 1.
+        lv_bit_c = lv_bit.
+        " Prepend: first extracted bit (LSB) goes to the right
+        CONCATENATE lv_bit_c rv_bits INTO rv_bits.
+      ENDWHILE.
+      RETURN.
+    ENDIF.
 
     WHILE strlen( rv_bits ) < iv_length.
       IF mv_bits IS INITIAL.
@@ -121,23 +162,42 @@ CLASS zcl_abapgit_zlib_stream IMPLEMENTATION.
 
   METHOD take_bit.
 
-    DATA: lv_index TYPE i,
-          lv_len TYPE i.
+    IF mv_fast_mode = abap_true.
+      " Optimization #2: Integer bit accumulator.
+      " DEFLATE reads bits LSB-first within each byte.
+      IF mv_bits_left = 0.
+        mv_bit_buf = mv_compressed+mv_offset(1).
+        mv_offset += 1.
+        mv_bits_left = 8.
+      ENDIF.
+      rv_bit = mv_bit_buf MOD 2.
+      mv_bit_buf = mv_bit_buf DIV 2.
+      mv_bits_left -= 1.
+    ELSE.
+      " Legacy path: string-based bit extraction
+      DATA: lv_index TYPE i,
+            lv_len TYPE i.
 
-    IF mv_bits IS INITIAL.
-      lv_index = mv_compressed+mv_offset(1) + 1.
-      READ TABLE gt_byte_bits INTO mv_bits INDEX lv_index.
-      mv_offset = mv_offset + 1.
+      IF mv_bits IS INITIAL.
+        lv_index = mv_compressed+mv_offset(1) + 1.
+        READ TABLE gt_byte_bits INTO mv_bits INDEX lv_index.
+        mv_offset = mv_offset + 1.
+      ENDIF.
+
+      lv_len = strlen( mv_bits ) - 1.
+      rv_bit = mv_bits+lv_len(1).
+      mv_bits = mv_bits(lv_len).
     ENDIF.
-
-    lv_len = strlen( mv_bits ) - 1.
-    rv_bit = mv_bits+lv_len(1).
-    mv_bits = mv_bits(lv_len).
 
   ENDMETHOD.
 
 
   METHOD take_bytes.
+
+    IF mv_fast_mode = abap_true.
+      " Discard remaining bits in current byte (realignment)
+      mv_bits_left = 0.
+    ENDIF.
 
     rv_bytes = mv_compressed+mv_offset(iv_length).
     mv_offset = mv_offset + iv_length.
@@ -147,19 +207,37 @@ CLASS zcl_abapgit_zlib_stream IMPLEMENTATION.
 
   METHOD take_int.
 
-    DATA:
-      lv_bits   TYPE string,
-      lv_i      TYPE i,
-      lv_offset TYPE i.
+    IF mv_fast_mode = abap_true AND iv_length > 0.
+      " Optimization #4: Direct integer accumulation without string intermediary.
+      " DEFLATE extra-bits are read LSB-first, so bit i has weight 2^i.
+      DATA lv_factor TYPE i VALUE 1.
+      DO iv_length TIMES.
+        IF mv_bits_left = 0.
+          mv_bit_buf = mv_compressed+mv_offset(1).
+          mv_offset += 1.
+          mv_bits_left = 8.
+        ENDIF.
+        rv_int = rv_int + ( mv_bit_buf MOD 2 ) * lv_factor.
+        mv_bit_buf = mv_bit_buf DIV 2.
+        mv_bits_left -= 1.
+        lv_factor = lv_factor * 2.
+      ENDDO.
+    ELSE.
+      " Legacy path or zero-length (no-op for iv_length = 0)
+      DATA:
+        lv_bits   TYPE string,
+        lv_i      TYPE i,
+        lv_offset TYPE i.
 
-    lv_bits = take_bits( iv_length ).
+      lv_bits = take_bits( iv_length ).
 
-    " inlining bits_to_int for better performance
-    DO strlen( lv_bits ) TIMES.
-      lv_i = lv_bits+lv_offset(1).
-      rv_int = rv_int * 2 + lv_i.
-      lv_offset = lv_offset + 1.
-    ENDDO.
+      " inlining bits_to_int for better performance
+      DO strlen( lv_bits ) TIMES.
+        lv_i = lv_bits+lv_offset(1).
+        rv_int = rv_int * 2 + lv_i.
+        lv_offset = lv_offset + 1.
+      ENDDO.
+    ENDIF.
 
   ENDMETHOD.
 ENDCLASS.

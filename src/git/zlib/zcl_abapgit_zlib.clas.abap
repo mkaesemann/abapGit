@@ -19,11 +19,15 @@ CLASS zcl_abapgit_zlib DEFINITION
   PROTECTED SECTION.
   PRIVATE SECTION.
     CONSTANTS: c_maxdcodes TYPE i VALUE 30.
+    "! Optimization switch for #2-#5: integer bit I/O, chunked output, inlined decode.
+    "! abap_true = optimized path, abap_false = legacy string-based path.
+    CONSTANTS: c_opt2to5_fast_zlib TYPE abap_bool VALUE abap_true.
 
     CLASS-DATA: gv_out      TYPE xstring,
                 go_lencode  TYPE REF TO zcl_abapgit_zlib_huffman,
                 go_distcode TYPE REF TO zcl_abapgit_zlib_huffman,
-                go_stream   TYPE REF TO zcl_abapgit_zlib_stream.
+                go_stream   TYPE REF TO zcl_abapgit_zlib_stream,
+                gt_order    TYPE TABLE OF i.  " RFC 1951 §3.2.7 code-length order (cached across calls)
 
     TYPES: BEGIN OF ty_pair,
              length   TYPE i,
@@ -44,6 +48,7 @@ CLASS zcl_abapgit_zlib DEFINITION
       fixed,
       not_compressed,
       decode_loop,
+      decode_loop_fast,
       read_pair
         IMPORTING iv_length      TYPE i
         RETURNING VALUE(rs_pair) TYPE ty_pair,
@@ -59,21 +64,44 @@ CLASS zcl_abapgit_zlib IMPLEMENTATION.
 
   METHOD copy_out.
 
-* copy one byte at a time, it is not possible to copy using
-* string offsets, as it might copy data that does not exist
-* in mv_out yet
+    " Seed-tiling strategy (equivalent to original byte-by-byte, fewer CONCATENATE calls):
+    "   Non-overlapping (length <= distance):  one CONCATENATE for the whole slice.
+    "   Overlapping LZ77 run (length > distance): capture the seed pattern once, then tile
+    "   it in chunks of 'distance' bytes until 'length' bytes have been appended.
+    "   Proof: each byte position i (0-based) maps to gv_out[src + i MOD distance],
+    "   which is exactly what the original lv_index loop produced.
 
-    DATA: lv_distance TYPE i,
-          lv_index    TYPE i,
-          lv_x        TYPE x LENGTH 1.
+    DATA lv_src_offset TYPE i.
+    DATA lv_src        TYPE xstring.
+    DATA lv_chunk      TYPE xstring.
+    DATA lv_remaining  TYPE i.
 
+    lv_src_offset = xstrlen( gv_out ) - is_pair-distance.
+    IF lv_src_offset < 0.
+      " Invalid back-reference: distance exceeds output produced so far.
+      " This indicates a corrupt DEFLATE stream or bit-read desynchronization.
+      ASSERT 1 = 0.
+    ENDIF.
+    lv_src        = gv_out+lv_src_offset(is_pair-distance).
 
-    lv_distance = xstrlen( gv_out ) - is_pair-distance.
-    DO is_pair-length TIMES.
-      lv_index = sy-index - 1 + lv_distance.
-      lv_x = gv_out+lv_index(1).
-      CONCATENATE gv_out lv_x INTO gv_out IN BYTE MODE.
-    ENDDO.
+    IF is_pair-length <= is_pair-distance.
+      " Non-overlapping: the required slice lives entirely in lv_src.
+      lv_chunk = lv_src(is_pair-length).
+      CONCATENATE gv_out lv_chunk INTO gv_out IN BYTE MODE.
+    ELSE.
+      " Overlapping LZ77 run: tile the seed pattern.
+      lv_remaining = is_pair-length.
+      WHILE lv_remaining > 0.
+        IF lv_remaining >= is_pair-distance.
+          CONCATENATE gv_out lv_src INTO gv_out IN BYTE MODE.
+          lv_remaining -= is_pair-distance.
+        ELSE.
+          lv_chunk = lv_src(lv_remaining).
+          CONCATENATE gv_out lv_chunk INTO gv_out IN BYTE MODE.
+          CLEAR lv_remaining.
+        ENDIF.
+      ENDWHILE.
+    ENDIF.
 
   ENDMETHOD.
 
@@ -124,6 +152,64 @@ CLASS zcl_abapgit_zlib IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD decode_loop_fast.
+
+    " Optimized decode loop combining:
+    "   #3: Chunked literal output (batch single-byte literals into lv_chunk,
+    "       flush to gv_out every 4096 bytes — reduces full-buffer copies)
+    "   #5: Inlined decode call for the hot path (eliminate method-call overhead
+    "       for every symbol by embedding the Huffman traversal here)
+
+    DATA lv_x       TYPE x.
+    DATA lv_symbol  TYPE i.
+    DATA lv_chunk   TYPE xstring.
+    DATA lv_count   TYPE i.
+    DATA lv_code    TYPE i.
+    DATA lv_index   TYPE i.
+    DATA lv_first   TYPE i.
+
+    DO.
+      " --- Inlined decode( go_lencode ) ---
+      CLEAR: lv_code, lv_index, lv_first.
+      DO zcl_abapgit_zlib_huffman=>c_maxbits TIMES.
+        lv_count = go_lencode->get_count( sy-index ).
+        lv_code = go_stream->take_bit( ) + lv_code * 2.
+        IF lv_code - lv_count < lv_first.
+          lv_symbol = go_lencode->get_symbol( lv_index + lv_code - lv_first + 1 ).
+          EXIT.
+        ENDIF.
+        lv_index = lv_index + lv_count.
+        lv_first = ( lv_first + lv_count ) * 2.
+      ENDDO.
+      " --- end inlined decode ---
+
+      IF lv_symbol < 256.
+        lv_x = lv_symbol.
+        CONCATENATE lv_chunk lv_x INTO lv_chunk IN BYTE MODE.
+        IF xstrlen( lv_chunk ) >= 4096.
+          CONCATENATE gv_out lv_chunk INTO gv_out IN BYTE MODE.
+          CLEAR lv_chunk.
+        ENDIF.
+      ELSEIF lv_symbol = 256.
+        " Flush remaining chunk before exiting
+        IF lv_chunk IS NOT INITIAL.
+          CONCATENATE gv_out lv_chunk INTO gv_out IN BYTE MODE.
+        ENDIF.
+        EXIT.
+      ELSE.
+        " Flush chunk before copy_out (it reads from gv_out tail)
+        IF lv_chunk IS NOT INITIAL.
+          CONCATENATE gv_out lv_chunk INTO gv_out IN BYTE MODE.
+          CLEAR lv_chunk.
+        ENDIF.
+        copy_out( read_pair( lv_symbol ) ).
+      ENDIF.
+
+    ENDDO.
+
+  ENDMETHOD.
+
+
   METHOD decompress.
 
     DATA: lv_bfinal TYPE c LENGTH 1,
@@ -139,6 +225,11 @@ CLASS zcl_abapgit_zlib IMPLEMENTATION.
       EXPORTING
         iv_data = iv_compressed.
 
+    " Enable integer bit-I/O in stream when optimizations #2-#5 are active
+    IF c_opt2to5_fast_zlib = abap_true.
+      go_stream->enable_fast_mode( ).
+    ENDIF.
+
     DO.
       lv_bfinal = go_stream->take_bits( 1 ).
 
@@ -148,10 +239,18 @@ CLASS zcl_abapgit_zlib IMPLEMENTATION.
           not_compressed( ).
         WHEN '01'.
           fixed( ).
-          decode_loop( ).
+          IF c_opt2to5_fast_zlib = abap_true.
+            decode_loop_fast( ).
+          ELSE.
+            decode_loop( ).
+          ENDIF.
         WHEN '10'.
           dynamic( ).
-          decode_loop( ).
+          IF c_opt2to5_fast_zlib = abap_true.
+            decode_loop_fast( ).
+          ELSE.
+            decode_loop( ).
+          ENDIF.
         WHEN OTHERS.
           ASSERT 1 = 0.
       ENDCASE.
@@ -176,32 +275,18 @@ CLASS zcl_abapgit_zlib IMPLEMENTATION.
           lv_index   TYPE i,
           lv_length  TYPE i,
           lv_symbol  TYPE i,
-          lt_order   TYPE TABLE OF i,
           lt_lengths TYPE zcl_abapgit_zlib_huffman=>ty_lengths,
           lt_dists   TYPE zcl_abapgit_zlib_huffman=>ty_lengths.
 
     FIELD-SYMBOLS: <lv_length> LIKE LINE OF lt_lengths.
 
 
-    APPEND 16 TO lt_order.
-    APPEND 17 TO lt_order.
-    APPEND 18 TO lt_order.
-    APPEND 0 TO lt_order.
-    APPEND 8 TO lt_order.
-    APPEND 7 TO lt_order.
-    APPEND 9 TO lt_order.
-    APPEND 6 TO lt_order.
-    APPEND 10 TO lt_order.
-    APPEND 5 TO lt_order.
-    APPEND 11 TO lt_order.
-    APPEND 4 TO lt_order.
-    APPEND 12 TO lt_order.
-    APPEND 3 TO lt_order.
-    APPEND 13 TO lt_order.
-    APPEND 2 TO lt_order.
-    APPEND 14 TO lt_order.
-    APPEND 1 TO lt_order.
-    APPEND 15 TO lt_order.
+    " RFC 1951 §3.2.7 code-length alphabet reorder — constant sequence, cached globally.
+    IF gt_order IS INITIAL.
+      gt_order = VALUE #( ( 16 ) ( 17 ) ( 18 ) ( 0 ) ( 8 ) ( 7 ) ( 9 ) ( 6 )
+                          ( 10 ) ( 5 ) ( 11 ) ( 4 ) ( 12 ) ( 3 ) ( 13 ) ( 2 )
+                          ( 14 ) ( 1 ) ( 15 ) ).
+    ENDIF.
 
     lv_nlen = go_stream->take_int( 5 ) + 257.
     lv_ndist = go_stream->take_int( 5 ) + 1.
@@ -212,7 +297,7 @@ CLASS zcl_abapgit_zlib IMPLEMENTATION.
     ENDDO.
 
     DO lv_ncode TIMES.
-      READ TABLE lt_order INDEX sy-index INTO lv_index.
+      READ TABLE gt_order INDEX sy-index INTO lv_index.
       ASSERT sy-subrc = 0.
       lv_index = lv_index + 1.
       READ TABLE lt_lengths INDEX lv_index ASSIGNING <lv_length>.
@@ -298,138 +383,81 @@ CLASS zcl_abapgit_zlib IMPLEMENTATION.
 
   METHOD map_distance.
 
-    CASE iv_code.
-      WHEN 0.
-        rv_distance = go_stream->take_int( 0 ) + 1.
-      WHEN 1.
-        rv_distance = go_stream->take_int( 0 ) + 2.
-      WHEN 2.
-        rv_distance = go_stream->take_int( 0 ) + 3.
-      WHEN 3.
-        rv_distance = go_stream->take_int( 0 ) + 4.
-      WHEN 4.
-        rv_distance = go_stream->take_int( 1 ) + 5.
-      WHEN 5.
-        rv_distance = go_stream->take_int( 1 ) + 7.
-      WHEN 6.
-        rv_distance = go_stream->take_int( 2 ) + 9.
-      WHEN 7.
-        rv_distance = go_stream->take_int( 2 ) + 13.
-      WHEN 8.
-        rv_distance = go_stream->take_int( 3 ) + 17.
-      WHEN 9.
-        rv_distance = go_stream->take_int( 3 ) + 25.
-      WHEN 10.
-        rv_distance = go_stream->take_int( 4 ) + 33.
-      WHEN 11.
-        rv_distance = go_stream->take_int( 4 ) + 49.
-      WHEN 12.
-        rv_distance = go_stream->take_int( 5 ) + 65.
-      WHEN 13.
-        rv_distance = go_stream->take_int( 5 ) + 97.
-      WHEN 14.
-        rv_distance = go_stream->take_int( 6 ) + 129.
-      WHEN 15.
-        rv_distance = go_stream->take_int( 6 ) + 193.
-      WHEN 16.
-        rv_distance = go_stream->take_int( 7 ) + 257.
-      WHEN 17.
-        rv_distance = go_stream->take_int( 7 ) + 385.
-      WHEN 18.
-        rv_distance = go_stream->take_int( 8 ) + 513.
-      WHEN 19.
-        rv_distance = go_stream->take_int( 8 ) + 769.
-      WHEN 20.
-        rv_distance = go_stream->take_int( 9 ) + 1025.
-      WHEN 21.
-        rv_distance = go_stream->take_int( 9 ) + 1537.
-      WHEN 22.
-        rv_distance = go_stream->take_int( 10 ) + 2049.
-      WHEN 23.
-        rv_distance = go_stream->take_int( 10 ) + 3073.
-      WHEN 24.
-        rv_distance = go_stream->take_int( 11 ) + 4097.
-      WHEN 25.
-        rv_distance = go_stream->take_int( 11 ) + 6145.
-      WHEN 26.
-        rv_distance = go_stream->take_int( 12 ) + 8193.
-      WHEN 27.
-        rv_distance = go_stream->take_int( 12 ) + 12289.
-      WHEN 28.
-        rv_distance = go_stream->take_int( 13 ) + 16385.
-      WHEN 29.
-        rv_distance = go_stream->take_int( 13 ) + 24577.
-      WHEN OTHERS.
-        ASSERT 1 = 0.
-    ENDCASE.
+    " RFC 1951 §3.2.5 distance alphabet — condensed from 30 WHEN to 15 groups.
+    " Codes 0-3: no extra bits, base = 1 + code.
+    " Codes 4-29 (pairs): extra_bits = (code DIV 2) - 1; within pair: stride = 2 ^ extra_bits.
+    " Formula: rv_distance = take_int(extra) + pair_base + (code MOD 2) * stride
+    " Spot-checks:
+    "   0→1  1→2  2→3  3→4
+    "   4→5+0=5  5→5+2=7   6→9+0=9   7→9+4=13
+    "   8→17+0=17 9→17+8=25  10→33+0=33 11→33+16=49
+    "   28→16385+0=16385  29→16385+8192=24577
+
+    IF iv_code BETWEEN 0 AND 3.
+      rv_distance = go_stream->take_int( 0 ) + 1 + iv_code.
+    ELSEIF iv_code BETWEEN 4 AND 5.
+      rv_distance = go_stream->take_int( 1 ) + 5 + ( iv_code - 4 ) * 2.
+    ELSEIF iv_code BETWEEN 6 AND 7.
+      rv_distance = go_stream->take_int( 2 ) + 9 + ( iv_code - 6 ) * 4.
+    ELSEIF iv_code BETWEEN 8 AND 9.
+      rv_distance = go_stream->take_int( 3 ) + 17 + ( iv_code - 8 ) * 8.
+    ELSEIF iv_code BETWEEN 10 AND 11.
+      rv_distance = go_stream->take_int( 4 ) + 33 + ( iv_code - 10 ) * 16.
+    ELSEIF iv_code BETWEEN 12 AND 13.
+      rv_distance = go_stream->take_int( 5 ) + 65 + ( iv_code - 12 ) * 32.
+    ELSEIF iv_code BETWEEN 14 AND 15.
+      rv_distance = go_stream->take_int( 6 ) + 129 + ( iv_code - 14 ) * 64.
+    ELSEIF iv_code BETWEEN 16 AND 17.
+      rv_distance = go_stream->take_int( 7 ) + 257 + ( iv_code - 16 ) * 128.
+    ELSEIF iv_code BETWEEN 18 AND 19.
+      rv_distance = go_stream->take_int( 8 ) + 513 + ( iv_code - 18 ) * 256.
+    ELSEIF iv_code BETWEEN 20 AND 21.
+      rv_distance = go_stream->take_int( 9 ) + 1025 + ( iv_code - 20 ) * 512.
+    ELSEIF iv_code BETWEEN 22 AND 23.
+      rv_distance = go_stream->take_int( 10 ) + 2049 + ( iv_code - 22 ) * 1024.
+    ELSEIF iv_code BETWEEN 24 AND 25.
+      rv_distance = go_stream->take_int( 11 ) + 4097 + ( iv_code - 24 ) * 2048.
+    ELSEIF iv_code BETWEEN 26 AND 27.
+      rv_distance = go_stream->take_int( 12 ) + 8193 + ( iv_code - 26 ) * 4096.
+    ELSEIF iv_code BETWEEN 28 AND 29.
+      rv_distance = go_stream->take_int( 13 ) + 16385 + ( iv_code - 28 ) * 8192.
+    ELSE.
+      ASSERT 1 = 0.
+    ENDIF.
 
   ENDMETHOD.
 
 
   METHOD map_length.
 
-    CASE iv_code.
-      WHEN 257.
-        rv_length = go_stream->take_int( 0 ) + 3.
-      WHEN 258.
-        rv_length = go_stream->take_int( 0 ) + 4.
-      WHEN 259.
-        rv_length = go_stream->take_int( 0 ) + 5.
-      WHEN 260.
-        rv_length = go_stream->take_int( 0 ) + 6.
-      WHEN 261.
-        rv_length = go_stream->take_int( 0 ) + 7.
-      WHEN 262.
-        rv_length = go_stream->take_int( 0 ) + 8.
-      WHEN 263.
-        rv_length = go_stream->take_int( 0 ) + 9.
-      WHEN 264.
-        rv_length = go_stream->take_int( 0 ) + 10.
-      WHEN 265.
-        rv_length = go_stream->take_int( 1 ) + 11.
-      WHEN 266.
-        rv_length = go_stream->take_int( 1 ) + 13.
-      WHEN 267.
-        rv_length = go_stream->take_int( 1 ) + 15.
-      WHEN 268.
-        rv_length = go_stream->take_int( 1 ) + 17.
-      WHEN 269.
-        rv_length = go_stream->take_int( 2 ) + 19.
-      WHEN 270.
-        rv_length = go_stream->take_int( 2 ) + 23.
-      WHEN 271.
-        rv_length = go_stream->take_int( 2 ) + 27.
-      WHEN 272.
-        rv_length = go_stream->take_int( 2 ) + 31.
-      WHEN 273.
-        rv_length = go_stream->take_int( 3 ) + 35.
-      WHEN 274.
-        rv_length = go_stream->take_int( 3 ) + 43.
-      WHEN 275.
-        rv_length = go_stream->take_int( 3 ) + 51.
-      WHEN 276.
-        rv_length = go_stream->take_int( 3 ) + 59.
-      WHEN 277.
-        rv_length = go_stream->take_int( 4 ) + 67.
-      WHEN 278.
-        rv_length = go_stream->take_int( 4 ) + 83.
-      WHEN 279.
-        rv_length = go_stream->take_int( 4 ) + 99.
-      WHEN 280.
-        rv_length = go_stream->take_int( 4 ) + 115.
-      WHEN 281.
-        rv_length = go_stream->take_int( 5 ) + 131.
-      WHEN 282.
-        rv_length = go_stream->take_int( 5 ) + 163.
-      WHEN 283.
-        rv_length = go_stream->take_int( 5 ) + 195.
-      WHEN 284.
-        rv_length = go_stream->take_int( 5 ) + 227.
-      WHEN 285.
-        rv_length = go_stream->take_int( 0 ) + 258.
-      WHEN OTHERS.
-        ASSERT 1 = 0.
-    ENDCASE.
+    " RFC 1951 §3.2.5 length alphabet — condensed from 29 WHEN to 7 arithmetic groups.
+    " Formula per group: rv_length = take_int(extra_bits) + base + (iv_code - grp_start) * stride
+    " Verification spot-checks (matching original WHEN values):
+    "   257 → 0+3+0=3   264 → 0+3+7=10
+    "   265 → 1+11+0=11 268 → 1+11+6=17
+    "   269 → 2+19+0=19 272 → 2+19+12=31
+    "   273 → 3+35+0=35 276 → 3+35+24=59
+    "   277 → 4+67+0=67 280 → 4+67+48=115
+    "   281 → 5+131+0=131 284 → 5+131+96=227
+    "   285 → 0+258=258
+
+    IF iv_code BETWEEN 257 AND 264.
+      rv_length = go_stream->take_int( 0 ) + 3 + iv_code - 257.
+    ELSEIF iv_code BETWEEN 265 AND 268.
+      rv_length = go_stream->take_int( 1 ) + 11 + ( iv_code - 265 ) * 2.
+    ELSEIF iv_code BETWEEN 269 AND 272.
+      rv_length = go_stream->take_int( 2 ) + 19 + ( iv_code - 269 ) * 4.
+    ELSEIF iv_code BETWEEN 273 AND 276.
+      rv_length = go_stream->take_int( 3 ) + 35 + ( iv_code - 273 ) * 8.
+    ELSEIF iv_code BETWEEN 277 AND 280.
+      rv_length = go_stream->take_int( 4 ) + 67 + ( iv_code - 277 ) * 16.
+    ELSEIF iv_code BETWEEN 281 AND 284.
+      rv_length = go_stream->take_int( 5 ) + 131 + ( iv_code - 281 ) * 32.
+    ELSEIF iv_code = 285.
+      rv_length = go_stream->take_int( 0 ) + 258.
+    ELSE.
+      ASSERT 1 = 0.
+    ENDIF.
 
   ENDMETHOD.
 
