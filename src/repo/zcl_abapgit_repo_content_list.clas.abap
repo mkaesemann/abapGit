@@ -211,19 +211,10 @@ CLASS zcl_abapgit_repo_content_list IMPLEMENTATION.
 
   METHOD determine_transports.
 
-    DATA ls_item TYPE zif_abapgit_definitions=>ty_item.
-
-    FIELD-SYMBOLS <ls_item> LIKE LINE OF ct_repo_items.
-
-    LOOP AT ct_repo_items ASSIGNING <ls_item>.
-      ls_item-obj_type = <ls_item>-obj_type.
-      ls_item-obj_name = <ls_item>-obj_name.
-      TRY.
-          <ls_item>-transport = zcl_abapgit_factory=>get_cts_api( )->get_transport_for_object( ls_item ).
-        CATCH zcx_abapgit_exception ##NO_HANDLER.
-          " Ignore errors related to object check when trying to get transport
-      ENDTRY.
-    ENDLOOP.
+    " ORTEC optimization: bulk transport determination (1 TLOCK read + 1 E070/E071 query)
+    " instead of per-item get_transport_for_object (3+ FM calls × N items = 16K+ DB accesses)
+    zcl_abapgit_ortec_cts_buffer=>determine_transports_bulk(
+      CHANGING ct_repo_items = ct_repo_items ).
 
   ENDMETHOD.
 
