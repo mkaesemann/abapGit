@@ -22,7 +22,7 @@ CLASS ltcl_switch DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
   PRIVATE SECTION. METHODS no_dump FOR TESTING.
 ENDCLASS.
 CLASS ltcl_switch IMPLEMENTATION.
-  METHOD no_dump. zcl_abapgit_ortec_git_switch=>reset( ). DATA lv TYPE abap_bool. lv = zcl_abapgit_ortec_git_switch=>is_active( ). ENDMETHOD.
+  METHOD no_dump. DATA lv TYPE abap_bool. lv = zcl_abapgit_ortec_git_switch=>is_active_for_repo( 'https://dummy.test/repo.git' ). ENDMETHOD.
 ENDCLASS.
 
 CLASS ltcl_repo_state DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
@@ -86,7 +86,7 @@ CLASS ltcl_persist_flow IMPLEMENTATION.
     IF lv_key IS NOT INITIAL.
       zcl_abapgit_ortec_repo_state=>clear_state( lv_key ).
       DELETE FROM zaog_obj_store WHERE repo_key = lv_key.
-    ENDIF. zcl_abapgit_ortec_git_switch=>reset( ).
+    ENDIF.
   ENDMETHOD.
   METHOD teardown.
     DATA lv_key TYPE c LENGTH 12.
@@ -132,20 +132,20 @@ CLASS ltcl_pack_index IMPLEMENTATION.
   METHOD setup. zcl_abapgit_ortec_pack_index=>cleanup_repo( mc_repo ). ENDMETHOD.
   METHOD teardown. zcl_abapgit_ortec_pack_index=>cleanup_repo( mc_repo ). ROLLBACK WORK. ENDMETHOD.
   METHOD store_and_get.
-    DATA lt_e TYPE zcl_abapgit_ortec_pack_index=>ty_index_entries. DATA ls_e TYPE zcl_abapgit_ortec_pack_index=>ty_index_entry.
+    DATA lt_e TYPE zcl_abapgit_ortec_pack_index=>tty_index_entries. DATA ls_e TYPE zcl_abapgit_ortec_pack_index=>ty_index_entry.
     ls_e-obj_index = 1. ls_e-obj_sha1 = 'aa11223344556677889900aabbccddeeff001122'. ls_e-obj_type = 'blob'. ls_e-uncomp_len = 100. ls_e-dec_status = 'P'. APPEND ls_e TO lt_e.
     ls_e-obj_index = 2. ls_e-obj_sha1 = 'bb11223344556677889900aabbccddeeff001122'. ls_e-obj_type = 'commit'. ls_e-dec_status = 'D'. APPEND ls_e TO lt_e.
     zcl_abapgit_ortec_pack_index=>store_entries( iv_repo_key = mc_repo iv_pack_id = mc_pack it_entries = lt_e ).
-    DATA lt_p TYPE zcl_abapgit_ortec_pack_index=>ty_index_entries.
+    DATA lt_p TYPE zcl_abapgit_ortec_pack_index=>tty_index_entries.
     lt_p = zcl_abapgit_ortec_pack_index=>get_pending( iv_repo_key = mc_repo iv_pack_id = mc_pack ).
     cl_abap_unit_assert=>assert_equals( act = lines( lt_p ) exp = 1 msg = 'Only 1 pending' ).
   ENDMETHOD.
   METHOD mark_decoded.
-    DATA lt_e TYPE zcl_abapgit_ortec_pack_index=>ty_index_entries. DATA ls_e TYPE zcl_abapgit_ortec_pack_index=>ty_index_entry.
+    DATA lt_e TYPE zcl_abapgit_ortec_pack_index=>tty_index_entries. DATA ls_e TYPE zcl_abapgit_ortec_pack_index=>ty_index_entry.
     ls_e-obj_index = 1. ls_e-obj_type = 'blob'. ls_e-dec_status = 'P'. APPEND ls_e TO lt_e.
     zcl_abapgit_ortec_pack_index=>store_entries( iv_repo_key = mc_repo iv_pack_id = mc_pack it_entries = lt_e ).
     zcl_abapgit_ortec_pack_index=>mark_decoded( iv_repo_key = mc_repo iv_pack_id = mc_pack iv_obj_index = 1 iv_obj_sha1 = 'cc11223344556677889900aabbccddeeff001122' ).
-    DATA lt_p TYPE zcl_abapgit_ortec_pack_index=>ty_index_entries.
+    DATA lt_p TYPE zcl_abapgit_ortec_pack_index=>tty_index_entries.
     lt_p = zcl_abapgit_ortec_pack_index=>get_pending( iv_repo_key = mc_repo iv_pack_id = mc_pack ).
     cl_abap_unit_assert=>assert_initial( act = lt_p msg = 'No pending after mark' ).
   ENDMETHOD.
@@ -312,7 +312,6 @@ CLASS ltcl_fetch_neg IMPLEMENTATION.
     DATA lv_key TYPE c LENGTH 12.
     lv_key = zcl_abapgit_ortec_repo_state=>get_or_create_repo_key_for_url( mc_url ).
     IF lv_key IS NOT INITIAL. zcl_abapgit_ortec_repo_state=>clear_state( lv_key ). DELETE FROM zaog_obj_store WHERE repo_key = lv_key. ENDIF.
-    zcl_abapgit_ortec_git_switch=>reset( ).
   ENDMETHOD.
   METHOD teardown.
     DATA lv_key TYPE c LENGTH 12.
