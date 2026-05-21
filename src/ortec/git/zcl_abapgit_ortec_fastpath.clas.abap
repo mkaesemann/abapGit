@@ -37,7 +37,8 @@ CLASS zcl_abapgit_ortec_fastpath DEFINITION
         et_objects      TYPE zif_abapgit_definitions=>ty_objects_tt
         ev_branch       TYPE zif_abapgit_git_definitions=>ty_sha1
       RAISING
-        zcx_abapgit_ortec_git.
+        zcx_abapgit_ortec_git
+        zcx_abapgit_exception.
 
     "! ORTEC-aware upload-pack by commit.
     CLASS-METHODS upload_pack_by_commit
@@ -49,7 +50,8 @@ CLASS zcl_abapgit_ortec_fastpath DEFINITION
         et_objects      TYPE zif_abapgit_definitions=>ty_objects_tt
         ev_commit       TYPE zif_abapgit_git_definitions=>ty_sha1
       RAISING
-        zcx_abapgit_ortec_git.
+        zcx_abapgit_ortec_git
+        zcx_abapgit_exception.
 
     "! Persist objects and state after a successful pull.
     "! Called as post-pull hook. Silently ignored on error.
@@ -233,52 +235,60 @@ METHOD pull_by_branch.
       RETURN. " No previous fetch -> standard path
     ENDIF.
 
-    " Remote changed -> standard path (negotiation reduces pack size)
-    IF lv_remote_sha <> ls_state-fetch_commit.
-      RETURN.
-    ENDIF.
+    IF lv_remote_sha = ls_state-fetch_commit.
+      " Remote unchanged -> reconstitute from stored objects (Phase 3)
+      lo_fp_timer = zcl_abapgit_timer=>create( )->start( ).
+      rs_result-objects = zcl_abapgit_ortec_obj_store=>get_all_objects( lv_repo_key ).
+      rs_result-commit  = ls_state-fetch_commit.
 
-    " Phase 3: Reconstitute from stored objects
-    lo_fp_timer = zcl_abapgit_timer=>create( )->start( ).
-    rs_result-objects = zcl_abapgit_ortec_obj_store=>get_all_objects( lv_repo_key ).
-    rs_result-commit  = ls_state-fetch_commit.
-
-    IF rs_result-objects IS INITIAL.
-      CLEAR rs_result.
-      RETURN.
-    ENDIF.
-
-    " Phase 4: Walk tree to produce files
-    TRY.
-        lt_expanded = zcl_abapgit_git_porcelain=>full_tree(
-                          it_objects = rs_result-objects
-                          iv_parent  = rs_result-commit ).
-
-        LOOP AT lt_expanded ASSIGNING <ls_exp>
-             WHERE chmod = zif_abapgit_git_definitions=>c_chmod-file.
-          READ TABLE rs_result-objects ASSIGNING <ls_blob>
-               WITH KEY type COMPONENTS type = zif_abapgit_git_definitions=>c_type-blob
-                                        sha1 = <ls_exp>-sha1.
-          IF sy-subrc = 0.
-            CLEAR ls_file.
-            ls_file-path     = <ls_exp>-path.
-            ls_file-filename = <ls_exp>-name.
-            ls_file-data     = <ls_blob>-data.
-            ls_file-sha1     = <ls_exp>-sha1.
-            APPEND ls_file TO rs_result-files.
-          ENDIF.
-        ENDLOOP.
-
-      CATCH zcx_abapgit_exception.
+      IF rs_result-objects IS INITIAL.
         CLEAR rs_result.
         RETURN.
-    ENDTRY.
+      ENDIF.
 
-    lv_fp_duration = lo_fp_timer->end( ).
-    li_progress = zcl_abapgit_progress=>get_instance( 1 ).
-    li_progress->show(
-      iv_current = 1
-      iv_text    = |Fastpath: { lines( rs_result-objects ) } git objects, { lv_fp_duration }| ).
+      " Phase 4: Walk tree to produce files
+      TRY.
+          lt_expanded = zcl_abapgit_git_porcelain=>full_tree(
+                            it_objects = rs_result-objects
+                            iv_parent  = rs_result-commit ).
+
+          LOOP AT lt_expanded ASSIGNING <ls_exp>
+               WHERE chmod = zif_abapgit_git_definitions=>c_chmod-file.
+            READ TABLE rs_result-objects ASSIGNING <ls_blob>
+                 WITH KEY type COMPONENTS type = zif_abapgit_git_definitions=>c_type-blob
+                                          sha1 = <ls_exp>-sha1.
+            IF sy-subrc = 0.
+              CLEAR ls_file.
+              ls_file-path     = <ls_exp>-path.
+              ls_file-filename = <ls_exp>-name.
+              ls_file-data     = <ls_blob>-data.
+              ls_file-sha1     = <ls_exp>-sha1.
+              APPEND ls_file TO rs_result-files.
+            ENDIF.
+          ENDLOOP.
+
+        CATCH zcx_abapgit_exception.
+          CLEAR rs_result.
+          RETURN.
+      ENDTRY.
+
+      lv_fp_duration = lo_fp_timer->end( ).
+      li_progress = zcl_abapgit_progress=>get_instance( 1 ).
+      li_progress->show(
+        iv_current = 1
+        iv_text    = |Fastpath: { lines( rs_result-objects ) } git objects, { lv_fp_duration }| ).
+      RETURN.
+    ENDIF.
+
+    " Phase 2b: Remote changed (force-push/rebase or normal new commit).
+    " Return INITIAL so caller does an HTTP fetch — but do NOT update state here.
+    " The state (fetch_commit) gets updated post-fetch via persist_pull_result()
+    " once the new objects are actually stored. Updating it eagerly here would
+    " create a DB-state vs. obj_store inconsistency that breaks the second
+    " pull_by_branch call (re-entered through upload_pack_by_branch) which
+    " would attempt Phase 3 reconstitution against a commit not in cache.
+    " Have-negotiation in upload_pack reads commits from zaog_obj_store
+    " (not from zaog_repo_state), so it works correctly without the eager update.
 
   ENDMETHOD.
 
@@ -405,23 +415,30 @@ METHOD upload_pack.
       lv_buffer = lv_buffer && zcl_abapgit_git_utils=>pkt_string( lv_line ).
     ENDLOOP.
 
-    IF iv_deepen_level > 0.
+    " Resolve have commits BEFORE assembling the deepen line.
+    " If we have cached objects to use as delta base, suppress deepen
+    " so the server can send a thin delta pack instead of full shallow pack.
+    TRY.
+        lt_ortec_haves = zcl_abapgit_ortec_fetch_neg=>get_have_commits(
+          iv_url         = iv_url
+          it_want_hashes = it_hashes ).
+      CATCH zcx_abapgit_ortec_git.
+    ENDTRY.
+
+    " Only send deepen when we have NO cached objects (first fetch).
+    " With deepen, the server ignores have lines and sends a full shallow pack.
+    " Without deepen (but with haves), the server sends only the delta.
+    IF lt_ortec_haves IS INITIAL AND iv_deepen_level > 0.
       lv_buffer = lv_buffer && zcl_abapgit_git_utils=>pkt_string( |deepen { iv_deepen_level }| &&
         cl_abap_char_utilities=>newline ).
     ENDIF.
 
     lv_buffer = lv_buffer && '0000'.
 
-    TRY.
-        lt_ortec_haves = zcl_abapgit_ortec_fetch_neg=>get_have_commits(
-          iv_url         = iv_url
-          it_want_hashes = it_hashes ).
-        LOOP AT lt_ortec_haves ASSIGNING <lv_ortec_have>.
-          lv_buffer = lv_buffer && zcl_abapgit_git_utils=>pkt_string(
-            |have { <lv_ortec_have> }{ cl_abap_char_utilities=>newline }| ).
-        ENDLOOP.
-      CATCH zcx_abapgit_ortec_git.
-    ENDTRY.
+    LOOP AT lt_ortec_haves ASSIGNING <lv_ortec_have>.
+      lv_buffer = lv_buffer && zcl_abapgit_git_utils=>pkt_string(
+        |have { <lv_ortec_have> }{ cl_abap_char_utilities=>newline }| ).
+    ENDLOOP.
 
     lv_buffer = lv_buffer && '0009done' && cl_abap_char_utilities=>newline.
 
@@ -432,6 +449,10 @@ METHOD upload_pack.
            CHANGING  cv_data = lv_xstring ).
 
     IF lv_pack IS INITIAL.
+      " Server sent empty pack — it considers our have-set sufficient.
+      " Return cached objects, but ONLY if the want-commit is actually present.
+      " Otherwise the caller's tree-walk would fail on a missing commit object
+      " and we'd silently return broken data.
       lv_repo_key = zcl_abapgit_ortec_repo_state=>get_repo_key_for_url( iv_url ).
       IF lv_repo_key IS NOT INITIAL.
         TRY.
@@ -442,15 +463,15 @@ METHOD upload_pack.
               READ TABLE it_hashes INTO lv_want_sha INDEX 1.
               IF sy-subrc = 0.
                 READ TABLE lt_cached TRANSPORTING NO FIELDS
-                     WITH KEY type = zif_abapgit_git_definitions=>c_type-commit
-                              sha1 = lv_want_sha.
+                     WITH KEY type COMPONENTS type = zif_abapgit_git_definitions=>c_type-commit
+                                              sha1 = lv_want_sha.
                 IF sy-subrc = 0.
                   rt_objects = lt_cached.
                   lv_fetch_duration = lo_fetch_timer->end( ).
                   li_progress = zcl_abapgit_progress=>get_instance( 1 ).
                   li_progress->show(
                     iv_current = 1
-                    iv_text    = |Fastpath: { lines( rt_objects ) } git objects (cached), { lv_fetch_duration }| ).
+                    iv_text    = |Fastpath: { lines( rt_objects ) } git objects (cached, empty pack), { lv_fetch_duration }| ).
                   RETURN.
                 ENDIF.
               ENDIF.
@@ -459,6 +480,7 @@ METHOD upload_pack.
         ENDTRY.
       ENDIF.
 
+      " Want-commit not in cache — caller must do a real fetch via fallback path.
       zcx_abapgit_ortec_git=>raise( 'Response could not be parsed - empty pack returned.' ).
     ENDIF.
 
@@ -467,10 +489,25 @@ METHOD upload_pack.
           DATA lv_ortec_rk TYPE zcl_abapgit_ortec_pack_dec=>ty_repo_key.
           lv_ortec_rk = zcl_abapgit_ortec_repo_state=>get_or_create_repo_key_for_url( iv_url ).
           IF lv_ortec_rk IS NOT INITIAL.
+            " Load existing objects explicitly as delta-base context.
+            " Passing them to decode_and_persist merges them into ct_objects BEFORE
+            " decode_deltas runs, so every base SHA1 is found in-memory via the
+            " sorted KEY sha lookup — no individual SELECT SINGLE fallbacks per delta.
+            " The returned rt_objects is already the full merged set (base + new);
+            " no second get_all_objects() is needed after decode_and_persist returns.
+            " On first fetch, lt_base_objs is empty — no overhead.
+            DATA lt_base_objs TYPE zif_abapgit_definitions=>ty_objects_tt.
+            TRY.
+                lt_base_objs = zcl_abapgit_ortec_obj_store=>get_all_objects( lv_ortec_rk ).
+              CATCH zcx_abapgit_ortec_git.
+            ENDTRY.
             rt_objects = zcl_abapgit_ortec_pack_dec=>decode_and_persist(
-              iv_data     = lv_pack
-              iv_repo_key = lv_ortec_rk ).
+              iv_data         = lv_pack
+              iv_repo_key     = lv_ortec_rk
+              it_base_objects = lt_base_objs ).
             IF rt_objects IS NOT INITIAL.
+              " rt_objects = full merged set (base + new objects).
+              " decode_and_persist already called invalidate_cache() internally.
               lv_fetch_duration = lo_fetch_timer->end( ).
               li_progress = zcl_abapgit_progress=>get_instance( 1 ).
               li_progress->show(
@@ -570,6 +607,9 @@ METHOD upload_pack.
     ENDLOOP.
     IF lt_new IS NOT INITIAL.
       MODIFY zaog_obj_store FROM TABLE lt_new.
+      " Invalidate in-memory session cache: MODIFY wrote directly to DB
+      " (bypassing store_object/store_objects which call invalidate_cache).
+      zcl_abapgit_ortec_obj_store=>invalidate_cache( ).
     ENDIF.
     zcl_abapgit_ortec_repo_state=>update_after_fetch(
         iv_repo_key    = lv_repo_key
@@ -583,3 +623,4 @@ METHOD upload_pack.
     rv_key = zcl_abapgit_ortec_repo_state=>get_or_create_repo_key_for_url( iv_url ).
   ENDMETHOD.
 ENDCLASS.
+

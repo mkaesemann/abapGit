@@ -120,11 +120,18 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
 
   METHOD get_object.
     DATA ls_row TYPE zaog_obj_store.
+    DATA lv_effective_key TYPE ty_repo_key.
+
+    " If no repo_key provided, use the currently cached repo (set by prior populate_cache)
+    lv_effective_key = iv_repo_key.
+    IF lv_effective_key IS INITIAL AND mv_cache_repo_key IS NOT INITIAL.
+      lv_effective_key = mv_cache_repo_key.
+    ENDIF.
 
     "! STRATEGY 2: Try cache first (O(1) lookup)
-    IF is_cache_valid( iv_repo_key ) = abap_true.
+    IF lv_effective_key IS NOT INITIAL AND is_cache_valid( lv_effective_key ) = abap_true.
       READ TABLE mt_cache INTO ls_row
-           WITH TABLE KEY repo_key = iv_repo_key obj_sha1 = iv_sha1.
+           WITH TABLE KEY repo_key = lv_effective_key obj_sha1 = iv_sha1.
       IF sy-subrc = 0 AND ls_row-status = 'R'.
         rs_object-sha1 = ls_row-obj_sha1.
         rs_object-type = ls_row-obj_type.
@@ -134,17 +141,21 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
     ENDIF.
 
     "! STRATEGY 2: Cache miss - read from DB
-    SELECT SINGLE * FROM zaog_obj_store
-      INTO ls_row
-      WHERE repo_key = iv_repo_key
-        AND obj_sha1 = iv_sha1
-        AND status   = 'R'.
-    IF sy-subrc <> 0.
-      zcx_abapgit_ortec_git=>raise( |Object { iv_sha1 } not found in store| ).
+    IF lv_effective_key IS NOT INITIAL.
+      SELECT SINGLE * FROM zaog_obj_store
+        INTO ls_row
+        WHERE repo_key = lv_effective_key
+          AND obj_sha1 = iv_sha1
+          AND status   = 'R'.
+      IF sy-subrc = 0.
+        rs_object-sha1 = ls_row-obj_sha1.
+        rs_object-type = ls_row-obj_type.
+        rs_object-data = ls_row-obj_data.
+        RETURN.
+      ENDIF.
     ENDIF.
-    rs_object-sha1 = ls_row-obj_sha1.
-    rs_object-type = ls_row-obj_type.
-    rs_object-data = ls_row-obj_data.
+
+    zcx_abapgit_ortec_git=>raise( |Object { iv_sha1 } not found in store| ).
   ENDMETHOD.
 
   METHOD exists.
@@ -167,65 +178,22 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD get_all_objects.
-    DATA ls_obj          TYPE zif_abapgit_definitions=>ty_object.
-    DATA lv_object_count TYPE i.
-    DATA lv_cursor       TYPE cursor.
-    DATA lt_rows         TYPE STANDARD TABLE OF zaog_obj_store.
+    DATA ls_obj TYPE zif_abapgit_definitions=>ty_object.
 
     FIELD-SYMBOLS <ls_row> LIKE LINE OF mt_cache.
-    FIELD-SYMBOLS <ls_db>  LIKE LINE OF lt_rows.
 
-    " Strategy 3 + 4 split:
-    " - Small repos: keep preload+cache behavior.
-    " - Large repos: stream via cursor in chunks to avoid high memory peaks.
-    SELECT COUNT(*) FROM zaog_obj_store
-      INTO lv_object_count
-      WHERE repo_key = iv_repo_key
-        AND status   = 'R'.
+    ""! STRATEGY 3: Populate cache (preload small repos < 55K, handle large separately)
+    populate_cache( iv_repo_key ).
 
-    IF lv_object_count < c_preload_threshold.
-      populate_cache( iv_repo_key ).
-
-      LOOP AT mt_cache ASSIGNING <ls_row>
-           WHERE repo_key = iv_repo_key AND status = 'R'.
-        CLEAR ls_obj.
-        ls_obj-sha1 = <ls_row>-obj_sha1.
-        ls_obj-type = <ls_row>-obj_type.
-        ls_obj-data = <ls_row>-obj_data.
-        APPEND ls_obj TO rt_objects.
-      ENDLOOP.
-      RETURN.
-    ENDIF.
-
-    " Large repo path: no cache, stream database rows chunk-by-chunk.
-    invalidate_cache( ).
-
-    OPEN CURSOR lv_cursor FOR
-      SELECT * FROM zaog_obj_store
-        WHERE repo_key = iv_repo_key
-          AND status   = 'R'
-        ORDER BY PRIMARY KEY.
-
-    DO.
-      CLEAR lt_rows.
-      FETCH NEXT CURSOR lv_cursor
-        INTO TABLE lt_rows
-        PACKAGE SIZE 2000.
-
-      IF sy-subrc <> 0 OR lt_rows IS INITIAL.
-        EXIT.
-      ENDIF.
-
-      LOOP AT lt_rows ASSIGNING <ls_db>.
-        CLEAR ls_obj.
-        ls_obj-sha1 = <ls_db>-obj_sha1.
-        ls_obj-type = <ls_db>-obj_type.
-        ls_obj-data = <ls_db>-obj_data.
-        APPEND ls_obj TO rt_objects.
-      ENDLOOP.
-    ENDDO.
-
-    CLOSE CURSOR lv_cursor.
+    "! STRATEGY 2: Return all cached objects for repo
+    LOOP AT mt_cache ASSIGNING <ls_row>
+         WHERE repo_key = iv_repo_key AND status = 'R'.
+      CLEAR ls_obj.
+      ls_obj-sha1 = <ls_row>-obj_sha1.
+      ls_obj-type = <ls_row>-obj_type.
+      ls_obj-data = <ls_row>-obj_data.
+      APPEND ls_obj TO rt_objects.
+    ENDLOOP.
   ENDMETHOD.
 
   METHOD clear_repo.
@@ -249,29 +217,42 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD populate_cache.
-    DATA lt_rows  TYPE STANDARD TABLE OF zaog_obj_store.
-    DATA ls_entry TYPE ty_cache_entry.
+    DATA lt_rows         TYPE STANDARD TABLE OF zaog_obj_store.
+    DATA lv_object_count TYPE i.
+    DATA ls_entry        TYPE ty_cache_entry.
 
     FIELD-SYMBOLS <ls_row> LIKE LINE OF lt_rows.
 
-    " Already cached for this repo? Return.
+    ""! Already cached for this repo? Return.
     IF is_cache_valid( iv_repo_key ) = abap_true.
       RETURN.
     ENDIF.
 
-    " Small-repo preload helper: caller decides when preload is appropriate.
-    SELECT * FROM zaog_obj_store
-      INTO TABLE lt_rows
-      WHERE repo_key = iv_repo_key
-        AND status   = 'R'
-      ORDER BY obj_sha1.
+    ""! STRATEGY 3: Count objects to decide strategy
+    SELECT COUNT(*) FROM zaog_obj_store
+      INTO lv_object_count
+      WHERE repo_key = iv_repo_key AND status = 'R'.
 
-    CLEAR mt_cache.
-    mv_cache_repo_key = iv_repo_key.
+    "! STRATEGY 3: Small repo (<55K) - bulk preload everything
+    IF lv_object_count < c_preload_threshold.
+      SELECT * FROM zaog_obj_store
+        INTO TABLE lt_rows
+        WHERE repo_key = iv_repo_key AND status = 'R'
+        ORDER BY obj_sha1.
 
-    LOOP AT lt_rows ASSIGNING <ls_row>.
-      MOVE-CORRESPONDING <ls_row> TO ls_entry.
-      INSERT ls_entry INTO TABLE mt_cache.
-    ENDLOOP.
+      CLEAR mt_cache.
+      mv_cache_repo_key = iv_repo_key.
+
+      LOOP AT lt_rows ASSIGNING <ls_row>.
+        MOVE-CORRESPONDING <ls_row> TO ls_entry.
+        INSERT ls_entry INTO TABLE mt_cache.
+      ENDLOOP.
+    ELSE.
+      ""! STRATEGY 4: Large repo (>=55K) - mark cache valid but empty
+      ""! get_object() falls through to single SELECT on cache miss
+      ""! get_all_objects() can be enhanced with cursor-based chunking later
+      CLEAR mt_cache.
+      mv_cache_repo_key = iv_repo_key.
+    ENDIF.
   ENDMETHOD.
 ENDCLASS.
