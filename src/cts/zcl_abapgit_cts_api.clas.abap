@@ -13,6 +13,18 @@ CLASS zcl_abapgit_cts_api DEFINITION
 
     DATA mv_confirm_transp_msgs_called TYPE abap_bool.
 
+    "! Cache entry for transport descriptions pre-fetched from E07T
+    TYPES:
+      BEGIN OF ty_desc_cache,
+        trkorr      TYPE trkorr,
+        description TYPE string,
+      END OF ty_desc_cache.
+
+    "! Instance-level description cache: populated by prefetch_descriptions or
+    "! lazily on each read_description call. Keyed by trkorr (one entry per request).
+    DATA mt_desc_cache TYPE HASHED TABLE OF ty_desc_cache
+                            WITH UNIQUE KEY trkorr.
+
     "! Returns the transport request / task the object is currently locked in
     "! @parameter iv_program_id | Program ID
     "! @parameter iv_object_type | Object type
@@ -656,6 +668,58 @@ CLASS zcl_abapgit_cts_api IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD zif_abapgit_cts_api~prefetch_descriptions.
+
+    DATA lt_missing TYPE zif_abapgit_cts_api=>ty_trkorr_tt.
+    DATA lt_e07t    TYPE SORTED TABLE OF e07t
+                         WITH NON-UNIQUE KEY trkorr langu.
+    DATA ls_cache   TYPE ty_desc_cache.
+    DATA lv_trkorr  TYPE trkorr.
+
+    FIELD-SYMBOLS <ls_e07t> LIKE LINE OF lt_e07t.
+
+    " Collect unique transport numbers not yet in the description cache
+    LOOP AT it_trkorr INTO lv_trkorr.
+      CHECK lv_trkorr IS NOT INITIAL.
+      READ TABLE mt_desc_cache WITH TABLE KEY trkorr = lv_trkorr
+        TRANSPORTING NO FIELDS.
+      IF sy-subrc <> 0.
+        APPEND lv_trkorr TO lt_missing.
+      ENDIF.
+    ENDLOOP.
+    SORT lt_missing.
+    DELETE ADJACENT DUPLICATES FROM lt_missing.
+    CHECK lt_missing IS NOT INITIAL.
+
+    " One bulk SELECT for all missing transports, all language variants
+    SELECT * FROM e07t INTO TABLE lt_e07t
+      FOR ALL ENTRIES IN lt_missing
+      WHERE trkorr = lt_missing-table_line.              "#EC CI_NOFIELD
+
+    " Populate cache: prefer sy-langu; fall back to any language
+    LOOP AT lt_missing INTO lv_trkorr.
+      CLEAR ls_cache.
+      ls_cache-trkorr = lv_trkorr.
+
+      READ TABLE lt_e07t ASSIGNING <ls_e07t>
+        WITH KEY trkorr = lv_trkorr langu = sy-langu.
+      IF sy-subrc = 0.
+        ls_cache-description = <ls_e07t>-as4text.
+      ELSE.
+        " No entry for the session language — take any available language
+        READ TABLE lt_e07t ASSIGNING <ls_e07t>
+          WITH KEY trkorr = lv_trkorr.
+        IF sy-subrc = 0.
+          ls_cache-description = <ls_e07t>-as4text.
+        ENDIF.
+      ENDIF.
+
+      INSERT ls_cache INTO TABLE mt_desc_cache.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+
   METHOD zif_abapgit_cts_api~is_object_type_customizing.
 
     DATA:
@@ -793,6 +857,17 @@ CLASS zcl_abapgit_cts_api IMPLEMENTATION.
 
   METHOD zif_abapgit_cts_api~read_description.
 
+    DATA ls_cache TYPE ty_desc_cache.
+
+    " O(1) cache hit — covers both pre-fetched and previously read transports
+    READ TABLE mt_desc_cache INTO ls_cache
+      WITH TABLE KEY trkorr = iv_trkorr.
+    IF sy-subrc = 0.
+      rv_description = ls_cache-description.
+      RETURN.
+    ENDIF.
+
+    " Cache miss: fall back to DB (original logic), then store result
     SELECT SINGLE as4text FROM e07t
       INTO rv_description
       WHERE trkorr = iv_trkorr
@@ -801,8 +876,11 @@ CLASS zcl_abapgit_cts_api IMPLEMENTATION.
 * fallback to any language
       SELECT SINGLE as4text FROM e07t
         INTO rv_description
-        WHERE trkorr = iv_trkorr ##SUBRC_OK.            "#EC CI_NOORDER
+        WHERE trkorr = iv_trkorr ##SUBRC_OK.                "#EC CI_NOORDER
     ENDIF.
+
+    INSERT VALUE #( trkorr = iv_trkorr description = rv_description )
+      INTO TABLE mt_desc_cache.
 
   ENDMETHOD.
 

@@ -206,4 +206,15 @@ INTERFACE zif_abapgit_cts_api
     RETURNING
       VALUE(rv_is_customizing_object) TYPE abap_bool.
 
+  "! Pre-fetch and cache transport descriptions for a set of transport numbers.
+  "! Replaces N per-row SELECT SINGLE calls with a single bulk SELECT on E07T.
+  "! Subsequent <em>read_description</em> calls for the same transport numbers
+  "! are served from the in-memory instance cache at O(1) cost.
+  "! Safe to call with duplicates or an empty table.
+  "! @parameter it_trkorr |
+  "! Transport numbers to pre-fetch
+  METHODS prefetch_descriptions
+    IMPORTING
+      it_trkorr TYPE ty_trkorr_tt.
+
 ENDINTERFACE.

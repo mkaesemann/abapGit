@@ -471,6 +471,16 @@ CLASS zcl_abapgit_gui_page_stage IMPLEMENTATION.
     ri_html->add( '<table id="stageTab" class="stage_tab w100">' ).
 
     lt_transports = find_transports( ms_files ).
+
+    " Pre-fetch all transport descriptions in one DB roundtrip before the render
+    " loop. Without this, render_transport calls read_description per list item,
+    " causing a SELECT SINGLE on E07T for every rendered row.
+    DATA(lt_trkorr_pf) = VALUE zif_abapgit_cts_api=>ty_trkorr_tt(
+      FOR ls_tran_pf IN lt_transports ( ls_tran_pf-trkorr ) ).
+    SORT lt_trkorr_pf.
+    DELETE ADJACENT DUPLICATES FROM lt_trkorr_pf.
+    zcl_abapgit_factory=>get_cts_api( )->prefetch_descriptions( lt_trkorr_pf ).
+
     lt_changed_by = find_changed_by(
       it_files = ms_files
       it_transports = lt_transports ).
