@@ -196,3 +196,64 @@ CLASS lcl_selected IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
+
+
+CLASS lcl_stage_object_filter DEFINITION FINAL.
+
+  PUBLIC SECTION.
+    INTERFACES zif_abapgit_object_filter.
+
+    METHODS constructor
+      IMPORTING
+        ii_repo         TYPE REF TO zif_abapgit_repo
+        iv_filter_value TYPE string
+        ii_obj_filter   TYPE REF TO zif_abapgit_object_filter OPTIONAL.
+
+  PRIVATE SECTION.
+    DATA mi_repo TYPE REF TO zif_abapgit_repo.
+    DATA mv_filter_value TYPE string.
+    DATA mi_obj_filter TYPE REF TO zif_abapgit_object_filter.
+
+ENDCLASS.
+
+
+CLASS lcl_stage_object_filter IMPLEMENTATION.
+
+  METHOD constructor.
+    mi_repo = ii_repo.
+    mv_filter_value = iv_filter_value.
+    mi_obj_filter = ii_obj_filter.
+  ENDMETHOD.
+
+  METHOD zif_abapgit_object_filter~get_filter.
+
+    DATA lt_candidates TYPE zif_abapgit_definitions=>ty_tadir_tt.
+    DATA lv_pattern TYPE string.
+
+    FIELD-SYMBOLS <ls_candidate> LIKE LINE OF lt_candidates.
+
+    IF mi_obj_filter IS BOUND.
+      lt_candidates = mi_obj_filter->get_filter( ).
+    ELSE.
+      lt_candidates = mi_repo->get_tadir_objects( ).
+    ENDIF.
+
+    IF mv_filter_value IS INITIAL.
+      rt_filter = lt_candidates.
+      RETURN.
+    ENDIF.
+
+    lv_pattern = '*' && to_upper( mv_filter_value ) && '*'.
+
+    LOOP AT lt_candidates ASSIGNING <ls_candidate>.
+      IF to_upper( <ls_candidate>-object ) CP lv_pattern
+          OR to_upper( <ls_candidate>-obj_name ) CP lv_pattern
+          OR to_upper( <ls_candidate>-devclass ) CP lv_pattern
+          OR to_upper( <ls_candidate>-path ) CP lv_pattern.
+        INSERT <ls_candidate> INTO TABLE rt_filter.
+      ENDIF.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+ENDCLASS.

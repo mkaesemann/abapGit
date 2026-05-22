@@ -41,6 +41,33 @@ CLASS zcl_abapgit_cts_integration DEFINITION
         !action   TYPE csequence
         !getdata  TYPE csequence
         !postdata TYPE zif_abapgit_html_viewer=>ty_post_data .
+    TYPES:
+      BEGIN OF ty_changed_by,
+        item     TYPE zif_abapgit_definitions=>ty_item,
+        filename TYPE string,
+        name     TYPE syuname,
+      END OF ty_changed_by.
+    TYPES ty_changed_by_tt TYPE SORTED TABLE OF ty_changed_by WITH UNIQUE KEY item filename.
+
+    CLASS-METHODS changed_by_bulk
+      IMPORTING
+        !it_files             TYPE zif_abapgit_definitions=>ty_files_item_tt
+      RETURNING
+        VALUE(rt_changed_by) TYPE ty_changed_by_tt .
+
+    CLASS-METHODS get_transportable_transports
+      IMPORTING
+        !it_items             TYPE zif_abapgit_definitions=>ty_items_tt
+      RETURNING
+        VALUE(rt_transports) TYPE zif_abapgit_cts_api=>ty_transport_list .
+
+    CLASS-METHODS find_changed_by
+      IMPORTING
+        !ii_repo              TYPE REF TO zif_abapgit_repo
+        !it_files             TYPE zif_abapgit_definitions=>ty_stage_files
+        !it_transports        TYPE zif_abapgit_cts_api=>ty_transport_list
+      RETURNING
+        VALUE(rt_changed_by) TYPE ty_changed_by_tt .
   PROTECTED SECTION.
     TYPES: BEGIN OF ty_trkorr,
              trkorr TYPE trkorr,
@@ -296,6 +323,318 @@ CLASS ZCL_ABAPGIT_CTS_INTEGRATION IMPLEMENTATION.
                          ELSE COND #( WHEN r_docu IS INITIAL
                                       THEN r_docu && ls_docu-tdline
                                       ELSE r_docu && cl_abap_char_utilities=>cr_lf && ls_docu-tdline ) ).
+    ENDLOOP.
+
+  ENDMETHOD.
+
+
+  METHOD changed_by_bulk.
+
+    TYPES ty_prog_name_tt TYPE SORTED TABLE OF reposrc-progname WITH UNIQUE KEY table_line.
+    TYPES ty_clas_name_tt TYPE SORTED TABLE OF vseoclass-clsname WITH UNIQUE KEY table_line.
+    TYPES ty_intf_name_tt TYPE SORTED TABLE OF vseointerf-clsname WITH UNIQUE KEY table_line.
+    TYPES ty_tabl_name_tt TYPE SORTED TABLE OF dd02l-tabname WITH UNIQUE KEY table_line.
+    TYPES ty_view_name_tt TYPE SORTED TABLE OF dd25l-viewname WITH UNIQUE KEY table_line.
+    TYPES ty_dtel_name_tt TYPE SORTED TABLE OF dd04l-rollname WITH UNIQUE KEY table_line.
+    TYPES ty_doma_name_tt TYPE SORTED TABLE OF dd01l-domname WITH UNIQUE KEY table_line.
+    TYPES ty_msag_name_tt TYPE SORTED TABLE OF t100a-arbgb WITH UNIQUE KEY table_line.
+    TYPES:
+      BEGIN OF ty_obj_user,
+        obj_type TYPE tadir-object,
+        obj_name TYPE tadir-obj_name,
+        name     TYPE syuname,
+      END OF ty_obj_user.
+    TYPES ty_obj_user_tt TYPE HASHED TABLE OF ty_obj_user WITH UNIQUE KEY obj_type obj_name.
+    TYPES:
+      BEGIN OF ty_name_user,
+        obj_name TYPE tadir-obj_name,
+        name     TYPE syuname,
+      END OF ty_name_user.
+
+    DATA lt_prog_names TYPE ty_prog_name_tt.
+    DATA lt_clas_names TYPE ty_clas_name_tt.
+    DATA lt_intf_names TYPE ty_intf_name_tt.
+    DATA lt_tabl_names TYPE ty_tabl_name_tt.
+    DATA lt_view_names TYPE ty_view_name_tt.
+    DATA lt_dtel_names TYPE ty_dtel_name_tt.
+    DATA lt_doma_names TYPE ty_doma_name_tt.
+    DATA lt_msag_names TYPE ty_msag_name_tt.
+    DATA lt_name_user TYPE STANDARD TABLE OF ty_name_user WITH DEFAULT KEY.
+    DATA lt_obj_user TYPE ty_obj_user_tt.
+    DATA ls_obj_user LIKE LINE OF lt_obj_user.
+    DATA ls_changed_by LIKE LINE OF rt_changed_by.
+    DATA ls_name_user LIKE LINE OF lt_name_user.
+
+    FIELD-SYMBOLS <ls_file> LIKE LINE OF it_files.
+
+    LOOP AT it_files ASSIGNING <ls_file> WHERE item IS NOT INITIAL.
+      CASE <ls_file>-item-obj_type.
+        WHEN 'PROG'.
+          INSERT CONV reposrc-progname( <ls_file>-item-obj_name ) INTO TABLE lt_prog_names.
+        WHEN 'CLAS'.
+          INSERT CONV vseoclass-clsname( <ls_file>-item-obj_name ) INTO TABLE lt_clas_names.
+        WHEN 'INTF'.
+          INSERT CONV vseointerf-clsname( <ls_file>-item-obj_name ) INTO TABLE lt_intf_names.
+        WHEN 'TABL'.
+          INSERT CONV dd02l-tabname( <ls_file>-item-obj_name ) INTO TABLE lt_tabl_names.
+        WHEN 'VIEW'.
+          INSERT CONV dd25l-viewname( <ls_file>-item-obj_name ) INTO TABLE lt_view_names.
+        WHEN 'DTEL'.
+          INSERT CONV dd04l-rollname( <ls_file>-item-obj_name ) INTO TABLE lt_dtel_names.
+        WHEN 'DOMA'.
+          INSERT CONV dd01l-domname( <ls_file>-item-obj_name ) INTO TABLE lt_doma_names.
+        WHEN 'MSAG'.
+          INSERT CONV t100a-arbgb( <ls_file>-item-obj_name ) INTO TABLE lt_msag_names.
+      ENDCASE.
+    ENDLOOP.
+
+    IF lt_prog_names IS NOT INITIAL.
+      SELECT progname AS obj_name unam AS name FROM reposrc
+        INTO TABLE lt_name_user
+        FOR ALL ENTRIES IN lt_prog_names
+        WHERE progname = lt_prog_names-table_line
+        AND r3state = 'A'.
+      LOOP AT lt_name_user INTO ls_name_user.
+        ls_obj_user-obj_type = 'PROG'.
+        ls_obj_user-obj_name = ls_name_user-obj_name.
+        ls_obj_user-name = ls_name_user-name.
+        INSERT ls_obj_user INTO TABLE lt_obj_user.
+      ENDLOOP.
+    ENDIF.
+
+    IF lt_clas_names IS NOT INITIAL.
+      SELECT clsname AS obj_name changedby AS name FROM vseoclass
+        INTO TABLE lt_name_user
+        FOR ALL ENTRIES IN lt_clas_names
+        WHERE clsname = lt_clas_names-table_line.
+      LOOP AT lt_name_user INTO ls_name_user.
+        ls_obj_user-obj_type = 'CLAS'.
+        ls_obj_user-obj_name = ls_name_user-obj_name.
+        ls_obj_user-name = ls_name_user-name.
+        INSERT ls_obj_user INTO TABLE lt_obj_user.
+      ENDLOOP.
+    ENDIF.
+
+    IF lt_intf_names IS NOT INITIAL.
+      SELECT clsname AS obj_name changedby AS name FROM vseointerf
+        INTO TABLE lt_name_user
+        FOR ALL ENTRIES IN lt_intf_names
+        WHERE clsname = lt_intf_names-table_line.
+      LOOP AT lt_name_user INTO ls_name_user.
+        ls_obj_user-obj_type = 'INTF'.
+        ls_obj_user-obj_name = ls_name_user-obj_name.
+        ls_obj_user-name = ls_name_user-name.
+        INSERT ls_obj_user INTO TABLE lt_obj_user.
+      ENDLOOP.
+    ENDIF.
+
+    IF lt_tabl_names IS NOT INITIAL.
+      SELECT tabname AS obj_name as4user AS name FROM dd02l
+        INTO TABLE lt_name_user
+        FOR ALL ENTRIES IN lt_tabl_names
+        WHERE tabname = lt_tabl_names-table_line.
+      LOOP AT lt_name_user INTO ls_name_user.
+        ls_obj_user-obj_type = 'TABL'.
+        ls_obj_user-obj_name = ls_name_user-obj_name.
+        ls_obj_user-name = ls_name_user-name.
+        INSERT ls_obj_user INTO TABLE lt_obj_user.
+      ENDLOOP.
+    ENDIF.
+
+    IF lt_view_names IS NOT INITIAL.
+      SELECT viewname AS obj_name as4user AS name FROM dd25l
+        INTO TABLE lt_name_user
+        FOR ALL ENTRIES IN lt_view_names
+        WHERE viewname = lt_view_names-table_line.
+      LOOP AT lt_name_user INTO ls_name_user.
+        ls_obj_user-obj_type = 'VIEW'.
+        ls_obj_user-obj_name = ls_name_user-obj_name.
+        ls_obj_user-name = ls_name_user-name.
+        INSERT ls_obj_user INTO TABLE lt_obj_user.
+      ENDLOOP.
+    ENDIF.
+
+    IF lt_dtel_names IS NOT INITIAL.
+      SELECT rollname AS obj_name as4user AS name FROM dd04l
+        INTO TABLE lt_name_user
+        FOR ALL ENTRIES IN lt_dtel_names
+        WHERE rollname = lt_dtel_names-table_line.
+      LOOP AT lt_name_user INTO ls_name_user.
+        ls_obj_user-obj_type = 'DTEL'.
+        ls_obj_user-obj_name = ls_name_user-obj_name.
+        ls_obj_user-name = ls_name_user-name.
+        INSERT ls_obj_user INTO TABLE lt_obj_user.
+      ENDLOOP.
+    ENDIF.
+
+    IF lt_doma_names IS NOT INITIAL.
+      SELECT domname AS obj_name as4user AS name FROM dd01l
+        INTO TABLE lt_name_user
+        FOR ALL ENTRIES IN lt_doma_names
+        WHERE domname = lt_doma_names-table_line.
+      LOOP AT lt_name_user INTO ls_name_user.
+        ls_obj_user-obj_type = 'DOMA'.
+        ls_obj_user-obj_name = ls_name_user-obj_name.
+        ls_obj_user-name = ls_name_user-name.
+        INSERT ls_obj_user INTO TABLE lt_obj_user.
+      ENDLOOP.
+    ENDIF.
+
+    IF lt_msag_names IS NOT INITIAL.
+      SELECT arbgb AS obj_name lastuser AS name FROM t100a
+        INTO TABLE lt_name_user
+        FOR ALL ENTRIES IN lt_msag_names
+        WHERE arbgb = lt_msag_names-table_line.
+      LOOP AT lt_name_user INTO ls_name_user.
+        ls_obj_user-obj_type = 'MSAG'.
+        ls_obj_user-obj_name = ls_name_user-obj_name.
+        ls_obj_user-name = ls_name_user-name.
+        INSERT ls_obj_user INTO TABLE lt_obj_user.
+      ENDLOOP.
+    ENDIF.
+
+    LOOP AT it_files ASSIGNING <ls_file> WHERE item IS NOT INITIAL.
+      CLEAR ls_changed_by.
+      ls_changed_by-item = <ls_file>-item.
+      ls_changed_by-filename = <ls_file>-file-filename.
+
+      READ TABLE lt_obj_user INTO ls_obj_user WITH TABLE KEY
+        obj_type = <ls_file>-item-obj_type
+        obj_name = <ls_file>-item-obj_name.
+      IF sy-subrc = 0 AND ls_obj_user-name IS NOT INITIAL.
+        ls_changed_by-name = ls_obj_user-name.
+      ELSE.
+        ls_changed_by-name = zcl_abapgit_objects=>changed_by(
+          is_item     = <ls_file>-item
+          iv_filename = <ls_file>-file-filename ).
+      ENDIF.
+
+      INSERT ls_changed_by INTO TABLE rt_changed_by.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+
+  METHOD find_changed_by.
+
+    TYPES: BEGIN OF ty_transport_user,
+             trkorr TYPE trkorr,
+             name   TYPE syuname,
+           END OF ty_transport_user.
+    TYPES ty_transport_user_tt TYPE HASHED TABLE OF ty_transport_user WITH UNIQUE KEY trkorr.
+
+    DATA: ls_remote            LIKE LINE OF it_files-remote,
+          ls_changed_by        LIKE LINE OF rt_changed_by,
+          lt_changed_by_remote LIKE rt_changed_by,
+          lt_changed_by_local  LIKE rt_changed_by,
+          ls_item              TYPE zif_abapgit_definitions=>ty_item,
+          lv_transport         LIKE LINE OF it_transports,
+          lt_trkorr            TYPE zif_abapgit_cts_api=>ty_trkorr_tt,
+          lt_transport_users   TYPE ty_transport_user_tt,
+          ls_transport_user    LIKE LINE OF lt_transport_users.
+
+    FIELD-SYMBOLS <ls_changed_by> LIKE LINE OF lt_changed_by_remote.
+
+    lt_changed_by_local = changed_by_bulk( it_files-local ).
+    INSERT LINES OF lt_changed_by_local INTO TABLE rt_changed_by.
+
+    LOOP AT it_files-remote INTO ls_remote WHERE filename IS NOT INITIAL.
+      TRY.
+          zcl_abapgit_filename_logic=>file_to_object(
+            EXPORTING
+              iv_filename = ls_remote-filename
+              iv_path     = ls_remote-path
+              io_dot      = ii_repo->get_dot_abapgit( )
+            IMPORTING
+              es_item     = ls_item ).
+          ls_changed_by-item = ls_item.
+          ls_changed_by-filename = ls_remote-filename.
+          INSERT ls_changed_by INTO TABLE lt_changed_by_remote.
+        CATCH zcx_abapgit_exception ##NO_HANDLER.
+      ENDTRY.
+    ENDLOOP.
+
+    LOOP AT it_transports INTO lv_transport WHERE trkorr IS NOT INITIAL.
+      APPEND lv_transport-trkorr TO lt_trkorr.
+    ENDLOOP.
+    SORT lt_trkorr.
+    DELETE ADJACENT DUPLICATES FROM lt_trkorr.
+
+    IF lt_trkorr IS NOT INITIAL.
+      SELECT trkorr as4user AS name FROM e070
+        INTO TABLE lt_transport_users
+        FOR ALL ENTRIES IN lt_trkorr
+        WHERE trkorr = lt_trkorr-table_line.
+    ENDIF.
+
+    LOOP AT lt_changed_by_remote ASSIGNING <ls_changed_by>.
+      CLEAR lv_transport.
+      READ TABLE it_transports WITH KEY
+        obj_type = <ls_changed_by>-item-obj_type
+        obj_name = <ls_changed_by>-item-obj_name
+        INTO lv_transport.
+      IF sy-subrc = 0.
+        READ TABLE lt_transport_users INTO ls_transport_user
+          WITH TABLE KEY trkorr = lv_transport-trkorr.
+        IF sy-subrc = 0 AND ls_transport_user-name IS NOT INITIAL.
+          <ls_changed_by>-name = ls_transport_user-name.
+        ENDIF.
+      ENDIF.
+      IF <ls_changed_by>-name IS INITIAL.
+        <ls_changed_by>-name = zcl_abapgit_objects_super=>c_user_unknown.
+      ENDIF.
+    ENDLOOP.
+
+    INSERT LINES OF lt_changed_by_remote INTO TABLE rt_changed_by.
+
+  ENDMETHOD.
+
+
+  METHOD get_transportable_transports.
+
+    TYPES: BEGIN OF ty_transportable_item,
+             obj_type TYPE e071-object,
+             obj_name TYPE e071-obj_name,
+           END OF ty_transportable_item.
+    TYPES ty_transportable_items TYPE SORTED TABLE OF ty_transportable_item WITH UNIQUE KEY obj_type obj_name.
+
+    DATA lt_transportable_items TYPE ty_transportable_items.
+    DATA ls_transportable_item LIKE LINE OF lt_transportable_items.
+    DATA lt_db_transports TYPE zif_abapgit_cts_api=>ty_transport_list.
+    DATA ls_transport LIKE LINE OF rt_transports.
+
+    FIELD-SYMBOLS <ls_item> LIKE LINE OF it_items.
+    FIELD-SYMBOLS <ls_db_transport> LIKE LINE OF lt_db_transports.
+
+    LOOP AT it_items ASSIGNING <ls_item> WHERE obj_type IS NOT INITIAL AND obj_name IS NOT INITIAL.
+      ls_transportable_item-obj_type = <ls_item>-obj_type.
+      ls_transportable_item-obj_name = <ls_item>-obj_name.
+      INSERT ls_transportable_item INTO TABLE lt_transportable_items.
+    ENDLOOP.
+
+    CHECK lt_transportable_items IS NOT INITIAL.
+
+    SELECT a~trkorr b~object AS obj_type b~obj_name
+      FROM e070 AS a INNER JOIN e071 AS b ON a~trkorr = b~trkorr
+      INTO CORRESPONDING FIELDS OF TABLE lt_db_transports
+      FOR ALL ENTRIES IN lt_transportable_items
+      WHERE ( a~trstatus = 'D' OR a~trstatus = 'L' )
+        AND a~trfunction <> 'G'
+        AND NOT ( a~trfunction = 'F' AND ( a~tarsystem = '' OR a~tarsystem = 'SAP' ) )
+        AND b~pgmid = 'R3TR'
+        AND b~object = lt_transportable_items-obj_type
+        AND b~obj_name = lt_transportable_items-obj_name.
+
+    LOOP AT lt_db_transports ASSIGNING <ls_db_transport>.
+      READ TABLE rt_transports INTO ls_transport WITH KEY
+        obj_type = <ls_db_transport>-obj_type
+        obj_name = <ls_db_transport>-obj_name.
+      IF sy-subrc <> 0.
+        INSERT <ls_db_transport> INTO TABLE rt_transports.
+      ELSEIF ls_transport-trkorr <> <ls_db_transport>-trkorr.
+        ls_transport-trkorr = zif_abapgit_definitions=>c_multiple_transports.
+        MODIFY TABLE rt_transports FROM ls_transport.
+      ENDIF.
     ENDLOOP.
 
   ENDMETHOD.

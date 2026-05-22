@@ -540,6 +540,7 @@ CLASS zcl_abapgit_cts_api IMPLEMENTATION.
     DATA lv_type_check_result TYPE c LENGTH 1.
     DATA ls_lock_key TYPE tlock_int.
     DATA ls_transport LIKE LINE OF rt_transports.
+    DATA lt_transportable_items TYPE zif_abapgit_definitions=>ty_items_tt.
 
     FIELD-SYMBOLS <ls_item> LIKE LINE OF it_items.
     FIELD-SYMBOLS <ls_tlock> LIKE LINE OF lt_tlock.
@@ -581,9 +582,7 @@ CLASS zcl_abapgit_cts_api IMPLEMENTATION.
           ENDIF.
         ENDLOOP.
       ELSEIF is_object_type_transportable( <ls_item>-obj_type ) = abap_true.
-        lv_request = get_current_transport_from_db(
-          iv_object_type = <ls_item>-obj_type
-          iv_object_name = <ls_item>-obj_name ).
+        APPEND <ls_item> TO lt_transportable_items.
       ENDIF.
 
       IF lv_request IS NOT INITIAL.
@@ -594,6 +593,13 @@ CLASS zcl_abapgit_cts_api IMPLEMENTATION.
       ENDIF.
 
     ENDLOOP.
+
+    IF lt_transportable_items IS NOT INITIAL.
+      SORT lt_transportable_items BY obj_type obj_name.
+      DELETE ADJACENT DUPLICATES FROM lt_transportable_items COMPARING obj_type obj_name.
+      INSERT LINES OF zcl_abapgit_cts_integration=>get_transportable_transports( lt_transportable_items )
+        INTO TABLE rt_transports.
+    ENDIF.
 
   ENDMETHOD.
 
