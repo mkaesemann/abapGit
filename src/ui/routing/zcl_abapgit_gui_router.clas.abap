@@ -570,17 +570,10 @@ CLASS ZCL_ABAPGIT_GUI_ROUTER IMPLEMENTATION.
 
 METHOD jump_display_user.
 
-    DATA lv_adt_jump_enabled TYPE abap_bool.
-
-    lv_adt_jump_enabled = zcl_abapgit_persist_factory=>get_settings( )->read( )->get_adt_jump_enabled( ).
-    IF lv_adt_jump_enabled = abap_true.
-      " todo: ADT deep-link for user display not yet available; fall through to SU01D
-    ENDIF.
-
-    " Open user maintenance in display-only mode (SU01 display).
-    " BAPI_USER_DISPLAY is a data BAPI and shows no screen; SU01D is the correct visual equivalent.
-    SET PARAMETER ID 'XUS' FIELD iv_username.
-    CALL TRANSACTION 'SU01D' AND SKIP FIRST SCREEN.
+    " todo, user display in ADT
+    CALL FUNCTION 'BAPI_USER_DISPLAY'
+      EXPORTING
+        username = iv_username.
 
   ENDMETHOD.
 

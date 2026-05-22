@@ -189,7 +189,7 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
       TRY.
           lv_changed_by_html = zcl_abapgit_gui_chunk_lib=>render_user_name(
             iv_username    = ls_changed_by-name
-            iv_interactive = abap_false )->render( ).
+            iv_interactive = abap_true )->render( ).
         CATCH zcx_abapgit_exception ##NO_HANDLER.
       ENDTRY.
       IF ls_changed_by-name IS NOT INITIAL.
@@ -255,7 +255,7 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
       TRY.
           lv_changed_by_html = zcl_abapgit_gui_chunk_lib=>render_user_name(
             iv_username    = ls_changed_by-name
-            iv_interactive = abap_false )->render( ).
+            iv_interactive = abap_true )->render( ).
         CATCH zcx_abapgit_exception ##NO_HANDLER.
       ENDTRY.
       IF ls_changed_by-name IS NOT INITIAL.
@@ -479,8 +479,8 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
     ri_html->add( '<th class="stage-status"></th>' ).
     ri_html->add( '<th class="stage-objtype">Type</th>' ).
     ri_html->add( '<th title="Click filename to see diff">File</th>' ).
-    ri_html->add( '<th style="width:10em">Changed by <a href="#" id="stageFilterByMe" title="Filter to my changes">(me)</a></th>' ).
-    ri_html->add( '<th style="width:12em">Transport</th>' ).
+    ri_html->add( '<th style="width:9em">Changed by <a href="#" id="stageFilterByMe" title="Filter to my changes">(me)</a></th>' ).
+    ri_html->add( '<th style="width:9em">Transport</th>' ).
     ri_html->add( '<th style="width:3em"></th>' ).
     ri_html->add( '<th class="cmd" style="width:12em">Command</th>' ).
     ri_html->add( '</tr></thead>' ).
@@ -597,7 +597,7 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
     ri_html->add( '          nLink.appendChild(document.createTextNode(data.displayName || "")); nameCell.appendChild(nLink);' ).
     ri_html->add( '        } else { nameCell.appendChild(document.createTextNode(data.displayName || "")); }' ).
     ri_html->add( '        row.appendChild(nameCell);' ).
-    ri_html->add( '        var userCell = document.createElement("td"); userCell.className = "user";' ).
+    ri_html->add( '        var userCell = document.createElement("td"); userCell.className = "user"; userCell.style.whiteSpace = "nowrap";' ).
     ri_html->add( '        userCell.innerHTML = data.changedByHtml || data.changedBy || "";' ).
     ri_html->add( '        if (data.userAction) { userCell.style.cursor = "pointer";' ).
     ri_html->add( '          (function(cell, act) { cell.onclick = function(e) {' ).
@@ -605,7 +605,13 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
     ri_html->add( '            e.cancelBubble = true; window.location.href = "sapevent:" + act; return false;' ).
     ri_html->add( '          }; })(userCell, data.userAction); }' ).
     ri_html->add( '        row.appendChild(userCell);' ).
-    ri_html->add( '        var transportCell = document.createElement("td"); transportCell.className = "transport"; transportCell.innerHTML = data.transportHtml || data.transport || ""; row.appendChild(transportCell);' ).
+    "ri_html->add( '        var transportCell = document.createElement("td"); transportCell.className = "transport"; transportCell.style.whiteSpace = "nowrap"; transportCell.innerHTML = data.transportHtml || data.transport || ""; row.appendChild(transpor
+"tCell);' ).
+    ri_html->add( '        var transportCell = document.createElement("td");'
+               && ' transportCell.className = "transport";'
+               && ' transportCell.style.whiteSpace = "nowrap";'
+               && ' transportCell.innerHTML = data.transportHtml || data.transport || "";'
+               && ' row.appendChild(transportCell);' ).
     ri_html->add( '        var selected = state[data.key] || "";' ).
     ri_html->add( '        var status = document.createElement("td"); status.className = "status"; row.appendChild(status);' ).
     ri_html->add( '        var cmd = document.createElement("td"); cmd.className = "cmd"; row.appendChild(cmd);' ).
