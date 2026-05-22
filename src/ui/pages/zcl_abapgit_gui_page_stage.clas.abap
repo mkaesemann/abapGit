@@ -18,8 +18,12 @@ CLASS zcl_abapgit_gui_page_stage DEFINITION
                  stage_commit  TYPE string VALUE 'stage_commit',
                  stage_filter  TYPE string VALUE 'stage_filter',
                  stage_load_all TYPE string VALUE 'stage_load_all',
+                 stage_page_prev TYPE string VALUE 'stage_page_prev',
+                 stage_page_next TYPE string VALUE 'stage_page_next',
+                 stage_virtual_filter TYPE string VALUE 'stage_virtual_filter',
                END OF c_action.
     CONSTANTS c_large_repo_threshold TYPE i VALUE 3000.
+    CONSTANTS c_virtual_window_size TYPE i VALUE 150.
 
     CLASS-METHODS create
       IMPORTING
@@ -64,6 +68,7 @@ CLASS zcl_abapgit_gui_page_stage DEFINITION
     DATA mv_sci_result TYPE zif_abapgit_definitions=>ty_sci_result.
     DATA mi_obj_filter TYPE REF TO zif_abapgit_object_filter.
     DATA mv_load_all TYPE abap_bool.
+    DATA mv_virtual_offset TYPE i.
 
     METHODS find_changed_by
       IMPORTING
@@ -130,6 +135,12 @@ CLASS zcl_abapgit_gui_page_stage DEFINITION
     METHODS is_large_repo_gate_active
       RETURNING
         VALUE(rv_active) TYPE abap_bool .
+    METHODS is_virtual_stage_candidate
+      RETURNING
+        VALUE(rv_candidate) TYPE abap_bool .
+    METHODS get_virtual_window_size
+      RETURNING
+        VALUE(rv_size) TYPE i .
     METHODS render_deferred_hidden_events
       RETURNING
         VALUE(ri_html) TYPE REF TO zif_abapgit_html .
@@ -353,9 +364,15 @@ CLASS zcl_abapgit_gui_page_stage IMPLEMENTATION.
 
   METHOD init_files.
     DATA li_obj_filter TYPE REF TO zif_abapgit_object_filter.
+    DATA lt_local LIKE ms_files-local.
+    DATA lt_remote LIKE ms_files-remote.
+    DATA lv_pattern TYPE string.
+
+    FIELD-SYMBOLS <ls_local> LIKE LINE OF ms_files-local.
+    FIELD-SYMBOLS <ls_remote> LIKE LINE OF ms_files-remote.
 
     li_obj_filter = mi_obj_filter.
-    IF mv_filter_value IS NOT INITIAL.
+    IF mv_filter_value IS NOT INITIAL AND mv_load_all = abap_false.
       CREATE OBJECT li_obj_filter TYPE lcl_stage_object_filter
         EXPORTING
           ii_repo         = mi_repo
@@ -365,6 +382,29 @@ CLASS zcl_abapgit_gui_page_stage IMPLEMENTATION.
 
     ms_files = zcl_abapgit_stage_logic=>get_stage_logic( )->get( ii_repo_online = mi_repo_online
                                                                  ii_obj_filter  = li_obj_filter ).
+
+    IF mv_filter_value IS NOT INITIAL AND mv_load_all = abap_false.
+      lv_pattern = '*' && to_upper( mv_filter_value ) && '*'.
+
+      LOOP AT ms_files-local ASSIGNING <ls_local>.
+        IF to_upper( <ls_local>-item-obj_type ) CP lv_pattern
+            OR to_upper( <ls_local>-item-obj_name ) CP lv_pattern
+            OR to_upper( <ls_local>-item-devclass ) CP lv_pattern
+            OR to_upper( <ls_local>-file-path ) CP lv_pattern
+            OR to_upper( <ls_local>-file-filename ) CP lv_pattern.
+          APPEND <ls_local> TO lt_local.
+        ENDIF.
+      ENDLOOP.
+      ms_files-local = lt_local.
+
+      LOOP AT ms_files-remote ASSIGNING <ls_remote>.
+        IF to_upper( <ls_remote>-path ) CP lv_pattern
+            OR to_upper( <ls_remote>-filename ) CP lv_pattern.
+          APPEND <ls_remote> TO lt_remote.
+        ENDIF.
+      ENDLOOP.
+      ms_files-remote = lt_remote.
+    ENDIF.
 
     IF lines( ms_files-local ) = 0 AND lines( ms_files-remote ) = 0.
       mi_repo->refresh( ).
@@ -382,8 +422,34 @@ CLASS zcl_abapgit_gui_page_stage IMPLEMENTATION.
 
   METHOD is_large_repo_gate_active.
 
-    rv_active = boolc( mv_load_all = abap_false
-      AND count_changed_files( ) > c_large_repo_threshold ).
+    rv_active = abap_false.
+
+  ENDMETHOD.
+
+
+  METHOD is_virtual_stage_candidate.
+
+    rv_candidate = boolc(
+      zcl_abapgit_ortec_git_stage=>is_virtual_active(
+        iv_changed_file_count = count_changed_files( )
+        iv_load_all           = abap_true
+        iv_threshold          = c_large_repo_threshold ) = abap_true ).
+
+  ENDMETHOD.
+
+
+  METHOD get_virtual_window_size.
+
+    TRY.
+        rv_size = zcl_abapgit_persist_factory=>get_settings( )->read( )->get_max_lines( ).
+      CATCH zcx_abapgit_exception ##NO_HANDLER.
+    ENDTRY.
+
+    IF rv_size = 0.
+      rv_size = count_changed_files( ).
+    ELSEIF rv_size < 0.
+      rv_size = c_virtual_window_size.
+    ENDIF.
 
   ENDMETHOD.
 
@@ -410,11 +476,13 @@ CLASS zcl_abapgit_gui_page_stage IMPLEMENTATION.
                     iv_style = 'display: none'
                     iv_txt   = 'Commit Selected (<span class="counter"></span>)'
                     iv_opt   = zif_abapgit_html=>c_html_opt-strong ).
+    ri_html->add( '&nbsp;&nbsp;' ).
     ri_html->add_a( iv_act   = 'errorStub(event)' " Will be reinit by JS
                     iv_typ   = zif_abapgit_html=>c_action_type-onclick
                     iv_id    = 'commitFilteredButton'
                     iv_style = 'display: none'
                     iv_txt   = 'Add <b>Filtered</b> and Commit (<span class="counter"></span>)' ).
+    ri_html->add( '&nbsp;&nbsp;' ).
     ri_html->add_a( iv_act = |{ c_action-stage_all }|
                     iv_id  = 'commitAllButton'
                     iv_txt = lv_add_all_txt ).
@@ -664,9 +732,12 @@ CLASS zcl_abapgit_gui_page_stage IMPLEMENTATION.
     DATA lv_text TYPE string.
 
     lv_count = count_changed_files( ).
-    lv_text = |{ lv_count } changed files detected — rendering the full list may take a long time in the embedded browser. | &&
-              |Use <a href="#" onclick="document.getElementById('objectSearch').focus(); return false;">Set Filter</a> | &&
-              |to narrow scope, or <a href="sapevent:{ c_action-stage_load_all }">Load All</a> and wait.|.
+    lv_text = |<div class="stage-large-repo-warning">| &&
+              |<div><strong>{ lv_count } changed files detected</strong></div>| &&
+              |<div>Rendering the full list can take a long time in the embedded browser.</div>| &&
+              |<div>Use <a href="#" onclick="document.getElementById('objectSearch').focus(); return false;">Set Filter</a> | &&
+              |to narrow the scope, or <a href="sapevent:{ c_action-stage_load_all }">Load All</a> and wait.</div>| &&
+              |</div>|.
 
     ri_html = zcl_abapgit_gui_chunk_lib=>render_warning_banner( lv_text ).
 
@@ -675,16 +746,33 @@ CLASS zcl_abapgit_gui_page_stage IMPLEMENTATION.
 
   METHOD render_scripts.
 
+    DATA lv_virtual_candidate TYPE string.
+    DATA lv_virtual_active TYPE string.
+
     CREATE OBJECT ri_html TYPE zcl_abapgit_html.
 
     ri_html->set_title( cl_abap_typedescr=>describe_by_object_ref( me )->get_relative_name( ) ).
+
+    lv_virtual_candidate = COND #( WHEN is_virtual_stage_candidate( ) = abap_true THEN 'true' ELSE 'false' ).
+    lv_virtual_active = COND #(
+      WHEN zcl_abapgit_ortec_git_stage=>is_virtual_active(
+             iv_changed_file_count = count_changed_files( )
+             iv_load_all           = mv_load_all
+             iv_threshold          = c_large_repo_threshold ) = abap_true
+      THEN 'true'
+      ELSE 'false' ).
 
     ri_html->add( 'var gStageParams = {' ).
     ri_html->add( |  seed:            "{ mv_seed }",| ). " Unique page id
     ri_html->add( |  user:            "{ to_lower( sy-uname ) }",| ).
     ri_html->add( '  formAction:      "stage_commit",' ).
     ri_html->add( |  patchAction:     "{ zif_abapgit_definitions=>c_action-go_patch }",| ).
+    ri_html->add( |  virtualFilterAction: "{ c_action-stage_virtual_filter }",| ).
     ri_html->add( '  focusFilterKey:  "f",' ).
+    ri_html->add( |  virtualCandidate: { lv_virtual_candidate },| ).
+    ri_html->add( |  virtualActive:    { lv_virtual_active },| ).
+    ri_html->add( |  virtualWindowSize: { get_virtual_window_size( ) },| ).
+    ri_html->add( |  changedFileCount:  { count_changed_files( ) },| ).
 
     ri_html->add( '  ids: {' ).
     ri_html->add( '    stageTab:          "stageTab",' ).
@@ -696,7 +784,9 @@ CLASS zcl_abapgit_gui_page_stage IMPLEMENTATION.
     ri_html->add( '  }' ).
 
     ri_html->add( '}' ).
-    ri_html->add( 'var gHelper = new StageHelper(gStageParams);' ).
+    ri_html->add( 'if (!gStageParams.virtualActive) {' ).
+    ri_html->add( '  var gHelper = new StageHelper(gStageParams);' ).
+    ri_html->add( '}' ).
 
   ENDMETHOD.
 
@@ -785,12 +875,34 @@ CLASS zcl_abapgit_gui_page_stage IMPLEMENTATION.
 
         mv_filter_value = ii_event->form_data( )->get( 'filterValue' ).
         mv_load_all = abap_false.
+        mv_virtual_offset = 0.
+        init_files( ).
+        rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
+
+      WHEN c_action-stage_virtual_filter.
+
+        mv_filter_value = ii_event->form_data( )->get( 'filterValue' ).
+        mv_load_all = abap_true.
+        mv_virtual_offset = 0.
         init_files( ).
         rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
 
       WHEN c_action-stage_load_all.
 
         mv_load_all = abap_true.
+        mv_virtual_offset = 0.
+        rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
+
+      WHEN c_action-stage_page_prev.
+
+        mv_virtual_offset = nmax( val1 = 0 val2 = mv_virtual_offset - get_virtual_window_size( ) ).
+        rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
+
+      WHEN c_action-stage_page_next.
+
+        IF mv_virtual_offset + get_virtual_window_size( ) < count_changed_files( ).
+          mv_virtual_offset = mv_virtual_offset + get_virtual_window_size( ).
+        ENDIF.
         rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
 
       WHEN zif_abapgit_definitions=>c_action-go_patch.                         " Go Patch page
@@ -801,11 +913,13 @@ CLASS zcl_abapgit_gui_page_stage IMPLEMENTATION.
 
       WHEN c_action-stage_refresh.
         mv_load_all = abap_false.
+        mv_virtual_offset = 0.
         mi_repo->refresh( abap_true ).
         init_files( ).
         rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
       WHEN zif_abapgit_definitions=>c_action-git_branch_switch.
         mv_load_all = abap_false.
+        mv_virtual_offset = 0.
         zcl_abapgit_services_git=>switch_branch( |{ ii_event->query( )->get( 'KEY' ) }| ).
         mi_repo->refresh( abap_true ).
         init_files( ).
@@ -887,6 +1001,19 @@ CLASS zcl_abapgit_gui_page_stage IMPLEMENTATION.
     ri_html->add( render_actions( ) ).
     IF is_large_repo_gate_active( ) = abap_true.
       ri_html->add( render_large_repo_warning( ) ).
+    ELSEIF zcl_abapgit_ortec_git_stage=>is_virtual_active(
+             iv_changed_file_count = count_changed_files( )
+             iv_load_all           = mv_load_all
+             iv_threshold          = c_large_repo_threshold ) = abap_true.
+      ri_html->add( zcl_abapgit_ortec_git_stage=>render_virtual_list(
+        ii_repo        = mi_repo
+        it_files       = ms_files
+        iv_window_size = get_virtual_window_size( )
+        iv_offset      = mv_virtual_offset
+        iv_total_count = count_changed_files( )
+        iv_prev_action = c_action-stage_page_prev
+        iv_next_action = c_action-stage_page_next
+        iv_filter_value = mv_filter_value ) ).
     ELSE.
       ri_html->add( render_list( ) ).
     ENDIF.
@@ -898,6 +1025,13 @@ CLASS zcl_abapgit_gui_page_stage IMPLEMENTATION.
       iv_collection = zcl_abapgit_gui_component=>c_html_parts-hidden_forms
       ii_part       = render_deferred_hidden_events( ) ).
     register_deferred_script( render_scripts( ) ).
+    IF zcl_abapgit_ortec_git_stage=>is_virtual_active(
+         iv_changed_file_count = count_changed_files( )
+         iv_load_all           = mv_load_all
+         iv_threshold          = c_large_repo_threshold ) = abap_true.
+      register_deferred_script( zcl_abapgit_ortec_git_stage=>render_virtual_adapter_script(
+        iv_window_size = get_virtual_window_size( ) ) ).
+    ENDIF.
 
   ENDMETHOD.
 ENDCLASS.
