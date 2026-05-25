@@ -570,10 +570,20 @@ CLASS ZCL_ABAPGIT_GUI_ROUTER IMPLEMENTATION.
 
 METHOD jump_display_user.
 
+    DATA ls_return TYPE bapiret2.
+
     " todo, user display in ADT
     CALL FUNCTION 'BAPI_USER_DISPLAY'
       EXPORTING
-        username = iv_username.
+        username = iv_username
+      IMPORTING
+        return   = ls_return.
+
+    IF ls_return-type IS NOT INITIAL.
+      " BAPI sets RETURN only on error (user not found, no address, technical user, auth failure).
+      " Use an information popup consistent with call_transaction error handling.
+      MESSAGE ls_return-message TYPE 'I'.
+    ENDIF.
 
   ENDMETHOD.
 

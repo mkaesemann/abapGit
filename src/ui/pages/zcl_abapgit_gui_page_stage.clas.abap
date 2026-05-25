@@ -456,13 +456,13 @@ CLASS zcl_abapgit_gui_page_stage IMPLEMENTATION.
 
   METHOD render_actions.
 
-    DATA: lv_local_count TYPE i,
+    DATA: lv_total_count TYPE i,
           lv_add_all_txt TYPE string.
 
     CREATE OBJECT ri_html TYPE zcl_abapgit_html.
-    lv_local_count = count_default_files_to_commit( ).
-    IF lv_local_count > 0.
-      lv_add_all_txt = |Add All and Commit ({ lv_local_count })|.
+    lv_total_count = count_changed_files( ).
+    IF lv_total_count > 0.
+      lv_add_all_txt = |Add All and Commit ({ lv_total_count })|.
       " Otherwise empty, but the element (id) is preserved for JS
     ENDIF.
 
