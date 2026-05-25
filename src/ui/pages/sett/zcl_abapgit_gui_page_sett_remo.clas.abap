@@ -66,6 +66,7 @@ CLASS zcl_abapgit_gui_page_sett_remo DEFINITION
     DATA mv_offline_switch_saved_url TYPE string.
 
     DATA mo_popup_picklist TYPE REF TO zcl_abapgit_gui_picklist.
+    DATA mo_branch_picker TYPE REF TO zcl_abapgit_ortec_branch_list.
 
     METHODS get_remote_settings_from_repo
       IMPORTING
@@ -203,7 +204,6 @@ CLASS zcl_abapgit_gui_page_sett_remo IMPLEMENTATION.
     DATA lv_url         TYPE zif_abapgit_persistence=>ty_repo-url.
     DATA lv_branch_name TYPE zif_abapgit_persistence=>ty_repo-branch_name.
     DATA ls_branch      TYPE zif_abapgit_git_definitions=>ty_git_branch.
-    DATA lv_popup_cancelled TYPE abap_bool.
 
     IF iv_is_return = abap_false.
 
@@ -213,20 +213,20 @@ CLASS zcl_abapgit_gui_page_sett_remo IMPLEMENTATION.
 
       lv_url         = mo_form_data->get( c_id-url ).
       lv_branch_name = mo_form_data->get( c_id-branch ).
+      IF lv_branch_name IS NOT INITIAL AND lv_branch_name NP 'refs/*'.
+        lv_branch_name = zif_abapgit_git_definitions=>c_git_branch-heads_prefix && lv_branch_name.
+      ENDIF.
 
-      mo_popup_picklist = zcl_abapgit_popup_branch_list=>create(
-        iv_show_new_option = abap_false
-        iv_url             = lv_url
-        iv_default_branch  = lv_branch_name
-        )->create_picklist(
-        )->set_id( c_event-choose_branch
-        )->set_in_page( ).
+      mo_branch_picker = zcl_abapgit_ortec_branch_list=>create(
+        iv_url            = lv_url
+        iv_default_branch = lv_branch_name ).
 
     ELSE.
 
-      lv_popup_cancelled = mo_popup_picklist->was_cancelled( ).
-      IF lv_popup_cancelled = abap_false.
-        mo_popup_picklist->get_result_item( CHANGING cs_selected = ls_branch ).
+      IF mo_branch_picker IS BOUND
+          AND mo_branch_picker->is_fulfilled( ) = abap_true
+          AND mo_branch_picker->was_cancelled( ) = abap_false.
+        mo_branch_picker->get_result( IMPORTING es_branch = ls_branch ).
         IF ls_branch IS NOT INITIAL.
           mo_form_data->set(
             iv_key = c_id-branch
@@ -536,6 +536,11 @@ CLASS zcl_abapgit_gui_page_sett_remo IMPLEMENTATION.
 
   METHOD handle_picklist_state.
 
+    IF mo_branch_picker IS BOUND AND mo_branch_picker->is_fulfilled( ) = abap_true.
+      choose_branch( abap_true ).
+      CLEAR mo_branch_picker.
+    ENDIF.
+
     IF mo_popup_picklist IS BOUND AND
       ( mo_popup_picklist->is_fulfilled( ) = abap_true OR mo_popup_picklist->is_in_page( ) = abap_false ).
       " Picklist is either fulfilled OR
@@ -543,8 +548,6 @@ CLASS zcl_abapgit_gui_page_sett_remo IMPLEMENTATION.
       CASE mo_popup_picklist->id( ).
         WHEN c_event-choose_pull_request.
           choose_pr( abap_true ).
-        WHEN c_event-choose_branch.
-          choose_branch( abap_true ).
         WHEN c_event-choose_tag.
           choose_tag( abap_true ).
         WHEN OTHERS.
@@ -920,9 +923,21 @@ CLASS zcl_abapgit_gui_page_sett_remo IMPLEMENTATION.
 
     DATA:
       lv_url    TYPE ty_remote_settings-url,
-      lv_commit TYPE ty_remote_settings-commit.
+      lv_commit TYPE ty_remote_settings-commit,
+      ls_picker_handled TYPE zif_abapgit_gui_event_handler=>ty_handling_result.
 
     mo_form_data->merge( zcl_abapgit_html_form_utils=>create( mo_form )->normalize( ii_event->form_data( ) ) ).
+
+    IF mo_branch_picker IS BOUND.
+      ls_picker_handled = mo_branch_picker->zif_abapgit_gui_event_handler~on_event( ii_event ).
+      IF ls_picker_handled-state <> zcl_abapgit_gui=>c_event_state-not_handled.
+        choose_branch( abap_true ).
+        CLEAR mo_branch_picker.
+        mo_form = get_form_schema( mo_form_data ).
+        rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
+        RETURN.
+      ENDIF.
+    ENDIF.
 
     CASE ii_event->mv_action.
       WHEN zif_abapgit_definitions=>c_action-go_back.
@@ -952,7 +967,10 @@ CLASS zcl_abapgit_gui_page_sett_remo IMPLEMENTATION.
         mo_validation_log->clear( ).
 
       WHEN c_event-choose_branch.
-        choose_branch( ). " Uniformly handle state below
+        choose_branch( ).
+        IF mo_branch_picker IS BOUND.
+          rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
+        ENDIF.
 
       WHEN c_event-choose_tag.
         choose_tag( ). " Uniformly handle state below
@@ -1002,7 +1020,9 @@ CLASS zcl_abapgit_gui_page_sett_remo IMPLEMENTATION.
     ENDIF.
 
     " If staying on form, initialize it with current settings
-    IF rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render AND mo_popup_picklist IS NOT BOUND.
+    IF rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render
+        AND mo_popup_picklist IS NOT BOUND
+        AND mo_branch_picker IS NOT BOUND.
       " Switching tabs must change the form layout
       mo_form = get_form_schema( mo_form_data ).
     ENDIF.
@@ -1090,7 +1110,15 @@ CLASS zcl_abapgit_gui_page_sett_remo IMPLEMENTATION.
       iv_class   = 'repo' " It's OK because it's repo settings ... for now
       ii_content = render_content( ) ).
 
-    IF mo_popup_picklist IS NOT BOUND OR mo_popup_picklist->is_in_page( ) = abap_false.
+    IF mo_branch_picker IS BOUND.
+      ri_html->add( zcl_abapgit_gui_in_page_modal=>create(
+        ii_child  = mo_branch_picker
+        iv_width  = 760
+        iv_height = 620 ) ).
+      " Register after modal child rendering: handler registration inserts at index 1,
+      " so this page can consume picker results and update the form field.
+      register_handlers( ).
+    ELSEIF mo_popup_picklist IS NOT BOUND OR mo_popup_picklist->is_in_page( ) = abap_false.
       register_handlers( ).
     ELSEIF mo_popup_picklist->is_in_page( ) = abap_true.
       " Block usual page events if the popup is an in-page popup

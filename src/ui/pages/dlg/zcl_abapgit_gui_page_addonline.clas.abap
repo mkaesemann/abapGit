@@ -49,6 +49,8 @@ CLASS zcl_abapgit_gui_page_addonline DEFINITION
     DATA mo_form_data TYPE REF TO zcl_abapgit_string_map .
     DATA mo_form_util TYPE REF TO zcl_abapgit_html_form_utils.
     DATA mo_validation_log TYPE REF TO zcl_abapgit_string_map .
+    "! Holds the async branch picker across navigation; read in render and on_event.
+    DATA mo_branch_picker TYPE REF TO zcl_abapgit_ortec_branch_list.
 
     METHODS validate_form
       IMPORTING
@@ -65,6 +67,12 @@ CLASS zcl_abapgit_gui_page_addonline DEFINITION
     METHODS choose_labels
       RAISING
         zcx_abapgit_exception.
+
+    "! <p class="shorttext synchronized">Apply pending async branch picker result</p>
+    "! If mo_branch_picker is fulfilled and not cancelled, updates mo_form_data
+    "! with the selected branch name (stripped of refs/heads/ prefix) and clears
+    "! the picker reference. Safe to call multiple times.
+    METHODS check_branch_picker_result.
 
 ENDCLASS.
 
@@ -86,6 +94,35 @@ CLASS zcl_abapgit_gui_page_addonline IMPLEMENTATION.
     mo_form_data->set(
       iv_key = c_id-labels
       iv_val = lv_new_labels ).
+
+  ENDMETHOD.
+
+
+METHOD check_branch_picker_result.
+
+    DATA ls_branch TYPE zif_abapgit_git_definitions=>ty_git_branch.
+
+    IF mo_branch_picker IS NOT BOUND OR mo_branch_picker->is_fulfilled( ) = abap_false.
+      RETURN.
+    ENDIF.
+
+    IF mo_branch_picker->was_cancelled( ) = abap_false.
+      mo_branch_picker->get_result( IMPORTING es_branch = ls_branch ).
+      IF ls_branch-name IS NOT INITIAL.
+        TRY.
+            mo_form_data->set(
+              iv_key = c_id-branch_name
+              iv_val = replace(
+                val  = ls_branch-name
+                sub  = zif_abapgit_git_definitions=>c_git_branch-heads_prefix
+                with = '' ) ).
+          CATCH zcx_abapgit_exception ##NO_HANDLER.
+            " set() raises on frozen map only; mo_form_data is never frozen here
+        ENDTRY.
+      ENDIF.
+    ENDIF.
+
+    CLEAR mo_branch_picker.
 
   ENDMETHOD.
 
@@ -272,8 +309,18 @@ CLASS zcl_abapgit_gui_page_addonline IMPLEMENTATION.
     DATA ls_repo_params TYPE zif_abapgit_services_repo=>ty_repo_params.
     DATA li_new_repo    TYPE REF TO zif_abapgit_repo.
     DATA lv_package     TYPE devclass.
+    DATA ls_picker_handled TYPE zif_abapgit_gui_event_handler=>ty_handling_result.
 
     mo_form_data = mo_form_util->normalize( ii_event->form_data( ) ).
+
+    IF mo_branch_picker IS BOUND.
+      ls_picker_handled = mo_branch_picker->zif_abapgit_gui_event_handler~on_event( ii_event ).
+      IF ls_picker_handled-state <> zcl_abapgit_gui=>c_event_state-not_handled.
+        check_branch_picker_result( ).
+        rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
+        RETURN.
+      ENDIF.
+    ENDIF.
 
     CASE ii_event->mv_action.
       WHEN c_event-create_package.
@@ -309,24 +356,21 @@ CLASS zcl_abapgit_gui_page_addonline IMPLEMENTATION.
           mo_validation_log->set(
             iv_key = c_id-branch_name
             iv_val = 'Check URL issues' ).
-          rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render. " Display errors
+          rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
           RETURN.
         ENDIF.
-        mo_form_data->set(
-          iv_key = c_id-branch_name
-          iv_val = zcl_abapgit_ui_factory=>get_popups( )->branch_list_popup( mo_form_data->get( c_id-url ) )-name ).
 
-        IF mo_form_data->get( c_id-branch_name ) IS INITIAL.
-          rs_handled-state = zcl_abapgit_gui=>c_event_state-no_more_act.
-        ELSE.
-          mo_form_data->set(
-            iv_key = c_id-branch_name
-            iv_val = replace( " strip technical
-              val = mo_form_data->get( c_id-branch_name )
-              sub = zif_abapgit_git_definitions=>c_git_branch-heads_prefix
-              with = '' ) ).
-          rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
+        " Build default-branch value with full ref prefix for picker highlight
+        DATA(lv_default) = mo_form_data->get( c_id-branch_name ).
+        IF lv_default IS NOT INITIAL.
+          lv_default = zif_abapgit_git_definitions=>c_git_branch-heads_prefix && lv_default.
         ENDIF.
+
+        " Create async picker and render it as an in-page modal popup
+        mo_branch_picker = zcl_abapgit_ortec_branch_list=>create(
+          iv_url            = mo_form_data->get( c_id-url )
+          iv_default_branch = lv_default ).
+        rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
 
       WHEN c_event-choose_labels.
 
@@ -353,8 +397,6 @@ CLASS zcl_abapgit_gui_page_addonline IMPLEMENTATION.
 
   METHOD zif_abapgit_gui_renderable~render.
 
-    register_handlers( ).
-
     CREATE OBJECT ri_html TYPE zcl_abapgit_html.
 
     ri_html->add( '<div class="form-container">' ).
@@ -362,5 +404,17 @@ CLASS zcl_abapgit_gui_page_addonline IMPLEMENTATION.
       io_values         = mo_form_data
       io_validation_log = mo_validation_log ) ).
     ri_html->add( '</div>' ).
+
+    IF mo_branch_picker IS BOUND.
+      ri_html->add( zcl_abapgit_gui_in_page_modal=>create(
+        ii_child  = mo_branch_picker
+        iv_width  = 760
+        iv_height = 620 ) ).
+    ENDIF.
+
+    " Register after modal child rendering: handler registration inserts at index 1,
+    " so this page can consume picker results and update the form field.
+    register_handlers( ).
+
   ENDMETHOD.
 ENDCLASS.

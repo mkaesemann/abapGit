@@ -55,6 +55,7 @@ CLASS zcl_abapgit_gui_page_repo_view DEFINITION
     DATA mv_diff_first TYPE abap_bool .
     DATA mv_key TYPE zif_abapgit_persistence=>ty_value .
     DATA mv_are_changes_recorded_in_tr TYPE abap_bool .
+    DATA mo_branch_picker TYPE REF TO zcl_abapgit_ortec_branch_list.
 
     METHODS render_head_line
       RETURNING
@@ -1098,13 +1099,48 @@ CLASS zcl_abapgit_gui_page_repo_view IMPLEMENTATION.
 
     DATA lv_path TYPE string.
     DATA lv_key TYPE zif_abapgit_persistence=>ty_value.
+    DATA ls_picker_handled TYPE zif_abapgit_gui_event_handler=>ty_handling_result.
+    DATA ls_branch TYPE zif_abapgit_git_definitions=>ty_git_branch.
+    DATA li_repo_online TYPE REF TO zif_abapgit_repo_online.
 
     lv_key = ii_event->query( )->get( 'KEY' ).
+
+    IF mo_branch_picker IS BOUND.
+      ls_picker_handled = mo_branch_picker->zif_abapgit_gui_event_handler~on_event( ii_event ).
+      IF ls_picker_handled-state <> zcl_abapgit_gui=>c_event_state-not_handled.
+        IF mo_branch_picker->is_fulfilled( ) = abap_true
+            AND mo_branch_picker->was_cancelled( ) = abap_false.
+          mo_branch_picker->get_result( IMPORTING es_branch = ls_branch ).
+          IF ls_branch-name = zif_abapgit_popups=>c_new_branch_label.
+            zcl_abapgit_services_git=>create_branch( mv_key ).
+          ELSEIF ls_branch-name IS NOT INITIAL.
+            li_repo_online ?= mi_repo.
+            li_repo_online->select_commit( '' ).
+            li_repo_online->switch_origin( '' ).
+            li_repo_online->select_branch( ls_branch-name ).
+            COMMIT WORK AND WAIT.
+          ENDIF.
+        ENDIF.
+        CLEAR mo_branch_picker.
+        rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
+        RETURN.
+      ENDIF.
+    ENDIF.
 
     CASE ii_event->mv_action.
       WHEN zif_abapgit_definitions=>c_action-go_repo. " Switch to another repo
         rs_handled-page  = create( lv_key ).
         rs_handled-state = zcl_abapgit_gui=>c_event_state-new_page_replacing.
+
+      WHEN zif_abapgit_definitions=>c_action-git_branch_switch.
+        IF mi_repo->is_offline( ) = abap_false.
+          li_repo_online ?= mi_repo.
+          mo_branch_picker = zcl_abapgit_ortec_branch_list=>create(
+            iv_url             = li_repo_online->get_url( )
+            iv_default_branch  = li_repo_online->get_selected_branch( )
+            iv_show_new_option = abap_true ).
+          rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
+        ENDIF.
 
       WHEN c_actions-go_data.
         rs_handled-page  = zcl_abapgit_gui_page_data=>create( lv_key ).
@@ -1415,6 +1451,16 @@ CLASS zcl_abapgit_gui_page_repo_view IMPLEMENTATION.
 
         RAISE EXCEPTION lx_error.
     ENDTRY.
+
+    IF mo_branch_picker IS BOUND.
+      ri_html->add( zcl_abapgit_gui_in_page_modal=>create(
+        ii_child  = mo_branch_picker
+        iv_width  = 760
+        iv_height = 620 ) ).
+      " Move repo-view handler in front of the picker handler so the page can
+      " consume picker go_back and keep the user on the repository overview.
+      gui_services( )->register_event_handler( me ).
+    ENDIF.
 
     register_deferred_script( render_scripts( ) ).
 

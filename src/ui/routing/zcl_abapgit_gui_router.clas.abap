@@ -487,9 +487,13 @@ CLASS ZCL_ABAPGIT_GUI_ROUTER IMPLEMENTATION.
       WHEN zif_abapgit_definitions=>c_action-git_branch_delete.             " GIT Delete remote branch
         zcl_abapgit_services_git=>delete_branch( lv_key ).
         rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
-      WHEN zif_abapgit_definitions=>c_action-git_branch_switch.             " GIT Switch branch
-        zcl_abapgit_services_git=>switch_branch( lv_key ).
-        rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
+      WHEN zif_abapgit_definitions=>c_action-git_branch_switch.             " GIT Switch branch (ORTEC rich picker modal)
+        DATA(lo_switch) = NEW zcl_abapgit_ortec_sw_branch( iv_key = lv_key ).
+        rs_handled-page  = zcl_abapgit_gui_page_hoc=>create(
+          iv_page_title      = 'Switch Branch'
+          ii_child_component = lo_switch
+          iv_show_as_modal   = abap_true ).
+        rs_handled-state = zcl_abapgit_gui=>c_event_state-new_page.
       WHEN zif_abapgit_definitions=>c_action-git_branch_merge.              " GIT Merge branch
         rs_handled-page  = zcl_abapgit_gui_page_merge_sel=>create( li_repo ).
         rs_handled-state = zcl_abapgit_gui=>c_event_state-new_page.
