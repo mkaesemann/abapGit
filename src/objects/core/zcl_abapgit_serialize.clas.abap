@@ -56,6 +56,7 @@ CLASS zcl_abapgit_serialize DEFINITION
     DATA ms_i18n_params TYPE zif_abapgit_definitions=>ty_i18n_params.
     DATA mo_abap_language_version TYPE REF TO zcl_abapgit_abap_language_vers.
     DATA mt_wo_translation_patterns TYPE string_table.
+    DATA mv_parallel_broken TYPE abap_bool.
 
     METHODS add_apack
       IMPORTING
@@ -295,6 +296,8 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
         EXPORTING
           io_dot_abapgit = mo_dot_abapgit.
     ENDIF.
+
+    mv_parallel_broken = abap_false.
 
   ENDMETHOD.
 
@@ -600,6 +603,7 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
         communication_failure = 3 MESSAGE lv_mess
         OTHERS = 4.
     IF sy-subrc <> 0.
+      mv_parallel_broken = abap_true.
       IF NOT mi_log IS INITIAL.
         IF NOT lv_mess IS INITIAL.
           DATA(gui_error) = 'Maximum number of GUI sessions reached'.
@@ -611,14 +615,16 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
           ENDIF.
           mi_log->add_error( lv_mess ).
         ELSE.
-          mi_log->add_error( |{ sy-msgv1 }{ sy-msgv2 }{ sy-msgv3 }{ sy-msgv3 }| ).
+          mi_log->add_error( |{ sy-msgv1 }{ sy-msgv2 }{ sy-msgv3 }{ sy-msgv4 }| ).
         ENDIF.
+        mi_log->add_warning( 'Falling back to sequential serialization for remaining objects.' ).
       ENDIF.
     ELSE.
       IMPORT data = ls_file_item FROM DATA BUFFER lv_result. "#EC CI_SUBRC
       ASSERT sy-subrc = 0.
       add_to_return( is_file_item = ls_file_item
                      iv_path      = lv_path ).
+      CLEAR: lv_result, ls_file_item.
     ENDIF.
 
     mv_free = mv_free + 1.
@@ -673,7 +679,17 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
         WAIT UNTIL mv_free <> lv_free UP TO 1 SECONDS.
         CONTINUE.
       ELSEIF sy-subrc <> 0.
-        ASSERT lv_msg = '' AND 0 = 1.
+        mv_parallel_broken = abap_true.
+        IF mi_log IS BOUND.
+          IF lv_msg IS NOT INITIAL.
+            mi_log->add_error( lv_msg ).
+          ELSE.
+            mi_log->add_error( |Parallel task start failed with subrc { sy-subrc }.| ).
+          ENDIF.
+          mi_log->add_warning( 'Running current object sequentially due to parallel start failure.' ).
+        ENDIF.
+        run_sequential( is_tadir ).
+        RETURN.
       ENDIF.
       EXIT.
     ENDDO.
@@ -731,12 +747,20 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
           lv_count    TYPE i,
           li_progress TYPE REF TO zif_abapgit_progress,
           lo_timer    TYPE REF TO zcl_abapgit_timer,
-          lt_tadir    TYPE zif_abapgit_definitions=>ty_tadir_tt.
+          lt_tadir    TYPE zif_abapgit_definitions=>ty_tadir_tt,
+          lv_use_redispatch TYPE abap_bool,
+          lv_last_redispatch_ts TYPE timestampl,
+          lv_current_ts TYPE timestampl,
+          lv_elapsed_seconds TYPE i.
 
     FIELD-SYMBOLS: <ls_tadir> LIKE LINE OF it_tadir.
 
 
     CLEAR mt_files.
+    mv_parallel_broken = abap_false.
+
+    lv_use_redispatch = zcl_abapgit_factory=>get_function_module( )->function_exists( 'TH_REDISPATCH' ).
+    GET TIME STAMP FIELD lv_last_redispatch_ts.
 
     lv_max = determine_max_processes( iv_force_sequential = iv_force_sequential
                                       iv_package          = iv_package ).
@@ -761,7 +785,22 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
       iv_count = lv_count )->start( ).
 
     LOOP AT lt_tadir ASSIGNING <ls_tadir>.
-      IF lv_max = 1 OR is_no_parallel( <ls_tadir>-object ) = abap_true.
+
+      IF lv_use_redispatch = abap_true.
+        GET TIME STAMP FIELD lv_current_ts.
+        lv_elapsed_seconds = cl_abap_tstmp=>subtract(
+          tstmp1 = lv_current_ts
+          tstmp2 = lv_last_redispatch_ts ).
+
+        IF lv_elapsed_seconds >= 300.
+          CALL FUNCTION 'TH_REDISPATCH'
+            EXCEPTIONS
+              OTHERS = 1.
+          GET TIME STAMP FIELD lv_last_redispatch_ts.
+        ENDIF.
+      ENDIF.
+
+      IF lv_max = 1 OR mv_parallel_broken = abap_true OR is_no_parallel( <ls_tadir>-object ) = abap_true.
         li_progress->show(
           iv_current = sy-tabix
           iv_text    = |Serialize { <ls_tadir>-obj_name }, { lv_max } thread| ).
