@@ -181,13 +181,14 @@ CLASS zcl_abapgit_ortec_branch_list IMPLEMENTATION.
 
   METHOD fill_last_commit_dates.
 
-    DATA lt_sha1    TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
-    DATA lt_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
-    DATA ls_commit  TYPE zif_abapgit_git_definitions=>ty_commit.
-    DATA lv_unix    TYPE zcl_abapgit_git_time=>ty_unixtime.
-    DATA lv_date    TYPE sy-datum.
-    DATA lv_time    TYPE sy-uzeit.
-    DATA lv_branch  TYPE zif_abapgit_git_definitions=>ty_git_branch-name.
+    DATA lt_sha1        TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_objects     TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA ls_commit      TYPE zif_abapgit_git_definitions=>ty_commit.
+    DATA lv_unix        TYPE zcl_abapgit_git_time=>ty_unixtime.
+    DATA lv_date        TYPE sy-datum.
+    DATA lv_time        TYPE sy-uzeit.
+    DATA lv_branch      TYPE zif_abapgit_git_definitions=>ty_git_branch-name.
+    DATA lv_is_fastpath TYPE abap_bool.
 
     FIELD-SYMBOLS <ls_branch> LIKE LINE OF mt_branches.
     FIELD-SYMBOLS <ls_item>   TYPE ty_group_item.
@@ -204,6 +205,8 @@ CLASS zcl_abapgit_ortec_branch_list IMPLEMENTATION.
       SORT lt_sha1.
       DELETE ADJACENT DUPLICATES FROM lt_sha1.
 
+      lv_is_fastpath = zcl_abapgit_ortec_git_switch=>is_active_for_repo( mv_url ).
+
       " Fast path: retrieve all branch-tip commit objects in one protocol-v2 request.
       IF lt_sha1 IS NOT INITIAL.
         TRY.
@@ -217,8 +220,27 @@ CLASS zcl_abapgit_ortec_branch_list IMPLEMENTATION.
         ENDTRY.
       ENDIF.
 
-      " Bounded fallback: one upload-pack request for all branch tips.
-      IF mt_tip_commits IS INITIAL AND lv_branch IS NOT INITIAL.
+      " Safe fastpath fallback: protocol-v2 commit-only fetch without touching
+      " ORTEC object-store state.
+      IF mt_tip_commits IS INITIAL
+          AND lt_sha1 IS NOT INITIAL
+          AND lv_is_fastpath = abap_true.
+        TRY.
+            CLEAR lt_objects.
+            lt_objects = zcl_abapgit_git_factory=>get_v2_porcelain( )->commits_last_year(
+              iv_url  = mv_url
+              it_sha1 = lt_sha1 ).
+            DELETE lt_objects WHERE type <> zif_abapgit_git_definitions=>c_type-commit.
+            mt_tip_commits = zcl_abapgit_git_commit=>parse_commits( lt_objects ).
+          CATCH zcx_abapgit_exception.
+            CLEAR mt_tip_commits.
+        ENDTRY.
+      ENDIF.
+
+      " Non-fastpath fallback: one upload-pack request for all branch tips.
+      IF mt_tip_commits IS INITIAL
+          AND lv_branch IS NOT INITIAL
+          AND lv_is_fastpath = abap_false.
         TRY.
             CLEAR lt_objects.
             zcl_abapgit_git_transport=>upload_pack_by_branch(
