@@ -523,23 +523,80 @@ CLASS ZCL_ABAPGIT_GIT_PORCELAIN IMPLEMENTATION.
 
   METHOD pull_by_branch.
 
-    zcl_abapgit_git_transport=>upload_pack_by_branch(
-      EXPORTING
-        iv_url          = iv_url
-        iv_branch_name  = iv_branch_name
-        iv_deepen_level = iv_deepen_level
-      IMPORTING
-        et_objects      = rs_result-objects
-        ev_branch       = rs_result-commit ).
+    DATA lv_ortec_repo_key TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key.
 
-    rs_result-files = pull(
-      iv_commit  = rs_result-commit
-      it_objects = rs_result-objects ).
+    " ORTEC: Try fast-path reconstitution from persistent object store
+    TRY.
+        rs_result = zcl_abapgit_ortec_fastpath=>pull_by_branch(
+          iv_url          = iv_url
+          iv_branch_name  = iv_branch_name
+          iv_deepen_level = iv_deepen_level ).
+        IF rs_result IS NOT INITIAL.
+          RETURN.
+        ENDIF.
+      CATCH zcx_abapgit_ortec_git.
+        "ORTEC: fast-path failed, continue with standard behavior
+    ENDTRY.
+
+* ORTEC: when fastpath is active, skip old in-memory pull buffer
+* so that the full fetch+persist path runs (hooks 2-6).
+* The ORTEC persistent store replaces the pull buffer's role.
+**    IF zcl_abapgit_ortec_git_switch=>is_active( ) = abap_false.
+**      rs_result = zcl_abapgit_pull_buffer=>pull_buffered_branch(
+**        iv_url         = iv_url
+**        iv_branch_name = iv_branch_name ).
+**    ENDIF.
+
+    IF rs_result IS INITIAL.
+
+      zcl_abapgit_git_transport=>upload_pack_by_branch(
+        EXPORTING
+          iv_url          = iv_url
+          iv_branch_name  = iv_branch_name
+          iv_deepen_level = iv_deepen_level
+        IMPORTING
+          et_objects      = rs_result-objects
+          ev_branch       = rs_result-commit ).
+
+      IF zcl_abapgit_ortec_git_switch=>is_active_for_repo( iv_url ) = abap_true.
+        lv_ortec_repo_key = zcl_abapgit_ortec_repo_state=>get_or_create_repo_key_for_url( iv_url ).
+      ELSE.
+        lv_ortec_repo_key = zcl_abapgit_ortec_repo_state=>get_repo_key_for_url( iv_url ).
+      ENDIF.
+
+      rs_result-files = pull(
+        iv_commit   = rs_result-commit
+        it_objects  = rs_result-objects
+        iv_repo_key = lv_ortec_repo_key ).
+**
+**      zcl_abapgit_pull_buffer=>store_branch_in_buffer(
+**        iv_url         = iv_url
+**        iv_branch_name = iv_branch_name
+**        iv_commit      = rs_result-commit
+**        it_objects     = rs_result-objects
+**        it_files       = rs_result-files
+**      ).
+
+* ORTEC: persist objects in persistent store after successful pull
+      TRY.
+          zcl_abapgit_ortec_fastpath=>persist_pull_result(
+            iv_url         = iv_url
+            iv_branch_name = iv_branch_name
+            iv_commit      = rs_result-commit
+            it_objects     = rs_result-objects
+            iv_repo_key    = lv_ortec_repo_key ).
+        CATCH zcx_abapgit_ortec_git.
+* ORTEC: persistence failure is non-critical, continue normally
+      ENDTRY.
+
+    ENDIF.
 
   ENDMETHOD.
 
 
   METHOD pull_by_commit.
+
+    DATA lv_ortec_repo_key TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key.
 
     zcl_abapgit_git_transport=>upload_pack_by_commit(
       EXPORTING
@@ -550,9 +607,15 @@ CLASS ZCL_ABAPGIT_GIT_PORCELAIN IMPLEMENTATION.
         et_objects      = rs_result-objects
         ev_commit       = rs_result-commit ).
 
-    rs_result-files = pull(
-      iv_commit  = rs_result-commit
-      it_objects = rs_result-objects ).
+    IF zcl_abapgit_ortec_git_switch=>is_active_for_repo( iv_url ) = abap_true.
+      lv_ortec_repo_key = zcl_abapgit_ortec_repo_state=>get_or_create_repo_key_for_url( iv_url ).
+    ELSE.
+      lv_ortec_repo_key = zcl_abapgit_ortec_repo_state=>get_repo_key_for_url( iv_url ).
+    ENDIF.
+
+    rs_result-files = pull( iv_commit   = rs_result-commit
+                            it_objects  = rs_result-objects
+                            iv_repo_key = lv_ortec_repo_key ).
 
   ENDMETHOD.
 
