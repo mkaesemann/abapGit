@@ -16,16 +16,19 @@ CLASS zcl_abapgit_ortec_git_stage DEFINITION
 
     CLASS-METHODS render_virtual_list
       IMPORTING
-        !ii_repo        TYPE REF TO zif_abapgit_repo
-        !it_files       TYPE zif_abapgit_definitions=>ty_stage_files
-        !iv_window_size TYPE i DEFAULT c_default_window_size
-        !iv_offset      TYPE i DEFAULT 0
-        !iv_total_count TYPE i OPTIONAL
-        !iv_prev_action TYPE string OPTIONAL
-        !iv_next_action TYPE string OPTIONAL
+        !ii_repo         TYPE REF TO zif_abapgit_repo
+        !it_files        TYPE zif_abapgit_definitions=>ty_stage_files
+        !iv_window_size  TYPE i DEFAULT c_default_window_size
+        !iv_offset       TYPE i DEFAULT 0
+        !iv_total_count  TYPE i OPTIONAL
+        !iv_first_action TYPE string OPTIONAL
+        !iv_prev_action  TYPE string OPTIONAL
+        !iv_next_action  TYPE string OPTIONAL
+        !iv_last_action  TYPE string OPTIONAL
+        !iv_jump_action  TYPE string OPTIONAL
         !iv_filter_value TYPE string OPTIONAL
       RETURNING
-        VALUE(ri_html)  TYPE REF TO zif_abapgit_html
+        VALUE(ri_html)   TYPE REF TO zif_abapgit_html
       RAISING
         zcx_abapgit_exception.
 
@@ -310,6 +313,8 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
     DATA lv_total_count TYPE i.
     DATA lv_offset TYPE i.
     DATA lv_end TYPE i.
+    DATA lv_current_page TYPE i.
+    DATA lv_total_pages  TYPE i.
     DATA lv_local_count TYPE i.
     DATA lv_from TYPE i.
     DATA lv_to TYPE i.
@@ -411,6 +416,19 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
     ENDIF.
     lv_offset = nmax( val1 = 0 val2 = iv_offset ).
     lv_end = nmin( val1 = lv_offset + iv_window_size val2 = lv_total_count ).
+
+    " Page number (1-based) and total pages for the navigation display
+    IF iv_window_size > 0.
+      lv_current_page = lv_offset / iv_window_size + 1.
+      lv_total_pages  = ( lv_total_count + iv_window_size - 1 ) / iv_window_size.
+    ELSE.
+      lv_current_page = 1.
+      lv_total_pages  = 1.
+    ENDIF.
+    IF lv_total_pages < 1.
+      lv_total_pages = 1.
+    ENDIF.
+
     lv_local_count = lines( ls_filtered-local ).
 
     IF lv_offset < lv_local_count.
@@ -461,17 +479,42 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
     ri_html->add( '<div id="stageVirtualPager" class="stage-virtual-pager margin-v5" style="display:flex;justify-content:space-between;align-items:center;">' ).
     ri_html->add( '<span id="stageVirtualInfo" class="pad-sides"></span>' ).
     ri_html->add( '<span class="stage-virtual-nav">' ).
-    IF lv_offset > 0 AND iv_prev_action IS NOT INITIAL.
-      ri_html->add( |&#x25C0;&nbsp;<a id="stageVirtualPrev" href="sapevent:{ iv_prev_action }">Previous</a>| ).
+
+    " ── First ───────────────────────────────────────────────────────────
+    IF lv_offset > 0 AND iv_first_action IS NOT INITIAL.
+      ri_html->add( |<a id="stageVirtualFirst" href="sapevent:{ iv_first_action }">First</a>| ).
     ELSE.
-      ri_html->add( '&#x25C0;&nbsp;<span id="stageVirtualPrev" class="grey">Previous</span>' ).
+      ri_html->add( '<span id="stageVirtualFirst" class="grey">First</span>' ).
     ENDIF.
     ri_html->add( '&nbsp;&nbsp;' ).
-    IF lv_end < lv_total_count AND iv_next_action IS NOT INITIAL.
-      ri_html->add( |<a id="stageVirtualNext" href="sapevent:{ iv_next_action }">Next</a>&nbsp;&#x25B6;| ).
+
+    " ── Previous ────────────────────────────────────────────────────────
+    IF lv_offset > 0 AND iv_prev_action IS NOT INITIAL.
+      ri_html->add( |<a id="stageVirtualPrev" href="sapevent:{ iv_prev_action }">Prev</a>| ).
     ELSE.
-      ri_html->add( '<span id="stageVirtualNext" class="grey">Next</span>&nbsp;&#x25B6;' ).
+      ri_html->add( '<span id="stageVirtualPrev" class="grey">Prev</span>' ).
     ENDIF.
+    ri_html->add( '&nbsp;&nbsp;' ).
+
+    " ── Page indicator (clickable when jump action available) ────────────
+    ri_html->add( |<span id="stageVirtualPageNum" style="padding:0 6px;font-weight:bold;">{ lv_current_page }&nbsp;/&nbsp;{ lv_total_pages }</span>| ).
+    ri_html->add( '&nbsp;&nbsp;' ).
+
+    " ── Next ────────────────────────────────────────────────────────────
+    IF lv_end < lv_total_count AND iv_next_action IS NOT INITIAL.
+      ri_html->add( |<a id="stageVirtualNext" href="sapevent:{ iv_next_action }">Next</a>| ).
+    ELSE.
+      ri_html->add( '<span id="stageVirtualNext" class="grey">Next</span>' ).
+    ENDIF.
+    ri_html->add( '&nbsp;&nbsp;' ).
+
+    " ── Last ────────────────────────────────────────────────────────────
+    IF lv_end < lv_total_count AND iv_last_action IS NOT INITIAL.
+      ri_html->add( |<a id="stageVirtualLast" href="sapevent:{ iv_last_action }">Last</a>| ).
+    ELSE.
+      ri_html->add( '<span id="stageVirtualLast" class="grey">Last</span>' ).
+    ENDIF.
+
     ri_html->add( '</span>' ).
     ri_html->add( '</div>' ).
     ri_html->add( '<table id="stageTab" class="stage_tab w100">' ).
@@ -492,7 +535,10 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
     ri_html->add( |  offset: { lv_offset },| ).
     ri_html->add( |  end: { lv_end },| ).
     ri_html->add( |  total: { lv_total_count },| ).
-    ri_html->add( |  windowSize: { iv_window_size }| ).
+    ri_html->add( |  windowSize: { iv_window_size },| ).
+    ri_html->add( |  currentPage: { lv_current_page },| ).
+    ri_html->add( |  totalPages: { lv_total_pages },| ).
+    ri_html->add( |  jumpAction: "{ iv_jump_action }"| ).
     ri_html->add( '};' ).
     ri_html->add( 'window.OrtecStageMethods = {' ).
     ri_html->add( |  add: "{ zif_abapgit_definitions=>c_method-add }",| ).
@@ -677,6 +723,43 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
     ri_html->add( '    var commitFiltered = id(gStageParams.ids.commitFilteredBtn); if (commitFiltered) { commitFiltered.onclick = function(){ markFilteredAndSubmit(); return false; }; }' ).
     ri_html->add( '    var patchButton = id(gStageParams.ids.patchBtn); if (patchButton) { patchButton.onclick = function(){ submit(gStageParams.patchAction); return false; }; }' ).
     ri_html->add( '    window.submitPatch = function(){ submit(gStageParams.patchAction); return false; };' ).
+    ri_html->add( '    // Page-number click: prompt for page number or name/pattern and POST to jump action' ).
+    ri_html->add( '    var pageNum = id("stageVirtualPageNum");' ).
+    ri_html->add( '    if (pageNum && pageMeta.jumpAction) {' ).
+    ri_html->add( '      pageNum.style.cursor = "pointer";' ).
+      ri_html->add( '      pageNum.title = "Click to jump to page or search by name";' ).
+    ri_html->add( '      pageNum.style.textDecoration = "underline dotted";' ).
+    ri_html->add( '      pageNum.onclick = function() {' ).
+    ri_html->add( '        var total = pageMeta.totalPages || 1;' ).
+    ri_html->add( '        var cur = pageMeta.currentPage || 1;' ).
+    ri_html->add( '        var input = prompt("Jump to page (1\u2013" + total + ") or search (e.g. Name*):", cur);' ).
+    ri_html->add( '        if (input === null) { return; }' ).
+    ri_html->add( '        input = input.trim();' ).
+    ri_html->add( '        if (!input) { return; }' ).
+    ri_html->add( '        var offset = null;' ).
+    ri_html->add( '        if (!isNaN(input)) {' ).
+    ri_html->add( '          var t = Math.min(Math.max(1, parseInt(input, 10)), total);' ).
+    ri_html->add( '          offset = (t - 1) * (pageMeta.windowSize || 150);' ).
+    ri_html->add( '        } else {' ).
+    ri_html->add( '          var q = input.toUpperCase();' ).
+    ri_html->add( '          var p = q.replace(/\*/g, "");' ).
+    ri_html->add( '          var idx = -1;' ).
+    ri_html->add( '          for (var i = 0; i < rows.length; i++) {' ).
+    ri_html->add( '            var hay = [rows[i].objType, rows[i].objName, rows[i].displayName, rows[i].path, rows[i].filename].join(" ").toUpperCase();' ).
+    ri_html->add( '            if ((q.indexOf("*") >= 0 && p && hay.indexOf(p) !== -1) || (q.indexOf("*") < 0 && hay.indexOf(q) !== -1)) {' ).
+    ri_html->add( '              idx = i; break;' ).
+    ri_html->add( '            }' ).
+    ri_html->add( '          }' ).
+    ri_html->add( '          if (idx < 0) { alert("No matching object found: " + input); return; }' ).
+    ri_html->add( '          offset = Math.floor(idx / (pageMeta.windowSize || 150)) * (pageMeta.windowSize || 150);' ).
+    ri_html->add( '        }' ).
+    ri_html->add( '        var form = document.createElement("form");' ).
+    ri_html->add( '        form.method = "post"; form.action = "sapevent:" + pageMeta.jumpAction;' ).
+    ri_html->add( '        var f = document.createElement("input");' ).
+    ri_html->add( '        f.type = "hidden"; f.name = "pageOffset"; f.value = offset;' ).
+    ri_html->add( '        form.appendChild(f); document.body.appendChild(form); form.submit();' ).
+    ri_html->add( '      };' ).
+    ri_html->add( '    }' ).
     ri_html->add( '    render();' ).
     ri_html->add( '  } catch (e) {' ).
     ri_html->add( '    var body = document.getElementById("stageVirtualBody");' ).
