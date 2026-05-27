@@ -930,9 +930,31 @@ CLASS zcl_abapgit_gui_page_stage IMPLEMENTATION.
 
       WHEN c_action-stage_page_jump.
 
-        DATA(lv_jump_offset_str) = ii_event->form_data( )->get( 'pageOffset' ).
-        DATA(lv_jump_offset) = CONV i( lv_jump_offset_str ).
-        mv_virtual_offset = nmax( val1 = 0 val2 = lv_jump_offset ).
+        DATA(lv_jump_query) = ii_event->form_data( )->get( 'pageQuery' ).
+        IF lv_jump_query IS NOT INITIAL.
+          DATA lv_query_offset TYPE i.
+          CALL METHOD zcl_abapgit_ortec_git_stage=>('FIND_JUMP_OFFSET')
+            EXPORTING
+              ii_repo           = mi_repo
+              it_files          = ms_files
+              iv_query          = lv_jump_query
+              iv_window_size    = get_virtual_window_size( )
+              iv_current_offset = mv_virtual_offset
+            RECEIVING
+              rv_offset         = lv_query_offset.
+          IF lv_query_offset >= 0.
+            mv_virtual_offset = lv_query_offset.
+          ENDIF.
+        ELSE.
+          DATA(lv_jump_offset_str) = ii_event->form_data( )->get( 'pageOffset' ).
+          DATA lv_jump_offset TYPE i.
+          TRY.
+              lv_jump_offset = CONV i( lv_jump_offset_str ).
+            CATCH cx_sy_conversion_no_number.
+              lv_jump_offset = 0.
+          ENDTRY.
+          mv_virtual_offset = nmax( val1 = 0 val2 = lv_jump_offset ).
+        ENDIF.
         rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
 
       WHEN zif_abapgit_definitions=>c_action-go_patch.                         " Go Patch page

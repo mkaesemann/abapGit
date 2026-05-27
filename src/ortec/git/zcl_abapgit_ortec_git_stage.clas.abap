@@ -14,6 +14,16 @@ CLASS zcl_abapgit_ortec_git_stage DEFINITION
       RETURNING
         VALUE(rv_active)       TYPE abap_bool.
 
+    CLASS-METHODS find_jump_offset
+      IMPORTING
+        !ii_repo           TYPE REF TO zif_abapgit_repo
+        !it_files          TYPE zif_abapgit_definitions=>ty_stage_files
+        !iv_query          TYPE string
+        !iv_window_size    TYPE i
+        !iv_current_offset TYPE i DEFAULT 0
+      RETURNING
+        VALUE(rv_offset)   TYPE i.
+
     CLASS-METHODS render_virtual_list
       IMPORTING
         !ii_repo         TYPE REF TO zif_abapgit_repo
@@ -146,6 +156,96 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
   METHOD is_virtual_active.
 
     rv_active = boolc( iv_changed_file_count > iv_threshold ).
+
+  ENDMETHOD.
+
+
+  METHOD find_jump_offset.
+
+    DATA lv_query TYPE string.
+    DATA lv_match TYPE string.
+    DATA lv_haystack TYPE string.
+    DATA lv_idx TYPE i VALUE 0.
+    DATA lv_total TYPE i.
+    DATA lv_page_start TYPE i.
+    DATA lv_start_idx TYPE i.
+    DATA lv_first_after TYPE i VALUE -1.
+    DATA lv_first_before TYPE i VALUE -1.
+    DATA ls_item TYPE zif_abapgit_definitions=>ty_item.
+
+    FIELD-SYMBOLS <ls_local> LIKE LINE OF it_files-local.
+    FIELD-SYMBOLS <ls_remote> LIKE LINE OF it_files-remote.
+
+    rv_offset = -1.
+
+    lv_query = to_upper( iv_query ).
+    SHIFT lv_query LEFT DELETING LEADING space.
+    SHIFT lv_query RIGHT DELETING TRAILING space.
+    IF lv_query IS INITIAL OR iv_window_size <= 0.
+      RETURN.
+    ENDIF.
+
+    lv_match = lv_query.
+    REPLACE ALL OCCURRENCES OF '*' IN lv_match WITH ''.
+    IF lv_match IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    lv_total = lines( it_files-local ) + lines( it_files-remote ).
+    IF lv_total <= 0.
+      RETURN.
+    ENDIF.
+
+    " Search-next semantics: start at the first row of the NEXT page
+    lv_page_start = ( nmax( val1 = 0 val2 = iv_current_offset ) / iv_window_size ) * iv_window_size.
+    lv_start_idx = lv_page_start + iv_window_size.
+    IF lv_start_idx >= lv_total.
+      lv_start_idx = 0.
+    ENDIF.
+
+    LOOP AT it_files-local ASSIGNING <ls_local>.
+      lv_haystack = to_upper(
+        |{ <ls_local>-item-obj_type } { <ls_local>-item-obj_name } { <ls_local>-item-devclass } { <ls_local>-file-path } { <ls_local>-file-filename }| ).
+      IF lv_haystack CS lv_match.
+        IF lv_idx >= lv_start_idx AND lv_first_after < 0.
+          lv_first_after = lv_idx.
+        ELSEIF lv_idx < lv_start_idx AND lv_first_before < 0.
+          lv_first_before = lv_idx.
+        ENDIF.
+      ENDIF.
+      lv_idx = lv_idx + 1.
+    ENDLOOP.
+
+    LOOP AT it_files-remote ASSIGNING <ls_remote>.
+      CLEAR ls_item.
+      TRY.
+          zcl_abapgit_filename_logic=>file_to_object(
+            EXPORTING
+              iv_filename = <ls_remote>-filename
+              iv_path     = <ls_remote>-path
+              io_dot      = ii_repo->get_dot_abapgit( )
+            IMPORTING
+              es_item     = ls_item ).
+        CATCH zcx_abapgit_exception ##NO_HANDLER.
+      ENDTRY.
+
+      lv_haystack = to_upper(
+        |{ ls_item-obj_type } { ls_item-obj_name } { <ls_remote>-path } { <ls_remote>-filename }| ).
+      IF lv_haystack CS lv_match.
+        IF lv_idx >= lv_start_idx AND lv_first_after < 0.
+          lv_first_after = lv_idx.
+        ELSEIF lv_idx < lv_start_idx AND lv_first_before < 0.
+          lv_first_before = lv_idx.
+        ENDIF.
+      ENDIF.
+      lv_idx = lv_idx + 1.
+    ENDLOOP.
+
+    IF lv_first_after >= 0.
+      rv_offset = ( lv_first_after / iv_window_size ) * iv_window_size.
+    ELSEIF lv_first_before >= 0.
+      rv_offset = ( lv_first_before / iv_window_size ) * iv_window_size.
+    ENDIF.
 
   ENDMETHOD.
 
@@ -736,28 +836,21 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
     ri_html->add( '        if (input === null) { return; }' ).
     ri_html->add( '        input = input.trim();' ).
     ri_html->add( '        if (!input) { return; }' ).
-    ri_html->add( '        var offset = null;' ).
+    ri_html->add( '        var offset = 0;' ).
+    ri_html->add( '        var query = "";' ).
     ri_html->add( '        if (!isNaN(input)) {' ).
     ri_html->add( '          var t = Math.min(Math.max(1, parseInt(input, 10)), total);' ).
     ri_html->add( '          offset = (t - 1) * (pageMeta.windowSize || 150);' ).
     ri_html->add( '        } else {' ).
-    ri_html->add( '          var q = input.toUpperCase();' ).
-    ri_html->add( '          var p = q.replace(/\*/g, "");' ).
-    ri_html->add( '          var idx = -1;' ).
-    ri_html->add( '          for (var i = 0; i < rows.length; i++) {' ).
-    ri_html->add( '            var hay = [rows[i].objType, rows[i].objName, rows[i].displayName, rows[i].path, rows[i].filename].join(" ").toUpperCase();' ).
-    ri_html->add( '            if ((q.indexOf("*") >= 0 && p && hay.indexOf(p) !== -1) || (q.indexOf("*") < 0 && hay.indexOf(q) !== -1)) {' ).
-    ri_html->add( '              idx = i; break;' ).
-    ri_html->add( '            }' ).
-    ri_html->add( '          }' ).
-    ri_html->add( '          if (idx < 0) { alert("No matching object found: " + input); return; }' ).
-    ri_html->add( '          offset = Math.floor(idx / (pageMeta.windowSize || 150)) * (pageMeta.windowSize || 150);' ).
+    ri_html->add( '          query = input;' ).
     ri_html->add( '        }' ).
     ri_html->add( '        var form = document.createElement("form");' ).
     ri_html->add( '        form.method = "post"; form.action = "sapevent:" + pageMeta.jumpAction;' ).
-    ri_html->add( '        var f = document.createElement("input");' ).
-    ri_html->add( '        f.type = "hidden"; f.name = "pageOffset"; f.value = offset;' ).
-    ri_html->add( '        form.appendChild(f); document.body.appendChild(form); form.submit();' ).
+    ri_html->add( '        var fOffset = document.createElement("input");' ).
+    ri_html->add( '        fOffset.type = "hidden"; fOffset.name = "pageOffset"; fOffset.value = offset;' ).
+    ri_html->add( '        var fQuery = document.createElement("input");' ).
+    ri_html->add( '        fQuery.type = "hidden"; fQuery.name = "pageQuery"; fQuery.value = query;' ).
+    ri_html->add( '        form.appendChild(fOffset); form.appendChild(fQuery); document.body.appendChild(form); form.submit();' ).
     ri_html->add( '      };' ).
     ri_html->add( '    }' ).
     ri_html->add( '    render();' ).
