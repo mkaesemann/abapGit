@@ -1,8 +1,17 @@
-"! <p class="shorttext synchronized">ORTEC Git Branch Selection</p>
+"! <p class="shorttext synchronized">ORTEC Git Branch Selection / Switch</p>
 "! <p>Rich web-based branch picker with real-time filtering,
 "! GitFlow group organisation, and HEAD/current-branch indicators.</p>
+"! <p>Can be used in two modes:</p>
+"! <ul>
+"!   <li><strong>Picker mode</strong> – call <em>CREATE</em> with an explicit URL.
+"!       The caller retrieves the selection via <em>GET_RESULT</em> after
+"!       <em>IS_FULFILLED</em> becomes true.</li>
+"!   <li><strong>Switch mode</strong> – call <em>CREATE_FOR_SWITCH</em> with a
+"!       repository key. The branch switch is performed automatically once the
+"!       user confirms a selection; no post-navigation handling is required.</li>
+"! </ul>
 "!
-"! <h2>Usage pattern</h2>
+"! <h2>Usage pattern (picker mode)</h2>
 "! <ol>
 "!   <li>Call <em>CREATE</em> to fetch branches and build the component.</li>
 "!   <li>Wrap in <em>ZCL_ABAPGIT_GUI_PAGE_HOC</em> and push as a new page.</li>
@@ -76,17 +85,27 @@ CLASS zcl_abapgit_ortec_branch_list DEFINITION
       EXPORTING
         !es_branch TYPE zif_abapgit_git_definitions=>ty_git_branch.
 
+    "! <p class="shorttext synchronized">Create a switch-branch component for a repository</p>
+    "! Resolves URL and current branch from the repository, constructs the picker,
+    "! and wires up automatic branch switching once the user confirms a selection.
+    "! @parameter iv_key | Repository key used to resolve URL, current branch, and perform the switch
+    "! @parameter ro_picker | The constructed switch component; push via ZCL_ABAPGIT_GUI_PAGE_HOC
+    CLASS-METHODS create_for_switch
+      IMPORTING
+        !iv_key          TYPE zif_abapgit_persistence=>ty_repo-key
+      RETURNING
+        VALUE(ro_picker) TYPE REF TO zcl_abapgit_ortec_branch_list
+      RAISING
+        zcx_abapgit_exception.
+
   PROTECTED SECTION.
   PRIVATE SECTION.
 
     " ── Types ──────────────────────────────────────────────────────────────
     TYPES:
       BEGIN OF ty_group_item,
-        branch            TYPE zif_abapgit_git_definitions=>ty_git_branch,
-        global_idx        TYPE i,
-        sort_name         TYPE string,
-        last_changed_sort TYPE string,
-        last_changed_text TYPE string,
+        branch     TYPE zif_abapgit_git_definitions=>ty_git_branch,
+        global_idx TYPE i,
       END OF ty_group_item.
     TYPES ty_group_items_tt TYPE STANDARD TABLE OF ty_group_item WITH DEFAULT KEY.
 
@@ -102,24 +121,19 @@ CLASS zcl_abapgit_ortec_branch_list DEFINITION
     CONSTANTS:
       BEGIN OF c_event,
         choose TYPE string VALUE 'ortec-branch-choose',
-        create TYPE string VALUE 'ortec-branch-create',
         back   TYPE string VALUE 'back',
       END OF c_event.
 
     CONSTANTS:
       BEGIN OF c_group,
-        current     TYPE string VALUE 'current',
-        head        TYPE string VALUE 'head',
-        main        TYPE string VALUE 'main',
-        development TYPE string VALUE 'development',
-        feature     TYPE string VALUE 'feature',
-        bugfix      TYPE string VALUE 'bugfix',
-        hotfix      TYPE string VALUE 'hotfix',
-        release     TYPE string VALUE 'release',
-        releases    TYPE string VALUE 'releases',
-        task        TYPE string VALUE 'task',
-        support     TYPE string VALUE 'support',
-        other       TYPE string VALUE 'other',
+        head    TYPE string VALUE 'head',
+        main    TYPE string VALUE 'main',
+        feature TYPE string VALUE 'feature',
+        bugfix  TYPE string VALUE 'bugfix',
+        hotfix  TYPE string VALUE 'hotfix',
+        release TYPE string VALUE 'release',
+        support TYPE string VALUE 'support',
+        other   TYPE string VALUE 'other',
       END OF c_group.
 
     " ── Instance data ──────────────────────────────────────────────────────
@@ -129,11 +143,12 @@ CLASS zcl_abapgit_ortec_branch_list DEFINITION
     DATA mv_hide_branch     TYPE string.
     DATA mv_hide_head       TYPE abap_bool.
     DATA mt_branches        TYPE zif_abapgit_git_definitions=>ty_git_branch_list_tt.
-    DATA mt_tip_commits     TYPE zif_abapgit_git_definitions=>ty_commit_tt.
     DATA mt_groups          TYPE ty_branch_groups_tt.
     DATA ms_result          TYPE zif_abapgit_git_definitions=>ty_git_branch.
     DATA mv_fulfilled       TYPE abap_bool.
     DATA mv_cancelled       TYPE abap_bool.
+    " Set by CREATE_FOR_SWITCH; drives automatic branch switching in on_event
+    DATA mv_key             TYPE zif_abapgit_persistence=>ty_repo-key.
 
     " ── Private helpers ────────────────────────────────────────────────────
     METHODS fetch_and_group
@@ -142,15 +157,10 @@ CLASS zcl_abapgit_ortec_branch_list DEFINITION
 
     METHODS classify_branch
       IMPORTING
-        !iv_branch_name  TYPE string OPTIONAL
         !iv_display_name TYPE string
         !iv_is_head      TYPE abap_bool DEFAULT abap_false
       RETURNING
         VALUE(rv_group)  TYPE string.
-
-    METHODS fill_last_commit_dates
-      CHANGING
-        !ct_items TYPE ty_group_items_tt.
 
     METHODS render_search_bar
       RETURNING
@@ -172,114 +182,17 @@ CLASS zcl_abapgit_ortec_branch_list DEFINITION
       RETURNING
         VALUE(ri_html) TYPE REF TO zif_abapgit_html.
 
+    METHODS perform_switch
+      IMPORTING
+        !is_branch TYPE zif_abapgit_git_definitions=>ty_git_branch
+      RAISING
+        zcx_abapgit_exception.
+
 ENDCLASS.
 
 
 
 CLASS zcl_abapgit_ortec_branch_list IMPLEMENTATION.
-
-
-  METHOD fill_last_commit_dates.
-
-    DATA lt_sha1        TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
-    DATA lt_objects     TYPE zif_abapgit_definitions=>ty_objects_tt.
-    DATA ls_commit      TYPE zif_abapgit_git_definitions=>ty_commit.
-    DATA lv_unix        TYPE zcl_abapgit_git_time=>ty_unixtime.
-    DATA lv_date        TYPE sy-datum.
-    DATA lv_time        TYPE sy-uzeit.
-    DATA lv_branch      TYPE zif_abapgit_git_definitions=>ty_git_branch-name.
-    DATA lv_is_fastpath TYPE abap_bool.
-
-    FIELD-SYMBOLS <ls_branch> LIKE LINE OF mt_branches.
-    FIELD-SYMBOLS <ls_item>   TYPE ty_group_item.
-
-    IF mt_tip_commits IS INITIAL.
-      LOOP AT mt_branches ASSIGNING <ls_branch>
-          WHERE sha1 IS NOT INITIAL.
-        APPEND <ls_branch>-sha1 TO lt_sha1.
-        IF lv_branch IS INITIAL.
-          lv_branch = <ls_branch>-name.
-        ENDIF.
-      ENDLOOP.
-
-      SORT lt_sha1.
-      DELETE ADJACENT DUPLICATES FROM lt_sha1.
-
-      lv_is_fastpath = zcl_abapgit_ortec_git_switch=>is_active_for_repo( mv_url ).
-
-      " Fast path: retrieve all branch-tip commit objects in one protocol-v2 request.
-      IF lt_sha1 IS NOT INITIAL.
-        TRY.
-            lt_objects = zcl_abapgit_git_factory=>get_v2_porcelain( )->list_no_blobs_multi(
-              iv_url  = mv_url
-              it_sha1 = lt_sha1 ).
-            DELETE lt_objects WHERE type <> zif_abapgit_git_definitions=>c_type-commit.
-            mt_tip_commits = zcl_abapgit_git_commit=>parse_commits( lt_objects ).
-          CATCH zcx_abapgit_exception.
-            CLEAR mt_tip_commits.
-        ENDTRY.
-      ENDIF.
-
-      " Safe fastpath fallback: protocol-v2 commit-only fetch without touching
-      " ORTEC object-store state.
-      IF mt_tip_commits IS INITIAL
-          AND lt_sha1 IS NOT INITIAL
-          AND lv_is_fastpath = abap_true.
-        TRY.
-            CLEAR lt_objects.
-            lt_objects = zcl_abapgit_git_factory=>get_v2_porcelain( )->commits_last_year(
-              iv_url  = mv_url
-              it_sha1 = lt_sha1 ).
-            DELETE lt_objects WHERE type <> zif_abapgit_git_definitions=>c_type-commit.
-            mt_tip_commits = zcl_abapgit_git_commit=>parse_commits( lt_objects ).
-          CATCH zcx_abapgit_exception.
-            CLEAR mt_tip_commits.
-        ENDTRY.
-      ENDIF.
-
-      " Non-fastpath fallback: one upload-pack request for all branch tips.
-      IF mt_tip_commits IS INITIAL
-          AND lv_branch IS NOT INITIAL
-          AND lv_is_fastpath = abap_false.
-        TRY.
-            CLEAR lt_objects.
-            zcl_abapgit_git_transport=>upload_pack_by_branch(
-              EXPORTING
-                iv_url          = mv_url
-                iv_branch_name  = lv_branch
-                iv_deepen_level = 1
-                it_branches     = mt_branches
-              IMPORTING
-                et_objects      = lt_objects ).
-            DELETE lt_objects WHERE type <> zif_abapgit_git_definitions=>c_type-commit.
-            mt_tip_commits = zcl_abapgit_git_commit=>parse_commits( lt_objects ).
-          CATCH zcx_abapgit_exception.
-            CLEAR mt_tip_commits.
-        ENDTRY.
-      ENDIF.
-    ENDIF.
-
-    LOOP AT ct_items ASSIGNING <ls_item>.
-      CLEAR ls_commit.
-      READ TABLE mt_tip_commits INTO ls_commit WITH KEY sha1 = <ls_item>-branch-sha1.
-      IF sy-subrc <> 0 OR ls_commit-time IS INITIAL.
-        CONTINUE.
-      ENDIF.
-
-      lv_unix = ls_commit-time.
-      lv_unix+11 = '+0000'.
-      zcl_abapgit_git_time=>get_utc(
-        EXPORTING
-          iv_unix = lv_unix
-        IMPORTING
-          ev_date = lv_date
-          ev_time = lv_time ).
-
-      <ls_item>-last_changed_sort = ls_commit-time.
-      <ls_item>-last_changed_text = |{ lv_date DATE = ISO }|.
-    ENDLOOP.
-
-  ENDMETHOD.
 
 
   METHOD create.
@@ -290,6 +203,24 @@ CLASS zcl_abapgit_ortec_branch_list IMPLEMENTATION.
         iv_show_new_option = iv_show_new_option
         iv_hide_branch     = iv_hide_branch
         iv_hide_head       = iv_hide_head.
+  ENDMETHOD.
+
+
+  METHOD create_for_switch.
+
+    DATA li_repo_online TYPE REF TO zif_abapgit_repo_online.
+
+    li_repo_online ?= zcl_abapgit_repo_srv=>get_instance( )->get( iv_key ).
+
+    CREATE OBJECT ro_picker
+      EXPORTING
+        iv_url             = li_repo_online->get_url( )
+        iv_default_branch  = li_repo_online->get_selected_branch( )
+        iv_show_new_option = abap_true.
+
+    " Store key so on_event can trigger the actual switch
+    ro_picker->mv_key = iv_key.
+
   ENDMETHOD.
 
 
@@ -308,15 +239,13 @@ CLASS zcl_abapgit_ortec_branch_list IMPLEMENTATION.
 
     DATA lo_branches    TYPE REF TO zif_abapgit_git_branch_list.
     DATA lv_head_symref TYPE string.
+    DATA ls_new_branch  TYPE zif_abapgit_git_definitions=>ty_git_branch.
     DATA ls_group       TYPE ty_branch_group.
     DATA ls_item        TYPE ty_group_item.
     DATA lv_group_key   TYPE string.
-    DATA lv_branch_idx  TYPE i.
 
     FIELD-SYMBOLS <ls_branch> LIKE LINE OF mt_branches.
     FIELD-SYMBOLS <ls_group>  LIKE LINE OF mt_groups.
-
-    CLEAR mt_groups.
 
     lo_branches    = zcl_abapgit_git_factory=>get_git_transport( )->branches( mv_url ).
     mt_branches    = lo_branches->get_branches_only( ).
@@ -346,44 +275,37 @@ CLASS zcl_abapgit_ortec_branch_list IMPLEMENTATION.
       zcx_abapgit_exception=>raise( 'No branches are available to select' ).
     ENDIF.
 
-    " Keep the global branch table stable for selection by index.
-    SORT mt_branches BY display_name ASCENDING.
+    " Sort: current HEAD first, then alphabetically by display name
+    SORT mt_branches BY is_head DESCENDING display_name ASCENDING.
+
+    " Append virtual "create new branch" entry
+    IF mv_show_new_option = abap_true.
+      ls_new_branch-name         = zif_abapgit_popups=>c_new_branch_label.
+      ls_new_branch-display_name = zif_abapgit_popups=>c_new_branch_label.
+      APPEND ls_new_branch TO mt_branches.
+    ENDIF.
 
     " Initialise groups in display order
-    ls_group-key = c_group-current.     ls_group-label = 'Current'.          APPEND ls_group TO mt_groups. CLEAR ls_group.
-    ls_group-key = c_group-head.        ls_group-label = 'HEAD'.             APPEND ls_group TO mt_groups. CLEAR ls_group.
-    ls_group-key = c_group-main.        ls_group-label = 'Default / Stable'. APPEND ls_group TO mt_groups. CLEAR ls_group.
-    ls_group-key = c_group-development. ls_group-label = 'Development'.      APPEND ls_group TO mt_groups. CLEAR ls_group.
-    ls_group-key = c_group-feature.     ls_group-label = 'Features'.         APPEND ls_group TO mt_groups. CLEAR ls_group.
-    ls_group-key = c_group-bugfix.      ls_group-label = 'Bug Fixes'.        APPEND ls_group TO mt_groups. CLEAR ls_group.
-    ls_group-key = c_group-hotfix.      ls_group-label = 'Hot Fixes'.        APPEND ls_group TO mt_groups. CLEAR ls_group.
-    ls_group-key = c_group-release.     ls_group-label = 'Release'.          APPEND ls_group TO mt_groups. CLEAR ls_group.
-    ls_group-key = c_group-releases.    ls_group-label = 'Releases'.         APPEND ls_group TO mt_groups. CLEAR ls_group.
-    ls_group-key = c_group-task.        ls_group-label = 'Tasks'.            APPEND ls_group TO mt_groups. CLEAR ls_group.
-    ls_group-key = c_group-support.     ls_group-label = 'Support'.          APPEND ls_group TO mt_groups. CLEAR ls_group.
-    ls_group-key = c_group-other.       ls_group-label = 'Other'.            APPEND ls_group TO mt_groups. CLEAR ls_group.
+    ls_group-key = c_group-head.    ls_group-label = 'HEAD'.            APPEND ls_group TO mt_groups.
+    ls_group-key = c_group-main.    ls_group-label = 'Default / Stable'. APPEND ls_group TO mt_groups.
+    ls_group-key = c_group-feature. ls_group-label = 'Features'.         APPEND ls_group TO mt_groups.
+    ls_group-key = c_group-bugfix.  ls_group-label = 'Bug Fixes'.        APPEND ls_group TO mt_groups.
+    ls_group-key = c_group-hotfix.  ls_group-label = 'Hot Fixes'.        APPEND ls_group TO mt_groups.
+    ls_group-key = c_group-release. ls_group-label = 'Releases'.         APPEND ls_group TO mt_groups.
+    ls_group-key = c_group-support. ls_group-label = 'Support'.          APPEND ls_group TO mt_groups.
+    ls_group-key = c_group-other.   ls_group-label = 'Other'.            APPEND ls_group TO mt_groups.
 
-    " Assign branches to groups, preserving the 1-based mt_branches index
+    " Assign branches to groups, preserving 1-based mt_branches index
     LOOP AT mt_branches ASSIGNING <ls_branch>.
-      lv_branch_idx = sy-tabix.
       lv_group_key = classify_branch(
-        iv_branch_name  = <ls_branch>-name
         iv_display_name = <ls_branch>-display_name
         iv_is_head      = <ls_branch>-is_head ).
       READ TABLE mt_groups ASSIGNING <ls_group> WITH KEY key = lv_group_key.
       IF sy-subrc = 0.
-        CLEAR ls_item.
         ls_item-branch     = <ls_branch>.
-        ls_item-global_idx = lv_branch_idx.
-        ls_item-sort_name  = to_lower( <ls_branch>-display_name ).
+        ls_item-global_idx = sy-tabix.
         APPEND ls_item TO <ls_group>-items.
       ENDIF.
-    ENDLOOP.
-
-    " Enrich each group with branch tip commit date metadata and sort newest first.
-    LOOP AT mt_groups ASSIGNING <ls_group> WHERE items IS NOT INITIAL.
-      fill_last_commit_dates( CHANGING ct_items = <ls_group>-items ).
-      SORT <ls_group>-items BY last_changed_sort DESCENDING sort_name ASCENDING.
     ENDLOOP.
 
     " Remove groups that ended up with no branches
@@ -394,20 +316,9 @@ CLASS zcl_abapgit_ortec_branch_list IMPLEMENTATION.
 
   METHOD classify_branch.
 
-    DATA lv_lower         TYPE string.
-    DATA lv_default       TYPE string.
-    DATA lv_default_disp  TYPE string.
+    DATA lv_lower TYPE string.
 
-    lv_lower        = to_lower( iv_display_name ).
-    lv_default      = to_lower( mv_default_branch ).
-    lv_default_disp = to_lower( zcl_abapgit_git_branch_utils=>get_display_name( mv_default_branch ) ).
-
-    " The caller's selected/default branch is shown in a dedicated top group.
-    IF mv_default_branch IS NOT INITIAL
-        AND ( to_lower( iv_branch_name ) = lv_default OR lv_lower = lv_default_disp ).
-      rv_group = c_group-current.
-      RETURN.
-    ENDIF.
+    lv_lower = to_lower( iv_display_name ).
 
     " HEAD virtual ref
     IF iv_is_head = abap_true AND lv_lower = to_lower( zif_abapgit_git_definitions=>c_head_name ).
@@ -421,10 +332,8 @@ CLASS zcl_abapgit_ortec_branch_list IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    " GitFlow and ORTEC-specific prefix patterns
-    IF lv_lower CP 'development/*'.
-      rv_group = c_group-development.
-    ELSEIF lv_lower CP 'feature/*' OR lv_lower CP 'feat/*'.
+    " GitFlow prefix patterns
+    IF lv_lower CP 'feature/*' OR lv_lower CP 'feat/*'.
       rv_group = c_group-feature.
     ELSEIF lv_lower CP 'bugfix/*' OR lv_lower CP 'bug/*' OR lv_lower CP 'fix/*'.
       rv_group = c_group-bugfix.
@@ -432,10 +341,6 @@ CLASS zcl_abapgit_ortec_branch_list IMPLEMENTATION.
       rv_group = c_group-hotfix.
     ELSEIF lv_lower CP 'release/*' OR lv_lower CP 'rel/*'.
       rv_group = c_group-release.
-    ELSEIF lv_lower CP 'releases/*'.
-      rv_group = c_group-releases.
-    ELSEIF lv_lower CP 'task/*'.
-      rv_group = c_group-task.
     ELSEIF lv_lower CP 'support/*'.
       rv_group = c_group-support.
     ELSE.
@@ -449,24 +354,12 @@ CLASS zcl_abapgit_ortec_branch_list IMPLEMENTATION.
 
     CREATE OBJECT ri_html TYPE zcl_abapgit_html.
 
-    ri_html->add( '<div class="ortec-bp-filter" style="background:#fff;">' ).
-    ri_html->add( '<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">' ).
+    ri_html->add( '<div class="ortec-bp-filter">' ).
     ri_html->add( '<input type="text" id="ortec-bp-input" autocomplete="off"' ).
     ri_html->add( ' placeholder="&#x1F50D; Filter branches&#x2026;"' ).
-    ri_html->add( ' style="flex:1 1 auto;min-width:0;padding:7px 10px;font-size:0.95em;' ).
-    ri_html->add( ' color:#2c3e50;background:#fff;' ).
-    ri_html->add( ' border:1px solid #b6bec8;border-radius:4px;' ).
-    ri_html->add( ' box-sizing:border-box;" />' ).
-    ri_html->add( '<select id="ortec-bp-sort" title="Sort branches"' ).
-    ri_html->add( ' style="flex:0 0 auto;padding:6px 8px;font-size:0.9em;' ).
-    ri_html->add( ' color:#2c3e50;background:#fff;border:1px solid #b6bec8;' ).
-    ri_html->add( ' border-radius:4px;box-sizing:border-box;">' ).
-    ri_html->add( '<option value="date-desc" selected>Last changed desc</option>' ).
-    ri_html->add( '<option value="date-asc">Last changed asc</option>' ).
-    ri_html->add( '<option value="name-asc">Name asc</option>' ).
-    ri_html->add( '<option value="name-desc">Name desc</option>' ).
-    ri_html->add( '</select>' ).
-    ri_html->add( '</div>' ).
+    ri_html->add( ' style="width:100%;padding:7px 10px;font-size:0.95em;' ).
+    ri_html->add( ' border:1px solid #ccc;border-radius:4px;' ).
+    ri_html->add( ' box-sizing:border-box;margin-bottom:12px;" />' ).
     ri_html->add( '</div>' ).
 
   ENDMETHOD.
@@ -474,12 +367,10 @@ CLASS zcl_abapgit_ortec_branch_list IMPLEMENTATION.
 
   METHOD render_branch_item.
 
-    DATA lv_sha_short    TYPE string.
-    DATA lv_is_current   TYPE abap_bool.
-    DATA lv_li_style     TYPE string.
-    DATA lv_display_esc  TYPE string.
-    DATA lv_sort_name_esc TYPE string.
-    DATA lv_sort_date_esc TYPE string.
+    DATA lv_sha_short  TYPE string.
+    DATA lv_is_current TYPE abap_bool.
+    DATA lv_li_style   TYPE string.
+    DATA lv_display_esc TYPE string.
 
     CREATE OBJECT ri_html TYPE zcl_abapgit_html.
 
@@ -490,32 +381,27 @@ CLASS zcl_abapgit_ortec_branch_list IMPLEMENTATION.
 
     lv_is_current = boolc( is_item-branch-name = mv_default_branch ).
 
-    lv_li_style = 'list-style:none;padding:5px 8px;border-bottom:1px solid #e8edf2;'
-               && 'display:flex;align-items:center;gap:6px;background:#fff;'.
+    lv_li_style = 'list-style:none;padding:5px 8px;border-bottom:1px solid #f0f0f0;'
+               && 'display:flex;align-items:center;gap:6px;'.
 
     IF lv_is_current = abap_true.
       lv_li_style = lv_li_style && 'background:#eaf4fb;'.
     ENDIF.
 
-    " HTML-safe display and sort attributes
+    " HTML-safe display name for data attribute
     lv_display_esc = escape( val    = is_item-branch-display_name
                              format = cl_abap_format=>e_html_attr ).
-    lv_sort_name_esc = escape( val    = is_item-sort_name
-                               format = cl_abap_format=>e_html_attr ).
-    lv_sort_date_esc = escape( val    = is_item-last_changed_sort
-                               format = cl_abap_format=>e_html_attr ).
 
     ri_html->add( |<li class="ortec-bp-item" data-idx="{ is_item-global_idx }"| ).
-    ri_html->add( | data-display="{ lv_display_esc }" data-sort-name="{ lv_sort_name_esc }"| ).
-    ri_html->add( | data-sort-date="{ lv_sort_date_esc }" style="{ lv_li_style }">| ).
+    ri_html->add( | data-display="{ lv_display_esc }" style="{ lv_li_style }">| ).
 
     " Clickable branch name
     ri_html->add_a(
       iv_txt   = is_item-branch-display_name
       iv_act   = c_event-choose
       iv_query = |IDX={ is_item-global_idx }|
-      iv_style = 'flex:1 1 auto;min-width:0;font-family:monospace;font-size:0.88em;'
-              && 'color:#1f2933;text-decoration:none;overflow:hidden;'
+      iv_style = 'flex:1;font-family:monospace;font-size:0.88em;'
+              && 'color:#2c3e50;text-decoration:none;overflow:hidden;'
               && 'text-overflow:ellipsis;white-space:nowrap;' ).
 
     " HEAD badge
@@ -532,14 +418,9 @@ CLASS zcl_abapgit_ortec_branch_list IMPLEMENTATION.
 
     " Short commit hash
     IF lv_sha_short IS NOT INITIAL.
-      ri_html->add( |<span style="color:#667085;font-size:0.75em;| ).
+      ri_html->add( |<span style="color:#aaa;font-size:0.75em;| ).
       ri_html->add( |font-family:monospace;white-space:nowrap;">{ lv_sha_short }</span>| ).
     ENDIF.
-
-    " Last changed date, rightmost column
-    ri_html->add( |<span class="ortec-bp-date" style="flex:0 0 86px;| ).
-    ri_html->add( |text-align:right;color:#667085;font-size:0.75em;| ).
-    ri_html->add( |font-family:monospace;white-space:nowrap;">{ is_item-last_changed_text }</span>| ).
 
     ri_html->add( '</li>' ).
 
@@ -548,8 +429,7 @@ CLASS zcl_abapgit_ortec_branch_list IMPLEMENTATION.
 
   METHOD render_group.
 
-    DATA lv_count TYPE i.
-    DATA lv_open  TYPE string.
+    DATA lv_count      TYPE i.
     FIELD-SYMBOLS <ls_item> LIKE LINE OF is_group-items.
 
     CREATE OBJECT ri_html TYPE zcl_abapgit_html.
@@ -559,33 +439,28 @@ CLASS zcl_abapgit_ortec_branch_list IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    IF is_group-key = c_group-current OR is_group-key = c_group-head.
-      lv_open = ' open'.
-    ENDIF.
+    ri_html->add( |<div class="ortec-bp-group" data-group="{ is_group-key }"| ).
+    ri_html->add( ' style="margin-bottom:14px;">' ).
 
-    ri_html->add( |<details class="ortec-bp-group" data-group="{ is_group-key }"{ lv_open }| ).
-    ri_html->add( ' style="margin-bottom:14px;background:#fff;">' ).
-
-    " Collapsible group header
-    ri_html->add( '<summary style="font-size:0.75em;font-weight:bold;color:#4f5b66;' ).
+    " Group header
+    ri_html->add( '<div style="font-size:0.75em;font-weight:bold;color:#888;' ).
     ri_html->add( 'text-transform:uppercase;letter-spacing:0.06em;' ).
-    ri_html->add( 'padding:5px 8px;background:#f1f4f7;border:1px solid #d8dee6;' ).
-    ri_html->add( 'border-radius:3px;margin-bottom:2px;display:flex;' ).
-    ri_html->add( 'justify-content:space-between;align-items:center;' ).
-    ri_html->add( 'cursor:pointer;user-select:none;">' ).
+    ri_html->add( 'padding:4px 8px;background:#f7f7f7;border-radius:3px;' ).
+    ri_html->add( 'margin-bottom:2px;display:flex;justify-content:space-between;' ).
+    ri_html->add( 'align-items:center;">' ).
     ri_html->add( |<span>{ is_group-label }</span>| ).
-    ri_html->add( '<span class="ortec-bp-gcnt" style="background:#d8dee6;color:#4f5b66;' ).
+    ri_html->add( '<span class="ortec-bp-gcnt" style="background:#e0e0e0;color:#666;' ).
     ri_html->add( |border-radius:10px;padding:1px 8px;font-size:0.9em;">{ lv_count }</span>| ).
-    ri_html->add( '</summary>' ).
+    ri_html->add( '</div>' ).
 
     " Branch items
-    ri_html->add( '<ul style="margin:0;padding:0;background:#fff;">' ).
+    ri_html->add( '<ul style="margin:0;padding:0;">' ).
     LOOP AT is_group-items ASSIGNING <ls_item>.
       ri_html->add( render_branch_item( <ls_item> ) ).
     ENDLOOP.
     ri_html->add( '</ul>' ).
 
-    ri_html->add( '</details>' ).
+    ri_html->add( '</div>' ).
 
   ENDMETHOD.
 
@@ -598,35 +473,8 @@ CLASS zcl_abapgit_ortec_branch_list IMPLEMENTATION.
     " Immediately-invoked function to keep scope clean
     ri_html->add( '(function() {' ).
     ri_html->add( '  var inp = document.getElementById("ortec-bp-input");' ).
-    ri_html->add( '  var sortCtl = document.getElementById("ortec-bp-sort");' ).
     ri_html->add( '  if (!inp) return;' ).
     ri_html->add( '  inp.focus();' ).
-    ri_html->add( '' ).
-    ri_html->add( '  function compareItems(a, b, mode) {' ).
-    ri_html->add( '    var av, bv;' ).
-    ri_html->add( '    if (mode.indexOf("name-") === 0) {' ).
-    ri_html->add( '      av = a.getAttribute("data-sort-name") || "";' ).
-    ri_html->add( '      bv = b.getAttribute("data-sort-name") || "";' ).
-    ri_html->add( '      if (av === bv) return 0;' ).
-    ri_html->add( '      return mode === "name-desc" ? (av < bv ? 1 : -1) : (av > bv ? 1 : -1);' ).
-    ri_html->add( '    }' ).
-    ri_html->add( '    av = a.getAttribute("data-sort-date") || "";' ).
-    ri_html->add( '    bv = b.getAttribute("data-sort-date") || "";' ).
-    ri_html->add( '    if (!av && !bv) return compareItems(a, b, "name-asc");' ).
-    ri_html->add( '    if (!av) return 1;' ).
-    ri_html->add( '    if (!bv) return -1;' ).
-    ri_html->add( '    if (av === bv) return compareItems(a, b, "name-asc");' ).
-    ri_html->add( '    return mode === "date-asc" ? (av > bv ? 1 : -1) : (av < bv ? 1 : -1);' ).
-    ri_html->add( '  }' ).
-    ri_html->add( '' ).
-    ri_html->add( '  function applySort() {' ).
-    ri_html->add( '    var mode = sortCtl ? sortCtl.value : "date-desc";' ).
-    ri_html->add( '    document.querySelectorAll(".ortec-bp-group ul").forEach(function(ul) {' ).
-    ri_html->add( '      var items = Array.prototype.slice.call(ul.querySelectorAll(".ortec-bp-item"));' ).
-    ri_html->add( '      items.sort(function(a, b) { return compareItems(a, b, mode); });' ).
-    ri_html->add( '      items.forEach(function(li) { ul.appendChild(li); });' ).
-    ri_html->add( '    });' ).
-    ri_html->add( '  }' ).
     ri_html->add( '' ).
     ri_html->add( '  function applyFilter() {' ).
     ri_html->add( '    var q = inp.value.toLowerCase();' ).
@@ -636,25 +484,23 @@ CLASS zcl_abapgit_ortec_branch_list IMPLEMENTATION.
     ri_html->add( '      grp.querySelectorAll(".ortec-bp-item").forEach(function(li) {' ).
     ri_html->add( '        var d = (li.getAttribute("data-display") || "").toLowerCase();' ).
     ri_html->add( '        var show = !q || d.indexOf(q) !== -1;' ).
-    ri_html->add( '        li.style.display = show ? "flex" : "none";' ).
+    ri_html->add( '        li.style.display = show ? "" : "none";' ).
     ri_html->add( '        if (show) vis++;' ).
     ri_html->add( '      });' ).
     ri_html->add( '      var cntEl = grp.querySelector(".ortec-bp-gcnt");' ).
     ri_html->add( '      if (cntEl) cntEl.textContent = vis;' ).
     ri_html->add( '      grp.style.display = vis > 0 ? "" : "none";' ).
-    ri_html->add( '      if (q && vis > 0) grp.open = true;' ).
     ri_html->add( '    });' ).
     ri_html->add( '  }' ).
     ri_html->add( '' ).
     ri_html->add( '  inp.addEventListener("input", applyFilter);' ).
-    ri_html->add( '  if (sortCtl) sortCtl.addEventListener("change", function() { applySort(); applyFilter(); });' ).
     ri_html->add( '' ).
     ri_html->add( '  inp.addEventListener("keydown", function(e) {' ).
     ri_html->add( '    if (e.key === "Enter") {' ).
     ri_html->add( '      // Click first visible branch link' ).
     ri_html->add( '      var items = document.querySelectorAll(".ortec-bp-item");' ).
     ri_html->add( '      for (var i = 0; i < items.length; i++) {' ).
-    ri_html->add( '        if (items[i].style.display !== "none" && items[i].offsetParent !== null) {' ).
+    ri_html->add( '        if (items[i].style.display !== "none") {' ).
     ri_html->add( '          var lnk = items[i].querySelector("a");' ).
     ri_html->add( '          if (lnk) { e.preventDefault(); lnk.click(); }' ).
     ri_html->add( '          break;' ).
@@ -665,7 +511,6 @@ CLASS zcl_abapgit_ortec_branch_list IMPLEMENTATION.
     ri_html->add( '      if (bk) bk.click();' ).
     ri_html->add( '    }' ).
     ri_html->add( '  });' ).
-    ri_html->add( '  applySort();' ).
     ri_html->add( '})();' ).
 
   ENDMETHOD.
@@ -686,8 +531,30 @@ CLASS zcl_abapgit_ortec_branch_list IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD perform_switch.
+
+    DATA li_repo_online TYPE REF TO zif_abapgit_repo_online.
+
+    IF is_branch-name = zif_abapgit_popups=>c_new_branch_label.
+      " Let the standard create-branch flow handle this
+      zcl_abapgit_services_git=>create_branch( mv_key ).
+    ELSE.
+      li_repo_online ?= zcl_abapgit_repo_srv=>get_instance( )->get( mv_key ).
+      li_repo_online->select_commit( '' ).
+      li_repo_online->switch_origin( '' ).
+      li_repo_online->select_branch( is_branch-name ).
+      COMMIT WORK AND WAIT.
+    ENDIF.
+
+  ENDMETHOD.
+
+
   METHOD zif_abapgit_gui_page_title~get_page_title.
-    rv_title = 'Select Branch'.
+    IF mv_key IS NOT INITIAL.
+      rv_title = 'Switch Branch'.
+    ELSE.
+      rv_title = 'Select Branch'.
+    ENDIF.
   ENDMETHOD.
 
 
@@ -700,37 +567,20 @@ CLASS zcl_abapgit_ortec_branch_list IMPLEMENTATION.
     CREATE OBJECT ri_html TYPE zcl_abapgit_html.
 
     ri_html->add( '<div class="ortec-branch-picker" style="' ).
-    ri_html->add( 'background:#fff;color:#2c3e50;border:1px solid #d0d7de;' ).
-    ri_html->add( 'border-radius:6px;box-shadow:0 12px 30px rgba(0,0,0,0.28);' ).
-    ri_html->add( 'padding:0;max-width:760px;width:100%;height:560px;' ).
-    ri_html->add( 'font-family:sans-serif;display:flex;flex-direction:column;' ).
-    ri_html->add( 'box-sizing:border-box;overflow:hidden;">' ).
+    ri_html->add( 'padding:16px;max-width:680px;font-family:sans-serif;">' ).
 
-    " ── Search / filter and sort bar ─────────────────────────────────────
-    ri_html->add( '<div style="padding:16px 16px 0 16px;background:#fff;flex:0 0 auto;">' ).
+    " ── Search / filter bar ──────────────────────────────────────────────
     ri_html->add( render_search_bar( ) ).
-    ri_html->add( '</div>' ).
 
-    " ── Grouped branch list: only this area scrolls ──────────────────────
-    ri_html->add( '<div id="ortec-bp-list" style="' ).
-    ri_html->add( 'overflow-y:auto;overflow-x:hidden;flex:1 1 auto;' ).
-    ri_html->add( 'padding:0 16px 8px 16px;background:#fff;box-sizing:border-box;">' ).
+    " ── Grouped branch list ──────────────────────────────────────────────
+    ri_html->add( '<div id="ortec-bp-list">' ).
     LOOP AT mt_groups ASSIGNING <ls_group>.
       ri_html->add( render_group( <ls_group> ) ).
     ENDLOOP.
     ri_html->add( '</div>' ).
 
-    " ── Footer actions: always visible ───────────────────────────────────
-    ri_html->add( '<div style="padding:10px 16px 14px 16px;background:#fff;' ).
-    ri_html->add( 'border-top:1px solid #d0d7de;flex:0 0 auto;' ).
-    ri_html->add( 'box-sizing:border-box;display:flex;gap:14px;align-items:center;' ).
-    ri_html->add( 'justify-content:flex-end;">' ).
-    IF mv_show_new_option = abap_true.
-      ri_html->add_a(
-        iv_txt   = '+ Create New Branch'
-        iv_act   = c_event-create
-        iv_class = 'button' ).
-    ENDIF.
+    " ── Back / cancel button ─────────────────────────────────────────────
+    ri_html->add( '<div style="margin-top:16px;">' ).
     ri_html->add_a(
       iv_txt   = 'Back'
       iv_act   = c_event-back
@@ -759,19 +609,15 @@ CLASS zcl_abapgit_ortec_branch_list IMPLEMENTATION.
         IF sy-subrc = 0.
           ms_result    = ls_branch.
           mv_fulfilled = abap_true.
+          " In switch mode, execute the branch switch immediately
+          IF mv_key IS NOT INITIAL.
+            perform_switch( ms_result ).
+          ENDIF.
           rs_handled-state = zcl_abapgit_gui=>c_event_state-go_back.
         ELSE.
           " Index out of range; should not happen in practice
           rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
         ENDIF.
-
-      WHEN c_event-create.
-
-        CLEAR ms_result.
-        ms_result-name         = zif_abapgit_popups=>c_new_branch_label.
-        ms_result-display_name = zif_abapgit_popups=>c_new_branch_label.
-        mv_fulfilled = abap_true.
-        rs_handled-state = zcl_abapgit_gui=>c_event_state-go_back.
 
       WHEN c_event-back OR zif_abapgit_definitions=>c_action-go_back.
 

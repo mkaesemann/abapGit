@@ -5,7 +5,7 @@
    <VSEOCLASS>
     <CLSNAME>ZCL_ABAPGIT_ORTEC_BRANCH_LIST</CLSNAME>
     <LANGU>E</LANGU>
-    <DESCRIPT>ORTEC Git Branch Selection</DESCRIPT>
+    <DESCRIPT>ORTEC Git Branch Selection / Switch</DESCRIPT>
     <STATE>1</STATE>
     <CLSCCINCL>X</CLSCCINCL>
     <FIXPT>X</FIXPT>
@@ -21,6 +21,11 @@
      <CMPNAME>CREATE</CMPNAME>
      <LANGU>E</LANGU>
      <DESCRIPT>Create a new branch picker component</DESCRIPT>
+    </SEOCOMPOTX>
+    <SEOCOMPOTX>
+     <CMPNAME>CREATE_FOR_SWITCH</CMPNAME>
+     <LANGU>E</LANGU>
+     <DESCRIPT>Create a switch-branch component for a repository</DESCRIPT>
     </SEOCOMPOTX>
     <SEOCOMPOTX>
      <CMPNAME>GET_RESULT</CMPNAME>
