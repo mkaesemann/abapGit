@@ -15,6 +15,9 @@ CLASS zcl_abapgit_object_wapa DEFINITION PUBLIC INHERITING FROM zcl_abapgit_obje
 
     CONSTANTS: c_active TYPE so2_version VALUE 'A'.
 
+    CONSTANTS c_use_ortec_serialize TYPE abap_bool VALUE abap_true ##NO_TEXT.
+    CONSTANTS c_use_ortec_exists    TYPE abap_bool VALUE abap_true ##NO_TEXT.
+
     METHODS:
       get_page_content
         IMPORTING io_page           TYPE REF TO cl_o2_api_pages
@@ -156,8 +159,19 @@ CLASS zcl_abapgit_object_wapa IMPLEMENTATION.
 
   METHOD get_page_content.
 
-    DATA: lt_content TYPE o2pageline_table,
-          lv_string  TYPE string.
+    DATA: lt_content          TYPE o2pageline_table,
+          lt_chunks           TYPE STANDARD TABLE OF xstring WITH DEFAULT KEY,
+          lv_line_xstring     TYPE xstring,
+          lv_chunk_xstring    TYPE xstring,
+          lv_newline          TYPE string,
+          lv_newline_xstring  TYPE xstring,
+          lv_chunk_size_bytes TYPE i,
+          lv_total_size_bytes TYPE i.
+
+    FIELD-SYMBOLS <lv_content_line> LIKE LINE OF lt_content.
+
+    CONSTANTS: lc_max_page_size_bytes TYPE i VALUE 15000000,
+               lc_chunk_size_bytes    TYPE i VALUE 524288.
 
     io_page->get_page(
       IMPORTING
@@ -171,9 +185,40 @@ CLASS zcl_abapgit_object_wapa IMPLEMENTATION.
       zcx_abapgit_exception=>raise( |WAPA - error from get_page_content| ).
     ENDIF.
 
-    CONCATENATE LINES OF lt_content INTO lv_string SEPARATED BY cl_abap_char_utilities=>newline RESPECTING BLANKS.
+    lv_newline = cl_abap_char_utilities=>newline.
+    lv_newline_xstring = zcl_abapgit_convert=>string_to_xstring_utf8( lv_newline ).
 
-    rv_content = zcl_abapgit_convert=>string_to_xstring_utf8( lv_string ).
+    LOOP AT lt_content ASSIGNING <lv_content_line>.
+      lv_line_xstring = zcl_abapgit_convert=>string_to_xstring_utf8( conv string( <lv_content_line>-line ) ).
+
+      IF lv_chunk_xstring IS INITIAL.
+        lv_chunk_xstring = lv_line_xstring.
+        lv_chunk_size_bytes = xstrlen( lv_line_xstring ).
+        lv_total_size_bytes = lv_total_size_bytes + lv_chunk_size_bytes.
+      ELSE.
+        CONCATENATE lv_chunk_xstring lv_newline_xstring lv_line_xstring
+          INTO lv_chunk_xstring IN BYTE MODE.
+        lv_chunk_size_bytes = lv_chunk_size_bytes + xstrlen( lv_newline_xstring ) + xstrlen( lv_line_xstring ).
+        lv_total_size_bytes = lv_total_size_bytes + xstrlen( lv_newline_xstring ) + xstrlen( lv_line_xstring ).
+      ENDIF.
+
+      IF lv_total_size_bytes > lc_max_page_size_bytes.
+        zcx_abapgit_exception=>raise(
+          |WAPA page content too large for safe serialization ({ lv_total_size_bytes } bytes, limit { lc_max_page_size_bytes } bytes).| ).
+      ENDIF.
+
+      IF lv_chunk_size_bytes >= lc_chunk_size_bytes.
+        APPEND lv_chunk_xstring TO lt_chunks.
+        CLEAR: lv_chunk_xstring,
+               lv_chunk_size_bytes.
+      ENDIF.
+    ENDLOOP.
+
+    IF lv_chunk_xstring IS NOT INITIAL.
+      APPEND lv_chunk_xstring TO lt_chunks.
+    ENDIF.
+
+    CONCATENATE LINES OF lt_chunks INTO rv_content IN BYTE MODE.
 
   ENDMETHOD.
 
@@ -543,6 +588,11 @@ CLASS zcl_abapgit_object_wapa IMPLEMENTATION.
 
     lv_name = ms_item-obj_name.
 
+    IF c_use_ortec_exists = abap_true.
+      rv_bool = zcl_abapgit_ortec_wapa=>exists( lv_name ).
+      RETURN.
+    ENDIF.
+
     cl_o2_api_application=>load(
       EXPORTING
         p_application_name  = lv_name
@@ -603,6 +653,15 @@ CLASS zcl_abapgit_object_wapa IMPLEMENTATION.
 
 
   METHOD zif_abapgit_object~serialize.
+
+    IF c_use_ortec_serialize = abap_true.
+      zcl_abapgit_ortec_wapa=>serialize(
+        is_item        = ms_item
+        io_files       = mo_files
+        io_xml         = io_xml
+        io_i18n_params = mo_i18n_params ).
+      RETURN.
+    ENDIF.
 
     DATA: lv_name       TYPE o2applname,
           ls_attributes TYPE o2applattr,
