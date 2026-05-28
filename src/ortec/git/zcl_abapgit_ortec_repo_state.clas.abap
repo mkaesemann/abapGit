@@ -71,6 +71,18 @@ CLASS zcl_abapgit_ortec_repo_state DEFINITION
     CLASS-METHODS clear_state
       IMPORTING iv_repo_key TYPE ty_repo_key.
 
+    "! Reset fetch_commit for a single branch so the next fetch negotiation
+    "! sends no have-lines for that branch, forcing the server to deliver
+    "! a complete (non-thin) pack. The object store is NOT touched; existing
+    "! objects remain as delta-base context for the fresh fetch.
+    "! @parameter iv_repo_key |
+    "! Repository key
+    "! @parameter iv_branch_name |
+    "! Branch ref name whose fetch_commit should be blanked
+    CLASS-METHODS reset_fetch_commit
+      IMPORTING iv_repo_key    TYPE ty_repo_key
+                iv_branch_name TYPE string.
+
     "! Derive repo_key from URL.
     "! Looks up existing entries by URL hash.
     "! @parameter iv_url |
@@ -80,6 +92,17 @@ CLASS zcl_abapgit_ortec_repo_state DEFINITION
     CLASS-METHODS get_repo_key_for_url
       IMPORTING iv_url        TYPE string
       RETURNING VALUE(rv_key) TYPE ty_repo_key.
+
+    "! Get all fully-materialised commit SHA1s for a repository.
+    "! Returns commits recorded in ZAOG_COMMIT_HIST; falls back to
+    "! ZAOG_REPO_STATE fetch_commit entries if the history table is empty.
+    "! @parameter iv_repo_key |
+    "! Repository key
+    "! @parameter rt_commits |
+    "! Table of known-complete commit SHA1s
+    CLASS-METHODS get_complete_commits
+      IMPORTING iv_repo_key       TYPE ty_repo_key
+      RETURNING VALUE(rt_commits) TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
 
     "! Derive repo_key from URL, creating a new key if none exists.
     "! Uses first 12 chars of SHA1(URL) as key.
@@ -152,6 +175,15 @@ CLASS zcl_abapgit_ortec_repo_state IMPLEMENTATION.
     rv_has = boolc( sy-subrc = 0 ).
   ENDMETHOD.
 
+  METHOD reset_fetch_commit.
+    DATA lv_branch TYPE c LENGTH 255.
+    lv_branch = iv_branch_name.
+    UPDATE zaog_repo_state
+      SET fetch_commit = ''
+      WHERE repo_key    = iv_repo_key
+        AND branch_name = lv_branch.
+  ENDMETHOD.
+
   METHOD clear_state.
     DELETE FROM zaog_repo_state WHERE repo_key = iv_repo_key.
   ENDMETHOD.
@@ -165,6 +197,25 @@ CLASS zcl_abapgit_ortec_repo_state IMPLEMENTATION.
     ENDTRY.
     SELECT SINGLE repo_key FROM zaog_repo_state INTO rv_key
       WHERE url_hash = lv_url_hash.
+  ENDMETHOD.
+
+  METHOD get_complete_commits.
+    DATA lv_fc TYPE zaog_repo_state-fetch_commit.
+    " Primary: fully-materialised commits from history table
+    SELECT DISTINCT commit_sha1 FROM zaog_commit_hist
+      INTO TABLE rt_commits
+      WHERE repo_key = iv_repo_key.
+    IF rt_commits IS NOT INITIAL.
+      RETURN.
+    ENDIF.
+    " Fallback: use fetch_commit entries from repo state table
+    SELECT DISTINCT fetch_commit FROM zaog_repo_state
+      INTO TABLE @DATA(lt_fc)
+      WHERE repo_key    = @iv_repo_key
+        AND fetch_commit <> ''.
+    LOOP AT lt_fc INTO lv_fc.
+      APPEND lv_fc TO rt_commits.
+    ENDLOOP.
   ENDMETHOD.
 
   METHOD get_or_create_repo_key_for_url.

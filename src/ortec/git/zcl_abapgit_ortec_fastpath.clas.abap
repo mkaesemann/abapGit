@@ -489,22 +489,13 @@ METHOD upload_pack.
           DATA lv_ortec_rk TYPE zcl_abapgit_ortec_pack_dec=>ty_repo_key.
           lv_ortec_rk = zcl_abapgit_ortec_repo_state=>get_or_create_repo_key_for_url( iv_url ).
           IF lv_ortec_rk IS NOT INITIAL.
-            " Load existing objects explicitly as delta-base context.
-            " Passing them to decode_and_persist merges them into ct_objects BEFORE
-            " decode_deltas runs, so every base SHA1 is found in-memory via the
-            " sorted KEY sha lookup — no individual SELECT SINGLE fallbacks per delta.
-            " The returned rt_objects is already the full merged set (base + new);
-            " no second get_all_objects() is needed after decode_and_persist returns.
-            " On first fetch, lt_base_objs is empty — no overhead.
-            DATA lt_base_objs TYPE zif_abapgit_definitions=>ty_objects_tt.
-            TRY.
-                lt_base_objs = zcl_abapgit_ortec_obj_store=>get_all_objects( lv_ortec_rk ).
-              CATCH zcx_abapgit_ortec_git.
-            ENDTRY.
+            " decode_and_persist issues a targeted bulk SELECT for delta bases
+            " (only SHA1s referenced as OBJ_REF_DELTA in this pack).
+            " Full packs trigger no SELECT; the fallback full-store SELECT fires
+            " only when a delta base is missing (edge case).
             rt_objects = zcl_abapgit_ortec_pack_dec=>decode_and_persist(
-              iv_data         = lv_pack
-              iv_repo_key     = lv_ortec_rk
-              it_base_objects = lt_base_objs ).
+              iv_data     = lv_pack
+              iv_repo_key = lv_ortec_rk ).
             IF rt_objects IS NOT INITIAL.
               " rt_objects = full merged set (base + new objects).
               " decode_and_persist already called invalidate_cache() internally.
@@ -616,6 +607,13 @@ METHOD upload_pack.
         iv_branch_name = iv_branch_name
         iv_url         = iv_url
         iv_commit      = iv_commit ).
+    " Record completed fetch in commit history (for multi-branch have negotiation)
+    DATA ls_hist TYPE zaog_commit_hist.
+    ls_hist-repo_key    = lv_repo_key.
+    ls_hist-commit_sha1 = iv_commit.
+    ls_hist-branch_name = iv_branch_name.
+    ls_hist-fetched_at  = lv_ts.
+    INSERT zaog_commit_hist FROM ls_hist. "#EC SUBRC_OK - duplicate key = already recorded
     COMMIT WORK.
   ENDMETHOD.
 

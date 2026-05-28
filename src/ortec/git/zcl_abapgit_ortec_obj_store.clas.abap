@@ -48,6 +48,20 @@ CLASS zcl_abapgit_ortec_obj_store DEFINITION
     "! STRATEGY 2: Clear session cache
     CLASS-METHODS invalidate_cache.
 
+    "! Parse parent commit SHA1s from a stored commit object.
+    "! Reads obj_data from ZAOG_OBJ_STORE and scans the Git commit
+    "! header for parent lines (stops at the first empty line).
+    "! @parameter iv_repo_key |
+    "! Repository key
+    "! @parameter iv_sha1 |
+    "! Commit SHA1 to read parents from
+    "! @parameter rt_parents |
+    "! Zero or more parent SHA1s (0=root, 1=normal, 2+=merge)
+    CLASS-METHODS get_commit_parents
+      IMPORTING iv_repo_key       TYPE ty_repo_key
+                iv_sha1           TYPE zif_abapgit_git_definitions=>ty_sha1
+      RETURNING VALUE(rt_parents) TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+
   PRIVATE SECTION.
     "! STRATEGY 2: Cache table
     TYPES BEGIN OF ty_cache_entry.
@@ -199,6 +213,42 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
   METHOD clear_repo.
     DELETE FROM zaog_obj_store WHERE repo_key = iv_repo_key.
     invalidate_cache( ).
+  ENDMETHOD.
+
+  METHOD get_commit_parents.
+    DATA lv_data   TYPE xstring.
+    DATA lv_text   TYPE string.
+    DATA lv_line   TYPE string.
+    DATA lv_sha1   TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lt_lines  TYPE TABLE OF string.
+
+    SELECT SINGLE obj_data FROM zaog_obj_store
+      INTO lv_data
+      WHERE repo_key = iv_repo_key
+        AND obj_sha1 = iv_sha1
+        AND obj_type = 'commit'
+        AND status   = 'R'.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+
+    " Decode raw bytes to string (UTF-8 / ASCII commit header)
+    TRY.
+        lv_text = cl_abap_codepage=>convert_from( source   = lv_data
+                                                  codepage = '4110' ). " UTF-8
+      CATCH cx_parameter_invalid_range cx_sy_conversion_codepage.
+        RETURN. " Commit data not valid UTF-8 — cannot parse parents
+    ENDTRY.
+    SPLIT lv_text AT cl_abap_char_utilities=>newline INTO TABLE lt_lines.
+    LOOP AT lt_lines INTO lv_line.
+      IF lv_line IS INITIAL.
+        EXIT. " End of commit header
+      ENDIF.
+      IF strlen( lv_line ) >= 47 AND lv_line(7) = 'parent '.
+        lv_sha1 = lv_line+7(40).
+        APPEND lv_sha1 TO rt_parents.
+      ENDIF.
+    ENDLOOP.
   ENDMETHOD.
 
   METHOD invalidate_cache.

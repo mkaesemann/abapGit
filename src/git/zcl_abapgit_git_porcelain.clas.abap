@@ -524,6 +524,8 @@ CLASS ZCL_ABAPGIT_GIT_PORCELAIN IMPLEMENTATION.
   METHOD pull_by_branch.
 
     DATA lv_ortec_repo_key TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key.
+    DATA lx_pull TYPE REF TO zcx_abapgit_exception.
+    DATA lv_pull_error TYPE string.
 
     " ORTEC: Try fast-path reconstitution from persistent object store
     TRY.
@@ -564,10 +566,60 @@ CLASS ZCL_ABAPGIT_GIT_PORCELAIN IMPLEMENTATION.
         lv_ortec_repo_key = zcl_abapgit_ortec_repo_state=>get_repo_key_for_url( iv_url ).
       ENDIF.
 
-      rs_result-files = pull(
-        iv_commit   = rs_result-commit
-        it_objects  = rs_result-objects
-        iv_repo_key = lv_ortec_repo_key ).
+      TRY.
+          rs_result-files = pull(
+            iv_commit   = rs_result-commit
+            it_objects  = rs_result-objects
+            iv_repo_key = lv_ortec_repo_key ).
+        CATCH zcx_abapgit_exception INTO lx_pull.
+          lv_pull_error = lx_pull->get_text( ).
+          IF     zcl_abapgit_ortec_git_switch=>is_active_for_repo( iv_url ) = abap_true
+             AND lv_ortec_repo_key IS NOT INITIAL
+             AND lv_pull_error CS 'Walk,'.
+            " The walk failed because the persistent store has some objects
+            " but not every blob/tree reachable from the fetched commit.
+            " Repair strategy: reset ONLY the branch's fetch_commit in ZAOG_REPO_STATE
+            " so the next upload-pack sends NO have-lines for this branch
+            " (forcing the server to deliver a complete, non-thin pack).
+            " The object store itself is kept intact: its objects still serve
+            " as delta-base context inside decode_and_persist, and other branches
+            " cached for the same repo are unaffected.
+            TRY.
+                TRY.
+                    zcl_abapgit_progress=>get_instance( 1 )->show(
+                      iv_current = 1
+                      iv_text    = |ORTEC: Walk error on { iv_branch_name } - self-healing retry (reset fetch_commit)| ).
+                  CATCH zcx_abapgit_exception. "#EC NO_HANDLER
+                ENDTRY.
+                zcl_abapgit_ortec_repo_state=>reset_fetch_commit(
+                  iv_repo_key    = lv_ortec_repo_key
+                  iv_branch_name = iv_branch_name ).
+                COMMIT WORK.
+
+                CLEAR rs_result.
+                zcl_abapgit_git_transport=>upload_pack_by_branch(
+                  EXPORTING
+                    iv_url          = iv_url
+                    iv_branch_name  = iv_branch_name
+                    iv_deepen_level = iv_deepen_level
+                  IMPORTING
+                    et_objects      = rs_result-objects
+                    ev_branch       = rs_result-commit ).
+
+                lv_ortec_repo_key = zcl_abapgit_ortec_repo_state=>get_or_create_repo_key_for_url( iv_url ).
+                rs_result-files = pull(
+                  iv_commit   = rs_result-commit
+                  it_objects  = rs_result-objects
+                  iv_repo_key = lv_ortec_repo_key ).
+              CATCH zcx_abapgit_ortec_git.
+                RAISE EXCEPTION lx_pull.
+              CATCH zcx_abapgit_exception.
+                RAISE EXCEPTION lx_pull.
+            ENDTRY.
+          ELSE.
+            RAISE EXCEPTION lx_pull.
+          ENDIF.
+      ENDTRY.
 **
 **      zcl_abapgit_pull_buffer=>store_branch_in_buffer(
 **        iv_url         = iv_url
@@ -813,6 +865,7 @@ CLASS ZCL_ABAPGIT_GIT_PORCELAIN IMPLEMENTATION.
     DATA: lv_path  TYPE string,
           ls_file  LIKE LINE OF ct_files,
           lt_nodes TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+    DATA ls_ortec_object TYPE zif_abapgit_definitions=>ty_object.
 
     FIELD-SYMBOLS: <ls_tree> LIKE LINE OF it_objects,
                    <ls_blob> LIKE LINE OF it_objects,
@@ -823,11 +876,22 @@ CLASS ZCL_ABAPGIT_GIT_PORCELAIN IMPLEMENTATION.
       WITH KEY type COMPONENTS
         type = zif_abapgit_git_definitions=>c_type-tree
         sha1 = iv_sha1.
-    IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'Walk, tree not found' ).
+    IF sy-subrc = 0.
+      lt_nodes = zcl_abapgit_git_pack=>decode_tree( <ls_tree>-data ).
+    ELSE.
+* ORTEC: try persistent object store for tree omitted by incremental fetch
+      TRY.
+          ls_ortec_object = zcl_abapgit_ortec_obj_store=>get_object(
+            iv_repo_key = iv_repo_key
+            iv_sha1     = iv_sha1 ).
+          IF ls_ortec_object-type <> zif_abapgit_git_definitions=>c_type-tree.
+            zcx_abapgit_exception=>raise( 'Walk, tree not found' ).
+          ENDIF.
+          lt_nodes = zcl_abapgit_git_pack=>decode_tree( ls_ortec_object-data ).
+        CATCH zcx_abapgit_ortec_git.
+          zcx_abapgit_exception=>raise( 'Walk, tree not found' ).
+      ENDTRY.
     ENDIF.
-
-    lt_nodes = zcl_abapgit_git_pack=>decode_tree( <ls_tree>-data ).
 
     LOOP AT lt_nodes ASSIGNING <ls_node>.
       IF <ls_node>-chmod = zif_abapgit_git_definitions=>c_chmod-file.
@@ -838,15 +902,17 @@ CLASS ZCL_ABAPGIT_GIT_PORCELAIN IMPLEMENTATION.
         IF sy-subrc <> 0.
 * ORTEC: try persistent object store for blob
           TRY.
-              DATA ls_ortec_blob TYPE zif_abapgit_definitions=>ty_object.
-              ls_ortec_blob = zcl_abapgit_ortec_obj_store=>get_object(
+              ls_ortec_object = zcl_abapgit_ortec_obj_store=>get_object(
                 iv_repo_key = iv_repo_key
                 iv_sha1     = <ls_node>-sha1 ).
+              IF ls_ortec_object-type <> zif_abapgit_git_definitions=>c_type-blob.
+                zcx_abapgit_exception=>raise( 'Walk, blob not found' ).
+              ENDIF.
               CLEAR ls_file.
               ls_file-path     = iv_path.
               ls_file-filename = <ls_node>-name.
-              ls_file-data     = ls_ortec_blob-data.
-              ls_file-sha1     = ls_ortec_blob-sha1.
+              ls_file-data     = ls_ortec_object-data.
+              ls_file-sha1     = ls_ortec_object-sha1.
               APPEND ls_file TO ct_files.
               CONTINUE.
             CATCH zcx_abapgit_ortec_git.

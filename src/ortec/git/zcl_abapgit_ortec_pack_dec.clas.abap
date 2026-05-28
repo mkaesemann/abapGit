@@ -633,6 +633,8 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
     " SHA1 set of base objects to suppress re-persisting them in the final promote step.
     DATA lt_base_shas       TYPE HASHED TABLE OF zif_abapgit_git_definitions=>ty_sha1
                                   WITH UNIQUE KEY table_line.
+    DATA lt_delta_bases     TYPE SORTED TABLE OF zif_abapgit_git_definitions=>ty_sha1
+                                  WITH UNIQUE KEY table_line.
 
     lv_commit_interval = iv_commit_interval.
     IF lv_commit_interval <= 0.
