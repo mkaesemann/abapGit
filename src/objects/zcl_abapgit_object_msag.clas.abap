@@ -488,24 +488,41 @@ CLASS zcl_abapgit_object_msag IMPLEMENTATION.
 
   METHOD zif_abapgit_object~serialize.
 
-    DATA: lv_msg_id TYPE rglif-message_id,
-          ls_inf    TYPE t100a,
-          lt_source TYPE ty_t100s.
+    DATA: lv_msg_id         TYPE rglif-message_id,
+          ls_inf            TYPE t100a,
+          lt_source         TYPE ty_t100s,
+          ls_prefetch       TYPE zcl_abapgit_ortec_ser_pref=>ty_msag_data,
+          lv_prefetch_found TYPE abap_bool.
 
 
     lv_msg_id = ms_item-obj_name.
 
-    SELECT SINGLE * FROM t100a INTO ls_inf
-      WHERE arbgb = lv_msg_id.                          "#EC CI_GENBUFF
-    IF sy-subrc <> 0.
-      RETURN.
+    IF zcl_abapgit_ortec_git_switch=>is_serial_prefetch_active( ) = abap_true.
+      lv_prefetch_found = zcl_abapgit_ortec_ser_pref=>get_msag_data(
+        EXPORTING
+          iv_msg_id   = lv_msg_id
+          iv_language = mv_language
+        IMPORTING
+          es_data     = ls_prefetch ).
     ENDIF.
-    CLEAR ls_inf-respuser.
 
-    SELECT * FROM t100 INTO TABLE lt_source
-      WHERE sprsl = mv_language
-      AND arbgb = lv_msg_id
-      ORDER BY PRIMARY KEY.               "#EC CI_SUBRC "#EC CI_GENBUFF
+    IF lv_prefetch_found = abap_true.
+      ls_inf = ls_prefetch-t100a.
+      lt_source = ls_prefetch-t100.
+    ELSE.
+      SELECT SINGLE * FROM t100a INTO ls_inf
+        WHERE arbgb = lv_msg_id.                          "#EC CI_GENBUFF
+      IF sy-subrc <> 0.
+        RETURN.
+      ENDIF.
+
+      SELECT * FROM t100 INTO TABLE lt_source
+        WHERE sprsl = mv_language
+        AND arbgb = lv_msg_id
+        ORDER BY PRIMARY KEY.               "#EC CI_SUBRC "#EC CI_GENBUFF
+    ENDIF.
+
+    CLEAR ls_inf-respuser.
 
     CLEAR: ls_inf-lastuser,
            ls_inf-ldate,

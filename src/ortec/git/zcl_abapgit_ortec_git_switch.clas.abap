@@ -35,6 +35,32 @@ CLASS zcl_abapgit_ortec_git_switch DEFINITION
       IMPORTING iv_url           TYPE string
       RETURNING VALUE(rv_active) TYPE abap_bool.
 
+    "! Check if bulk existence checks are enabled in this internal session.
+    "! Defaults to ABAP_FALSE so standard abapGit behavior is unchanged.
+    "! @parameter rv_active |
+    "! ABAP_TRUE if bulk existence checks are enabled.
+    CLASS-METHODS is_bulk_exists_active
+      RETURNING VALUE(rv_active) TYPE abap_bool.
+
+    "! Enable or disable bulk existence checks in this internal session.
+    "! @parameter iv_active |
+    "! ABAP_TRUE enables the guarded TADIR bulk-exists hook.
+    CLASS-METHODS set_bulk_exists_active
+      IMPORTING iv_active TYPE abap_bool.
+
+    "! Check if serializer prefetch is enabled in this internal session.
+    "! Defaults to ABAP_FALSE so standard abapGit behavior is unchanged.
+    "! @parameter rv_active |
+    "! ABAP_TRUE if serializer prefetch is enabled.
+    CLASS-METHODS is_serial_prefetch_active
+      RETURNING VALUE(rv_active) TYPE abap_bool.
+
+    "! Enable or disable serializer prefetch in this internal session.
+    "! @parameter iv_active |
+    "! ABAP_TRUE enables the guarded serialization prefetch hook.
+    CLASS-METHODS set_serial_prefetch_active
+      IMPORTING iv_active TYPE abap_bool.
+
     "! Read persistent cache flag from ORTEC user persistence.
     "! @parameter iv_url |
     "! Repository URL
@@ -60,20 +86,25 @@ CLASS zcl_abapgit_ortec_git_switch DEFINITION
     "! @parameter rs_result |
     "! Number of deleted rows per table
     "! @raising zcx_abapgit_ortec_git |
+    "! Raised if no ORTEC cache state can be resolved for the URL.
     CLASS-METHODS clear_repo_cache
       IMPORTING iv_url           TYPE string
       RETURNING VALUE(rs_result) TYPE ty_clear_result
       RAISING   zcx_abapgit_ortec_git.
 
     "! Build UI message for clear result.
-    "!
+    "! Formats the per-table delete counts into the compact repository-cache message.
     "! @parameter is_result |
+    "! Clear result counts.
     "! @parameter rv_message |
+    "! User-facing summary text.
     CLASS-METHODS format_clear_result
       IMPORTING is_result         TYPE ty_clear_result
       RETURNING VALUE(rv_message) TYPE string.
 
   PRIVATE SECTION.
+    CLASS-DATA mv_bulk_exists_active TYPE abap_bool VALUE abap_true.
+    CLASS-DATA mv_serial_prefetch_active TYPE abap_bool VALUE abap_true.
 
 ENDCLASS.
 
@@ -138,6 +169,22 @@ CLASS zcl_abapgit_ortec_git_switch IMPLEMENTATION.
       CATCH cx_root.
         rv_enabled = abap_false.
     ENDTRY.
+  ENDMETHOD.
+
+  METHOD is_bulk_exists_active.
+    rv_active = mv_bulk_exists_active.
+  ENDMETHOD.
+
+  METHOD is_serial_prefetch_active.
+    rv_active = mv_serial_prefetch_active.
+  ENDMETHOD.
+
+  METHOD set_bulk_exists_active.
+    mv_bulk_exists_active = iv_active.
+  ENDMETHOD.
+
+  METHOD set_serial_prefetch_active.
+    mv_serial_prefetch_active = iv_active.
   ENDMETHOD.
 
   METHOD set_use_repo_cache.

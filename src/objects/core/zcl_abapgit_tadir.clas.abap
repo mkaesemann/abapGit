@@ -208,6 +208,11 @@ CLASS zcl_abapgit_tadir IMPLEMENTATION.
     FIELD-SYMBOLS: <ls_tadir> LIKE LINE OF it_tadir.
 
 
+    IF zcl_abapgit_ortec_git_switch=>is_bulk_exists_active( ) = abap_true.
+      rt_tadir = zcl_abapgit_ortec_bulk_exists=>filter_existing( it_tadir ).
+      RETURN.
+    ENDIF.
+
     li_progress = zcl_abapgit_progress=>get_instance( lines( it_tadir ) ).
 
 * rows from database table TADIR are not removed for
