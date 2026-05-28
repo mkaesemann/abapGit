@@ -571,8 +571,9 @@ CLASS zcl_abapgit_object_fugr IMPLEMENTATION.
 
   METHOD functions.
 
-    DATA: lv_area    TYPE rs38l-area,
-          lt_enlfdir TYPE STANDARD TABLE OF enlfdir.
+    DATA: lv_area       TYPE rs38l-area,
+          lt_enlfdir    TYPE STANDARD TABLE OF enlfdir,
+          lv_prefetched TYPE abap_bool.
     DATA lv_index TYPE i.
 
     FIELD-SYMBOLS: <ls_functab> TYPE LINE OF ty_rs38l_incl_tt,
@@ -592,16 +593,26 @@ CLASS zcl_abapgit_object_fugr IMPLEMENTATION.
       zcx_abapgit_exception=>raise_t100( ).
     ENDIF.
 
-    "FM is not reliable if Function Group is inconsistent, so cross-check results (#7147)
-    SELECT * FROM enlfdir
-      INTO TABLE lt_enlfdir
-      WHERE area = ms_item-obj_name
-        AND active = abap_true
-      ORDER BY funcname.                                  "#EC CI_SUBRC
+    IF zcl_abapgit_ortec_git_switch=>is_serial_prefetch_active( ) = abap_true.
+      lv_prefetched = zcl_abapgit_ortec_ser_pref_ext=>get_fugr_enlfdir(
+        EXPORTING
+          iv_area    = CONV #( ms_item-obj_name )
+        IMPORTING
+          et_enlfdir = lt_enlfdir ).
+    ENDIF.
 
-    LOOP AT lt_enlfdir ASSIGNING <ls_enlfdir>.
-      TRANSLATE <ls_enlfdir>-funcname TO UPPER CASE.
-    ENDLOOP.
+    IF lv_prefetched = abap_false.
+      "FM is not reliable if Function Group is inconsistent, so cross-check results (#7147)
+      SELECT * FROM enlfdir
+        INTO TABLE lt_enlfdir
+        WHERE area = ms_item-obj_name
+          AND active = abap_true
+        ORDER BY funcname.                                "#EC CI_SUBRC
+
+      LOOP AT lt_enlfdir ASSIGNING <ls_enlfdir>.
+        TRANSLATE <ls_enlfdir>-funcname TO UPPER CASE.
+      ENDLOOP.
+    ENDIF.
 
     SORT lt_enlfdir BY funcname ASCENDING.
 
@@ -930,6 +941,7 @@ CLASS zcl_abapgit_object_fugr IMPLEMENTATION.
       lt_functab    TYPE ty_rs38l_incl_tt,
       lt_new_source TYPE rsfb_source,
       ls_function   LIKE LINE OF rt_functions.
+    DATA ls_metadata TYPE zcl_abapgit_ortec_ser_pref_ext=>ty_fugr_func_meta.
 
     FIELD-SYMBOLS: <ls_func>          LIKE LINE OF lt_functab,
                    <ls_documentation> TYPE LINE OF ty_function-documentation.
@@ -979,8 +991,18 @@ CLASS zcl_abapgit_object_fugr IMPLEMENTATION.
         CLEAR <ls_documentation>-index.
       ENDLOOP.
 
-      SELECT SINGLE exten3 INTO ls_function-exception_classes FROM enlfdir
-        WHERE funcname = <ls_func>-funcname.              "#EC CI_SUBRC
+      CLEAR ls_metadata.
+      IF zcl_abapgit_ortec_git_switch=>is_serial_prefetch_active( ) = abap_true
+          AND zcl_abapgit_ortec_ser_pref_ext=>get_fugr_func_metadata(
+            EXPORTING
+              iv_funcname = <ls_func>-funcname
+            IMPORTING
+              es_metadata = ls_metadata ) = abap_true.
+        ls_function-exception_classes = ls_metadata-exception_classes.
+      ELSE.
+        SELECT SINGLE exten3 INTO ls_function-exception_classes FROM enlfdir
+          WHERE funcname = <ls_func>-funcname.            "#EC CI_SUBRC
+      ENDIF.
 
       " Scope and Interface Contract only for 7.55 or higher
       TRY.
@@ -1102,14 +1124,26 @@ CLASS zcl_abapgit_object_fugr IMPLEMENTATION.
 
   METHOD serialize_xml.
 
-    DATA: lt_includes TYPE ty_sobj_name_tt,
-          lv_areat    TYPE tlibt-areat.
+    DATA: lt_includes   TYPE ty_sobj_name_tt,
+          lv_areat      TYPE tlibt-areat,
+          lv_prefetched TYPE abap_bool.
 
 
-    SELECT SINGLE areat INTO lv_areat
-      FROM tlibt
-      WHERE spras = mv_language
-      AND area = ms_item-obj_name.        "#EC CI_GENBUFF "#EC CI_SUBRC
+    IF zcl_abapgit_ortec_git_switch=>is_serial_prefetch_active( ) = abap_true.
+      lv_prefetched = zcl_abapgit_ortec_ser_pref_ext=>get_fugr_areat(
+        EXPORTING
+          iv_area     = CONV #( ms_item-obj_name )
+          iv_language = mv_language
+        IMPORTING
+          ev_areat    = lv_areat ).
+    ENDIF.
+
+    IF lv_prefetched = abap_false.
+      SELECT SINGLE areat INTO lv_areat
+        FROM tlibt
+        WHERE spras = mv_language
+        AND area = ms_item-obj_name.      "#EC CI_GENBUFF "#EC CI_SUBRC
+    ENDIF.
 
     lt_includes = includes( ).
 

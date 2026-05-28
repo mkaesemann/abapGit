@@ -328,29 +328,41 @@ CLASS zcl_abapgit_object_dtel IMPLEMENTATION.
 * fm DDIF_DTEL_GET bypasses buffer, so SELECTs are
 * done directly from here
 
-    DATA: lv_name  TYPE ddobjname,
-          ls_extra TYPE ty_extra,
-          ls_dd04v TYPE dd04v.
+    DATA: lv_name       TYPE ddobjname,
+          ls_extra      TYPE ty_extra,
+          ls_dd04v      TYPE dd04v,
+          lv_prefetched TYPE abap_bool.
 
     FIELD-SYMBOLS <lg_field> TYPE any.
 
     lv_name = ms_item-obj_name.
 
-    SELECT SINGLE * FROM dd04l
-      INTO CORRESPONDING FIELDS OF ls_dd04v
-      WHERE rollname = lv_name
-      AND as4local = 'A'
-      AND as4vers = '0000'.
-    IF sy-subrc <> 0 OR ls_dd04v IS INITIAL.
-      RETURN.
+    IF zcl_abapgit_ortec_git_switch=>is_serial_prefetch_active( ) = abap_true.
+      lv_prefetched = zcl_abapgit_ortec_ser_pref_ext=>get_dtel_data(
+        EXPORTING
+          iv_rollname = CONV #( lv_name )
+          iv_language = mv_language
+        IMPORTING
+          es_dd04v    = ls_dd04v ).
     ENDIF.
 
-    SELECT SINGLE * FROM dd04t
-      INTO CORRESPONDING FIELDS OF ls_dd04v
-      WHERE rollname = lv_name
-      AND ddlanguage = mv_language
-      AND as4local = 'A'
-      AND as4vers = '0000'.
+    IF lv_prefetched = abap_false.
+      SELECT SINGLE * FROM dd04l
+        INTO CORRESPONDING FIELDS OF ls_dd04v
+        WHERE rollname = lv_name
+        AND as4local = 'A'
+        AND as4vers = '0000'.
+      IF sy-subrc <> 0 OR ls_dd04v IS INITIAL.
+        RETURN.
+      ENDIF.
+
+      SELECT SINGLE * FROM dd04t
+        INTO CORRESPONDING FIELDS OF ls_dd04v
+        WHERE rollname = lv_name
+        AND ddlanguage = mv_language
+        AND as4local = 'A'
+        AND as4vers = '0000'.
+    ENDIF.
 
     CLEAR: ls_dd04v-as4user,
            ls_dd04v-as4date,

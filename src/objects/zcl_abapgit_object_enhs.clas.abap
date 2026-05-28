@@ -236,6 +236,7 @@ CLASS zcl_abapgit_object_enhs IMPLEMENTATION.
           li_enhs      TYPE REF TO zif_abapgit_object_enhs,
           lx_enh_root  TYPE REF TO cx_enh_root.
     DATA lv_abap_language_version TYPE uccheck.
+    DATA lv_has_abap_language_version TYPE abap_bool.
 
     lv_spot_name = ms_item-obj_name.
 
@@ -247,17 +248,31 @@ CLASS zcl_abapgit_object_enhs IMPLEMENTATION.
         zcx_abapgit_exception=>raise_with_text( lx_enh_root ).
     ENDTRY.
 
-    TRY.
-        SELECT SINGLE ('ABAP_LANGUAGE_VERSION') FROM enhspotheader INTO lv_abap_language_version
-          WHERE enhspot = ms_item-obj_name AND version = 'A'.
-        IF sy-subrc = 0.
-          clear_abap_language_version( CHANGING cv_abap_language_version = lv_abap_language_version ).
+    IF zcl_abapgit_ortec_git_switch=>is_serial_prefetch_active( ) = abap_true.
+      lv_has_abap_language_version = zcl_abapgit_ortec_ser_pref_ext=>get_enhs_abap_language_vers(
+        EXPORTING
+          iv_enhspot               = lv_spot_name
+        IMPORTING
+          ev_abap_language_version = lv_abap_language_version ).
+    ENDIF.
 
-          io_xml->add( iv_name = 'ABAP_LANGUAGE_VERSION'
-                       ig_data = lv_abap_language_version ).
-        ENDIF.
-      CATCH cx_root ##NO_HANDLER.
-    ENDTRY.
+    IF lv_has_abap_language_version = abap_false.
+      TRY.
+          SELECT SINGLE ('ABAP_LANGUAGE_VERSION') FROM enhspotheader INTO lv_abap_language_version
+            WHERE enhspot = ms_item-obj_name AND version = 'A'.
+          IF sy-subrc = 0.
+            lv_has_abap_language_version = abap_true.
+          ENDIF.
+        CATCH cx_root ##NO_HANDLER.
+      ENDTRY.
+    ENDIF.
+
+    IF lv_has_abap_language_version = abap_true.
+      clear_abap_language_version( CHANGING cv_abap_language_version = lv_abap_language_version ).
+
+      io_xml->add( iv_name = 'ABAP_LANGUAGE_VERSION'
+                   ig_data = lv_abap_language_version ).
+    ENDIF.
 
     li_enhs = factory( li_spot_ref->get_tool( ) ).
 

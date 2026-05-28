@@ -98,7 +98,8 @@ CLASS zcl_abapgit_object_prog IMPLEMENTATION.
 
     DATA: lt_tpool_i18n      TYPE zif_abapgit_lang_definitions=>ty_i18n_tpools,
           lt_tpool           TYPE textpool_table,
-          lt_language_filter TYPE zif_abapgit_environment=>ty_system_language_filter.
+          lt_language_filter TYPE zif_abapgit_environment=>ty_system_language_filter,
+          lv_prefetched      TYPE abap_bool.
 
     FIELD-SYMBOLS <ls_tpool> LIKE LINE OF lt_tpool_i18n.
 
@@ -111,14 +112,26 @@ CLASS zcl_abapgit_object_prog IMPLEMENTATION.
     " Skip main language - it was already serialized
     lt_language_filter = mo_i18n_params->build_language_filter( ).
 
-    SELECT DISTINCT language
-      INTO CORRESPONDING FIELDS OF TABLE lt_tpool_i18n
-      FROM d010tinf
-      WHERE r3state = 'A'
-      AND prog = ms_item-obj_name
-      AND language <> mv_language
-      AND language IN lt_language_filter
-      ORDER BY language ##TOO_MANY_ITAB_FIELDS.
+    IF zcl_abapgit_ortec_git_switch=>is_serial_prefetch_active( ) = abap_true.
+      lv_prefetched = zcl_abapgit_ortec_ser_pref_ext=>get_prog_tpool_languages(
+        EXPORTING
+          iv_program    = CONV #( ms_item-obj_name )
+          iv_language   = mv_language
+        IMPORTING
+          et_tpool_i18n = lt_tpool_i18n ).
+      DELETE lt_tpool_i18n WHERE language NOT IN lt_language_filter.
+    ENDIF.
+
+    IF lv_prefetched = abap_false.
+      SELECT DISTINCT language
+        INTO CORRESPONDING FIELDS OF TABLE lt_tpool_i18n
+        FROM d010tinf
+        WHERE r3state = 'A'
+        AND prog = ms_item-obj_name
+        AND language <> mv_language
+        AND language IN lt_language_filter
+        ORDER BY language ##TOO_MANY_ITAB_FIELDS.
+    ENDIF.
 
     SORT lt_tpool_i18n BY language ASCENDING.
     LOOP AT lt_tpool_i18n ASSIGNING <ls_tpool>.

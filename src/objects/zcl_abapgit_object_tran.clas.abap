@@ -400,19 +400,34 @@ CLASS zcl_abapgit_object_tran IMPLEMENTATION.
   METHOD serialize_texts.
 
     DATA lt_tpool_i18n TYPE TABLE OF tstct.
+    DATA ls_prefetched TYPE zcl_abapgit_ortec_ser_pref_ext=>ty_tran_data.
+    DATA lv_prefetched TYPE abap_bool.
 
     IF mo_i18n_params->ms_params-main_language_only = abap_true.
       RETURN.
     ENDIF.
 
-    " Skip main language - it was already serialized
-    " Don't serialize t-code itself
-    SELECT sprsl ttext
-      INTO CORRESPONDING FIELDS OF TABLE lt_tpool_i18n
-      FROM tstct
-      WHERE sprsl <> mv_language
-      AND   tcode = ms_item-obj_name
-      ORDER BY sprsl ##TOO_MANY_ITAB_FIELDS.            "#EC CI_GENBUFF
+    IF zcl_abapgit_ortec_git_switch=>is_serial_prefetch_active( ) = abap_true.
+      lv_prefetched = zcl_abapgit_ortec_ser_pref_ext=>get_tran_data(
+        EXPORTING
+          iv_tcode    = CONV #( ms_item-obj_name )
+          iv_language = mv_language
+        IMPORTING
+          es_data     = ls_prefetched ).
+    ENDIF.
+
+    IF lv_prefetched = abap_true.
+      lt_tpool_i18n = ls_prefetched-tstct_i18n.
+    ELSE.
+      " Skip main language - it was already serialized
+      " Don't serialize t-code itself
+      SELECT sprsl ttext
+        INTO CORRESPONDING FIELDS OF TABLE lt_tpool_i18n
+        FROM tstct
+        WHERE sprsl <> mv_language
+        AND   tcode = ms_item-obj_name
+        ORDER BY sprsl ##TOO_MANY_ITAB_FIELDS.          "#EC CI_GENBUFF
+    ENDIF.
 
     mo_i18n_params->trim_saplang_keyed_table(
       EXPORTING
@@ -939,9 +954,11 @@ CLASS zcl_abapgit_object_tran IMPLEMENTATION.
           ls_tstcp       TYPE tstcp,
           lt_tstca       TYPE ty_tstca,
           ls_gui_attr    TYPE tstcc.
-    DATA: ls_item TYPE zif_abapgit_definitions=>ty_item,
-          ls_sush TYPE usob_sm,
-          lo_sush TYPE REF TO zcl_abapgit_object_sush.
+    DATA: ls_item       TYPE zif_abapgit_definitions=>ty_item,
+          ls_sush       TYPE usob_sm,
+          lo_sush       TYPE REF TO zcl_abapgit_object_sush,
+          ls_prefetched TYPE zcl_abapgit_ortec_ser_pref_ext=>ty_tran_data,
+          lv_prefetched TYPE abap_bool.
 
     lv_transaction = ms_item-obj_name.
 
@@ -952,18 +969,33 @@ CLASS zcl_abapgit_object_tran IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    SELECT SINGLE * FROM tstct INTO ls_tstct
-      WHERE sprsl = mv_language
-      AND tcode = lv_transaction.         "#EC CI_SUBRC "#EC CI_GENBUFF
+    IF zcl_abapgit_ortec_git_switch=>is_serial_prefetch_active( ) = abap_true.
+      lv_prefetched = zcl_abapgit_ortec_ser_pref_ext=>get_tran_data(
+        EXPORTING
+          iv_tcode    = lv_transaction
+          iv_language = mv_language
+        IMPORTING
+          es_data     = ls_prefetched ).
+    ENDIF.
 
-    SELECT SINGLE * FROM tstcp INTO ls_tstcp
-      WHERE tcode = lv_transaction.       "#EC CI_SUBRC "#EC CI_GENBUFF
+    IF lv_prefetched = abap_true.
+      ls_tstct = ls_prefetched-tstct.
+      ls_tstcp = ls_prefetched-tstcp.
+      lt_tstca = ls_prefetched-tstca.
+    ELSE.
+      SELECT SINGLE * FROM tstct INTO ls_tstct
+        WHERE sprsl = mv_language
+        AND tcode = lv_transaction.       "#EC CI_SUBRC "#EC CI_GENBUFF
 
-    SELECT * FROM tstca INTO TABLE lt_tstca
-      WHERE tcode = lv_transaction
-      ORDER BY PRIMARY KEY.
-    IF sy-subrc <> 0.
-      CLEAR: lt_tstca.
+      SELECT SINGLE * FROM tstcp INTO ls_tstcp
+        WHERE tcode = lv_transaction.     "#EC CI_SUBRC "#EC CI_GENBUFF
+
+      SELECT * FROM tstca INTO TABLE lt_tstca
+        WHERE tcode = lv_transaction
+        ORDER BY PRIMARY KEY.
+      IF sy-subrc <> 0.
+        CLEAR: lt_tstca.
+      ENDIF.
     ENDIF.
 
     io_xml->add( iv_name = 'TSTC'

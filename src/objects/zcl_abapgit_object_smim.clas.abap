@@ -124,6 +124,8 @@ CLASS zcl_abapgit_object_smim IMPLEMENTATION.
 
     DATA ls_phio TYPE skwf_io.
     DATA lt_phios TYPE STANDARD TABLE OF skwf_io WITH DEFAULT KEY.
+    DATA ls_prefetched TYPE zcl_abapgit_ortec_ser_pref_ext=>ty_smim_phf_data.
+    DATA lv_prefetched TYPE abap_bool.
 
     " Get file name with extension which is important for importing object correctly
     CALL FUNCTION 'SKWF_LOIO_ALL_PHIOS_GET'
@@ -133,6 +135,22 @@ CLASS zcl_abapgit_object_smim IMPLEMENTATION.
         phios = lt_phios.
 
     LOOP AT lt_phios INTO ls_phio.
+      CLEAR lv_prefetched.
+      IF zcl_abapgit_ortec_git_switch=>is_serial_prefetch_active( ) = abap_true.
+        lv_prefetched = zcl_abapgit_ortec_ser_pref_ext=>get_smim_phf(
+          EXPORTING
+            iv_loio_id = CONV #( is_loio-objid )
+            iv_phio_id = CONV #( ls_phio-objid )
+          IMPORTING
+            es_data    = ls_prefetched ).
+      ENDIF.
+
+      IF lv_prefetched = abap_true.
+        cs_extra-file_name = ls_prefetched-file_name.
+        cs_extra-mimetype = ls_prefetched-mimetype.
+        EXIT.
+      ENDIF.
+
       SELECT SINGLE file_name mimetype FROM smimphf INTO CORRESPONDING FIELDS OF cs_extra
         WHERE langu = sy-langu AND loio_id = is_loio-objid AND phio_id = ls_phio-objid.
       IF sy-subrc = 0.
@@ -180,13 +198,24 @@ CLASS zcl_abapgit_object_smim IMPLEMENTATION.
   METHOD get_url_for_io.
 
     DATA ls_smimloio TYPE smimloio.
+    DATA lv_prefetched TYPE abap_bool.
 
     CLEAR: ev_url, ev_is_folder, es_io.
 
-    SELECT SINGLE * FROM smimloio INTO ls_smimloio
-      WHERE loio_id = ms_item-obj_name.                 "#EC CI_GENBUFF
-    IF sy-subrc <> 0.
-      RAISE EXCEPTION TYPE zcx_abapgit_not_found.
+    IF zcl_abapgit_ortec_git_switch=>is_serial_prefetch_active( ) = abap_true.
+      lv_prefetched = zcl_abapgit_ortec_ser_pref_ext=>get_smim_loio(
+        EXPORTING
+          iv_loio_id  = CONV #( ms_item-obj_name )
+        IMPORTING
+          es_smimloio = ls_smimloio ).
+    ENDIF.
+
+    IF lv_prefetched = abap_false.
+      SELECT SINGLE * FROM smimloio INTO ls_smimloio
+        WHERE loio_id = ms_item-obj_name.               "#EC CI_GENBUFF
+      IF sy-subrc <> 0.
+        RAISE EXCEPTION TYPE zcx_abapgit_not_found.
+      ENDIF.
     ENDIF.
 
     IF ls_smimloio-lo_class = wbmr_c_skwf_folder_class.

@@ -782,6 +782,9 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
       zcl_abapgit_ortec_ser_pref=>prepare(
         it_tadir    = lt_tadir
         iv_language = ms_i18n_params-main_language ).
+      zcl_abapgit_ortec_ser_pref_ext=>prepare(
+        it_tadir    = lt_tadir
+        iv_language = ms_i18n_params-main_language ).
     ENDIF.
 
     TRY.
@@ -835,11 +838,13 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
       CLEANUP.
         IF lv_use_ortec_prefetch = abap_true.
           zcl_abapgit_ortec_ser_pref=>clear( ).
+          zcl_abapgit_ortec_ser_pref_ext=>clear( ).
         ENDIF.
     ENDTRY.
 
     IF lv_use_ortec_prefetch = abap_true.
       zcl_abapgit_ortec_ser_pref=>clear( ).
+      zcl_abapgit_ortec_ser_pref_ext=>clear( ).
     ENDIF.
 
   ENDMETHOD.

@@ -34,6 +34,20 @@ CLASS zcl_abapgit_object_tobj IMPLEMENTATION.
 
   METHOD read_extra.
 
+    DATA ls_prefetched TYPE zcl_abapgit_ortec_ser_pref_ext=>ty_tobj_data.
+
+    IF zcl_abapgit_ortec_git_switch=>is_serial_prefetch_active( ) = abap_true
+        AND zcl_abapgit_ortec_ser_pref_ext=>get_tobj_data(
+          EXPORTING
+            iv_tabname = iv_tabname
+          IMPORTING
+            es_data    = ls_prefetched ) = abap_true.
+      rs_tobj-tddat = ls_prefetched-tddat.
+      rs_tobj-tvdir = ls_prefetched-tvdir.
+      rs_tobj-tvimf = ls_prefetched-tvimf.
+      RETURN.
+    ENDIF.
+
     SELECT SINGLE * FROM tddat INTO rs_tobj-tddat WHERE tabname = iv_tabname.
 
     SELECT SINGLE * FROM tvdir INTO rs_tobj-tvdir WHERE tabname = iv_tabname.
