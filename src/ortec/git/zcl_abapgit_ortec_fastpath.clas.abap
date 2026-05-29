@@ -75,6 +75,29 @@ CLASS zcl_abapgit_ortec_fastpath DEFINITION
                 iv_repo_key    TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key OPTIONAL
       RAISING   zcx_abapgit_ortec_git.
 
+    "! Fetch tip commit objects for branch metadata — read-only, no ORTEC fastpath routing.
+    "! Used by the branch picker to retrieve last-changed dates without touching
+    "! the persistent object store or delta-negotiation state.
+    "! @parameter iv_url |
+    "! Remote URL
+    "! @parameter iv_branch |
+    "! Any branch name (used to initialise the v1 connection)
+    "! @parameter it_branches |
+    "! Branch list whose tip SHAs should be fetched
+    "! @parameter et_objects |
+    "! Decoded git objects (commits only, filtered by caller)
+    "! @raising zcx_abapgit_exception |
+    "! On network or protocol error
+    "! @raising zcx_abapgit_ortec_git |
+    "! On ORTEC Git transport error
+    CLASS-METHODS fetch_tip_commits
+      IMPORTING iv_url      TYPE string
+                iv_branch   TYPE string
+                it_branches TYPE zif_abapgit_git_definitions=>ty_git_branch_list_tt
+      EXPORTING et_objects  TYPE zif_abapgit_definitions=>ty_objects_tt
+      RAISING   zcx_abapgit_exception
+                zcx_abapgit_ortec_git.
+
   PRIVATE SECTION.
     "! Resolve repo key from URL. Creates new key if none found.
     "! @parameter iv_url |
@@ -108,6 +131,73 @@ ENDCLASS.
 
 
 CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
+  METHOD fetch_tip_commits.
+
+    DATA lo_client  TYPE REF TO zcl_abapgit_http_client.
+    DATA lv_buffer  TYPE string.
+    DATA lv_line    TYPE string.
+    DATA lv_capa    TYPE string.
+    DATA lv_xstring TYPE xstring.
+    DATA lv_pack    TYPE xstring.
+    DATA lt_hashes  TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+
+    FIELD-SYMBOLS <ls_branch> LIKE LINE OF it_branches.
+    FIELD-SYMBOLS <lv_sha1>   LIKE LINE OF lt_hashes.
+
+    " Collect unique tip SHAs from the branch list
+    LOOP AT it_branches ASSIGNING <ls_branch>
+        WHERE sha1 IS NOT INITIAL.
+      APPEND <ls_branch>-sha1 TO lt_hashes.
+    ENDLOOP.
+    SORT lt_hashes.
+    DELETE ADJACENT DUPLICATES FROM lt_hashes.
+
+    IF lt_hashes IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    " Open a standard v1 upload-pack connection — no ORTEC fastpath routing
+    zcl_abapgit_git_transport=>find_branch_ortec(
+      EXPORTING
+        iv_url         = iv_url
+        iv_service     = 'upload'
+        iv_branch_name = iv_branch
+      IMPORTING
+        eo_client = lo_client ).
+
+    lo_client->set_headers( iv_url     = iv_url
+                            iv_service = 'upload' ).
+
+    " Build v1 want + deepen 1 request — no haves, no ORTEC delta negotiation
+    lv_capa = 'side-band-64k no-progress multi_ack'.
+    LOOP AT lt_hashes ASSIGNING <lv_sha1>.
+      IF sy-tabix = 1.
+        lv_line = |want { <lv_sha1> } { lv_capa }{ cl_abap_char_utilities=>newline }|.
+      ELSE.
+        lv_line = |want { <lv_sha1> }{ cl_abap_char_utilities=>newline }|.
+      ENDIF.
+      lv_buffer = lv_buffer && zcl_abapgit_git_utils=>pkt_string( lv_line ).
+    ENDLOOP.
+
+    lv_buffer = lv_buffer
+      && zcl_abapgit_git_utils=>pkt_string( |deepen 1{ cl_abap_char_utilities=>newline }| )
+      && '0000'
+      && '0009done' && cl_abap_char_utilities=>newline.
+
+    lv_xstring = lo_client->send_receive_close(
+      zcl_abapgit_convert=>string_to_xstring_utf8( lv_buffer ) ).
+
+    parse( IMPORTING ev_pack = lv_pack
+           CHANGING  cv_data = lv_xstring ).
+
+    IF lv_pack IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    et_objects = zcl_abapgit_git_pack=>decode( lv_pack ).
+
+  ENDMETHOD.
+
 METHOD pull_by_branch.
 
     DATA lt_resumed     TYPE zif_abapgit_definitions=>ty_objects_tt.

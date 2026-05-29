@@ -19,13 +19,11 @@ CLASS zcl_abapgit_ortec_pack_dec DEFINITION
     "! <p>If <em>it_objects</em> is supplied the decode step is skipped and the
     "! pre-decoded objects are persisted directly (the raw packfile is still
     "! stored so a future resume can re-decode if needed).</p>
-    "! <p>If <em>it_base_objects</em> is supplied these objects are merged into the
-    "! in-memory work table before delta resolution runs. This lets
-    "! {@link CLAS:zcl_abapgit_git_delta} find all base objects in-memory
-    "! instead of issuing individual <em>SELECT SINGLE</em> fallbacks per missing
-    "! delta base — which is the efficient path for thin-pack incremental fetches.
-    "! Only newly decoded objects are persisted; base objects are not re-written.
-    "! The returned table contains both base and new objects (full working set).</p>
+    "! <p>Delta bases for thin-pack resolution are fetched automatically via a
+    "! targeted bulk SELECT on {@link TABL:zaog_obj_store} scoped to the SHA1s
+    "! actually referenced in this pack — no full-store load on the normal path.
+    "! Full packs trigger no SELECT at all. A full-store fallback SELECT fires
+    "! only if a delta base is absent (edge case after incomplete earlier fetches).</p>
     "! @parameter iv_data |
     "! Raw packfile bytes received from the Git server
     "! @parameter iv_repo_key |
@@ -34,8 +32,6 @@ CLASS zcl_abapgit_ortec_pack_dec DEFINITION
     "! Commit every N objects during the persist phase (default 50)
     "! @parameter it_objects |
     "! Pre-decoded objects; if supplied the pack decode is skipped
-    "! @parameter it_base_objects |
-    "! Existing objects used as delta base context; merged in-memory before delta resolution
     "! @parameter rt_objects |
     "! Fully decoded and delta-resolved objects (base + new)
     "! @raising zcx_abapgit_exception |
@@ -45,7 +41,6 @@ CLASS zcl_abapgit_ortec_pack_dec DEFINITION
                 iv_repo_key        TYPE ty_repo_key
                 iv_commit_interval TYPE i                                      DEFAULT 50
                 it_objects         TYPE zif_abapgit_definitions=>ty_objects_tt OPTIONAL
-                it_base_objects    TYPE zif_abapgit_definitions=>ty_objects_tt OPTIONAL
       RETURNING VALUE(rt_objects)  TYPE zif_abapgit_definitions=>ty_objects_tt
       RAISING   zcx_abapgit_exception.
 
@@ -105,10 +100,9 @@ CLASS zcl_abapgit_ortec_pack_dec DEFINITION
     "! Active fetch session that stores curr_offset and decoded-object progress
     "! @parameter iv_commit_interval |
     "! Commit frequency for checkpoint writes during the decode loop
-    "! @parameter it_base_objects |
-    "! Existing objects used as delta base context; merged in-memory before delta resolution
     "! @parameter rt_objects |
-    "! Decoded and delta-resolved objects (base + new)
+    "! Decoded and delta-resolved objects; may include base objects fetched for
+    "! delta resolution — only new objects are persisted
     "! @raising zcx_abapgit_exception |
     "! On format or checksum error
     CLASS-METHODS resumable_decode
@@ -117,7 +111,6 @@ CLASS zcl_abapgit_ortec_pack_dec DEFINITION
                 iv_pack_id         TYPE ty_pack_id
                 iv_session_id      TYPE ty_session_id
                 iv_commit_interval TYPE i DEFAULT 50
-                it_base_objects    TYPE zif_abapgit_definitions=>ty_objects_tt OPTIONAL
       RETURNING VALUE(rt_objects)  TYPE zif_abapgit_definitions=>ty_objects_tt
       RAISING   zcx_abapgit_exception.
 
@@ -276,11 +269,10 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
                            iv_repo_key        = iv_repo_key
                            iv_pack_id         = lv_pack_id
                            iv_session_id      = lv_session_id
-                           iv_commit_interval = iv_commit_interval
-                           it_base_objects    = it_base_objects ).
+                           iv_commit_interval = iv_commit_interval ).
           " Keep lv_obj_count as read from the pack header above.  Do NOT override
-          " with lines( rt_objects ) since rt_objects now contains base objects
-          " merged for delta resolution and would give an inflated count.
+          " with lines( rt_objects ) since rt_objects may include base objects
+          " fetched for delta resolution and would give an inflated count.
         ENDIF.
 
         " STEP 5: Persist decoded objects.
@@ -980,15 +972,59 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
       zcx_abapgit_exception=>raise( |SHA1 at end of pack doesn't match| ).
     ENDIF.
 
-    " Before delta resolution, merge base objects into rt_objects so that
-    " decode_deltas finds every base SHA1 in the in-memory table (KEY sha lookup)
-    " instead of falling back to individual SELECT SINGLE per missing base.
-    " Collect their SHA1s into lt_base_shas so the promote step below skips them —
-    " base objects are already persisted with status 'R' from a previous fetch cycle.
-    IF it_base_objects IS SUPPLIED AND it_base_objects IS NOT INITIAL.
-      LOOP AT it_base_objects INTO ls_object.
+    " ── Targeted delta-base prefetch ─────────────────────────────────────────
+    " Collect the SHA1s of every OBJ_REF_DELTA base referenced in this pack.
+    " Full packs contain no ref_delta objects so lt_delta_bases stays empty.
+    LOOP AT rt_objects INTO ls_object.
+      IF ls_object-type = zif_abapgit_git_definitions=>c_type-ref_d.
+        INSERT ls_object-sha1 INTO TABLE lt_delta_bases.
+      ENDIF.
+    ENDLOOP.
+
+    " FOR ALL ENTRIES crashes on an empty driving table — skip SELECT for full packs.
+    IF lt_delta_bases IS NOT INITIAL.
+      SELECT *
+        FROM zaog_obj_store
+        FOR ALL ENTRIES IN @lt_delta_bases
+        WHERE repo_key = @iv_repo_key
+          AND obj_sha1 = @lt_delta_bases-table_line
+          AND status   = 'R'
+        INTO TABLE @DATA(lt_base_fetch).
+      LOOP AT lt_base_fetch INTO ls_row.
+        CLEAR ls_object.
+        ls_object-sha1 = ls_row-obj_sha1.
+        ls_object-type = ls_row-obj_type.
+        ls_object-data = ls_row-obj_data.
         INSERT ls_object INTO TABLE rt_objects.
         INSERT ls_object-sha1 INTO TABLE lt_base_shas.
+      ENDLOOP.
+
+      " Edge-case guard: if any expected base was not found (incomplete store),
+      " fall back to a full-repo SELECT and merge only the missing entries.
+      " This path is taken at most once per decode — EXIT after full load.
+      LOOP AT lt_delta_bases INTO DATA(lv_need).
+        READ TABLE lt_base_shas WITH TABLE KEY table_line = lv_need
+          TRANSPORTING NO FIELDS.
+        IF sy-subrc <> 0.
+          SELECT *
+            FROM zaog_obj_store
+            INTO TABLE @DATA(lt_full_fetch)
+            WHERE repo_key = @iv_repo_key
+              AND status   = 'R'.
+          LOOP AT lt_full_fetch INTO ls_row.
+            READ TABLE lt_base_shas WITH TABLE KEY table_line = ls_row-obj_sha1
+              TRANSPORTING NO FIELDS.
+            IF sy-subrc <> 0.
+              CLEAR ls_object.
+              ls_object-sha1 = ls_row-obj_sha1.
+              ls_object-type = ls_row-obj_type.
+              ls_object-data = ls_row-obj_data.
+              INSERT ls_object INTO TABLE rt_objects.
+              INSERT ls_object-sha1 INTO TABLE lt_base_shas.
+            ENDIF.
+          ENDLOOP.
+          EXIT. " One full load is sufficient
+        ENDIF.
       ENDLOOP.
     ENDIF.
 

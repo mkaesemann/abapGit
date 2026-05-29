@@ -268,23 +268,21 @@ CLASS zcl_abapgit_ortec_branch_list IMPLEMENTATION.
         ENDTRY.
       ENDIF.
 
-      " Non-fastpath fallback: one upload-pack request for all branch tips.
+      " Fallback: plain v1 upload-pack for all branch tips (no ORTEC fastpath routing).
       IF mt_tip_commits IS INITIAL
-          AND lv_branch IS NOT INITIAL
-          AND lv_is_fastpath = abap_false.
+          AND lv_branch IS NOT INITIAL.
         TRY.
             CLEAR lt_objects.
-            zcl_abapgit_git_transport=>upload_pack_by_branch(
+            zcl_abapgit_ortec_fastpath=>fetch_tip_commits(
               EXPORTING
-                iv_url          = mv_url
-                iv_branch_name  = lv_branch
-                iv_deepen_level = 1
-                it_branches     = mt_branches
+                iv_url      = mv_url
+                iv_branch   = lv_branch
+                it_branches = mt_branches
               IMPORTING
-                et_objects      = lt_objects ).
+                et_objects  = lt_objects ).
             DELETE lt_objects WHERE type <> zif_abapgit_git_definitions=>c_type-commit.
             mt_tip_commits = zcl_abapgit_git_commit=>parse_commits( lt_objects ).
-          CATCH zcx_abapgit_exception.
+          CATCH zcx_abapgit_exception zcx_abapgit_ortec_git.
             CLEAR mt_tip_commits.
         ENDTRY.
       ENDIF.
