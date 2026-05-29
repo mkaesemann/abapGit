@@ -133,13 +133,20 @@ ENDCLASS.
 CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
   METHOD fetch_tip_commits.
 
-    DATA lo_client  TYPE REF TO zcl_abapgit_http_client.
-    DATA lv_buffer  TYPE string.
-    DATA lv_line    TYPE string.
-    DATA lv_capa    TYPE string.
-    DATA lv_xstring TYPE xstring.
-    DATA lv_pack    TYPE xstring.
-    DATA lt_hashes  TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lo_client     TYPE REF TO zcl_abapgit_http_client.
+    DATA lv_buffer     TYPE string.
+    DATA lv_line       TYPE string.
+    DATA lv_capa       TYPE string.
+    DATA lv_xstring    TYPE xstring.
+    DATA lv_pack       TYPE xstring.
+    DATA lt_hashes     TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lv_ref_data   TYPE string.
+    DATA lv_null       TYPE c LENGTH 1.
+    DATA lv_has_filter TYPE abap_bool.
+    DATA lv_null_pos   TYPE i.
+    DATA lv_nl_pos     TYPE i.
+    DATA lv_caps       TYPE string.
+    DATA lv_offset     TYPE i.
 
     FIELD-SYMBOLS <ls_branch> LIKE LINE OF it_branches.
     FIELD-SYMBOLS <lv_sha1>   LIKE LINE OF lt_hashes.
@@ -165,11 +172,33 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
       IMPORTING
         eo_client = lo_client ).
 
+    " Check server capabilities for 'filter' (BEFORE set_headers to preserve response)
+    lv_ref_data = lo_client->get_cdata( ).
+    lv_null = zcl_abapgit_git_utils=>get_null( ).
+    FIND FIRST OCCURRENCE OF lv_null IN lv_ref_data MATCH OFFSET lv_null_pos.
+    IF sy-subrc = 0.
+      lv_offset = lv_null_pos + 1.
+      lv_caps = lv_ref_data+lv_offset.
+      FIND FIRST OCCURRENCE OF cl_abap_char_utilities=>newline IN lv_caps
+        MATCH OFFSET lv_nl_pos.
+      IF sy-subrc = 0 AND lv_nl_pos > 0.
+        lv_caps = lv_caps(lv_nl_pos).
+        lv_has_filter = xsdbool( lv_caps CS 'filter' ).
+      ENDIF.
+    ENDIF.
+
+    IF lv_has_filter = abap_false.
+      " Server does not advertise 'filter': without it the server would send
+      " commits + ALL trees + ALL blobs, potentially gigabytes for large repos.
+      " Returning empty is safer than risking SYSTEM_NO_ROLL.
+      RETURN.
+    ENDIF.
+
     lo_client->set_headers( iv_url     = iv_url
                             iv_service = 'upload' ).
 
-    " Build v1 want + deepen 1 request — no haves, no ORTEC delta negotiation
-    lv_capa = 'side-band-64k no-progress multi_ack'.
+    " Build v1 want + deepen 1 + filter tree:0 request (commits only)
+    lv_capa = 'side-band-64k no-progress multi_ack filter'.
     LOOP AT lt_hashes ASSIGNING <lv_sha1>.
       IF sy-tabix = 1.
         lv_line = |want { <lv_sha1> } { lv_capa }{ cl_abap_char_utilities=>newline }|.
@@ -181,6 +210,7 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
 
     lv_buffer = lv_buffer
       && zcl_abapgit_git_utils=>pkt_string( |deepen 1{ cl_abap_char_utilities=>newline }| )
+      && zcl_abapgit_git_utils=>pkt_string( |filter tree:0{ cl_abap_char_utilities=>newline }| )
       && '0000'
       && '0009done' && cl_abap_char_utilities=>newline.
 
@@ -194,7 +224,7 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    et_objects = zcl_abapgit_git_pack=>decode( lv_pack ).
+    et_objects = zcl_abapgit_ortec_pack_dec=>decode_commits_only( lv_pack ).
 
   ENDMETHOD.
 
@@ -358,6 +388,15 @@ METHOD pull_by_branch.
           ENDLOOP.
 
         CATCH zcx_abapgit_exception.
+          " Object store is tree-incomplete for this commit.
+          " Invalidate the tip commit from ZAOG_COMMIT_HIST and clear
+          " fetch_commit in ZAOG_REPO_STATE so the next upload_pack sends
+          " no have-lines for it and the server delivers a complete pack.
+          " The stored objects are kept as delta bases for the repair fetch.
+          zcl_abapgit_ortec_repo_state=>invalidate_tip_commit(
+            iv_repo_key    = lv_repo_key
+            iv_branch_name = iv_branch_name
+            iv_commit      = ls_state-fetch_commit ).
           CLEAR rs_result.
           RETURN.
       ENDTRY.
@@ -556,6 +595,24 @@ METHOD upload_pack.
                      WITH KEY type COMPONENTS type = zif_abapgit_git_definitions=>c_type-commit
                                               sha1 = lv_want_sha.
                 IF sy-subrc = 0.
+                  " Validate tree completeness before trusting the cache.
+                  " A corrupt earlier fetch can leave commits recorded in
+                  " ZAOG_COMMIT_HIST but with missing subtrees; this guard
+                  " prevents returning broken data to the push path.
+                  TRY.
+                      zcl_abapgit_git_porcelain=>full_tree(
+                        it_objects = lt_cached
+                        iv_parent  = lv_want_sha ).
+                    CATCH zcx_abapgit_exception.
+                      " Cache is tree-incomplete - invalidate tip commit so
+                      " the next have-negotiation excludes it from have-lines
+                      " and the server delivers a complete pack.
+                      zcl_abapgit_ortec_repo_state=>invalidate_tip_commit(
+                        iv_repo_key = lv_repo_key
+                        iv_commit   = lv_want_sha ).
+                      zcx_abapgit_ortec_git=>raise(
+                        'Cached objects have incomplete tree - falling back to standard fetch' ).
+                  ENDTRY.
                   rt_objects = lt_cached.
                   lv_fetch_duration = lo_fetch_timer->end( ).
                   li_progress = zcl_abapgit_progress=>get_instance( 1 ).

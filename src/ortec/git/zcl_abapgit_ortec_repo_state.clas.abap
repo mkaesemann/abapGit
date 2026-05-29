@@ -114,6 +114,19 @@ CLASS zcl_abapgit_ortec_repo_state DEFINITION
       IMPORTING iv_url        TYPE string
       RETURNING VALUE(rv_key) TYPE ty_repo_key.
 
+    "! Invalidate a tip commit from history and state so the next have-negotiation
+    "! does not advertise it as fully materialised. Used when the object store
+    "! is found to be tree-incomplete for this commit. Existing objects are kept
+    "! as delta bases for the subsequent repair fetch.
+    "! @parameter iv_repo_key | Repository key
+    "! @parameter iv_commit | Commit SHA1 to de-register as complete
+    "! @parameter iv_branch_name | Branch ref name (optional; if omitted, all
+    "!   state rows for this commit are cleared)
+    CLASS-METHODS invalidate_tip_commit
+      IMPORTING iv_repo_key    TYPE ty_repo_key
+                iv_commit      TYPE zif_abapgit_git_definitions=>ty_sha1
+                iv_branch_name TYPE string OPTIONAL.
+
   PROTECTED SECTION.
   PRIVATE SECTION.
 ENDCLASS.
@@ -232,6 +245,32 @@ CLASS zcl_abapgit_ortec_repo_state IMPLEMENTATION.
         lv_sha = '000000000000'.
     ENDTRY.
     rv_key = lv_sha(12).
+  ENDMETHOD.
+
+  METHOD invalidate_tip_commit.
+    DATA lv_branch TYPE c LENGTH 255.
+    " Remove this commit from the complete-commit history so have-negotiation
+    " no longer advertises it as fully materialised.
+    DELETE FROM zaog_commit_hist
+      WHERE repo_key    = iv_repo_key
+        AND commit_sha1 = iv_commit.
+    " Blank fetch_commit in state row(s) referencing this commit so Phase 3
+    " (reconstitute from store) does not fire for it again.
+    IF iv_branch_name IS SUPPLIED AND iv_branch_name IS NOT INITIAL.
+      lv_branch = iv_branch_name.
+      UPDATE zaog_repo_state
+        SET fetch_commit = ''
+        WHERE repo_key    = iv_repo_key
+          AND branch_name = lv_branch
+          AND fetch_commit = iv_commit.
+    ELSE.
+      " Branch unknown - clear all state rows with this commit as tip (safe:
+      " forces a fresh fetch for every branch that had it as their tip).
+      UPDATE zaog_repo_state
+        SET fetch_commit = ''
+        WHERE repo_key    = iv_repo_key
+          AND fetch_commit = iv_commit.
+    ENDIF.
   ENDMETHOD.
 
 ENDCLASS.

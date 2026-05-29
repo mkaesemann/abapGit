@@ -60,6 +60,11 @@ CLASS zcl_abapgit_ortec_pack_dec DEFINITION
       RETURNING VALUE(rt_objects) TYPE zif_abapgit_definitions=>ty_objects_tt
       RAISING   zcx_abapgit_exception.
 
+    CLASS-METHODS decode_commits_only
+      IMPORTING iv_data           TYPE xstring
+      RETURNING VALUE(rt_objects) TYPE zif_abapgit_definitions=>ty_objects_tt
+      RAISING   zcx_abapgit_exception.
+
   PROTECTED SECTION.
     CONSTANTS c_pack_start             TYPE x LENGTH 4 VALUE '5041434B' ##NO_TEXT.
     CONSTANTS c_zlib                   TYPE x LENGTH 2 VALUE '789C' ##NO_TEXT.
@@ -197,10 +202,112 @@ CLASS zcl_abapgit_ortec_pack_dec DEFINITION
       IMPORTING iv_repo_key TYPE ty_repo_key
                 iv_pack_id  TYPE ty_pack_id
                 iv_count    TYPE i.
+
 ENDCLASS.
 
 
 CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
+  METHOD decode_commits_only.
+    " Decode a pack and return only commit objects, using stream_decompress.
+    " Designed for filter tree:0 responses: small pack, commits only.
+
+    IF c_opt6_stream_decompress = abap_false.
+      zcx_abapgit_exception=>raise(
+        'decode_commits_only requires kernel streaming support (opt6)' ).
+    ENDIF.
+
+    DATA lv_data           TYPE xstring.
+    DATA lv_xstring        TYPE xstring.
+    DATA lv_objects        TYPE i.
+    DATA lv_x              TYPE x LENGTH 1.
+    DATA lv_type           TYPE zif_abapgit_git_definitions=>ty_type.
+    DATA lv_expected       TYPE i.
+    DATA lv_ref_delta      TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_zlib           TYPE x LENGTH 2.
+    DATA lv_decompressed   TYPE xstring.
+    DATA lv_compressed_len TYPE i.
+    DATA ls_object         TYPE zif_abapgit_definitions=>ty_object.
+    DATA lv_uindex         TYPE sy-index.
+
+    lv_data = iv_data.
+
+    IF xstrlen( lv_data ) < 12.
+      zcx_abapgit_exception=>raise( 'decode_commits_only: pack too short' ).
+    ENDIF.
+    IF lv_data(4) <> c_pack_start.
+      zcx_abapgit_exception=>raise(
+        |decode_commits_only: bad PACK header { lv_data(4) }| ).
+    ENDIF.
+    lv_data = lv_data+4.
+
+    IF lv_data(4) <> c_version.
+      zcx_abapgit_exception=>raise(
+        |decode_commits_only: unsupported pack version { lv_data(4) }| ).
+    ENDIF.
+    lv_data = lv_data+4.
+
+    lv_xstring = lv_data(4).
+    lv_objects = zcl_abapgit_convert=>xstring_to_int( lv_xstring ).
+    lv_data = lv_data+4.
+
+    DO lv_objects TIMES.
+      lv_uindex = sy-index.
+      lv_x = lv_data(1).
+      lv_type = get_type( lv_x ).
+
+      get_length(
+        IMPORTING ev_length = lv_expected
+        CHANGING  cv_data   = lv_data ).
+
+      IF lv_type = zif_abapgit_git_definitions=>c_type-ref_d.
+        lv_ref_delta = lv_data(20).
+        TRANSLATE lv_ref_delta TO LOWER CASE.
+        lv_data = lv_data+20.
+      ELSE.
+        CLEAR lv_ref_delta.
+      ENDIF.
+
+      " Strip 2-byte zlib header (CMF + FLG)
+      lv_zlib = lv_data(2).
+      IF lv_zlib <> c_zlib AND lv_zlib <> c_zlib_hmm.
+        zcx_abapgit_exception=>raise(
+          |decode_commits_only: unexpected zlib header { lv_zlib }| ).
+      ENDIF.
+      lv_data = lv_data+2.
+
+      " Kernel streaming decompress; ev_compressed_len = DEFLATE bytes only
+      stream_decompress(
+        EXPORTING iv_data         = lv_data
+                  iv_expected_len = lv_expected
+        IMPORTING ev_decompressed   = lv_decompressed
+                  ev_compressed_len = lv_compressed_len ).
+
+      lv_data = lv_data+lv_compressed_len.  " advance past DEFLATE
+      lv_data = lv_data+4.                  " skip 4-byte Adler32
+
+      " Accumulate all objects; non-commits needed for potential delta bases
+      CLEAR ls_object.
+      ls_object-type  = lv_type.
+      ls_object-data  = lv_decompressed.
+      ls_object-index = lv_uindex.
+      IF lv_type = zif_abapgit_git_definitions=>c_type-ref_d.
+        ls_object-sha1 = lv_ref_delta.  " already lowercased
+      ELSE.
+        ls_object-sha1 = zcl_abapgit_hash=>sha1(
+          iv_type = lv_type
+          iv_data = lv_decompressed ).
+      ENDIF.
+      APPEND ls_object TO rt_objects.
+    ENDDO.
+
+    " Resolve REF_DELTA objects in-place
+    zcl_abapgit_git_delta=>decode_deltas( CHANGING ct_objects = rt_objects ).
+
+    " Discard non-commit objects
+    DELETE rt_objects WHERE type <> zif_abapgit_git_definitions=>c_type-commit.
+
+  ENDMETHOD.
+
   METHOD decode_and_persist.
     DATA lv_repo_lock_id TYPE zcl_abapgit_ortec_pack_raw=>ty_session_id.
     DATA lv_pack_id      TYPE ty_pack_id.
