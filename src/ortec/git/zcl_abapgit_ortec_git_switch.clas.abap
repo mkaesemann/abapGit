@@ -15,6 +15,20 @@ CLASS zcl_abapgit_ortec_git_switch DEFINITION
         END OF settings,
       END OF cs_info.
 
+    "! Local-object bulk-exists optimization switches.
+    "! TABL, DTEL, CLAS, and INTF are active after audit validation in IT8.
+    CONSTANTS:
+      BEGIN OF cs_bulk_exists,
+        "! Use the TABL bulk handler instead of standard per-object TABL existence checks.
+        tabl_active TYPE abap_bool VALUE abap_true,
+        "! Use the DTEL bulk handler instead of standard per-object DTEL existence checks.
+        dtel_active TYPE abap_bool VALUE abap_true,
+        "! Use the CLAS bulk handler instead of standard per-object CLAS existence checks.
+        clas_active TYPE abap_bool VALUE abap_true,
+        "! Use the INTF bulk handler instead of standard per-object INTF existence checks.
+        intf_active TYPE abap_bool VALUE abap_true,
+      END OF cs_bulk_exists.
+
     TYPES:
       BEGIN OF ty_clear_result,
         repo_key   TYPE zcl_abapgit_ortec_repo_state=>ty_repo_key,

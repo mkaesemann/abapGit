@@ -36,6 +36,21 @@ CLASS zcl_abapgit_ortec_bulk_exists DEFINITION
       END OF ty_tobj_key.
     TYPES ty_tobj_keys TYPE HASHED TABLE OF ty_tobj_key WITH UNIQUE KEY objectname objecttype.
 
+    " OPP-B: TABL handler types
+    TYPES ty_tabl_keys TYPE HASHED TABLE OF dd02l-tabname WITH UNIQUE KEY table_line.
+    " OPP-C: DTEL handler types
+    TYPES ty_dtel_keys TYPE HASHED TABLE OF dd04l-rollname WITH UNIQUE KEY table_line.
+    " OPP-D: INTF handler types
+    TYPES ty_intf_keys TYPE HASHED TABLE OF seoclassdf-clsname WITH UNIQUE KEY table_line.
+    TYPES:
+      BEGIN OF ty_intf_raw,
+        clsname  TYPE seoclassdf-clsname,
+        category TYPE seoclassdf-category,
+      END OF ty_intf_raw.
+    TYPES ty_intf_raw_tab TYPE STANDARD TABLE OF ty_intf_raw WITH DEFAULT KEY.
+    " OPP-E: CLAS handler types
+    TYPES ty_clas_keys TYPE HASHED TABLE OF seoclassdf-clsname WITH UNIQUE KEY table_line.
+
     CLASS-METHODS build_doma_buffer
       IMPORTING it_tadir    TYPE zif_abapgit_definitions=>ty_tadir_tt
       EXPORTING et_existing TYPE ty_doma_keys
@@ -86,6 +101,33 @@ CLASS zcl_abapgit_ortec_bulk_exists DEFINITION
       IMPORTING it_tadir    TYPE zif_abapgit_definitions=>ty_tadir_tt
       EXPORTING et_existing TYPE ty_ttyp_keys
                 ev_success  TYPE abap_bool.
+
+    "! OPP-B: Bulk existence check for TABL (database tables).
+    CLASS-METHODS build_tabl_buffer
+      IMPORTING it_tadir      TYPE zif_abapgit_definitions=>ty_tadir_tt
+      EXPORTING et_existing   TYPE ty_tabl_keys
+                et_generated  TYPE ty_tabl_keys
+                ev_success    TYPE abap_bool.
+
+    "! OPP-C: Bulk existence check for DTEL (data elements).
+    CLASS-METHODS build_dtel_buffer
+      IMPORTING it_tadir    TYPE zif_abapgit_definitions=>ty_tadir_tt
+      EXPORTING et_existing TYPE ty_dtel_keys
+                ev_success  TYPE abap_bool.
+
+    "! OPP-D: Bulk existence check for INTF (interfaces).
+    CLASS-METHODS build_intf_buffer
+      IMPORTING it_tadir      TYPE zif_abapgit_definitions=>ty_tadir_tt
+      EXPORTING et_existing   TYPE ty_intf_keys
+                et_proxy_gen  TYPE ty_intf_keys
+                ev_success    TYPE abap_bool.
+
+    "! OPP-E: Bulk existence check for CLAS (classes).
+    CLASS-METHODS build_clas_buffer
+      IMPORTING it_tadir     TYPE zif_abapgit_definitions=>ty_tadir_tt
+      EXPORTING et_existing  TYPE ty_clas_keys
+                et_sadl_gen  TYPE ty_clas_keys
+                ev_success   TYPE abap_bool.
 
     CLASS-METHODS exists_standard
       IMPORTING is_tadir         TYPE ty_tadir
@@ -446,6 +488,21 @@ CLASS zcl_abapgit_ortec_bulk_exists IMPLEMENTATION.
     DATA lv_typename TYPE dd40l-typename.
     DATA ls_tobj_key TYPE ty_tobj_key.
     DATA lv_tobj_key_success TYPE abap_bool.
+    DATA lt_existing_tabl TYPE ty_tabl_keys.
+    DATA lt_chdo_tabl TYPE ty_tabl_keys.
+    DATA lv_tabl_success TYPE abap_bool.
+    DATA lv_tabname TYPE dd02l-tabname.
+    DATA lt_existing_dtel TYPE ty_dtel_keys.
+    DATA lv_dtel_success TYPE abap_bool.
+    DATA lv_rollname TYPE dd04l-rollname.
+    DATA lt_existing_intf TYPE ty_intf_keys.
+    DATA lt_proxy_intf TYPE ty_intf_keys.
+    DATA lv_intf_success TYPE abap_bool.
+    DATA lv_clsname_intf TYPE seoclassdf-clsname.
+    DATA lt_existing_clas TYPE ty_clas_keys.
+    DATA lt_sadl_clas TYPE ty_clas_keys.
+    DATA lv_clas_success TYPE abap_bool.
+    DATA lv_clsname_clas TYPE seoclassdf-clsname.
 
     build_doma_buffer(
       EXPORTING it_tadir    = it_tadir
@@ -497,6 +554,37 @@ CLASS zcl_abapgit_ortec_bulk_exists IMPLEMENTATION.
       EXPORTING it_tadir    = it_tadir
       IMPORTING et_existing = lt_existing_ttyp
                 ev_success  = lv_ttyp_success ).
+
+    IF zcl_abapgit_ortec_git_switch=>cs_bulk_exists-tabl_active = abap_true.
+      build_tabl_buffer(
+        EXPORTING it_tadir     = it_tadir
+        IMPORTING et_existing  = lt_existing_tabl
+                  et_generated = lt_chdo_tabl
+                  ev_success   = lv_tabl_success ).
+    ENDIF.
+
+    IF zcl_abapgit_ortec_git_switch=>cs_bulk_exists-dtel_active = abap_true.
+      build_dtel_buffer(
+        EXPORTING it_tadir    = it_tadir
+        IMPORTING et_existing = lt_existing_dtel
+                  ev_success  = lv_dtel_success ).
+    ENDIF.
+
+    IF zcl_abapgit_ortec_git_switch=>cs_bulk_exists-intf_active = abap_true.
+      build_intf_buffer(
+        EXPORTING it_tadir     = it_tadir
+        IMPORTING et_existing  = lt_existing_intf
+                  et_proxy_gen = lt_proxy_intf
+                  ev_success   = lv_intf_success ).
+    ENDIF.
+
+    IF zcl_abapgit_ortec_git_switch=>cs_bulk_exists-clas_active = abap_true.
+      build_clas_buffer(
+        EXPORTING it_tadir    = it_tadir
+        IMPORTING et_existing = lt_existing_clas
+                  et_sadl_gen = lt_sadl_clas
+                  ev_success  = lv_clas_success ).
+    ENDIF.
 
     LOOP AT it_tadir INTO DATA(ls_tadir).
       CASE ls_tadir-object.
@@ -606,12 +694,224 @@ CLASS zcl_abapgit_ortec_bulk_exists IMPLEMENTATION.
             APPEND ls_tadir TO rt_tadir.
           ENDIF.
 
+        WHEN 'TABL'.
+          lv_tabname = ls_tadir-obj_name.
+          IF lv_tabl_success = abap_false.
+            IF exists_standard( ls_tadir ) = abap_true.
+              APPEND ls_tadir TO rt_tadir.
+            ENDIF.
+          ELSEIF line_exists( lt_existing_tabl[ table_line = lv_tabname ] )
+              AND NOT line_exists( lt_chdo_tabl[ table_line = lv_tabname ] ).
+            APPEND ls_tadir TO rt_tadir.
+          ENDIF.
+
+        WHEN 'DTEL'.
+          lv_rollname = ls_tadir-obj_name.
+          IF lv_dtel_success = abap_false.
+            IF exists_standard( ls_tadir ) = abap_true.
+              APPEND ls_tadir TO rt_tadir.
+            ENDIF.
+          ELSEIF line_exists( lt_existing_dtel[ table_line = lv_rollname ] ).
+            APPEND ls_tadir TO rt_tadir.
+          ENDIF.
+
+        WHEN 'INTF'.
+          lv_clsname_intf = ls_tadir-obj_name.
+          IF lv_intf_success = abap_false.
+            IF exists_standard( ls_tadir ) = abap_true.
+              APPEND ls_tadir TO rt_tadir.
+            ENDIF.
+          ELSEIF line_exists( lt_existing_intf[ table_line = lv_clsname_intf ] )
+              AND NOT line_exists( lt_proxy_intf[ table_line = lv_clsname_intf ] ).
+            APPEND ls_tadir TO rt_tadir.
+          ENDIF.
+
+        WHEN 'CLAS'.
+          lv_clsname_clas = ls_tadir-obj_name.
+          IF lv_clas_success = abap_false.
+            IF exists_standard( ls_tadir ) = abap_true.
+              APPEND ls_tadir TO rt_tadir.
+            ENDIF.
+          ELSEIF line_exists( lt_existing_clas[ table_line = lv_clsname_clas ] )
+              AND NOT line_exists( lt_sadl_clas[ table_line = lv_clsname_clas ] ).
+            APPEND ls_tadir TO rt_tadir.
+          ENDIF.
+
         WHEN OTHERS.
           IF exists_standard( ls_tadir ) = abap_true.
             APPEND ls_tadir TO rt_tadir.
           ENDIF.
       ENDCASE.
     ENDLOOP.
+  ENDMETHOD.
+
+  METHOD build_tabl_buffer.
+    DATA lt_keys TYPE ty_tabl_keys.
+    DATA lv_tabname TYPE dd02l-tabname.
+
+    CLEAR et_existing.
+    CLEAR et_generated.
+    ev_success = abap_true.
+
+    LOOP AT it_tadir INTO DATA(ls_tadir) WHERE object = 'TABL'.
+      lv_tabname = ls_tadir-obj_name.
+      INSERT lv_tabname INTO TABLE lt_keys.
+    ENDLOOP.
+
+    IF lt_keys IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    TRY.
+        " All versions (active and inactive) — same coverage as the standard fallback to DD02L
+        SELECT tabname
+          FROM dd02l
+          INTO TABLE @et_existing
+          FOR ALL ENTRIES IN @lt_keys
+          WHERE tabname = @lt_keys-table_line.
+
+        " CHDO-generated tables must be excluded — mirrors the TCDRS check in TABL~EXISTS
+        IF et_existing IS NOT INITIAL.
+          SELECT tabname
+            FROM tcdrs
+            INTO TABLE @et_generated
+            FOR ALL ENTRIES IN @et_existing
+            WHERE tabname = @et_existing-table_line.
+        ENDIF.
+      CATCH cx_root.
+        CLEAR et_existing.
+        CLEAR et_generated.
+        ev_success = abap_false.
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD build_dtel_buffer.
+    DATA lt_keys TYPE ty_dtel_keys.
+    DATA lv_rollname TYPE dd04l-rollname.
+
+    CLEAR et_existing.
+    ev_success = abap_true.
+
+    LOOP AT it_tadir INTO DATA(ls_tadir) WHERE object = 'DTEL'.
+      lv_rollname = ls_tadir-obj_name.
+      INSERT lv_rollname INTO TABLE lt_keys.
+    ENDLOOP.
+
+    IF lt_keys IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    TRY.
+        " DD04L holds all versions (active and inactive) — equivalent to the
+        " DD_GET_NAMETAB_HEADER miss-path fallback in the standard DTEL~EXISTS
+        SELECT rollname
+          FROM dd04l
+          INTO TABLE @et_existing
+          FOR ALL ENTRIES IN @lt_keys
+          WHERE rollname = @lt_keys-table_line.
+      CATCH cx_root.
+        CLEAR et_existing.
+        ev_success = abap_false.
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD build_intf_buffer.
+    DATA lt_keys    TYPE ty_intf_keys.
+    DATA lt_raw     TYPE ty_intf_raw_tab.
+    DATA lv_clsname TYPE seoclassdf-clsname.
+    DATA lv_wd_cat  TYPE seoclassdf-category.
+
+    CLEAR et_existing.
+    CLEAR et_proxy_gen.
+    ev_success = abap_true.
+
+    " Resolve numeric value of the WebDynpro-interface category constant
+    lv_wd_cat = seoc_category_webdynpro_class.
+
+    LOOP AT it_tadir INTO DATA(ls_tadir) WHERE object = 'INTF'.
+      lv_clsname = ls_tadir-obj_name.
+      INSERT lv_clsname INTO TABLE lt_keys.
+    ENDLOOP.
+
+    IF lt_keys IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    TRY.
+        " Step 1: existence + category via SEOCLASSDF
+        " version '0'/'1' matches the behavior of SEO_CLASS_EXISTENCE_CHECK
+        SELECT clsname, category
+          FROM seoclassdf
+          INTO TABLE @lt_raw
+          FOR ALL ENTRIES IN @lt_keys
+          WHERE clsname = @lt_keys-table_line
+            AND ( version = '0' OR version = '1' ).
+
+        " Exclude WebDynpro-generated interfaces — identical to standard INTF~EXISTS
+        LOOP AT lt_raw INTO DATA(ls_raw).
+          IF ls_raw-category <> lv_wd_cat.
+            INSERT ls_raw-clsname INTO TABLE et_existing.
+          ENDIF.
+        ENDLOOP.
+
+        " Step 2: exclude proxy-generated interfaces — mirrors SPROXHDR check in INTF~EXISTS
+        IF et_existing IS NOT INITIAL.
+          SELECT obj_name
+            FROM sproxhdr
+            INTO TABLE @et_proxy_gen
+            FOR ALL ENTRIES IN @et_existing
+            WHERE object   = 'INTF'
+              AND obj_name = @et_existing-table_line.
+        ENDIF.
+      CATCH cx_root.
+        CLEAR et_existing.
+        CLEAR et_proxy_gen.
+        ev_success = abap_false.
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD build_clas_buffer.
+    DATA lt_keys    TYPE ty_clas_keys.
+    DATA lv_clsname TYPE seoclassdf-clsname.
+
+    CLEAR et_existing.
+    CLEAR et_sadl_gen.
+    ev_success = abap_true.
+
+    LOOP AT it_tadir INTO DATA(ls_tadir) WHERE object = 'CLAS'.
+      lv_clsname = ls_tadir-obj_name.
+      INSERT lv_clsname INTO TABLE lt_keys.
+    ENDLOOP.
+
+    IF lt_keys IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    TRY.
+        " Step 1: existence via SEOCLASSDF (version '0'/'1' = inactive or active)
+        SELECT clsname
+          FROM seoclassdf
+          INTO TABLE @et_existing
+          FOR ALL ENTRIES IN @lt_keys
+          WHERE clsname = @lt_keys-table_line
+            AND ( version = '0' OR version = '1' ).
+
+        " Step 2: SADL-generated classes must be excluded
+        " (mirrors the read_superclass check in standard CLAS~EXISTS:
+        "  skip if superclass = 'CL_SADL_GTK_EXPOSURE_MPC')
+        IF et_existing IS NOT INITIAL.
+          SELECT clsname
+            FROM vseoextend
+            INTO TABLE @et_sadl_gen
+            FOR ALL ENTRIES IN @et_existing
+            WHERE clsname    = @et_existing-table_line
+              AND refclsname = 'CL_SADL_GTK_EXPOSURE_MPC'.
+        ENDIF.
+      CATCH cx_root.
+        CLEAR et_existing.
+        CLEAR et_sadl_gen.
+        ev_success = abap_false.
+    ENDTRY.
   ENDMETHOD.
 
   METHOD get_dsys_object.
