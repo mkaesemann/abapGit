@@ -4,6 +4,10 @@ CLASS ltcl_obj_store DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
     METHODS setup. METHODS teardown.
     METHODS store_and_get FOR TESTING RAISING cx_static_check.
     METHODS not_found FOR TESTING RAISING cx_static_check.
+    METHODS get_objects_bulk FOR TESTING RAISING cx_static_check.
+    METHODS get_objects_missing FOR TESTING RAISING cx_static_check.
+    METHODS reachable_objects_graph FOR TESTING RAISING cx_static_check.
+    METHODS reachable_objects_missing_tree FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 CLASS ltcl_obj_store IMPLEMENTATION.
   METHOD setup. DELETE FROM zaog_obj_store WHERE repo_key = mc_repo. ENDMETHOD.
@@ -16,6 +20,142 @@ CLASS ltcl_obj_store IMPLEMENTATION.
   ENDMETHOD.
   METHOD not_found.
     TRY. zcl_abapgit_ortec_obj_store=>get_object( iv_repo_key = mc_repo iv_sha1 = 'ffffffffffffffffffffffffffffffffffffffff' ). cl_abap_unit_assert=>fail( ). CATCH zcx_abapgit_ortec_git. ENDTRY.
+  ENDMETHOD.
+  METHOD get_objects_bulk.
+    DATA lt_sha1s TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lv_first TYPE xstring.
+    DATA lv_second TYPE xstring.
+
+    lv_first = '31'.
+    lv_second = '32'.
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = '1111111111111111111111111111111111111111'
+      iv_type     = zif_abapgit_git_definitions=>c_type-blob
+      iv_data     = lv_first ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = '2222222222222222222222222222222222222222'
+      iv_type     = zif_abapgit_git_definitions=>c_type-blob
+      iv_data     = lv_second ).
+
+    APPEND '1111111111111111111111111111111111111111' TO lt_sha1s.
+    APPEND '2222222222222222222222222222222222222222' TO lt_sha1s.
+    APPEND '1111111111111111111111111111111111111111' TO lt_sha1s.
+
+    lt_objects = zcl_abapgit_ortec_obj_store=>get_objects(
+      iv_repo_key = mc_repo
+      it_sha1s    = lt_sha1s ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lines( lt_objects )
+      exp = 2
+      msg = 'Duplicate SHA input is read once' ).
+    READ TABLE lt_objects TRANSPORTING NO FIELDS
+         WITH KEY type COMPONENTS type = zif_abapgit_git_definitions=>c_type-blob
+                                  sha1 = '2222222222222222222222222222222222222222'.
+    cl_abap_unit_assert=>assert_subrc( msg = 'Second blob was read' ).
+  ENDMETHOD.
+  METHOD get_objects_missing.
+    DATA lt_sha1s TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+
+    APPEND 'ffffffffffffffffffffffffffffffffffffffff' TO lt_sha1s.
+    TRY.
+        zcl_abapgit_ortec_obj_store=>get_objects(
+          iv_repo_key = mc_repo
+          it_sha1s    = lt_sha1s ).
+        cl_abap_unit_assert=>fail( 'Missing bulk object must raise' ).
+      CATCH zcx_abapgit_ortec_git.
+    ENDTRY.
+  ENDMETHOD.
+  METHOD reachable_objects_graph.
+    DATA lt_nodes TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+    DATA ls_node LIKE LINE OF lt_nodes.
+    DATA ls_commit TYPE zcl_abapgit_git_pack=>ty_commit.
+    DATA lt_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lt_expanded TYPE zif_abapgit_git_definitions=>ty_expanded_tt.
+    DATA lv_blob_data TYPE xstring.
+    DATA lv_blob_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_tree_data TYPE xstring.
+    DATA lv_tree_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_commit_data TYPE xstring.
+    DATA lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+
+    lv_blob_data = '48656C6C6F'.
+    lv_blob_sha = zcl_abapgit_hash=>sha1_blob( lv_blob_data ).
+
+    ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-file.
+    ls_node-name  = 'hello.txt'.
+    ls_node-sha1  = lv_blob_sha.
+    APPEND ls_node TO lt_nodes.
+
+    lv_tree_data = zcl_abapgit_git_pack=>encode_tree( lt_nodes ).
+    lv_tree_sha = zcl_abapgit_hash=>sha1_tree( lv_tree_data ).
+
+    ls_commit-tree = lv_tree_sha.
+    ls_commit-author = 'Test <test@example.com> 0 +0000'.
+    ls_commit-committer = 'Test <test@example.com> 0 +0000'.
+    ls_commit-body = 'test'.
+    lv_commit_data = zcl_abapgit_git_pack=>encode_commit( ls_commit ).
+    lv_commit_sha = zcl_abapgit_hash=>sha1_commit( lv_commit_data ).
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_commit_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-commit
+      iv_data     = lv_commit_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_tree_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-tree
+      iv_data     = lv_tree_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_blob_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-blob
+      iv_data     = lv_blob_data ).
+
+    lt_objects = zcl_abapgit_ortec_obj_store=>get_reachable_objects(
+      iv_repo_key = mc_repo
+      iv_commit   = lv_commit_sha ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lines( lt_objects )
+      exp = 3
+      msg = 'Commit tree and blob are reachable' ).
+
+    lt_expanded = zcl_abapgit_git_porcelain=>full_tree(
+      it_objects = lt_objects
+      iv_parent  = lv_commit_sha ).
+    READ TABLE lt_expanded TRANSPORTING NO FIELDS WITH KEY path_name COMPONENTS path = '/' name = 'hello.txt'.
+    cl_abap_unit_assert=>assert_subrc( msg = 'Reconstituted objects are full_tree-safe' ).
+  ENDMETHOD.
+  METHOD reachable_objects_missing_tree.
+    DATA ls_commit TYPE zcl_abapgit_git_pack=>ty_commit.
+    DATA lv_commit_data TYPE xstring.
+    DATA lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+
+    ls_commit-tree = '3333333333333333333333333333333333333333'.
+    ls_commit-author = 'Test <test@example.com> 0 +0000'.
+    ls_commit-committer = 'Test <test@example.com> 0 +0000'.
+    ls_commit-body = 'missing tree'.
+    lv_commit_data = zcl_abapgit_git_pack=>encode_commit( ls_commit ).
+    lv_commit_sha = zcl_abapgit_hash=>sha1_commit( lv_commit_data ).
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_commit_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-commit
+      iv_data     = lv_commit_data ).
+
+    TRY.
+        zcl_abapgit_ortec_obj_store=>get_reachable_objects(
+          iv_repo_key = mc_repo
+          iv_commit   = lv_commit_sha ).
+        cl_abap_unit_assert=>fail( 'Missing reachable tree must raise' ).
+      CATCH zcx_abapgit_ortec_git.
+    ENDTRY.
   ENDMETHOD.
 ENDCLASS.
 CLASS ltcl_switch DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.

@@ -358,16 +358,19 @@ METHOD pull_by_branch.
     IF lv_remote_sha = ls_state-fetch_commit.
       " Remote unchanged -> reconstitute from stored objects (Phase 3)
       lo_fp_timer = zcl_abapgit_timer=>create( )->start( ).
-      rs_result-objects = zcl_abapgit_ortec_obj_store=>get_all_objects( lv_repo_key ).
       rs_result-commit  = ls_state-fetch_commit.
-
-      IF rs_result-objects IS INITIAL.
-        CLEAR rs_result.
-        RETURN.
-      ENDIF.
 
       " Phase 4: Walk tree to produce files
       TRY.
+          rs_result-objects = zcl_abapgit_ortec_obj_store=>get_reachable_objects(
+            iv_repo_key = lv_repo_key
+            iv_commit   = rs_result-commit ).
+
+          IF rs_result-objects IS INITIAL.
+            CLEAR rs_result.
+            RETURN.
+          ENDIF.
+
           lt_expanded = zcl_abapgit_git_porcelain=>full_tree(
                             it_objects = rs_result-objects
                             iv_parent  = rs_result-commit ).
@@ -387,12 +390,11 @@ METHOD pull_by_branch.
             ENDIF.
           ENDLOOP.
 
-        CATCH zcx_abapgit_exception.
+        CATCH zcx_abapgit_ortec_git zcx_abapgit_exception.
           " Object store is tree-incomplete for this commit.
-          " Invalidate the tip commit from ZAOG_COMMIT_HIST and clear
-          " fetch_commit in ZAOG_REPO_STATE so the next upload_pack sends
-          " no have-lines for it and the server delivers a complete pack.
-          " The stored objects are kept as delta bases for the repair fetch.
+          " De-register only this tip as fully materialised so it is not
+          " advertised as an empty-pack-safe have. Other complete commits
+          " and all stored objects remain available as delta bases for repair.
           zcl_abapgit_ortec_repo_state=>invalidate_tip_commit(
             iv_repo_key    = lv_repo_key
             iv_branch_name = iv_branch_name
@@ -519,6 +521,10 @@ METHOD upload_pack.
     DATA lv_pack    TYPE xstring.
     DATA lv_repo_key TYPE zcl_abapgit_ortec_repo_state=>ty_repo_key.
     DATA lt_ortec_haves TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_cached TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lt_reachable TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lt_cached_shas TYPE HASHED TABLE OF zif_abapgit_git_definitions=>ty_sha1
+               WITH UNIQUE KEY table_line.
 
     DATA lo_fetch_timer   TYPE REF TO zcl_abapgit_timer.
     DATA lv_fetch_duration TYPE string.
@@ -526,6 +532,7 @@ METHOD upload_pack.
 
     FIELD-SYMBOLS <lv_hash> LIKE LINE OF it_hashes.
     FIELD-SYMBOLS <lv_ortec_have> LIKE LINE OF lt_ortec_haves.
+    FIELD-SYMBOLS <ls_reachable> LIKE LINE OF lt_reachable.
 
 
     io_client->set_headers(
@@ -585,50 +592,57 @@ METHOD upload_pack.
       lv_repo_key = zcl_abapgit_ortec_repo_state=>get_repo_key_for_url( iv_url ).
       IF lv_repo_key IS NOT INITIAL.
         TRY.
-            DATA lt_cached   TYPE zif_abapgit_definitions=>ty_objects_tt.
-            DATA lv_want_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
-            lt_cached = zcl_abapgit_ortec_obj_store=>get_all_objects( lv_repo_key ).
-            IF lt_cached IS NOT INITIAL.
-              READ TABLE it_hashes INTO lv_want_sha INDEX 1.
-              IF sy-subrc = 0.
-                READ TABLE lt_cached TRANSPORTING NO FIELDS
-                     WITH KEY type COMPONENTS type = zif_abapgit_git_definitions=>c_type-commit
-                                              sha1 = lv_want_sha.
-                IF sy-subrc = 0.
-                  " Validate tree completeness before trusting the cache.
-                  " A corrupt earlier fetch can leave commits recorded in
-                  " ZAOG_COMMIT_HIST but with missing subtrees; this guard
-                  " prevents returning broken data to the push path.
-                  TRY.
-                      zcl_abapgit_git_porcelain=>full_tree(
-                        it_objects = lt_cached
-                        iv_parent  = lv_want_sha ).
-                    CATCH zcx_abapgit_exception.
-                      " Cache is tree-incomplete - invalidate tip commit so
-                      " the next have-negotiation excludes it from have-lines
-                      " and the server delivers a complete pack.
-                      zcl_abapgit_ortec_repo_state=>invalidate_tip_commit(
-                        iv_repo_key = lv_repo_key
-                        iv_commit   = lv_want_sha ).
-                      zcx_abapgit_ortec_git=>raise(
-                        'Cached objects have incomplete tree - falling back to standard fetch' ).
-                  ENDTRY.
-                  rt_objects = lt_cached.
-                  lv_fetch_duration = lo_fetch_timer->end( ).
-                  li_progress = zcl_abapgit_progress=>get_instance( 1 ).
-                  li_progress->show(
-                    iv_current = 1
-                    iv_text    = |Fastpath: { lines( rt_objects ) } git objects (cached, empty pack), { lv_fetch_duration }| ).
-                  RETURN.
+            IF lines( it_hashes ) > 1.
+              zcx_abapgit_ortec_git=>raise( 'Cached multi-want empty pack requires standard fetch' ).
+            ENDIF.
+
+            CLEAR: lt_cached,
+                   lt_cached_shas.
+
+            LOOP AT it_hashes ASSIGNING <lv_hash>.
+              TRY.
+                  lt_reachable = zcl_abapgit_ortec_obj_store=>get_reachable_objects(
+                    iv_repo_key = lv_repo_key
+                    iv_commit   = <lv_hash> ).
+                  zcl_abapgit_git_porcelain=>full_tree(
+                    it_objects = lt_reachable
+                    iv_parent  = <lv_hash> ).
+                CATCH zcx_abapgit_ortec_git zcx_abapgit_exception.
+                  " Cache is tree-incomplete. De-register this commit as
+                  " fully materialised so it is no longer advertised as an
+                  " empty-pack-safe have; keep other haves as delta bases.
+                  zcl_abapgit_ortec_repo_state=>invalidate_tip_commit(
+                    iv_repo_key = lv_repo_key
+                    iv_commit   = <lv_hash> ).
+                  zcx_abapgit_ortec_git=>raise(
+                    'Cached objects have incomplete tree - falling back to standard fetch' ).
+              ENDTRY.
+
+              LOOP AT lt_reachable ASSIGNING <ls_reachable>.
+                READ TABLE lt_cached_shas WITH TABLE KEY table_line = <ls_reachable>-sha1 TRANSPORTING NO FIELDS.
+                IF sy-subrc <> 0.
+                  INSERT <ls_reachable>-sha1 INTO TABLE lt_cached_shas.
+                  APPEND <ls_reachable> TO lt_cached.
                 ENDIF.
-              ENDIF.
+              ENDLOOP.
+            ENDLOOP.
+
+            IF lt_cached IS NOT INITIAL.
+              rt_objects = lt_cached.
+              lv_fetch_duration = lo_fetch_timer->end( ).
+              li_progress = zcl_abapgit_progress=>get_instance( 1 ).
+              li_progress->show(
+                iv_current = 1
+                iv_text    = |Fastpath: { lines( rt_objects ) } git objects (cached, empty pack), { lv_fetch_duration }| ).
+              RETURN.
             ENDIF.
           CATCH zcx_abapgit_ortec_git.
         ENDTRY.
       ENDIF.
 
-      " Want-commit not in cache — caller must do a real fetch via fallback path.
-      zcx_abapgit_ortec_git=>raise( 'Response could not be parsed - empty pack returned.' ).
+      " Cached objects are unavailable or unsafe; caller must use the standard fetch path.
+      zcx_abapgit_ortec_git=>raise(
+        'Cached objects not available for empty pack response - falling back to standard fetch' ).
     ENDIF.
 
     TRY.
@@ -768,4 +782,3 @@ METHOD upload_pack.
     rv_key = zcl_abapgit_ortec_repo_state=>get_or_create_repo_key_for_url( iv_url ).
   ENDMETHOD.
 ENDCLASS.
-
