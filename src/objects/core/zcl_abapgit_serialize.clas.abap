@@ -603,7 +603,7 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
         communication_failure = 3 MESSAGE lv_mess
         OTHERS = 4.
     IF sy-subrc <> 0.
-      mv_parallel_broken = abap_true.
+      "mv_parallel_broken = abap_true.
       IF NOT mi_log IS INITIAL.
         IF NOT lv_mess IS INITIAL.
           DATA(gui_error) = 'Maximum number of GUI sessions reached'.

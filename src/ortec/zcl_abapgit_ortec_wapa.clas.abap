@@ -4,7 +4,7 @@ CLASS zcl_abapgit_ortec_wapa DEFINITION
   CREATE PRIVATE .
 
 * Optimised serialize / exists path for abapGit object handler ZCL_ABAPGIT_OBJECT_WAPA.
-* Activated from ZCL_ABAPGIT_OBJECT_WAPA via kill-switch constants c_use_ortec_serialize / c_use_ortec_exists.
+* Activated from ZCL_ABAPGIT_OBJECT_WAPA via switch in zcl_abapgit_ortec_git_switch.
 * Output (XML + raw page files written to io_files) MUST be byte-identical to the legacy path.
 *
 * Stage B:  direct active-version page reads from O2PAGDIR / O2PAGCON instead of
@@ -14,7 +14,7 @@ CLASS zcl_abapgit_ortec_wapa DEFINITION
 
   PUBLIC SECTION.
 
-    CONSTANTS c_max_page_size_bytes TYPE i VALUE 10000000 ##NO_TEXT.
+    CONSTANTS c_max_page_size_bytes TYPE i VALUE 20000000 ##NO_TEXT.
 
     CLASS-METHODS serialize
       IMPORTING

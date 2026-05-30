@@ -69,6 +69,9 @@ CLASS zcl_abapgit_ortec_git_switch DEFINITION
     CLASS-METHODS is_serial_prefetch_active
       RETURNING VALUE(rv_active) TYPE abap_bool.
 
+    CLASS-METHODS is_wapa_active
+      RETURNING VALUE(rv_active) TYPE abap_bool.
+
     "! Enable or disable serializer prefetch in this internal session.
     "! @parameter iv_active |
     "! ABAP_TRUE enables the guarded serialization prefetch hook.
@@ -213,6 +216,10 @@ CLASS zcl_abapgit_ortec_git_switch IMPLEMENTATION.
 
   METHOD is_active_for_repo.
     rv_active = get_use_repo_cache( iv_url ).
+  ENDMETHOD.
+
+  METHOD is_wapa_active.
+    rv_active = abap_true.
   ENDMETHOD.
 
 ENDCLASS.
