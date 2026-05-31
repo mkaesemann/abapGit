@@ -346,11 +346,21 @@ CLASS zcl_abapgit_objects_super IMPLEMENTATION.
 
   METHOD serialize_longtexts.
 
+    DATA lt_dokil TYPE zif_abapgit_definitions=>ty_dokil_tt.
+
+    IF it_dokil IS NOT INITIAL.
+      lt_dokil = it_dokil.
+    ELSEIF iv_longtext_id IS NOT INITIAL.
+      lt_dokil = zcl_abapgit_ortec_ser_pref=>get_dokil(
+        iv_longtext_id = iv_longtext_id
+        iv_object_name = ms_item-obj_name ).
+    ENDIF.
+
     zcl_abapgit_factory=>get_longtexts( )->serialize(
       iv_object_name   = ms_item-obj_name
       iv_longtext_name = iv_longtext_name
       iv_longtext_id   = iv_longtext_id
-      it_dokil         = it_dokil
+      it_dokil         = lt_dokil
       io_i18n_params   = mo_i18n_params
       ii_xml           = ii_xml ).
 
