@@ -22,7 +22,7 @@ CLASS zcl_abapgit_ortec_obj_store DEFINITION
       RAISING   zcx_abapgit_ortec_git.
 
     CLASS-METHODS get_object
-      IMPORTING iv_repo_key      TYPE ty_repo_key
+      IMPORTING iv_repo_key      TYPE ty_repo_key OPTIONAL
                 iv_sha1          TYPE zif_abapgit_git_definitions=>ty_sha1
       RETURNING VALUE(rs_object) TYPE zif_abapgit_definitions=>ty_object
       RAISING   zcx_abapgit_ortec_git.

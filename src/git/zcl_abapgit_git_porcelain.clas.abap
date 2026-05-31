@@ -947,6 +947,7 @@ CLASS ZCL_ABAPGIT_GIT_PORCELAIN IMPLEMENTATION.
     DATA: ls_object   LIKE LINE OF it_objects,
           lt_expanded LIKE rt_expanded,
           lt_nodes    TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+    DATA ls_ortec_object TYPE zif_abapgit_definitions=>ty_object.
 
     FIELD-SYMBOLS: <ls_exp>  LIKE LINE OF rt_expanded,
                    <ls_node> LIKE LINE OF lt_nodes.
@@ -956,10 +957,21 @@ CLASS ZCL_ABAPGIT_GIT_PORCELAIN IMPLEMENTATION.
       WITH KEY type COMPONENTS
         type = zif_abapgit_git_definitions=>c_type-tree
         sha1 = iv_tree.
-    IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise( 'tree not found' ).
+    IF sy-subrc = 0.
+      lt_nodes = zcl_abapgit_git_pack=>decode_tree( ls_object-data ).
+    ELSE.
+* ORTEC: try persistent object store for tree omitted by incremental fetch
+      TRY.
+          ls_ortec_object = zcl_abapgit_ortec_obj_store=>get_object(
+            iv_sha1 = iv_tree ).
+          IF ls_ortec_object-type <> zif_abapgit_git_definitions=>c_type-tree.
+            zcx_abapgit_exception=>raise( 'walk_tree, tree not found' ).
+          ENDIF.
+          lt_nodes = zcl_abapgit_git_pack=>decode_tree( ls_ortec_object-data ).
+        CATCH zcx_abapgit_ortec_git.
+          zcx_abapgit_exception=>raise( 'tree not found' ).
+      ENDTRY.
     ENDIF.
-    lt_nodes = zcl_abapgit_git_pack=>decode_tree( ls_object-data ).
 
     LOOP AT lt_nodes ASSIGNING <ls_node>.
       CASE <ls_node>-chmod.
