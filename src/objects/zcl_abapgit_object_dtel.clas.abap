@@ -104,6 +104,7 @@ CLASS zcl_abapgit_object_dtel IMPLEMENTATION.
           lt_dd04_texts      TYPE ty_dd04_texts,
           lt_i18n_langs      TYPE TABLE OF langu,
           lt_language_filter TYPE zif_abapgit_environment=>ty_system_language_filter.
+    DATA lt_dtel_i18n_texts TYPE zcl_abapgit_ortec_ser_pref_ext=>ty_dtel_i18n_texts.
 
     FIELD-SYMBOLS: <lv_lang>      LIKE LINE OF lt_i18n_langs,
                    <ls_dd04_text> LIKE LINE OF lt_dd04_texts.
@@ -117,36 +118,65 @@ CLASS zcl_abapgit_object_dtel IMPLEMENTATION.
     " Collect additional languages, skip main lang - it was serialized already
     lt_language_filter = mo_i18n_params->build_language_filter( ).
 
-    SELECT DISTINCT ddlanguage AS langu INTO TABLE lt_i18n_langs
-      FROM dd04v
-      WHERE rollname = lv_name
-      AND ddlanguage IN lt_language_filter
-      AND ddlanguage <> mv_language
-      ORDER BY langu.                                     "#EC CI_SUBRC
-
-    LOOP AT lt_i18n_langs ASSIGNING <lv_lang>.
-      lv_index = sy-tabix.
-      CALL FUNCTION 'DDIF_DTEL_GET'
+    " Try prefetch first
+    IF zcl_abapgit_ortec_git_switch=>is_serial_prefetch_active( ) = abap_true
+      AND zcl_abapgit_ortec_ser_pref_ext=>get_dtel_i18n(
         EXPORTING
-          name          = lv_name
-          langu         = <lv_lang>
+          iv_rollname   = CONV #( lv_name )
+          iv_language   = mv_language
         IMPORTING
-          dd04v_wa      = ls_dd04v
-        EXCEPTIONS
-          illegal_input = 1
-          OTHERS        = 2.
-      IF sy-subrc <> 0 OR ls_dd04v-ddlanguage IS INITIAL.
-        DELETE lt_i18n_langs INDEX lv_index. " Don't save this lang
-        CONTINUE.
+          et_i18n_langs = lt_i18n_langs
+          et_dtel_texts = lt_dtel_i18n_texts ) = abap_true.
+
+      " Apply language filter
+      IF lt_language_filter IS NOT INITIAL.
+        DELETE lt_i18n_langs WHERE table_line NOT IN lt_language_filter.
+        DELETE lt_dtel_i18n_texts WHERE ddlanguage NOT IN lt_language_filter.
       ENDIF.
 
-      APPEND INITIAL LINE TO lt_dd04_texts ASSIGNING <ls_dd04_text>.
-      MOVE-CORRESPONDING ls_dd04v TO <ls_dd04_text>.
+      SORT lt_i18n_langs ASCENDING.
 
-    ENDLOOP.
+      " Convert to ty_dd04_texts
+      LOOP AT lt_dtel_i18n_texts INTO DATA(ls_i18n_text).
+        APPEND INITIAL LINE TO lt_dd04_texts ASSIGNING <ls_dd04_text>.
+        MOVE-CORRESPONDING ls_i18n_text TO <ls_dd04_text>.
+      ENDLOOP.
+      SORT lt_dd04_texts BY ddlanguage ASCENDING.
 
-    SORT lt_i18n_langs ASCENDING.
-    SORT lt_dd04_texts BY ddlanguage ASCENDING.
+    ELSE.
+
+      SELECT DISTINCT ddlanguage AS langu INTO TABLE lt_i18n_langs
+        FROM dd04v
+        WHERE rollname = lv_name
+        AND ddlanguage IN lt_language_filter
+        AND ddlanguage <> mv_language
+        ORDER BY langu.                                   "#EC CI_SUBRC
+
+      LOOP AT lt_i18n_langs ASSIGNING <lv_lang>.
+        lv_index = sy-tabix.
+        CALL FUNCTION 'DDIF_DTEL_GET'
+          EXPORTING
+            name          = lv_name
+            langu         = <lv_lang>
+          IMPORTING
+            dd04v_wa      = ls_dd04v
+          EXCEPTIONS
+            illegal_input = 1
+            OTHERS        = 2.
+        IF sy-subrc <> 0 OR ls_dd04v-ddlanguage IS INITIAL.
+          DELETE lt_i18n_langs INDEX lv_index. " Don't save this lang
+          CONTINUE.
+        ENDIF.
+
+        APPEND INITIAL LINE TO lt_dd04_texts ASSIGNING <ls_dd04_text>.
+        MOVE-CORRESPONDING ls_dd04v TO <ls_dd04_text>.
+
+      ENDLOOP.
+
+      SORT lt_i18n_langs ASCENDING.
+      SORT lt_dd04_texts BY ddlanguage ASCENDING.
+
+    ENDIF.
 
     IF lines( lt_i18n_langs ) > 0.
       ii_xml->add( iv_name = 'I18N_LANGS'

@@ -655,6 +655,10 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
 
     DO.
       lv_task = |{ iv_task }-{ sy-index }|.
+      " Extract per-object prefetch slice for parallel worker
+      DATA(lv_prefetch_buf) = zcl_abapgit_ortec_ser_pref=>extract_for_object( is_tadir ).
+      DATA(lv_prefetch_buf_ext) = zcl_abapgit_ortec_ser_pref_ext=>extract_for_object( is_tadir ).
+      DATA(lv_prefetch_buf_oo) = zcl_abapgit_ortec_ser_pref_oo=>extract_for_object( is_tadir ).
       " An initial server group is handled like DEFAULT meaning all instances are used
       CALL FUNCTION 'Z_ABAPGIT_SERIALIZE_PARALLEL'
         STARTING NEW TASK lv_task
@@ -669,6 +673,9 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
           iv_suppress_po_comments = ms_i18n_params-suppress_po_comments
           it_translation_langs    = ms_i18n_params-translation_languages
           iv_use_lxe              = ms_i18n_params-use_lxe
+          iv_prefetch_buffer      = lv_prefetch_buf
+          iv_prefetch_buffer_ext  = lv_prefetch_buf_ext
+          iv_prefetch_buffer_oo   = lv_prefetch_buf_oo
         EXCEPTIONS
           system_failure          = 1 MESSAGE lv_msg
           communication_failure   = 2 MESSAGE lv_msg
@@ -785,6 +792,9 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
       zcl_abapgit_ortec_ser_pref_ext=>prepare(
         it_tadir    = lt_tadir
         iv_language = ms_i18n_params-main_language ).
+      zcl_abapgit_ortec_ser_pref_oo=>prepare(
+        it_tadir    = lt_tadir
+        iv_language = ms_i18n_params-main_language ).
     ENDIF.
 
     TRY.
@@ -837,12 +847,14 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
         IF lv_use_ortec_prefetch = abap_true.
           zcl_abapgit_ortec_ser_pref=>clear( ).
           zcl_abapgit_ortec_ser_pref_ext=>clear( ).
+          zcl_abapgit_ortec_ser_pref_oo=>clear( ).
         ENDIF.
     ENDTRY.
 
     IF lv_use_ortec_prefetch = abap_true.
       zcl_abapgit_ortec_ser_pref=>clear( ).
       zcl_abapgit_ortec_ser_pref_ext=>clear( ).
+      zcl_abapgit_ortec_ser_pref_oo=>clear( ).
     ENDIF.
 
   ENDMETHOD.

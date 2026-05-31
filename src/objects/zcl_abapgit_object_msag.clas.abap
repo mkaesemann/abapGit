@@ -234,6 +234,7 @@ CLASS zcl_abapgit_object_msag IMPLEMENTATION.
           lt_t100t           TYPE TABLE OF t100t,
           lt_i18n_langs      TYPE TABLE OF langu,
           lt_language_filter TYPE zif_abapgit_environment=>ty_system_language_filter.
+    DATA lt_t100_i18n_raw TYPE zcl_abapgit_ortec_ser_pref=>ty_t100_tt.
 
     lv_msg_id = ms_item-obj_name.
 
@@ -245,32 +246,67 @@ CLASS zcl_abapgit_object_msag IMPLEMENTATION.
     " Skip main lang - it has been already serialized and also technical languages
     lt_language_filter = mo_i18n_params->build_language_filter( ).
 
-    SELECT DISTINCT sprsl AS langu INTO TABLE lt_i18n_langs
-      FROM t100t
-      WHERE arbgb = lv_msg_id
-      AND sprsl IN lt_language_filter
-      AND sprsl <> mv_language
-      ORDER BY langu.                    "#EC CI_BYPASS "#EC CI_GENBUFF
+    " Try prefetch first
+    IF zcl_abapgit_ortec_git_switch=>is_serial_prefetch_active( ) = abap_true
+      AND zcl_abapgit_ortec_ser_pref=>get_msag_i18n_data(
+        EXPORTING
+          iv_msg_id     = lv_msg_id
+          iv_language   = mv_language
+        IMPORTING
+          et_i18n_langs = lt_i18n_langs
+          et_t100t      = lt_t100t
+          et_t100_i18n  = lt_t100_i18n_raw ) = abap_true.
 
-    SORT lt_i18n_langs ASCENDING.
+      " Apply language filter from prefetched data
+      IF lt_language_filter IS NOT INITIAL.
+        DELETE lt_i18n_langs WHERE table_line NOT IN lt_language_filter.
+        DELETE lt_t100t WHERE sprsl NOT IN lt_language_filter.
+        DELETE lt_t100_i18n_raw WHERE sprsl NOT IN lt_language_filter.
+      ENDIF.
 
-    IF lines( lt_i18n_langs ) > 0.
-
-      SELECT * FROM t100t INTO CORRESPONDING FIELDS OF TABLE lt_t100t
-        WHERE sprsl IN lt_language_filter
-        AND sprsl <> mv_language
-        AND arbgb = lv_msg_id
-        ORDER BY PRIMARY KEY.                           "#EC CI_GENBUFF
-
-      SELECT * FROM t100 INTO CORRESPONDING FIELDS OF TABLE lt_t100_texts
-        WHERE sprsl IN lt_language_filter
-        AND sprsl <> mv_language
-        AND arbgb = lv_msg_id
-        ORDER BY PRIMARY KEY.             "#EC CI_SUBRC "#EC CI_GENBUFF
-
+      SORT lt_i18n_langs ASCENDING.
       SORT lt_t100t BY sprsl ASCENDING.
+
+      " Convert t100 to ty_t100_texts
+      LOOP AT lt_t100_i18n_raw INTO DATA(ls_t100_raw).
+        APPEND INITIAL LINE TO lt_t100_texts ASSIGNING FIELD-SYMBOL(<ls_text>).
+        MOVE-CORRESPONDING ls_t100_raw TO <ls_text>.
+      ENDLOOP.
       SORT lt_t100_texts BY sprsl msgnr ASCENDING.
 
+    ELSE.
+
+      SELECT DISTINCT sprsl AS langu INTO TABLE lt_i18n_langs
+        FROM t100t
+        WHERE arbgb = lv_msg_id
+        AND sprsl IN lt_language_filter
+        AND sprsl <> mv_language
+        ORDER BY langu.                  "#EC CI_BYPASS "#EC CI_GENBUFF
+
+      SORT lt_i18n_langs ASCENDING.
+
+      IF lines( lt_i18n_langs ) > 0.
+
+        SELECT * FROM t100t INTO CORRESPONDING FIELDS OF TABLE lt_t100t
+          WHERE sprsl IN lt_language_filter
+          AND sprsl <> mv_language
+          AND arbgb = lv_msg_id
+          ORDER BY PRIMARY KEY.                         "#EC CI_GENBUFF
+
+        SELECT * FROM t100 INTO CORRESPONDING FIELDS OF TABLE lt_t100_texts
+          WHERE sprsl IN lt_language_filter
+          AND sprsl <> mv_language
+          AND arbgb = lv_msg_id
+          ORDER BY PRIMARY KEY.           "#EC CI_SUBRC "#EC CI_GENBUFF
+
+        SORT lt_t100t BY sprsl ASCENDING.
+        SORT lt_t100_texts BY sprsl msgnr ASCENDING.
+
+      ENDIF.
+
+    ENDIF.
+
+    IF lines( lt_i18n_langs ) > 0.
       ii_xml->add( iv_name = 'I18N_LANGS'
                    ig_data = lt_i18n_langs ).
 
@@ -279,7 +315,6 @@ CLASS zcl_abapgit_object_msag IMPLEMENTATION.
 
       ii_xml->add( iv_name = 'T100_TEXTS'
                    ig_data = lt_t100_texts ).
-
     ENDIF.
 
   ENDMETHOD.

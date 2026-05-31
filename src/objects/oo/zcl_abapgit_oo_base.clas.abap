@@ -153,6 +153,15 @@ CLASS ZCL_ABAPGIT_OO_BASE IMPLEMENTATION.
   METHOD zif_abapgit_oo_object_fnc~read_descriptions_class.
     FIELD-SYMBOLS <ls_description> LIKE LINE OF rt_descriptions.
 
+    IF zcl_abapgit_ortec_git_switch=>is_serial_prefetch_active( ) = abap_true.
+      IF zcl_abapgit_ortec_ser_pref_oo=>get_descriptions_class(
+        EXPORTING iv_clsname      = iv_object_name
+                  iv_language     = iv_language
+        IMPORTING et_descriptions = rt_descriptions ) = abap_true.
+        RETURN.
+      ENDIF.
+    ENDIF.
+
     " Only translations i.e. not the main language
     SELECT * FROM seoclasstx INTO TABLE rt_descriptions
             WHERE clsname   = iv_object_name
@@ -168,6 +177,15 @@ CLASS ZCL_ABAPGIT_OO_BASE IMPLEMENTATION.
 
   METHOD zif_abapgit_oo_object_fnc~read_descriptions_compo.
     FIELD-SYMBOLS <ls_description> LIKE LINE OF rt_descriptions.
+
+    IF zcl_abapgit_ortec_git_switch=>is_serial_prefetch_active( ) = abap_true.
+      IF zcl_abapgit_ortec_ser_pref_oo=>get_descriptions_compo(
+        EXPORTING iv_clsname      = iv_object_name
+                  iv_language     = iv_language
+        IMPORTING et_descriptions = rt_descriptions ) = abap_true.
+        RETURN.
+      ENDIF.
+    ENDIF.
 
     IF iv_language IS INITIAL.
       " load all languages
@@ -192,6 +210,15 @@ CLASS ZCL_ABAPGIT_OO_BASE IMPLEMENTATION.
 
   METHOD zif_abapgit_oo_object_fnc~read_descriptions_subco.
     FIELD-SYMBOLS <ls_description> LIKE LINE OF rt_descriptions.
+
+    IF zcl_abapgit_ortec_git_switch=>is_serial_prefetch_active( ) = abap_true.
+      IF zcl_abapgit_ortec_ser_pref_oo=>get_descriptions_subco(
+        EXPORTING iv_clsname      = iv_object_name
+                  iv_language     = iv_language
+        IMPORTING et_descriptions = rt_descriptions ) = abap_true.
+        RETURN.
+      ENDIF.
+    ENDIF.
 
     IF iv_language IS INITIAL.
       " load all languages

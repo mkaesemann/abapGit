@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_SUSH" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values>
+   <HEAD>
+    <NAME>Z_ABAPGIT_SERIALIZE_PARALLEL</NAME>
+    <TYPE>RF</TYPE>
+    <DISPLAY_NAME>Z_ABAPGIT_SERIALIZE_PARALLEL</DISPLAY_NAME>
+    <STEXT>abapGit - Serialize Object</STEXT>
+   </HEAD>
+  </asx:values>
+ </asx:abap>
+</abapGit>

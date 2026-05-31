@@ -10,6 +10,9 @@ FUNCTION z_abapgit_serialize_parallel.
 *"     VALUE(IV_SUPPRESS_PO_COMMENTS) TYPE  CHAR1
 *"     VALUE(IT_TRANSLATION_LANGS) TYPE  TFPLAISO
 *"     VALUE(IV_USE_LXE) TYPE  CHAR1
+*"     VALUE(IV_PREFETCH_BUFFER) TYPE  XSTRING OPTIONAL
+*"     VALUE(IV_PREFETCH_BUFFER_EXT) TYPE  XSTRING OPTIONAL
+*"     VALUE(IV_PREFETCH_BUFFER_OO) TYPE  XSTRING OPTIONAL
 *"  EXPORTING
 *"     VALUE(EV_RESULT) TYPE  XSTRING
 *"     VALUE(EV_PATH) TYPE  STRING
@@ -24,6 +27,14 @@ FUNCTION z_abapgit_serialize_parallel.
         ls_files       TYPE zif_abapgit_objects=>ty_serialization.
 
   TRY.
+      " Inject prefetch data into worker session caches
+      IF iv_prefetch_buffer IS NOT INITIAL OR iv_prefetch_buffer_ext IS NOT INITIAL
+        OR iv_prefetch_buffer_oo IS NOT INITIAL.
+        zcl_abapgit_ortec_ser_pref=>inject_from_buffer( iv_prefetch_buffer ).
+        zcl_abapgit_ortec_ser_pref_ext=>inject_from_buffer( iv_prefetch_buffer_ext ).
+        zcl_abapgit_ortec_ser_pref_oo=>inject_from_buffer( iv_prefetch_buffer_oo ).
+        zcl_abapgit_ortec_git_switch=>set_serial_prefetch_active( abap_true ).
+      ENDIF.
       ls_item-obj_type  = is_tadir-object.
       ls_item-obj_name  = is_tadir-obj_name.
       ls_item-devclass  = is_tadir-devclass.

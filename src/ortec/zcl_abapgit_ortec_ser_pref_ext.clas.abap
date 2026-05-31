@@ -37,6 +37,18 @@ CLASS zcl_abapgit_ortec_ser_pref_ext DEFINITION
         exception_classes TYPE abap_bool,
       END OF ty_fugr_func_meta.
 
+    TYPES:
+      BEGIN OF ty_dtel_i18n_text,
+        ddlanguage TYPE dd04t-ddlanguage,
+        ddtext     TYPE dd04t-ddtext,
+        reptext    TYPE dd04t-reptext,
+        scrtext_s  TYPE dd04t-scrtext_s,
+        scrtext_m  TYPE dd04t-scrtext_m,
+        scrtext_l  TYPE dd04t-scrtext_l,
+      END OF ty_dtel_i18n_text.
+    TYPES ty_dtel_i18n_texts TYPE STANDARD TABLE OF ty_dtel_i18n_text
+      WITH DEFAULT KEY.
+
     CLASS-METHODS prepare
       IMPORTING
         it_tadir    TYPE zif_abapgit_definitions=>ty_tadir_tt
@@ -52,6 +64,17 @@ CLASS zcl_abapgit_ortec_ser_pref_ext DEFINITION
         es_dd04v        TYPE dd04v
       RETURNING
         VALUE(rv_found) TYPE abap_bool.
+
+    "! Return prefetched DTEL i18n data (translation languages + text fields).
+    CLASS-METHODS get_dtel_i18n
+      IMPORTING
+        iv_rollname      TYPE dd04l-rollname
+        iv_language      TYPE spras
+      EXPORTING
+        et_i18n_langs    TYPE zcl_abapgit_ortec_ser_pref=>ty_langu_tt
+        et_dtel_texts    TYPE ty_dtel_i18n_texts
+      RETURNING
+        VALUE(rv_found)  TYPE abap_bool.
 
     CLASS-METHODS get_enhs_abap_language_vers
       IMPORTING
@@ -129,6 +152,15 @@ CLASS zcl_abapgit_ortec_ser_pref_ext DEFINITION
       RETURNING
         VALUE(rv_found) TYPE abap_bool.
 
+    "! Extract prefetch data relevant to a single TADIR object into a transferable buffer.
+    CLASS-METHODS extract_for_object
+      IMPORTING is_tadir         TYPE zif_abapgit_definitions=>ty_tadir
+      RETURNING VALUE(rv_buffer) TYPE xstring.
+
+    "! Inject prefetch data from a buffer into the session-local caches.
+    CLASS-METHODS inject_from_buffer
+      IMPORTING iv_buffer TYPE xstring.
+
   PRIVATE SECTION.
     TYPES ty_dtel_keys TYPE HASHED TABLE OF dd04l-rollname
       WITH UNIQUE KEY table_line.
@@ -147,8 +179,9 @@ CLASS zcl_abapgit_ortec_ser_pref_ext DEFINITION
 
     TYPES:
       BEGIN OF ty_dtel_cache,
-        rollname TYPE dd04l-rollname,
-        dd04v    TYPE dd04v,
+        rollname   TYPE dd04l-rollname,
+        dd04v      TYPE dd04v,
+        dd04t_i18n TYPE STANDARD TABLE OF dd04t WITH DEFAULT KEY,
       END OF ty_dtel_cache.
     TYPES ty_dtel_cache_tt TYPE HASHED TABLE OF ty_dtel_cache
       WITH UNIQUE KEY rollname.
@@ -354,6 +387,34 @@ CLASS zcl_abapgit_ortec_ser_pref_ext IMPLEMENTATION.
     ENDIF.
   ENDMETHOD.
 
+  METHOD get_dtel_i18n.
+    CLEAR: et_i18n_langs, et_dtel_texts.
+
+    READ TABLE mt_dtel INTO DATA(ls_dtel) WITH TABLE KEY rollname = iv_rollname.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+
+    " Build language list and text entries from stored dd04t translations
+    LOOP AT ls_dtel-dd04t_i18n INTO DATA(ls_dd04t)
+      WHERE ddlanguage <> iv_language.
+      APPEND VALUE ty_dtel_i18n_text(
+        ddlanguage = ls_dd04t-ddlanguage
+        ddtext     = ls_dd04t-ddtext
+        reptext    = ls_dd04t-reptext
+        scrtext_s  = ls_dd04t-scrtext_s
+        scrtext_m  = ls_dd04t-scrtext_m
+        scrtext_l  = ls_dd04t-scrtext_l ) TO et_dtel_texts.
+      APPEND ls_dd04t-ddlanguage TO et_i18n_langs.
+    ENDLOOP.
+
+    SORT et_i18n_langs ASCENDING.
+    DELETE ADJACENT DUPLICATES FROM et_i18n_langs.
+    SORT et_dtel_texts BY ddlanguage ASCENDING.
+
+    rv_found = abap_true.
+  ENDMETHOD.
+
   METHOD get_enhs_abap_language_vers.
     CLEAR ev_abap_language_version.
     READ TABLE mt_enhs INTO DATA(ls_enhs) WITH TABLE KEY enhspot = iv_enhspot.
@@ -531,12 +592,12 @@ CLASS zcl_abapgit_ortec_ser_pref_ext IMPLEMENTATION.
       RETURN.
     ENDIF.
 
+    " Load DD04T for ALL languages (not just main)
     SELECT *
       FROM dd04t
       INTO TABLE @lt_dd04t
       FOR ALL ENTRIES IN @it_names
       WHERE rollname = @it_names-table_line
-        AND ddlanguage = @mv_language
         AND as4local = 'A'
         AND as4vers = '0000'.
 
@@ -544,7 +605,13 @@ CLASS zcl_abapgit_ortec_ser_pref_ext IMPLEMENTATION.
       READ TABLE mt_dtel ASSIGNING FIELD-SYMBOL(<ls_dtel>)
         WITH TABLE KEY rollname = ls_dd04t-rollname.
       IF sy-subrc = 0.
-        MOVE-CORRESPONDING ls_dd04t TO <ls_dtel>-dd04v.
+        IF ls_dd04t-ddlanguage = mv_language.
+          " Main language: merge into dd04v as before
+          MOVE-CORRESPONDING ls_dd04t TO <ls_dtel>-dd04v.
+        ELSE.
+          " Translation: store separately
+          APPEND ls_dd04t TO <ls_dtel>-dd04t_i18n.
+        ENDIF.
       ENDIF.
     ENDLOOP.
   ENDMETHOD.
@@ -800,4 +867,198 @@ CLASS zcl_abapgit_ortec_ser_pref_ext IMPLEMENTATION.
       ENDIF.
     ENDLOOP.
   ENDMETHOD.
+
+
+  METHOD extract_for_object.
+    DATA lt_dtel TYPE ty_dtel_cache_tt.
+    DATA lt_enhs TYPE ty_enhs_cache_tt.
+    DATA lt_fugr_areat TYPE ty_fugr_areat_cache_tt.
+    DATA lt_fugr_enlfdir TYPE ty_fugr_enlfdir_cache_tt.
+    DATA lt_fugr_func_meta TYPE ty_fugr_func_meta_tt.
+    DATA lt_prog_langs TYPE ty_prog_lang_cache_tt.
+    DATA lt_smim_loio TYPE ty_smim_loio_cache_tt.
+    DATA lt_smim_phf TYPE ty_smim_phf_cache_tt.
+    DATA lt_tobj TYPE ty_tobj_cache_tt.
+    DATA lt_tran TYPE ty_tran_cache_tt.
+    DATA lv_has_data TYPE abap_bool.
+
+    CASE is_tadir-object.
+      WHEN 'DTEL'.
+        READ TABLE mt_dtel INTO DATA(ls_dtel)
+          WITH TABLE KEY rollname = CONV dd04l-rollname( is_tadir-obj_name ).
+        IF sy-subrc = 0.
+          INSERT ls_dtel INTO TABLE lt_dtel.
+          lv_has_data = abap_true.
+        ENDIF.
+
+      WHEN 'ENHS'.
+        READ TABLE mt_enhs INTO DATA(ls_enhs)
+          WITH TABLE KEY enhspot = CONV enhspotname( is_tadir-obj_name ).
+        IF sy-subrc = 0.
+          INSERT ls_enhs INTO TABLE lt_enhs.
+          lv_has_data = abap_true.
+        ENDIF.
+
+      WHEN 'FUGR'.
+        DATA(lv_area) = CONV tlibt-area( is_tadir-obj_name ).
+        READ TABLE mt_fugr_areat INTO DATA(ls_areat)
+          WITH TABLE KEY area = lv_area.
+        IF sy-subrc = 0.
+          INSERT ls_areat INTO TABLE lt_fugr_areat.
+          lv_has_data = abap_true.
+        ENDIF.
+        READ TABLE mt_fugr_enlfdir INTO DATA(ls_enlfdir)
+          WITH TABLE KEY area = lv_area.
+        IF sy-subrc = 0.
+          INSERT ls_enlfdir INTO TABLE lt_fugr_enlfdir.
+          lv_has_data = abap_true.
+          " Also extract func_meta for each function module in this group
+          LOOP AT ls_enlfdir-enlfdir INTO DATA(ls_fm).
+            READ TABLE mt_fugr_func_meta INTO DATA(ls_func_meta)
+              WITH TABLE KEY funcname = ls_fm-funcname.
+            IF sy-subrc = 0.
+              INSERT ls_func_meta INTO TABLE lt_fugr_func_meta.
+            ENDIF.
+          ENDLOOP.
+        ENDIF.
+        " Also extract prog_langs for the FUGR main program
+        DATA(lv_program) = get_fugr_main_program( CONV rs38l-area( is_tadir-obj_name ) ).
+        IF lv_program IS NOT INITIAL.
+          READ TABLE mt_prog_langs INTO DATA(ls_prog)
+            WITH TABLE KEY program = lv_program.
+          IF sy-subrc = 0.
+            INSERT ls_prog INTO TABLE lt_prog_langs.
+            lv_has_data = abap_true.
+          ENDIF.
+        ENDIF.
+
+      WHEN 'PROG'.
+        READ TABLE mt_prog_langs INTO ls_prog
+          WITH TABLE KEY program = is_tadir-obj_name.
+        IF sy-subrc = 0.
+          INSERT ls_prog INTO TABLE lt_prog_langs.
+          lv_has_data = abap_true.
+        ENDIF.
+
+      WHEN 'SMIM'.
+        DATA(lv_loio) = CONV smimloio-loio_id( is_tadir-obj_name ).
+        READ TABLE mt_smim_loio INTO DATA(ls_loio)
+          WITH TABLE KEY loio_id = lv_loio.
+        IF sy-subrc = 0.
+          INSERT ls_loio INTO TABLE lt_smim_loio.
+          lv_has_data = abap_true.
+        ENDIF.
+        LOOP AT mt_smim_phf INTO DATA(ls_phf)
+          WHERE loio_id = lv_loio.
+          INSERT ls_phf INTO TABLE lt_smim_phf.
+          lv_has_data = abap_true.
+        ENDLOOP.
+
+      WHEN 'TOBJ'.
+        DATA(lv_tobj_name) = condense( CONV string( is_tadir-obj_name ) ).
+        DATA(lv_tobj_len) = strlen( lv_tobj_name ) - 1.
+        IF lv_tobj_len > 0.
+          READ TABLE mt_tobj INTO DATA(ls_tobj)
+            WITH TABLE KEY tabname = CONV vim_name( lv_tobj_name(lv_tobj_len) ).
+          IF sy-subrc = 0.
+            INSERT ls_tobj INTO TABLE lt_tobj.
+            lv_has_data = abap_true.
+          ENDIF.
+        ENDIF.
+
+      WHEN 'TRAN'.
+        READ TABLE mt_tran INTO DATA(ls_tran)
+          WITH TABLE KEY tcode = CONV tstc-tcode( is_tadir-obj_name ).
+        IF sy-subrc = 0.
+          INSERT ls_tran INTO TABLE lt_tran.
+          lv_has_data = abap_true.
+        ENDIF.
+    ENDCASE.
+
+    IF lv_has_data = abap_false.
+      RETURN.
+    ENDIF.
+
+    EXPORT dtel = lt_dtel
+           enhs = lt_enhs
+           fugr_areat = lt_fugr_areat
+           fugr_enlfdir = lt_fugr_enlfdir
+           fugr_func_meta = lt_fugr_func_meta
+           prog_langs = lt_prog_langs
+           smim_loio = lt_smim_loio
+           smim_phf = lt_smim_phf
+           tobj = lt_tobj
+           tran = lt_tran
+           language = mv_language
+      TO DATA BUFFER rv_buffer COMPRESSION ON.
+  ENDMETHOD.
+
+
+  METHOD inject_from_buffer.
+    DATA lt_dtel TYPE ty_dtel_cache_tt.
+    DATA lt_enhs TYPE ty_enhs_cache_tt.
+    DATA lt_fugr_areat TYPE ty_fugr_areat_cache_tt.
+    DATA lt_fugr_enlfdir TYPE ty_fugr_enlfdir_cache_tt.
+    DATA lt_fugr_func_meta TYPE ty_fugr_func_meta_tt.
+    DATA lt_prog_langs TYPE ty_prog_lang_cache_tt.
+    DATA lt_smim_loio TYPE ty_smim_loio_cache_tt.
+    DATA lt_smim_phf TYPE ty_smim_phf_cache_tt.
+    DATA lt_tobj TYPE ty_tobj_cache_tt.
+    DATA lt_tran TYPE ty_tran_cache_tt.
+    DATA lv_language TYPE spras.
+
+    CHECK iv_buffer IS NOT INITIAL.
+
+    IMPORT dtel = lt_dtel
+           enhs = lt_enhs
+           fugr_areat = lt_fugr_areat
+           fugr_enlfdir = lt_fugr_enlfdir
+           fugr_func_meta = lt_fugr_func_meta
+           prog_langs = lt_prog_langs
+           smim_loio = lt_smim_loio
+           smim_phf = lt_smim_phf
+           tobj = lt_tobj
+           tran = lt_tran
+           language = lv_language
+      FROM DATA BUFFER iv_buffer.                       "#EC CI_SUBRC
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+
+    LOOP AT lt_dtel INTO DATA(ls_dtel).
+      INSERT ls_dtel INTO TABLE mt_dtel.
+    ENDLOOP.
+    LOOP AT lt_enhs INTO DATA(ls_enhs).
+      INSERT ls_enhs INTO TABLE mt_enhs.
+    ENDLOOP.
+    LOOP AT lt_fugr_areat INTO DATA(ls_areat).
+      INSERT ls_areat INTO TABLE mt_fugr_areat.
+    ENDLOOP.
+    LOOP AT lt_fugr_enlfdir INTO DATA(ls_enlfdir).
+      INSERT ls_enlfdir INTO TABLE mt_fugr_enlfdir.
+    ENDLOOP.
+    LOOP AT lt_fugr_func_meta INTO DATA(ls_func_meta).
+      INSERT ls_func_meta INTO TABLE mt_fugr_func_meta.
+    ENDLOOP.
+    LOOP AT lt_prog_langs INTO DATA(ls_prog).
+      INSERT ls_prog INTO TABLE mt_prog_langs.
+    ENDLOOP.
+    LOOP AT lt_smim_loio INTO DATA(ls_loio).
+      INSERT ls_loio INTO TABLE mt_smim_loio.
+    ENDLOOP.
+    LOOP AT lt_smim_phf INTO DATA(ls_phf).
+      INSERT ls_phf INTO TABLE mt_smim_phf.
+    ENDLOOP.
+    LOOP AT lt_tobj INTO DATA(ls_tobj).
+      INSERT ls_tobj INTO TABLE mt_tobj.
+    ENDLOOP.
+    LOOP AT lt_tran INTO DATA(ls_tran).
+      INSERT ls_tran INTO TABLE mt_tran.
+    ENDLOOP.
+
+    IF lv_language IS NOT INITIAL.
+      mv_language = lv_language.
+    ENDIF.
+  ENDMETHOD.
+
 ENDCLASS.
