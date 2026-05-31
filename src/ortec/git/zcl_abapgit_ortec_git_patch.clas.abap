@@ -561,6 +561,12 @@ CLASS zcl_abapgit_ortec_git_patch IMPLEMENTATION.
     ri_html->add( '  container.appendChild(resizeHandle);' ).
     ri_html->add( '  container.appendChild(diffList);' ).
     ri_html->add( '  diffList.classList.add("ortec-diff-content");' ).
+    ri_html->add( '  var el=container.parentElement;' ).
+    ri_html->add( '  while(el&&el!==document.body&&el!==document.documentElement){' ).
+    ri_html->add( '    var ov=getComputedStyle(el).overflow;' ).
+    ri_html->add( '    if(ov!=="visible")el.style.overflow="visible";' ).
+    ri_html->add( '    el=el.parentElement;' ).
+    ri_html->add( '  }' ).
 
     ri_html->add( '  (function(){' ).
     ri_html->add( '    var dragging=false,startX=0,startW=0;' ).
@@ -839,19 +845,39 @@ CLASS zcl_abapgit_ortec_git_patch IMPLEMENTATION.
     ri_html->add( '    });' ).
     ri_html->add( '  }' ).
 
-    ri_html->add( '  diffList.addEventListener("click",function(e){' ).
+    ri_html->add( '  document.addEventListener("click",function(e){' ).
     ri_html->add( '    var a=e.target.closest("a[href]");' ).
     ri_html->add( '    if(!a) return;' ).
     ri_html->add( '    var href=a.getAttribute("href");' ).
-    ri_html->add( '    if(href&&href.indexOf("#")===0){' ).
+    ri_html->add( '    if(a.id&&a.id.indexOf("li_jump_")===0){' ).
+    ri_html->add( '      var txt=a.textContent||a.innerText||"";' ).
+    ri_html->add( '      txt=txt.trim();' ).
+    ri_html->add( '      if(txt){' ).
+    ri_html->add( '        for(var i=0;i<allDiffs.length;i++){' ).
+    ri_html->add( '          var df=allDiffs[i].getAttribute("data-file")||"";' ).
+    ri_html->add( '          if(df&&df.indexOf(txt)>=0){' ).
+    ri_html->add( '            e.preventDefault(); e.stopPropagation();' ).
+    ri_html->add( '            switchFile(i);' ).
+    ri_html->add( '            currentChangeIdx=-1;' ).
+    ri_html->add( '            allDiffs[i].scrollIntoView({block:"start"});' ).
+    ri_html->add( '            return;' ).
+    ri_html->add( '          }' ).
+    ri_html->add( '        }' ).
+    ri_html->add( '      }' ).
+    ri_html->add( '      return;' ).
+    ri_html->add( '    }' ).
+    ri_html->add( '    if(href&&href.indexOf("#")===0&&href.length>1){' ).
     ri_html->add( '      var targetId=href.substring(1);' ).
-    ri_html->add( '      for(var i=0;i<allDiffs.length;i++){' ).
-    ri_html->add( '        if(allDiffs[i].id===targetId||allDiffs[i].querySelector("#"+targetId)){' ).
-    ri_html->add( '          e.preventDefault();' ).
-    ri_html->add( '          switchFile(i);' ).
-    ri_html->add( '          currentChangeIdx=-1;' ).
-    ri_html->add( '          allDiffs[i].scrollIntoView({block:"start"});' ).
-    ri_html->add( '          return;' ).
+    ri_html->add( '      var targetEl=document.getElementById(targetId);' ).
+    ri_html->add( '      if(targetEl){' ).
+    ri_html->add( '        for(var i=0;i<allDiffs.length;i++){' ).
+    ri_html->add( '          if(allDiffs[i]===targetEl||allDiffs[i].contains(targetEl)){' ).
+    ri_html->add( '            e.preventDefault();' ).
+    ri_html->add( '            switchFile(i);' ).
+    ri_html->add( '            currentChangeIdx=-1;' ).
+    ri_html->add( '            allDiffs[i].scrollIntoView({block:"start"});' ).
+    ri_html->add( '            return;' ).
+    ri_html->add( '          }' ).
     ri_html->add( '        }' ).
     ri_html->add( '      }' ).
     ri_html->add( '    }' ).
