@@ -16,13 +16,15 @@ CLASS zcl_abapgit_diff DEFINITION
     TYPES:
       ty_regexset_tt TYPE STANDARD TABLE OF REF TO cl_abap_regex WITH KEY table_line.
 
+    CLASS-DATA gt_regex_set TYPE ty_regexset_tt.
+
     DATA mt_beacons TYPE zif_abapgit_definitions=>ty_string_tt.
     DATA mt_diff TYPE zif_abapgit_definitions=>ty_diffs_tt.
     DATA ms_stats TYPE zif_abapgit_definitions=>ty_count.
 
     METHODS map_beacons.
     METHODS shortlist.
-    METHODS create_regex_set
+    CLASS-METHODS get_regex_set
       RETURNING
         VALUE(rt_regex_set) TYPE ty_regexset_tt.
 
@@ -78,11 +80,16 @@ CLASS zcl_abapgit_diff IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD create_regex_set.
+  METHOD get_regex_set.
 
     DATA: lo_regex TYPE REF TO cl_abap_regex,
           lt_regex TYPE zif_abapgit_definitions=>ty_string_tt,
           lv_regex LIKE LINE OF lt_regex.
+
+    IF gt_regex_set IS NOT INITIAL.
+      rt_regex_set = gt_regex_set.
+      RETURN.
+    ENDIF.
 
     APPEND '^\s*(CLASS|FORM|MODULE|REPORT|METHOD|INTERFACE|FUNCTION)\s[^=]' TO lt_regex.
     APPEND '^\s*(PUBLIC|PROTECTED|PRIVATE)\sSECTION(\s|\.)' TO lt_regex.
@@ -98,8 +105,10 @@ CLASS zcl_abapgit_diff IMPLEMENTATION.
         EXPORTING
           pattern     = lv_regex
           ignore_case = abap_true ##REGEX_POSIX.
-      APPEND lo_regex TO rt_regex_set.
+      APPEND lo_regex TO gt_regex_set.
     ENDLOOP.
+
+    rt_regex_set = gt_regex_set.
 
   ENDMETHOD.
 
@@ -141,7 +150,7 @@ CLASS zcl_abapgit_diff IMPLEMENTATION.
 
     FIELD-SYMBOLS: <ls_diff> LIKE LINE OF mt_diff.
 
-    lt_regex = create_regex_set( ).
+    lt_regex = get_regex_set( ).
     LOOP AT mt_diff ASSIGNING <ls_diff>.
 
       CLEAR lv_offs.

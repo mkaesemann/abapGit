@@ -12,10 +12,17 @@ CLASS zcl_abapgit_diff_std DEFINITION PUBLIC.
       RAISING
         zcx_abapgit_exception.
 
+    CLASS-METHODS clear_cache.
+
   PRIVATE SECTION.
-    CLASS-DATA gt_diff TYPE zif_abapgit_definitions=>ty_diffs_tt.
-    CLASS-DATA gv_compare_mode TYPE c LENGTH 1.
-    CLASS-DATA gv_ignore_case TYPE abap_bool.
+    TYPES:
+      BEGIN OF ty_cache_entry,
+        key  TYPE string,
+        diff TYPE zif_abapgit_definitions=>ty_diffs_tt,
+      END OF ty_cache_entry.
+
+    CLASS-DATA gt_cache TYPE HASHED TABLE OF ty_cache_entry WITH UNIQUE KEY key.
+    CONSTANTS c_max_cache_entries TYPE i VALUE 200.
 
     CLASS-METHODS unpack
       IMPORTING
@@ -29,19 +36,24 @@ CLASS zcl_abapgit_diff_std DEFINITION PUBLIC.
 
     CLASS-METHODS compute_diff
       IMPORTING
-        !it_new        TYPE rswsourcet
-        !it_old        TYPE rswsourcet
+        !it_new          TYPE rswsourcet
+        !it_old          TYPE rswsourcet
+        !iv_compare_mode TYPE c
+        !iv_ignore_case  TYPE abap_bool
       RETURNING
-        VALUE(rt_diff) TYPE zif_abapgit_definitions=>ty_diffs_tt.
+        VALUE(rt_diff)   TYPE zif_abapgit_definitions=>ty_diffs_tt.
 
     CLASS-METHODS compute_diff_extra
       IMPORTING
-        !it_new        TYPE rswsourcet
-        !it_old        TYPE rswsourcet
+        !it_new          TYPE rswsourcet
+        !it_old          TYPE rswsourcet
+        !iv_compare_mode TYPE c
       RETURNING
-        VALUE(rt_diff) TYPE zif_abapgit_definitions=>ty_diffs_tt.
+        VALUE(rt_diff)   TYPE zif_abapgit_definitions=>ty_diffs_tt.
 
-    CLASS-METHODS adjust_diff.
+    CLASS-METHODS adjust_diff
+      CHANGING
+        !ct_diff TYPE zif_abapgit_definitions=>ty_diffs_tt.
 
     CLASS-METHODS has_line_diff
       IMPORTING
@@ -50,9 +62,39 @@ CLASS zcl_abapgit_diff_std DEFINITION PUBLIC.
       RETURNING
         VALUE(rv_has_diff) TYPE abap_bool.
 
+    CLASS-METHODS build_cache_key
+      IMPORTING
+        iv_new                TYPE xstring
+        iv_old                TYPE xstring
+        iv_ignore_indentation TYPE abap_bool
+        iv_ignore_comments    TYPE abap_bool
+        iv_ignore_case        TYPE abap_bool
+      RETURNING
+        VALUE(rv_key)         TYPE string
+      RAISING
+        zcx_abapgit_exception.
+
 ENDCLASS.
 
 CLASS zcl_abapgit_diff_std IMPLEMENTATION.
+
+  METHOD build_cache_key.
+    " Build a unique key from content hashes + flags
+    DATA lv_combined TYPE xstring.
+    lv_combined = iv_old.
+    CONCATENATE lv_combined iv_new INTO lv_combined IN BYTE MODE.
+    rv_key = zcl_abapgit_hash=>sha1_raw( lv_combined )
+          && iv_ignore_indentation
+          && iv_ignore_comments
+          && iv_ignore_case.
+  ENDMETHOD.
+
+
+  METHOD clear_cache.
+    CLEAR gt_cache.
+  ENDMETHOD.
+
+
   METHOD adjust_diff.
 
     " ABAP kernel diff traverses files from bottom up which leads to odd display of diffs
@@ -72,12 +114,12 @@ CLASS zcl_abapgit_diff_std IMPLEMENTATION.
       lt_diff_block  TYPE STANDARD TABLE OF ty_diff_block WITH DEFAULT KEY.
 
     FIELD-SYMBOLS:
-      <ls_diff>       LIKE LINE OF gt_diff,
-      <ls_diff_begin> LIKE LINE OF gt_diff,
-      <ls_diff_end>   LIKE LINE OF gt_diff.
+      <ls_diff>       LIKE LINE OF ct_diff,
+      <ls_diff_begin> LIKE LINE OF ct_diff,
+      <ls_diff_end>   LIKE LINE OF ct_diff.
 
     " Determine start and length of diff blocks
-    LOOP AT gt_diff ASSIGNING <ls_diff>.
+    LOOP AT ct_diff ASSIGNING <ls_diff>.
       IF <ls_diff>-result = zif_abapgit_definitions=>c_diff-insert OR
          <ls_diff>-result = zif_abapgit_definitions=>c_diff-delete.
         IF ls_diff_block IS INITIAL.
@@ -95,12 +137,12 @@ CLASS zcl_abapgit_diff_std IMPLEMENTATION.
     LOOP AT lt_diff_block INTO ls_diff_block.
       DO ls_diff_block-len TIMES.
         lv_block_begin = ls_diff_block-start + sy-index - 1.
-        READ TABLE gt_diff ASSIGNING <ls_diff_begin> INDEX lv_block_begin.
+        READ TABLE ct_diff ASSIGNING <ls_diff_begin> INDEX lv_block_begin.
         IF sy-subrc <> 0.
           EXIT.
         ENDIF.
         lv_block_end = ls_diff_block-start + ls_diff_block-len + sy-index - 1.
-        READ TABLE gt_diff ASSIGNING <ls_diff_end> INDEX lv_block_end.
+        READ TABLE ct_diff ASSIGNING <ls_diff_end> INDEX lv_block_end.
         IF sy-subrc <> 0.
           EXIT.
         ENDIF.
@@ -168,29 +210,56 @@ CLASS zcl_abapgit_diff_std IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD compute.
-    DATA: lt_new TYPE rswsourcet,
-          lt_old TYPE rswsourcet.
+    DATA: lt_new          TYPE rswsourcet,
+          lt_old          TYPE rswsourcet,
+          lv_compare_mode TYPE c LENGTH 1,
+          lv_cache_key    TYPE string.
 
-    gv_compare_mode = 1.
+    FIELD-SYMBOLS <ls_cache> TYPE ty_cache_entry.
+
+    " Check cache first
+    lv_cache_key = build_cache_key(
+      iv_new                = iv_new
+      iv_old                = iv_old
+      iv_ignore_indentation = iv_ignore_indentation
+      iv_ignore_comments    = iv_ignore_comments
+      iv_ignore_case        = iv_ignore_case ).
+
+    READ TABLE gt_cache WITH TABLE KEY key = lv_cache_key ASSIGNING <ls_cache>.
+    IF sy-subrc = 0.
+      rt_diff = <ls_cache>-diff.
+      RETURN.
+    ENDIF.
+
+    lv_compare_mode = 1.
     IF iv_ignore_indentation = abap_true.
-      gv_compare_mode = gv_compare_mode + 1.
+      lv_compare_mode = lv_compare_mode + 1.
     ENDIF.
     IF iv_ignore_comments = abap_true.
-      gv_compare_mode = gv_compare_mode + 2.
+      lv_compare_mode = lv_compare_mode + 2.
     ENDIF.
-    gv_ignore_case = iv_ignore_case.
 
     unpack( EXPORTING iv_new = iv_new
                       iv_old = iv_old
             IMPORTING et_new = lt_new
                       et_old = lt_old ).
 
-    gt_diff = compute_diff( it_new = lt_new
-                            it_old = lt_old ).
+    rt_diff = compute_diff( it_new          = lt_new
+                            it_old          = lt_old
+                            iv_compare_mode = lv_compare_mode
+                            iv_ignore_case  = iv_ignore_case ).
 
-    adjust_diff( ).
+    adjust_diff( CHANGING ct_diff = rt_diff ).
 
-    rt_diff = gt_diff.
+    " Store in cache (evict all if too large)
+    IF lines( gt_cache ) >= c_max_cache_entries.
+      CLEAR gt_cache.
+    ENDIF.
+
+    DATA ls_cache TYPE ty_cache_entry.
+    ls_cache-key  = lv_cache_key.
+    ls_cache-diff = rt_diff.
+    INSERT ls_cache INTO TABLE gt_cache.
 
   ENDMETHOD.
 
@@ -206,8 +275,8 @@ CLASS zcl_abapgit_diff_std IMPLEMENTATION.
     " Note: Ignore case is for keywords, variables, types etc, but not for literals
     CALL FUNCTION 'RS_CMP_COMPUTE_DELTA'
       EXPORTING
-        compare_mode            = gv_compare_mode
-        ignore_case_differences = gv_ignore_case
+        compare_mode            = iv_compare_mode
+        ignore_case_differences = iv_ignore_case
       TABLES
         text_tab1               = it_new
         text_tab2               = it_old
@@ -250,8 +319,9 @@ CLASS zcl_abapgit_diff_std IMPLEMENTATION.
       ENDLOOP.
     ELSEIF sy-subrc = 2.
       " The function doesn't find all diffs...
-      rt_diff = compute_diff_extra( it_new = it_new
-                                    it_old = it_old ).
+      rt_diff = compute_diff_extra( it_new          = it_new
+                                    it_old          = it_old
+                                    iv_compare_mode = iv_compare_mode ).
     ELSE.
       ASSERT 0 = 1. " incorrect function call
     ENDIF.
@@ -279,7 +349,7 @@ CLASS zcl_abapgit_diff_std IMPLEMENTATION.
       ls_diff-new_num = sy-tabix.
       ls_diff-new     = <lv_new>.
 
-      IF ( gv_compare_mode = 1 OR gv_compare_mode = 3 )
+      IF ( iv_compare_mode = 1 OR iv_compare_mode = 3 )
       AND has_line_diff( iv_old = <lv_old>
                          iv_new = <lv_new> ) = abap_true.
         ls_diff-result = zif_abapgit_definitions=>c_diff-update.
