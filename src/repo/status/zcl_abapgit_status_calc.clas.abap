@@ -429,10 +429,15 @@ CLASS zcl_abapgit_status_calc IMPLEMENTATION.
 
   METHOD process_remote.
 
+    DATA lt_local_idx TYPE SORTED TABLE OF zif_abapgit_definitions=>ty_file_item
+      WITH NON-UNIQUE KEY file-filename.
+
     FIELD-SYMBOLS:
       <ls_remote> LIKE LINE OF it_unprocessed_remote,
       <ls_result> LIKE LINE OF ct_results,
-      <ls_local>  LIKE LINE OF it_local.
+      <ls_local>  LIKE LINE OF lt_local_idx.
+
+    lt_local_idx = it_local.
 
     LOOP AT it_unprocessed_remote ASSIGNING <ls_remote>.
 
@@ -444,8 +449,8 @@ CLASS zcl_abapgit_status_calc IMPLEMENTATION.
         it_state_idx = it_state_idx ).
 
       " Check if same file exists in different location (not for generic package files)
-      READ TABLE it_local ASSIGNING <ls_local>
-        WITH KEY file-filename = <ls_remote>-filename.
+      READ TABLE lt_local_idx ASSIGNING <ls_local>
+        WITH TABLE KEY file-filename = <ls_remote>-filename.
       IF sy-subrc = 0 AND <ls_remote>-filename <> zcl_abapgit_filename_logic=>c_package_file.
         <ls_result>-match = abap_false.
         <ls_result>-lstate = zif_abapgit_definitions=>c_state-deleted.
