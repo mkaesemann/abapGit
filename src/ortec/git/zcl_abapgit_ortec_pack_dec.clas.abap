@@ -70,7 +70,7 @@ CLASS zcl_abapgit_ortec_pack_dec DEFINITION
     CONSTANTS c_zlib                   TYPE x LENGTH 2 VALUE '789C' ##NO_TEXT.
     CONSTANTS c_zlib_hmm               TYPE x LENGTH 2 VALUE '7801' ##NO_TEXT.
     CONSTANTS c_version                TYPE x LENGTH 4 VALUE '00000002' ##NO_TEXT.
-    "! Interval in seconds between TH_REDISPATCH calls inside the decode loop.
+    "! Interval in seconds between timeout-avoidance checks inside the decode loop.
     "! Default 300 s = 5 minutes.  Increase for systems with longer WP timeouts.
     CONSTANTS c_redispatch_interval    TYPE i          VALUE 300 ##NO_TEXT.
     "! Optimization #1: Use kernel decompress + Adler32-scan to find compressed
@@ -1039,14 +1039,14 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
         COMMIT WORK.
       ENDIF.
 
-      " Prevent work process timeout: call TH_REDISPATCH every c_redispatch_interval seconds.
-      " TH_REDISPATCH resets the WP runtime counter without stopping execution.
+      " Run centralized timeout avoidance every c_redispatch_interval seconds.
+      " The switch can suppress TH_REDISPATCH for SAT tracing.
       GET TIME STAMP FIELD lv_redispatch_now.
       lv_elapsed = cl_abap_tstmp=>subtract(
                        tstmp1 = lv_redispatch_now
                        tstmp2 = lv_last_redispatch ).
       IF lv_elapsed >= c_redispatch_interval.
-        CALL FUNCTION 'TH_REDISPATCH'.
+        zcl_abapgit_ortec_git_switch=>avoid_timeout( ).
         lv_last_redispatch = lv_redispatch_now.
       ENDIF.
 

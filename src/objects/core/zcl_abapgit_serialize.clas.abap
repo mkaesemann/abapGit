@@ -760,7 +760,7 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
     CLEAR mt_files.
     mv_parallel_broken = abap_false.
 
-    lv_use_redispatch = zcl_abapgit_factory=>get_function_module( )->function_exists( 'TH_REDISPATCH' ).
+    lv_use_redispatch = zcl_abapgit_ortec_git_switch=>is_avoid_timeout_active( ).
     GET TIME STAMP FIELD lv_last_redispatch_ts.
 
     lv_max = determine_max_processes( iv_force_sequential = iv_force_sequential
@@ -805,9 +805,7 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
               tstmp2 = lv_last_redispatch_ts ).
 
             IF lv_elapsed_seconds >= 300.
-              CALL FUNCTION 'TH_REDISPATCH'
-                EXCEPTIONS
-                  OTHERS = 1.
+              zcl_abapgit_ortec_git_switch=>avoid_timeout( ).
               GET TIME STAMP FIELD lv_last_redispatch_ts.
             ENDIF.
           ENDIF.

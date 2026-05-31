@@ -72,6 +72,22 @@ CLASS zcl_abapgit_ortec_git_switch DEFINITION
     CLASS-METHODS is_wapa_active
       RETURNING VALUE(rv_active) TYPE abap_bool.
 
+    "! Check if timeout avoidance via TH_REDISPATCH is enabled in this internal session.
+    "! Defaults to ABAP_FALSE in IT8 so SAT traces can run without redispatch interference.
+    "! @parameter rv_active |
+    "! ABAP_TRUE if timeout avoidance is enabled.
+    CLASS-METHODS is_avoid_timeout_active
+      RETURNING VALUE(rv_active) TYPE abap_bool.
+
+    "! Enable or disable timeout avoidance via TH_REDISPATCH in this internal session.
+    "! @parameter iv_active |
+    "! ABAP_TRUE enables centralized TH_REDISPATCH calls.
+    CLASS-METHODS set_avoid_timeout_active
+      IMPORTING iv_active TYPE abap_bool.
+
+    "! Central timeout-avoidance hook. Keep TH_REDISPATCH calls behind this method.
+    CLASS-METHODS avoid_timeout.
+
     "! Enable or disable serializer prefetch in this internal session.
     "! @parameter iv_active |
     "! ABAP_TRUE enables the guarded serialization prefetch hook.
@@ -122,11 +138,26 @@ CLASS zcl_abapgit_ortec_git_switch DEFINITION
   PRIVATE SECTION.
     CLASS-DATA mv_bulk_exists_active TYPE abap_bool VALUE abap_true.
     CLASS-DATA mv_serial_prefetch_active TYPE abap_bool VALUE abap_true.
+    CLASS-DATA mv_avoid_timeout_active TYPE abap_bool VALUE abap_true.
 
 ENDCLASS.
 
 
 CLASS zcl_abapgit_ortec_git_switch IMPLEMENTATION.
+  METHOD avoid_timeout.
+    IF is_avoid_timeout_active( ) = abap_false.
+      RETURN.
+    ENDIF.
+
+*    IF zcl_abapgit_factory=>get_function_module( )->function_exists( 'TH_REDISPATCH' ) = abap_false.
+*      RETURN.
+*    ENDIF.
+
+    CALL FUNCTION 'TH_REDISPATCH'
+      EXCEPTIONS
+        OTHERS = 1.
+  ENDMETHOD.
+
   METHOD clear_repo_cache.
     DATA lv_repo_key TYPE zcl_abapgit_ortec_repo_state=>ty_repo_key.
 
@@ -188,12 +219,20 @@ CLASS zcl_abapgit_ortec_git_switch IMPLEMENTATION.
     ENDTRY.
   ENDMETHOD.
 
+  METHOD is_avoid_timeout_active.
+    rv_active = mv_avoid_timeout_active.
+  ENDMETHOD.
+
   METHOD is_bulk_exists_active.
     rv_active = mv_bulk_exists_active.
   ENDMETHOD.
 
   METHOD is_serial_prefetch_active.
     rv_active = mv_serial_prefetch_active.
+  ENDMETHOD.
+
+  METHOD set_avoid_timeout_active.
+    mv_avoid_timeout_active = iv_active.
   ENDMETHOD.
 
   METHOD set_bulk_exists_active.
@@ -223,3 +262,4 @@ CLASS zcl_abapgit_ortec_git_switch IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
+
