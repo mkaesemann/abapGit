@@ -69,6 +69,7 @@ CLASS zcl_abapgit_gui_page_patch DEFINITION
     DATA mv_pushed TYPE abap_bool .
     DATA mi_repo_online TYPE REF TO zif_abapgit_repo_online .
     DATA mv_sci_result TYPE zif_abapgit_definitions=>ty_sci_result .
+    CONSTANTS c_use_standard_patch TYPE abap_bool VALUE abap_false .
 
     METHODS render_patch
       IMPORTING
@@ -708,7 +709,16 @@ CLASS zcl_abapgit_gui_page_patch IMPLEMENTATION.
 
     ri_html = super->zif_abapgit_gui_renderable~render( ).
 
+    IF c_use_standard_patch = abap_false.
+      ri_html->add( zcl_abapgit_ortec_git_patch=>render_styles( ) ).
+      ri_html->add( zcl_abapgit_ortec_git_patch=>render_nav_data_script( mt_diff_files ) ).
+    ENDIF.
+
     register_deferred_script( render_scripts( ) ).
+
+    IF c_use_standard_patch = abap_false.
+      register_deferred_script( zcl_abapgit_ortec_git_patch=>render_scripts( ) ).
+    ENDIF.
 
   ENDMETHOD.
 ENDCLASS.
