@@ -90,11 +90,13 @@ CLASS zcl_abapgit_repo_online IMPLEMENTATION.
                        iv_text    = 'Fetch remote files' ).
 
     IF get_selected_commit( ) IS INITIAL.
-      ls_pull = zcl_abapgit_git_porcelain=>pull_by_branch( iv_url         = get_url( )
-                                                           iv_branch_name = get_selected_branch( ) ).
+      ls_pull = zcl_abapgit_git_porcelain=>pull_by_branch(
+        iv_url         = get_url( )
+        iv_branch_name = get_selected_branch( ) ).
     ELSE.
-      ls_pull = zcl_abapgit_git_porcelain=>pull_by_commit( iv_url         = get_url( )
-                                                           iv_commit_hash = get_selected_commit( ) ).
+      ls_pull = zcl_abapgit_git_porcelain=>pull_by_commit(
+        iv_url         = get_url( )
+        iv_commit_hash = get_selected_commit( ) ).
     ENDIF.
 
     set_files_remote( ls_pull-files ).

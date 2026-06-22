@@ -30,6 +30,7 @@ CLASS zcl_abapgit_ortec_obj_store DEFINITION
     CLASS-METHODS get_objects
       IMPORTING iv_repo_key       TYPE ty_repo_key
                 it_sha1s          TYPE zif_abapgit_git_definitions=>ty_sha1_tt
+                iv_bulk_fetch     TYPE abap_bool DEFAULT abap_false
       RETURNING VALUE(rt_objects) TYPE zif_abapgit_definitions=>ty_objects_tt
       RAISING   zcx_abapgit_ortec_git.
 
@@ -74,10 +75,11 @@ CLASS zcl_abapgit_ortec_obj_store DEFINITION
                 iv_sha1           TYPE zif_abapgit_git_definitions=>ty_sha1
       RETURNING VALUE(rt_parents) TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
 
+  PROTECTED SECTION.
   PRIVATE SECTION.
     "! STRATEGY 2: Cache table
     TYPES BEGIN OF ty_cache_entry.
-            INCLUDE TYPE zaog_obj_store.
+    INCLUDE TYPE zaog_obj_store.
     TYPES END OF ty_cache_entry.
 
     TYPES ty_obj_store_tt TYPE STANDARD TABLE OF zaog_obj_store WITH DEFAULT KEY.
@@ -114,7 +116,10 @@ CLASS zcl_abapgit_ortec_obj_store DEFINITION
 ENDCLASS.
 
 
+
 CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
+
+
   METHOD store_object.
     DATA ls_row TYPE zaog_obj_store.
 
@@ -132,6 +137,7 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
     ENDIF.
     invalidate_cache( ).
   ENDMETHOD.
+
 
   METHOD store_objects.
     DATA lv_ts   TYPE timestampl.
@@ -158,6 +164,7 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
     invalidate_cache( ).
   ENDMETHOD.
 
+
   METHOD get_object.
     DATA lt_sha1s TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
     DATA lt_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
@@ -183,6 +190,7 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
 
     zcx_abapgit_ortec_git=>raise( |Object { iv_sha1 } not found in store| ).
   ENDMETHOD.
+
 
   METHOD get_objects.
     DATA lt_unique_sha1s TYPE ty_sha1_set.
@@ -221,21 +229,34 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
       ENDIF.
     ENDLOOP.
 
-    LOOP AT lt_missing_sha1s ASSIGNING <lv_sha1>.
-      ls_sha1-sha1 = <lv_sha1>.
-      APPEND ls_sha1 TO lt_package.
-      IF lines( lt_package ) >= c_select_package_size.
+    IF iv_bulk_fetch = abap_true.
+      LOOP AT lt_missing_sha1s ASSIGNING <lv_sha1>.
+        ls_sha1-sha1 = <lv_sha1>.
+        APPEND ls_sha1 TO lt_package.
+      ENDLOOP.
+
+      IF lt_package IS NOT INITIAL.
         lt_db_rows = read_object_rows( iv_repo_key = iv_repo_key
                                        it_sha1s    = lt_package ).
         APPEND LINES OF lt_db_rows TO lt_rows.
-        CLEAR lt_package.
       ENDIF.
-    ENDLOOP.
+    ELSE.
+      LOOP AT lt_missing_sha1s ASSIGNING <lv_sha1>.
+        ls_sha1-sha1 = <lv_sha1>.
+        APPEND ls_sha1 TO lt_package.
+        IF lines( lt_package ) >= c_select_package_size.
+          lt_db_rows = read_object_rows( iv_repo_key = iv_repo_key
+                                         it_sha1s    = lt_package ).
+          APPEND LINES OF lt_db_rows TO lt_rows.
+          CLEAR lt_package.
+        ENDIF.
+      ENDLOOP.
 
-    IF lt_package IS NOT INITIAL.
-      lt_db_rows = read_object_rows( iv_repo_key = iv_repo_key
-                                     it_sha1s    = lt_package ).
-      APPEND LINES OF lt_db_rows TO lt_rows.
+      IF lt_package IS NOT INITIAL.
+        lt_db_rows = read_object_rows( iv_repo_key = iv_repo_key
+                                       it_sha1s    = lt_package ).
+        APPEND LINES OF lt_db_rows TO lt_rows.
+      ENDIF.
     ENDIF.
 
     mv_cache_repo_key = iv_repo_key.
@@ -259,6 +280,7 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
     ENDLOOP.
   ENDMETHOD.
 
+
   METHOD get_reachable_objects.
     DATA lt_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
     DATA lt_commit_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
@@ -278,9 +300,14 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
     FIELD-SYMBOLS <ls_blob_object> LIKE LINE OF lt_blob_objects.
     FIELD-SYMBOLS <ls_node> LIKE LINE OF lt_nodes.
 
+    " Pre-load all objects for this repo into the session cache in one SELECT,
+    " so every get_objects call below is a pure in-memory cache lookup.
+    populate_cache( iv_repo_key ).
+
     APPEND iv_commit TO lt_commit_sha.
-    lt_commit_objects = get_objects( iv_repo_key = iv_repo_key
-                                     it_sha1s    = lt_commit_sha ).
+    lt_commit_objects = get_objects( iv_repo_key   = iv_repo_key
+                                     it_sha1s      = lt_commit_sha
+                                     iv_bulk_fetch = abap_true ).
     READ TABLE lt_commit_objects INTO ls_commit_object INDEX 1.
     IF sy-subrc <> 0 OR ls_commit_object-type <> zif_abapgit_git_definitions=>c_type-commit.
       zcx_abapgit_ortec_git=>raise( |Commit { iv_commit } not found in store| ).
@@ -304,8 +331,9 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
 
     WHILE lt_current_trees IS NOT INITIAL.
       CLEAR lt_next_trees.
-      lt_tree_objects = get_objects( iv_repo_key = iv_repo_key
-                                     it_sha1s    = lt_current_trees ).
+      lt_tree_objects = get_objects( iv_repo_key   = iv_repo_key
+                                     it_sha1s      = lt_current_trees
+                                     iv_bulk_fetch = abap_true ).
 
       LOOP AT lt_tree_objects ASSIGNING <ls_tree_object>.
         IF <ls_tree_object>-type <> zif_abapgit_git_definitions=>c_type-tree.
@@ -352,8 +380,9 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
     ENDWHILE.
 
     IF lt_blob_sha1s IS NOT INITIAL.
-      lt_blob_objects = get_objects( iv_repo_key = iv_repo_key
-                                     it_sha1s    = lt_blob_sha1s ).
+      lt_blob_objects = get_objects( iv_repo_key   = iv_repo_key
+                                     it_sha1s      = lt_blob_sha1s
+                                     iv_bulk_fetch = abap_true ).
       LOOP AT lt_blob_objects ASSIGNING <ls_blob_object>.
         IF <ls_blob_object>-type <> zif_abapgit_git_definitions=>c_type-blob.
           zcx_abapgit_ortec_git=>raise( |Object { <ls_blob_object>-sha1 } is not a blob| ).
@@ -367,6 +396,7 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
     ENDIF.
   ENDMETHOD.
 
+
   METHOD exists.
     " TODO: variable is assigned but never used (ABAP cleaner)
     DATA lv_dummy TYPE c LENGTH 40.
@@ -379,6 +409,7 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
     rv_exists = boolc( sy-subrc = 0 ).
   ENDMETHOD.
 
+
   METHOD get_known_commits.
     SELECT obj_sha1 FROM zaog_obj_store
       INTO TABLE rt_commits
@@ -386,6 +417,7 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
         AND obj_type = 'commit'
         AND status   = 'R'.
   ENDMETHOD.
+
 
   METHOD get_all_objects.
     DATA ls_obj TYPE zif_abapgit_definitions=>ty_object.
@@ -406,10 +438,12 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
     ENDLOOP.
   ENDMETHOD.
 
+
   METHOD clear_repo.
     DELETE FROM zaog_obj_store WHERE repo_key = iv_repo_key.
     invalidate_cache( ).
   ENDMETHOD.
+
 
   METHOD get_commit_parents.
     DATA lv_data   TYPE xstring.
@@ -447,21 +481,25 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
     ENDLOOP.
   ENDMETHOD.
 
+
   METHOD invalidate_cache.
     CLEAR: mt_cache,
            mv_cache_repo_key,
            mv_full_cache_repo_key.
   ENDMETHOD.
 
+
   METHOD get_timestamp.
     GET TIME STAMP FIELD rv_ts.
   ENDMETHOD.
+
 
   METHOD is_cache_valid.
     IF mv_full_cache_repo_key = iv_repo_key AND mv_full_cache_repo_key IS NOT INITIAL.
       rv_valid = abap_true.
     ENDIF.
   ENDMETHOD.
+
 
   METHOD populate_cache.
     DATA lt_rows         TYPE STANDARD TABLE OF zaog_obj_store.
@@ -488,6 +526,7 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
       INSERT ls_entry INTO TABLE mt_cache.
     ENDLOOP.
   ENDMETHOD.
+
 
   METHOD read_object_rows.
     DATA lr_sha1s TYPE RANGE OF zaog_obj_store-obj_sha1.

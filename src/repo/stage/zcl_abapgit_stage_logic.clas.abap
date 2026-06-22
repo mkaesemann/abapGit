@@ -114,8 +114,28 @@ CLASS zcl_abapgit_stage_logic IMPLEMENTATION.
 
   METHOD zif_abapgit_stage_logic~get.
 
+    DATA lv_reset_remote_cache TYPE abap_bool.
+
     " Getting REMOTE before LOCAL is critical to ensure that DATA config is loaded first
-    rs_files-remote = ii_repo_online->get_files_remote( ii_obj_filter ).
+    IF ii_obj_filter IS INITIAL.
+      rs_files-remote = ii_repo_online->get_files_remote( ii_obj_filter ).
+    ELSE.
+      TRY.
+          CALL METHOD ('ZCL_ABAPGIT_ORTEC_FILTER_WALK')=>('GET_REMOTE_FILES_FOR_STAGE')
+            EXPORTING
+              ii_repo_online = ii_repo_online
+              ii_obj_filter  = ii_obj_filter
+            RECEIVING
+              rt_files       = rs_files-remote.
+
+          " Repo status calculation calls get_files_remote again; preload the filtered
+          " set to keep that second call on the same lightweight data.
+          ii_repo_online->set_files_remote( rs_files-remote ).
+          lv_reset_remote_cache = abap_true.
+        CATCH cx_root.
+          rs_files-remote = ii_repo_online->get_files_remote( ii_obj_filter ).
+      ENDTRY.
+    ENDIF.
 
     IF ii_obj_filter IS INITIAL.
       rs_files-local = ii_repo_online->get_files_local( ).
@@ -130,6 +150,13 @@ CLASS zcl_abapgit_stage_logic IMPLEMENTATION.
     remove_identical( CHANGING cs_files = rs_files ).
     remove_ignored( EXPORTING ii_repo  = ii_repo_online
                     CHANGING  cs_files = rs_files ).
+
+    " Filtered REMOTE list must not remain cached as the repository baseline.
+    IF lv_reset_remote_cache = abap_true.
+      ii_repo_online->refresh(
+        iv_drop_cache = abap_false
+        iv_drop_log   = abap_false ).
+    ENDIF.
 
   ENDMETHOD.
 ENDCLASS.
