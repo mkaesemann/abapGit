@@ -49,6 +49,14 @@ CLASS zcl_abapgit_ortec_git_stage DEFINITION
         VALUE(ri_html)  TYPE REF TO zif_abapgit_html.
   PROTECTED SECTION.
   PRIVATE SECTION.
+    CLASS-METHODS find_changed_by
+      IMPORTING
+        !ii_repo             TYPE REF TO zif_abapgit_repo
+        !it_files            TYPE zif_abapgit_definitions=>ty_stage_files
+        !it_transports       TYPE zif_abapgit_cts_api=>ty_transport_list
+      RETURNING
+        VALUE(rt_changed_by) TYPE zcl_abapgit_cts_integration=>ty_changed_by_tt.
+
     CLASS-METHODS find_transports
       IMPORTING
         !ii_repo             TYPE REF TO zif_abapgit_repo
@@ -149,6 +157,73 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
 
       CATCH zcx_abapgit_exception ##NO_HANDLER.
     ENDTRY.
+
+  ENDMETHOD.
+
+
+  METHOD find_changed_by.
+
+    DATA: ls_local             LIKE LINE OF it_files-local,
+          ls_remote            LIKE LINE OF it_files-remote,
+          ls_changed_by        LIKE LINE OF rt_changed_by,
+          lt_changed_by_remote LIKE rt_changed_by,
+          ls_item              TYPE zif_abapgit_definitions=>ty_item,
+          lv_transport         LIKE LINE OF it_transports,
+          lv_user              TYPE uname.
+
+    FIELD-SYMBOLS <ls_changed_by> LIKE LINE OF lt_changed_by_remote.
+
+    TRY.
+        rt_changed_by = zcl_abapgit_cts_integration=>find_changed_by(
+          ii_repo       = ii_repo
+          it_files      = it_files
+          it_transports = it_transports ).
+        RETURN.
+      CATCH cx_root ##NO_HANDLER.
+    ENDTRY.
+
+    LOOP AT it_files-local INTO ls_local WHERE NOT item IS INITIAL.
+      ls_changed_by-item = ls_local-item.
+      ls_changed_by-filename = ls_local-file-filename.
+      ls_changed_by-name = zcl_abapgit_objects=>changed_by(
+        is_item     = ls_local-item
+        iv_filename = ls_local-file-filename ).
+      INSERT ls_changed_by INTO TABLE rt_changed_by.
+    ENDLOOP.
+
+    LOOP AT it_files-remote INTO ls_remote WHERE filename IS NOT INITIAL.
+      TRY.
+          zcl_abapgit_filename_logic=>file_to_object(
+            EXPORTING
+              iv_filename = ls_remote-filename
+              iv_path     = ls_remote-path
+              io_dot      = ii_repo->get_dot_abapgit( )
+            IMPORTING
+              es_item     = ls_item ).
+          ls_changed_by-item = ls_item.
+          INSERT ls_changed_by INTO TABLE lt_changed_by_remote.
+        CATCH zcx_abapgit_exception ##NO_HANDLER.
+      ENDTRY.
+    ENDLOOP.
+
+    LOOP AT lt_changed_by_remote ASSIGNING <ls_changed_by>.
+      CLEAR lv_transport.
+      READ TABLE it_transports WITH KEY
+        obj_type = <ls_changed_by>-item-obj_type
+        obj_name = <ls_changed_by>-item-obj_name
+        INTO lv_transport.
+      IF sy-subrc = 0.
+        lv_user = zcl_abapgit_factory=>get_cts_api( )->read_user( lv_transport-trkorr ).
+        IF lv_user IS NOT INITIAL.
+          <ls_changed_by>-name = lv_user.
+        ENDIF.
+      ENDIF.
+      IF <ls_changed_by>-name IS INITIAL.
+        <ls_changed_by>-name = zcl_abapgit_objects_super=>c_user_unknown.
+      ENDIF.
+    ENDLOOP.
+
+    INSERT LINES OF lt_changed_by_remote INTO TABLE rt_changed_by.
 
   ENDMETHOD.
 
@@ -442,7 +517,7 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
       SORT lt_filter_trkorr_pf.
       DELETE ADJACENT DUPLICATES FROM lt_filter_trkorr_pf.
       zcl_abapgit_factory=>get_cts_api( )->prefetch_descriptions( lt_filter_trkorr_pf ).
-      lt_filter_changed_by = zcl_abapgit_cts_integration=>find_changed_by(
+      lt_filter_changed_by = find_changed_by(
         ii_repo       = ii_repo
         it_files      = it_files
         it_transports = lt_filter_transports ).
@@ -564,7 +639,7 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
     DELETE ADJACENT DUPLICATES FROM lt_trkorr.
     zcl_abapgit_factory=>get_cts_api( )->prefetch_descriptions( lt_trkorr ).
 
-    lt_changed_by = zcl_abapgit_cts_integration=>find_changed_by(
+    lt_changed_by = find_changed_by(
       ii_repo       = ii_repo
       it_files      = ls_window
       it_transports = lt_transports ).
