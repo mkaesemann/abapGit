@@ -24,6 +24,25 @@ CLASS zcl_abapgit_ortec_filter_walk DEFINITION
       RAISING
         zcx_abapgit_exception.
 
+    "! Resolve filtered remote files for the diff single-object/file flow.
+    "! Uses the same fast-path/fallback behavior as stage filtering.
+    "! @parameter ii_repo_online |
+    "! Repository instance from diff page
+    "! @parameter ii_obj_filter |
+    "! Object filter for single object/file diff
+    "! @parameter rt_files |
+    "! Filtered remote files
+    "! @raising zcx_abapgit_exception |
+    "! Raised only when both fast and fallback paths fail
+    CLASS-METHODS get_remote_files_for_diff
+      IMPORTING
+        ii_repo_online TYPE REF TO zif_abapgit_repo
+        ii_obj_filter  TYPE REF TO zif_abapgit_object_filter
+      RETURNING
+        VALUE(rt_files) TYPE zif_abapgit_git_definitions=>ty_files_tt
+      RAISING
+        zcx_abapgit_exception.
+
     "! Resolve filtered files for a known commit/repository key.
     "! The object table parameter is kept for compatibility with existing callers.
     "! @parameter iv_commit |
@@ -61,6 +80,12 @@ ENDCLASS.
 
 
 CLASS zcl_abapgit_ortec_filter_walk IMPLEMENTATION.
+
+  METHOD get_remote_files_for_diff.
+    rt_files = get_remote_files_for_stage(
+      ii_repo_online = ii_repo_online
+      ii_obj_filter  = ii_obj_filter ).
+  ENDMETHOD.
 
   METHOD get_remote_files_for_stage.
     DATA li_repo_online TYPE REF TO zif_abapgit_repo_online.
