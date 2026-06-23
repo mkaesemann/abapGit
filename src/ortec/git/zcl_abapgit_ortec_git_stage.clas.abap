@@ -810,6 +810,23 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
     ri_html->add( '      }' ).
     ri_html->add( '      body.appendChild(row);' ).
     ri_html->add( '    }' ).
+    ri_html->add( '    function paintRowSelection(row, data) {' ).
+    ri_html->add( '      if (!row || !data) { return; }' ).
+    ri_html->add( '      var selected = state[data.key] || "";' ).
+    ri_html->add( '      var status = row.querySelector("td.status");' ).
+    ri_html->add( '      var cmd = row.querySelector("td.cmd");' ).
+    ri_html->add( '      if (!status || !cmd) { return; }' ).
+    ri_html->add( '      status.innerHTML = ""; cmd.innerHTML = "";' ).
+    ri_html->add( '      if (selected) { status.innerHTML = "<span style=\"background-color:#ddd;color:#000;font-weight:bold;padding:1px 4px\">" + selected + "</span>"; }' ).
+    ri_html->add( '      else { status.appendChild(document.createTextNode("?")); }' ).
+    ri_html->add( '      if (selected) { addAction(cmd, "reset", ""); }' ).
+    ri_html->add( '      else if (data.context === "local") { addAction(cmd, "add", methods.add); }' ).
+    ri_html->add( '      else { addAction(cmd, "ignore", methods.ignore); cmd.appendChild(document.createTextNode(" ")); addAction(cmd, "remove", methods.remove); }' ).
+    ri_html->add( '    }' ).
+    ri_html->add( '    function findFilteredByKey(key) {' ).
+    ri_html->add( '      for (var i = 0; i < filtered.length; i++) { if (filtered[i].key === key) { return filtered[i]; } }' ).
+    ri_html->add( '      return null;' ).
+    ri_html->add( '    }' ).
     ri_html->add( '    function render() {' ).
     ri_html->add( '      var body = id("stageVirtualBody"); if (!body) { return; }' ).
     ri_html->add( '      while (body.firstChild) { body.removeChild(body.firstChild); }' ).
@@ -841,13 +858,9 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
                && ' transportCell.style.whiteSpace = "nowrap";'
                && ' transportCell.innerHTML = data.transportHtml || data.transport || "";'
                && ' row.appendChild(transportCell);' ).
-    ri_html->add( '        var selected = state[data.key] || "";' ).
     ri_html->add( '        var status = document.createElement("td"); status.className = "status"; row.appendChild(status);' ).
     ri_html->add( '        var cmd = document.createElement("td"); cmd.className = "cmd"; row.appendChild(cmd);' ).
-    ri_html->add( '        if (selected) { status.innerHTML = "<span style=\"background-color:#ddd;color:#000;font-weight:bold;padding:1px 4px\">" + selected + "</span>"; } else { status.appendChild(document.createTextNode("?")); }' ).
-    ri_html->add( '        if (selected) { addAction(cmd, "reset", ""); }' ).
-    ri_html->add( '        else if (data.context === "local") { addAction(cmd, "add", methods.add); }' ).
-    ri_html->add( '        else { addAction(cmd, "ignore", methods.ignore); cmd.appendChild(document.createTextNode(" ")); addAction(cmd, "remove", methods.remove); }' ).
+    ri_html->add( '        paintRowSelection(row, data);' ).
     ri_html->add( '        body.appendChild(row);' ).
     ri_html->add( '      }' ).
     ri_html->add( '      if (!filtered.length) { var empty = document.createElement("tr"); var emptyCell = addCell(empty, "No files match the current filter"); emptyCell.colSpan = 7; body.appendChild(empty); }' ).
@@ -889,7 +902,14 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
     ri_html->add( '      if (target && target.getAttribute && target.getAttribute("data-method") !== null) {' ).
     ri_html->add( '        if (event.preventDefault) { event.preventDefault(); } event.cancelBubble = true;' ).
     ri_html->add( '        var row = target; while (row && row.tagName !== "TR") { row = row.parentNode; }' ).
-    ri_html->add( '        if (row) { var key = row.getAttribute("data-key"); var method = target.getAttribute("data-method"); if (method) { state[key] = method; } else { delete state[key]; } save(); render(); }' ).
+    ri_html->add( '        if (row) {' ).
+    ri_html->add( '          var key = row.getAttribute("data-key");' ).
+    ri_html->add( '          var method = target.getAttribute("data-method");' ).
+    ri_html->add( '          if (method) { state[key] = method; } else { delete state[key]; }' ).
+    ri_html->add( '          save();' ).
+    ri_html->add( '          paintRowSelection(row, findFilteredByKey(key));' ).
+    ri_html->add( '          updateButtons();' ).
+    ri_html->add( '        }' ).
     ri_html->add( '        return false;' ).
     ri_html->add( '      }' ).
     ri_html->add( '    }; }' ).

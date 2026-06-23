@@ -48,7 +48,7 @@ CLASS zcl_abapgit_ortec_git_patch DEFINITION
 
     CLASS-METHODS render_nav_json
       IMPORTING
-        it_diff_files  TYPE zif_abapgit_gui_diff=>ty_file_diffs
+        it_data        TYPE ty_file_info_tt
       RETURNING
         VALUE(rv_json) TYPE string.
 
@@ -80,6 +80,12 @@ CLASS zcl_abapgit_ortec_git_patch DEFINITION
         iv_val            TYPE string
       RETURNING
         VALUE(rv_escaped) TYPE string.
+
+    CLASS-METHODS render_file_detail_json
+      IMPORTING
+        is_info        TYPE ty_file_info
+      RETURNING
+        VALUE(rv_json) TYPE string.
 
 ENDCLASS.
 
@@ -282,60 +288,22 @@ CLASS zcl_abapgit_ortec_git_patch IMPLEMENTATION.
 
   METHOD render_nav_json.
 
-    DATA lt_data       TYPE ty_file_info_tt.
     DATA lt_files_json TYPE string_table.
     DATA ls_info       TYPE ty_file_info.
-    DATA ls_hunk       TYPE ty_hunk_info.
-    DATA ls_sub        TYPE ty_subblock_info.
     DATA lv_file_json  TYPE string.
-    DATA lv_first_h    TYPE abap_bool.
-    DATA lv_first_s    TYPE abap_bool.
 
-    lt_data = build_nav_data( it_diff_files ).
-
-    LOOP AT lt_data INTO ls_info.
+    LOOP AT it_data INTO ls_info.
       lv_file_json = '{"idx":' && ls_info-file_index
         && ',"filename":"' && escape_json( ls_info-filename ) && '"'
+        && ',"path":"' && escape_json( ls_info-path ) && '"'
         && ',"nfname":"' && escape_json( ls_info-nfname ) && '"'
         && ',"lstate":"' && ls_info-lstate && '"'
         && ',"rstate":"' && ls_info-rstate && '"'
         && ',"ins":' && ls_info-total_insert
         && ',"del":' && ls_info-total_delete
-        && ',"hunks":['.
+        && ',"hasHunks":' && COND string( WHEN lines( ls_info-hunks ) > 0 THEN '1' ELSE '0' )
+        && '}'.
 
-      lv_first_h = abap_true.
-      LOOP AT ls_info-hunks INTO ls_hunk.
-        IF lv_first_h = abap_false.
-          lv_file_json = lv_file_json && ','.
-        ENDIF.
-        lv_first_h = abap_false.
-
-        lv_file_json = lv_file_json
-          && '{"sec":' && ls_hunk-section_num
-          && ',"text":"' && escape_json( ls_hunk-beacon_text ) && '"'
-          && ',"ins":' && ls_hunk-inserted
-          && ',"del":' && ls_hunk-deleted
-          && ',"subs":['.
-
-        lv_first_s = abap_true.
-        LOOP AT ls_hunk-subblocks INTO ls_sub.
-          IF lv_first_s = abap_false.
-            lv_file_json = lv_file_json && ','.
-          ENDIF.
-          lv_first_s = abap_false.
-
-          lv_file_json = lv_file_json
-            && '{"f":' && ls_sub-first_line
-            && ',"l":' && ls_sub-last_line
-            && ',"i":' && ls_sub-inserted
-            && ',"d":' && ls_sub-deleted
-            && '}'.
-        ENDLOOP.
-
-        lv_file_json = lv_file_json && ']}'.
-      ENDLOOP.
-
-      lv_file_json = lv_file_json && ']}'.
       APPEND lv_file_json TO lt_files_json.
     ENDLOOP.
 
@@ -344,15 +312,70 @@ CLASS zcl_abapgit_ortec_git_patch IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD render_file_detail_json.
+
+    DATA ls_hunk      TYPE ty_hunk_info.
+    DATA ls_sub       TYPE ty_subblock_info.
+    DATA lv_first_h   TYPE abap_bool.
+    DATA lv_first_s   TYPE abap_bool.
+
+    rv_json = '{"hunks":['.
+
+    lv_first_h = abap_true.
+    LOOP AT is_info-hunks INTO ls_hunk.
+      IF lv_first_h = abap_false.
+        rv_json = rv_json && ','.
+      ENDIF.
+      lv_first_h = abap_false.
+
+      rv_json = rv_json
+        && '{"sec":' && ls_hunk-section_num
+        && ',"text":"' && escape_json( ls_hunk-beacon_text ) && '"'
+        && ',"ins":' && ls_hunk-inserted
+        && ',"del":' && ls_hunk-deleted
+        && ',"subs":['.
+
+      lv_first_s = abap_true.
+      LOOP AT ls_hunk-subblocks INTO ls_sub.
+        IF lv_first_s = abap_false.
+          rv_json = rv_json && ','.
+        ENDIF.
+        lv_first_s = abap_false.
+
+        rv_json = rv_json
+          && '{"f":' && ls_sub-first_line
+          && ',"l":' && ls_sub-last_line
+          && ',"i":' && ls_sub-inserted
+          && ',"d":' && ls_sub-deleted
+          && '}'.
+      ENDLOOP.
+
+      rv_json = rv_json && ']}'.
+    ENDLOOP.
+
+    rv_json = rv_json && ']}'.
+
+  ENDMETHOD.
+
+
   METHOD render_nav_data_script.
 
+    DATA lt_data TYPE ty_file_info_tt.
+    DATA ls_info TYPE ty_file_info.
     DATA lv_json TYPE string.
+    DATA lv_hunks_json TYPE string.
 
     CREATE OBJECT ri_html TYPE zcl_abapgit_html.
 
-    lv_json = render_nav_json( it_diff_files ).
+    lt_data = build_nav_data( it_diff_files ).
+    lv_json = render_nav_json( lt_data ).
 
     ri_html->add( '<script>window.ortecPatchNav=' && lv_json && ';</script>' ).
+
+    LOOP AT lt_data INTO ls_info WHERE hunks IS NOT INITIAL.
+      lv_hunks_json = render_file_detail_json( ls_info ).
+      ri_html->add( |<script type="application/json" id="ortec-patch-details-{ ls_info-file_index }">{ lv_hunks_json }</script>| ).
+    ENDLOOP.
 
   ENDMETHOD.
 
@@ -475,6 +498,10 @@ CLASS zcl_abapgit_ortec_git_patch IMPLEMENTATION.
     ri_html->add( '  var Q=String.fromCharCode(39);' ).
     ri_html->add( '  var lineCacheByFile=Object.create(null);' ).
     ri_html->add( '  var lineCacheByHunk=Object.create(null);' ).
+    ri_html->add( '  var fileIndexList=[];' ).
+    ri_html->add( '  var visibleFileIndexes=[];' ).
+    ri_html->add( '  var renderedFileCount=0;' ).
+    ri_html->add( '  var fileRenderBatch=80;' ).
 
     ri_html->add( '  function escHtml(s){' ).
     ri_html->add( '    return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");' ).
@@ -512,49 +539,99 @@ CLASS zcl_abapgit_ortec_git_patch IMPLEMENTATION.
     ri_html->add( '    h+="<div class=\"ortec-jump-nav\">";' ).
     ri_html->add( '    h+="<button type=\"button\" class=\"ortec-jump-btn\" id=\"ortec-prev-change\" title=\"Previous change (Ctrl+Up)\">&#9650; Prev</button>";' ).
     ri_html->add( '    h+="<button type=\"button\" class=\"ortec-jump-btn\" id=\"ortec-next-change\" title=\"Next change (Ctrl+Down)\">&#9660; Next</button>";' ).
+    ri_html->add( '    h+="</div></div>";' ).
+    ri_html->add( '    h+="<div class=\"ortec-sidebar-files\" id=\"ortec-sidebar-files\"></div>";' ).
+    ri_html->add( '    h+="<div class=\"ortec-sidebar-footer\"><span id=\"ortec-summary\">File 1 of "+navData.length+"</span></div>";' ).
+    ri_html->add( '    return h;' ).
+    ri_html->add( '  }' ).
+    ri_html->add( '  function buildFileRowHtml(idx){' ).
+    ri_html->add( '    var f=navData[idx]; if(!f)return "";' ).
+    ri_html->add( '    var ac=(idx===activeIdx)?" ortec-active":"";' ).
+    ri_html->add( '    var sc=stateClass(f.lstate,f.rstate);' ).
+    ri_html->add( '    var ex=f.hasHunks?"&#9656;":"";' ).
+    ri_html->add( '    var h="";' ).
+    ri_html->add( '    h+="<div class=\"ortec-sidebar-file"+ac+"\" data-idx=\""+idx+"\" data-fname=\""+escAttr(f.filename)+"\">";' ).
+    ri_html->add( '    h+="<div class=\"ortec-file-header\">";' ).
+    ri_html->add( '    h+="<span class=\"ortec-expand\" data-idx=\""+idx+"\">"+ex+"</span>";' ).
+    ri_html->add( '    h+="<input type=\"checkbox\" class=\"ortec-file-cb\" data-idx=\""+idx+"\" data-nf=\""+escAttr(f.nfname)+"\">";' ).
+    ri_html->add( '    h+="<span class=\"ortec-file-name"+sc+"\" data-idx=\""+idx+"\" title=\""+escAttr((f.path||"")+f.filename)+"\">"+escHtml(f.filename)+"</span>";' ).
+    ri_html->add( '    h+="<span class=\"ortec-file-stats\">+"+f.ins+"/-"+f.del+"</span>";' ).
     ri_html->add( '    h+="</div>";' ).
-    ri_html->add( '    h+="</div><div class=\"ortec-sidebar-files\" id=\"ortec-sidebar-files\">";' ).
-    ri_html->add( '    for(var i=0;i<navData.length;i++){' ).
-    ri_html->add( '      var f=navData[i];' ).
-    ri_html->add( '      var ac=(i===0)?" ortec-active":"";' ).
-    ri_html->add( '      var sc=stateClass(f.lstate,f.rstate);' ).
-    ri_html->add( '      h+="<div class=\"ortec-sidebar-file"+ac+"\" data-idx=\""+i+"\" data-fname=\""+escAttr(f.filename)+"\">";' ).
-    ri_html->add( '      h+="<div class=\"ortec-file-header\">";' ).
-    ri_html->add( '      h+="<span class=\"ortec-expand\" data-idx=\""+i+"\">&#9656;</span>";' ).
-    ri_html->add( '      h+="<input type=\"checkbox\" class=\"ortec-file-cb\" data-idx=\""+i+"\" data-nf=\""+escAttr(f.nfname)+"\">";' ).
-    ri_html->add( '      h+="<span class=\"ortec-file-name"+sc+"\" data-idx=\""+i+"\" title=\""+escAttr(f.path+f.filename)+"\">"+escHtml(f.filename)+"</span>";' ).
-    ri_html->add( '      h+="<span class=\"ortec-file-stats\">+"+f.ins+"/-"+f.del+"</span>";' ).
+    ri_html->add( '    h+="<div class=\"ortec-hunks\" id=\"ortec-hunks-"+idx+"\" style=\"display:none\"></div>";' ).
+    ri_html->add( '    h+="</div>";' ).
+    ri_html->add( '    return h;' ).
+    ri_html->add( '  }' ).
+    ri_html->add( '  function getDetailData(idx){' ).
+    ri_html->add( '    var f=navData[idx]; if(!f)return null;' ).
+    ri_html->add( '    if(f._detailsLoaded)return f;' ).
+    ri_html->add( '    var node=document.getElementById("ortec-patch-details-"+idx);' ).
+    ri_html->add( '    if(!node){f.hunks=[];f._detailsLoaded=true;return f;}' ).
+    ri_html->add( '    try{var payload=JSON.parse(node.textContent||"{}");f.hunks=payload.hunks||[];}catch(e){f.hunks=[];}' ).
+    ri_html->add( '    f._detailsLoaded=true;' ).
+    ri_html->add( '    if(node.parentNode){node.parentNode.removeChild(node);}' ).
+    ri_html->add( '    return f;' ).
+    ri_html->add( '  }' ).
+    ri_html->add( '  function buildHunksHtml(idx){' ).
+    ri_html->add( '    var f=getDetailData(idx); if(!f||!f.hunks||f.hunks.length===0)return "";' ).
+    ri_html->add( '    var h="";' ).
+    ri_html->add( '    h+="<div class=\"ortec-hunks-inner\">";' ).
+    ri_html->add( '    for(var j=0;j<f.hunks.length;j++){' ).
+    ri_html->add( '      var k=f.hunks[j];' ).
+    ri_html->add( '      h+="<div class=\"ortec-hunk\" data-idx=\""+idx+"\" data-sec=\""+k.sec+"\">";' ).
+    ri_html->add( '      h+="<input type=\"checkbox\" class=\"ortec-hunk-cb\" data-idx=\""+idx+"\" data-sec=\""+k.sec+"\" data-nf=\""+escAttr(f.nfname)+"\">";' ).
+    ri_html->add( '      h+="<span class=\"ortec-hunk-name\">"+escHtml(k.text||"---")+"</span>";' ).
+    ri_html->add( '      h+="<span class=\"ortec-hunk-stats\">+"+(k.ins||0)+"/-"+(k.del||0)+"</span>";' ).
     ri_html->add( '      h+="</div>";' ).
-    ri_html->add( '      if(f.hunks&&f.hunks.length>0){' ).
-    ri_html->add( '        h+="<div class=\"ortec-hunks\" id=\"ortec-hunks-"+i+"\" style=\"display:none\">";' ).
-    ri_html->add( '        for(var j=0;j<f.hunks.length;j++){' ).
-    ri_html->add( '          var k=f.hunks[j];' ).
-    ri_html->add( '          h+="<div class=\"ortec-hunk\" data-idx=\""+i+"\" data-sec=\""+k.sec+"\">";' ).
-    ri_html->add( '          h+="<input type=\"checkbox\" class=\"ortec-hunk-cb\" data-idx=\""+i+"\" data-sec=\""+k.sec+"\" data-nf=\""+escAttr(f.nfname)+"\">";' ).
-    ri_html->add( '          h+="<span class=\"ortec-hunk-name\">"+escHtml(k.text)+"</span>";' ).
-    ri_html->add( '          h+="<span class=\"ortec-hunk-stats\">+"+k.ins+"/-"+k.del+"</span>";' ).
+    ri_html->add( '      if(k.subs&&k.subs.length>1){' ).
+    ri_html->add( '        h+="<div class=\"ortec-subblocks\">";' ).
+    ri_html->add( '        for(var s=0;s<k.subs.length;s++){' ).
+    ri_html->add( '          var sb=k.subs[s];' ).
+    ri_html->add( '          h+="<div class=\"ortec-subblock\" data-idx=\""+idx+"\" data-sec=\""+k.sec+"\" data-sf=\""+sb.f+"\" data-sl=\""+sb.l+"\" data-nf=\""+escAttr(f.nfname)+"\">";' ).
+    ri_html->add( '          h+="<input type=\"checkbox\" class=\"ortec-sub-cb\" data-idx=\""+idx+"\" data-sec=\""+k.sec+"\" data-sf=\""+sb.f+"\" data-sl=\""+sb.l+"\" data-nf=\""+escAttr(f.nfname)+"\">";' ).
+    ri_html->add( '          h+="<span class=\"ortec-sub-label\">Block "+(s+1)+"</span>";' ).
+    ri_html->add( '          h+="<span class=\"ortec-sub-stats\">+"+(sb.i||0)+"/-"+(sb.d||0)+"</span>";' ).
     ri_html->add( '          h+="</div>";' ).
-    ri_html->add( '          if(k.subs&&k.subs.length>1){' ).
-    ri_html->add( '            h+="<div class=\"ortec-subblocks\">";' ).
-    ri_html->add( '            for(var s=0;s<k.subs.length;s++){' ).
-    ri_html->add( '              var sb=k.subs[s];' ).
-    ri_html->add( '              h+="<div class=\"ortec-subblock\" data-idx=\""+i+"\" data-sec=\""+k.sec+"\" data-sf=\""+sb.f+"\" data-sl=\""+sb.l+"\" data-nf=\""+escAttr(f.nfname)+"\">";' ).
-    ri_html->add( '              h+="<input type=\"checkbox\" class=\"ortec-sub-cb\" data-idx=\""+i+"\" data-sec=\""+k.sec+"\" data-sf=\""+sb.f+"\" data-sl=\""+sb.l+"\" data-nf=\""+escAttr(f.nfname)+"\">";' ).
-    ri_html->add( '              h+="<span class=\"ortec-sub-label\">Block "+(s+1)+"</span>";' ).
-    ri_html->add( '              h+="<span class=\"ortec-sub-stats\">+"+sb.i+"/-"+sb.d+"</span>";' ).
-    ri_html->add( '              h+="</div>";' ).
-    ri_html->add( '            }' ).
-    ri_html->add( '            h+="</div>";' ).
-    ri_html->add( '          }' ).
     ri_html->add( '        }' ).
     ri_html->add( '        h+="</div>";' ).
     ri_html->add( '      }' ).
-    ri_html->add( '      h+="</div>";' ).
     ri_html->add( '    }' ).
-    ri_html->add( '    h+="</div><div class=\"ortec-sidebar-footer\">";' ).
-    ri_html->add( '    h+="<span id=\"ortec-summary\">File 1 of "+navData.length+"</span>";' ).
     ri_html->add( '    h+="</div>";' ).
     ri_html->add( '    return h;' ).
+    ri_html->add( '  }' ).
+    ri_html->add( '  function ensureHunksRendered(idx){' ).
+    ri_html->add( '    var f=navData[idx]; if(!f||!f.hasHunks)return;' ).
+    ri_html->add( '    if(f._hunksRendered)return;' ).
+    ri_html->add( '    var hd=document.getElementById("ortec-hunks-"+idx); if(!hd)return;' ).
+    ri_html->add( '    hd.innerHTML=buildHunksHtml(idx);' ).
+    ri_html->add( '    f._hunksRendered=true;' ).
+    ri_html->add( '    syncAllForFile(idx);' ).
+    ri_html->add( '  }' ).
+    ri_html->add( '  function appendMoreFileRows(force){' ).
+    ri_html->add( '    if(!sidebarFiles)return;' ).
+    ri_html->add( '    var limit=force?visibleFileIndexes.length:Math.min(visibleFileIndexes.length,renderedFileCount+fileRenderBatch);' ).
+    ri_html->add( '    if(limit<=renderedFileCount)return;' ).
+    ri_html->add( '    var frag=document.createDocumentFragment();' ).
+    ri_html->add( '    for(var p=renderedFileCount;p<limit;p++){' ).
+    ri_html->add( '      var wrapper=document.createElement("div");' ).
+    ri_html->add( '      wrapper.innerHTML=buildFileRowHtml(visibleFileIndexes[p]);' ).
+    ri_html->add( '      if(wrapper.firstChild)frag.appendChild(wrapper.firstChild);' ).
+    ri_html->add( '    }' ).
+    ri_html->add( '    sidebarFiles.appendChild(frag);' ).
+    ri_html->add( '    renderedFileCount=limit;' ).
+    ri_html->add( '  }' ).
+    ri_html->add( '  function resetFileRows(indexes){' ).
+    ri_html->add( '    visibleFileIndexes=indexes.slice(0);' ).
+    ri_html->add( '    renderedFileCount=0;' ).
+    ri_html->add( '    if(sidebarFiles)sidebarFiles.innerHTML="";' ).
+    ri_html->add( '    appendMoreFileRows(false);' ).
+    ri_html->add( '  }' ).
+    ri_html->add( '  function ensureFileRowVisible(idx){' ).
+    ri_html->add( '    if(!sidebarFiles)return;' ).
+    ri_html->add( '    var sel=".ortec-sidebar-file[data-idx="+Q+idx+Q+"]";' ).
+    ri_html->add( '    if(sidebar.querySelector(sel))return;' ).
+    ri_html->add( '    var pos=visibleFileIndexes.indexOf(idx);' ).
+    ri_html->add( '    if(pos<0)return;' ).
+    ri_html->add( '    while(renderedFileCount<=pos){appendMoreFileRows(false);if(renderedFileCount>=visibleFileIndexes.length)break;}' ).
     ri_html->add( '  }' ).
 
     ri_html->add( '  var container=document.createElement("div");' ).
@@ -564,6 +641,7 @@ CLASS zcl_abapgit_ortec_git_patch IMPLEMENTATION.
     ri_html->add( '  sidebar.id="ortec-sidebar";' ).
     ri_html->add( '  sidebar.className="ortec-sidebar";' ).
     ri_html->add( '  sidebar.innerHTML=buildSidebar();' ).
+    ri_html->add( '  var sidebarFiles=null;' ).
     ri_html->add( '  var resizeHandle=document.createElement("div");' ).
     ri_html->add( '  resizeHandle.className="ortec-resize-handle";' ).
     ri_html->add( '  resizeHandle.title="Drag to resize";' ).
@@ -578,6 +656,9 @@ CLASS zcl_abapgit_ortec_git_patch IMPLEMENTATION.
     ri_html->add( '    if(ov!=="visible")el.style.overflow="visible";' ).
     ri_html->add( '    el=el.parentElement;' ).
     ri_html->add( '  }' ).
+    ri_html->add( '  sidebarFiles=document.getElementById("ortec-sidebar-files");' ).
+    ri_html->add( '  for(var fi=0;fi<navData.length;fi++){fileIndexList.push(fi);}' ).
+    ri_html->add( '  resetFileRows(fileIndexList);' ).
 
     ri_html->add( '  (function(){' ).
     ri_html->add( '    var dragging=false,startX=0,startW=0;' ).
@@ -616,6 +697,7 @@ CLASS zcl_abapgit_ortec_git_patch IMPLEMENTATION.
     ri_html->add( '    if(oldSb) oldSb.classList.remove("ortec-active");' ).
     ri_html->add( '    activeIdx=idx;' ).
     ri_html->add( '    allDiffs[idx].style.display="";' ).
+    ri_html->add( '    ensureFileRowVisible(idx);' ).
     ri_html->add( '    var sel=".ortec-sidebar-file[data-idx="+Q+idx+Q+"]";' ).
     ri_html->add( '    var newSb=sidebar.querySelector(sel);' ).
     ri_html->add( '    if(newSb){' ).
@@ -732,6 +814,7 @@ CLASS zcl_abapgit_ortec_git_patch IMPLEMENTATION.
     ri_html->add( '    }' ).
     ri_html->add( '    if(t.classList.contains("ortec-expand")){' ).
     ri_html->add( '      var xIdx=parseInt(t.getAttribute("data-idx"));' ).
+    ri_html->add( '      ensureHunksRendered(xIdx);' ).
     ri_html->add( '      var hd=document.getElementById("ortec-hunks-"+xIdx);' ).
     ri_html->add( '      if(hd){' ).
     ri_html->add( '        if(hd.style.display==="none"){hd.style.display="";t.innerHTML="&#9662;";}' ).
@@ -843,10 +926,22 @@ CLASS zcl_abapgit_ortec_git_patch IMPLEMENTATION.
     ri_html->add( '  if(filterEl){' ).
     ri_html->add( '    filterEl.addEventListener("input",function(){' ).
     ri_html->add( '      var v=this.value.toLowerCase();' ).
-    ri_html->add( '      var files=sidebar.querySelectorAll(".ortec-sidebar-file");' ).
-    ri_html->add( '      for(var i=0;i<files.length;i++){' ).
-    ri_html->add( '        var fn=files[i].getAttribute("data-fname").toLowerCase();' ).
-    ri_html->add( '        files[i].style.display=(v===""||fn.indexOf(v)>=0)?"":"none";' ).
+    ri_html->add( '      var filteredIdx=[];' ).
+    ri_html->add( '      for(var i=0;i<navData.length;i++){' ).
+    ri_html->add( '        var fn=(navData[i].filename||"").toLowerCase();' ).
+    ri_html->add( '        if(v===""||fn.indexOf(v)>=0)filteredIdx.push(i);' ).
+    ri_html->add( '      }' ).
+    ri_html->add( '      resetFileRows(filteredIdx);' ).
+    ri_html->add( '      ensureFileRowVisible(activeIdx);' ).
+    ri_html->add( '      var actSel=".ortec-sidebar-file[data-idx="+Q+activeIdx+Q+"]";' ).
+    ri_html->add( '      var act=sidebar.querySelector(actSel); if(act)act.classList.add("ortec-active");' ).
+    ri_html->add( '    });' ).
+    ri_html->add( '  }' ).
+
+    ri_html->add( '  if(sidebarFiles){' ).
+    ri_html->add( '    sidebarFiles.addEventListener("scroll",function(){' ).
+    ri_html->add( '      if(sidebarFiles.scrollTop+sidebarFiles.clientHeight>=sidebarFiles.scrollHeight-60){' ).
+    ri_html->add( '        appendMoreFileRows(false);' ).
     ri_html->add( '      }' ).
     ri_html->add( '    });' ).
     ri_html->add( '  }' ).
@@ -907,9 +1002,13 @@ CLASS zcl_abapgit_ortec_git_patch IMPLEMENTATION.
     ri_html->add( '    }' ).
     ri_html->add( '  });' ).
 
-    ri_html->add( '  for(var i=0;i<navData.length;i++) syncAllForFile(i);' ).
+    ri_html->add( '  for(var i=0;i<renderedFileCount;i++){' ).
+    ri_html->add( '    syncAllForFile(visibleFileIndexes[i]);' ).
+    ri_html->add( '  }' ).
+    ri_html->add( '  ensureFileRowVisible(0);' ).
+    ri_html->add( '  ensureHunksRendered(0);' ).
     ri_html->add( '  var firstHunks=document.getElementById("ortec-hunks-0");' ).
-    ri_html->add( '  if(firstHunks){firstHunks.style.display="";' ).
+    ri_html->add( '  if(firstHunks&&firstHunks.innerHTML!==""){firstHunks.style.display="";' ).
     ri_html->add( '    var exp0=sidebar.querySelector(".ortec-expand[data-idx="+Q+"0"+Q+"]");' ).
     ri_html->add( '    if(exp0) exp0.innerHTML="&#9662;";' ).
     ri_html->add( '  }' ).
