@@ -917,14 +917,16 @@ CLASS zcl_abapgit_gui_page_stage IMPLEMENTATION.
 
       WHEN c_action-stage_page_next.
 
-        IF mv_virtual_offset + get_virtual_window_size( ) < count_changed_files( ).
+        DATA(lv_stage_file_count_next) = lines( ms_files-local ) + lines( ms_files-remote ).
+        IF mv_virtual_offset + get_virtual_window_size( ) < lv_stage_file_count_next.
           mv_virtual_offset = mv_virtual_offset + get_virtual_window_size( ).
         ENDIF.
         rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
 
       WHEN c_action-stage_page_last.
 
-        DATA(lv_last_offset) = count_changed_files( ) - get_virtual_window_size( ).
+        DATA(lv_stage_file_count_last) = lines( ms_files-local ) + lines( ms_files-remote ).
+        DATA(lv_last_offset) = lv_stage_file_count_last - get_virtual_window_size( ).
         mv_virtual_offset = nmax( val1 = 0 val2 = lv_last_offset ).
         rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
 
@@ -1051,13 +1053,14 @@ CLASS zcl_abapgit_gui_page_stage IMPLEMENTATION.
 
     ri_html->add( '<div class="stage-container">' ).
     ri_html->add( render_actions( ) ).
+    DATA(lv_stage_file_count) = lines( ms_files-local ) + lines( ms_files-remote ).
     IF c_use_standard_stage = abap_false.
       ri_html->add( zcl_abapgit_ortec_git_stage=>render_virtual_list(
         ii_repo        = mi_repo
         it_files       = ms_files
         iv_window_size = get_virtual_window_size( )
         iv_offset      = mv_virtual_offset
-        iv_total_count = count_changed_files( )
+        iv_total_count = lv_stage_file_count
         iv_first_action = c_action-stage_page_first
         iv_prev_action = c_action-stage_page_prev
         iv_next_action = c_action-stage_page_next
@@ -1075,7 +1078,7 @@ CLASS zcl_abapgit_gui_page_stage IMPLEMENTATION.
         it_files       = ms_files
         iv_window_size = get_virtual_window_size( )
         iv_offset      = mv_virtual_offset
-        iv_total_count = count_changed_files( )
+        iv_total_count = lv_stage_file_count
         iv_first_action = c_action-stage_page_first
         iv_prev_action = c_action-stage_page_prev
         iv_next_action = c_action-stage_page_next
