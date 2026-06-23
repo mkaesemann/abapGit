@@ -229,6 +229,30 @@ CLASS zcl_abapgit_repo_online IMPLEMENTATION.
 
 
   METHOD zif_abapgit_repo_online~get_current_remote.
+    DATA li_branch_list TYPE REF TO zif_abapgit_git_branch_list.
+    DATA lv_branch TYPE string.
+    DATA ls_branch TYPE zif_abapgit_git_definitions=>ty_git_branch.
+
+    rv_sha1 = get_selected_commit( ).
+    IF rv_sha1 IS NOT INITIAL.
+      RETURN.
+    ENDIF.
+
+    lv_branch = get_selected_branch( ).
+    IF lv_branch IS NOT INITIAL.
+      TRY.
+          li_branch_list = zcl_abapgit_git_factory=>get_git_transport( )->branches( get_url( ) ).
+          ls_branch = li_branch_list->find_by_name( lv_branch ).
+          rv_sha1 = ls_branch-sha1.
+          IF rv_sha1 IS NOT INITIAL.
+            mv_current_commit = rv_sha1.
+            RETURN.
+          ENDIF.
+        CATCH zcx_abapgit_exception.
+      ENDTRY.
+    ENDIF.
+
+    " Fallback for environments/refs where lightweight lookup cannot resolve the SHA1.
     fetch_remote( ).
     rv_sha1 = mv_current_commit.
   ENDMETHOD.

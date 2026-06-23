@@ -118,11 +118,28 @@ CLASS zcl_abapgit_ortec_obj_index IMPLEMENTATION.
     DATA lt_filter TYPE zif_abapgit_definitions=>ty_tadir_tt.
     DATA lt_rows   TYPE ty_index_rows_tt.
     DATA lo_filter TYPE REF TO zcl_abapgit_repo_filter.
+    DATA lt_devc_paths TYPE SORTED TABLE OF string WITH UNIQUE KEY table_line.
+    DATA lv_devc_path  TYPE string.
+
+    FIELD-SYMBOLS <ls_filter> TYPE zif_abapgit_definitions=>ty_tadir.
+    FIELD-SYMBOLS <ls_row>    TYPE zaog_obj_index.
 
     lt_filter = ii_obj_filter->get_filter( ).
     IF lt_filter IS INITIAL.
       RETURN.
     ENDIF.
+
+    LOOP AT lt_filter ASSIGNING <ls_filter> WHERE object = 'DEVC'.
+      TRY.
+          lv_devc_path = zcl_abapgit_folder_logic=>get_instance( )->package_to_path(
+            iv_top     = iv_devclass
+            io_dot     = io_dot
+            iv_package = CONV devclass( <ls_filter>-obj_name ) ).
+          INSERT lv_devc_path INTO TABLE lt_devc_paths.
+        CATCH zcx_abapgit_exception.
+          " Keep DEVC baseline unchanged if package-path mapping is not available.
+      ENDTRY.
+    ENDLOOP.
 
     ensure_index(
       iv_repo_key = iv_repo_key
@@ -134,6 +151,16 @@ CLASS zcl_abapgit_ortec_obj_index IMPLEMENTATION.
       iv_repo_key = iv_repo_key
       iv_commit   = iv_commit
       it_filter   = lt_filter ).
+
+    IF lt_devc_paths IS NOT INITIAL.
+      LOOP AT lt_rows ASSIGNING <ls_row> WHERE obj_type = 'DEVC'.
+        READ TABLE lt_devc_paths WITH TABLE KEY table_line = <ls_row>-file_path
+          TRANSPORTING NO FIELDS.
+        IF sy-subrc <> 0.
+          DELETE lt_rows INDEX sy-tabix.
+        ENDIF.
+      ENDLOOP.
+    ENDIF.
 
     IF lt_rows IS INITIAL.
       RETURN.
@@ -159,6 +186,16 @@ CLASS zcl_abapgit_ortec_obj_index IMPLEMENTATION.
           iv_repo_key = iv_repo_key
           iv_commit   = iv_commit
           it_filter   = lt_filter ).
+
+        IF lt_devc_paths IS NOT INITIAL.
+          LOOP AT lt_rows ASSIGNING <ls_row> WHERE obj_type = 'DEVC'.
+            READ TABLE lt_devc_paths WITH TABLE KEY table_line = <ls_row>-file_path
+              TRANSPORTING NO FIELDS.
+            IF sy-subrc <> 0.
+              DELETE lt_rows INDEX sy-tabix.
+            ENDIF.
+          ENDLOOP.
+        ENDIF.
 
         rt_files = build_files_from_rows(
           iv_repo_key = iv_repo_key

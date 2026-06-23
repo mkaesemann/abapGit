@@ -70,7 +70,6 @@ CLASS zcl_abapgit_object_filter_tran IMPLEMENTATION.
     DATA ls_filter TYPE zif_abapgit_definitions=>ty_tadir.
     DATA lv_trobj_name_new TYPE trobj_name.
     DATA lv_trobj_type_new TYPE tadir-object.
-    DATA lt_filter TYPE zif_abapgit_definitions=>ty_tadir_tt.
     DATA lr_cts_api TYPE REF TO zif_abapgit_cts_api.
 
     lt_e071_filter = it_e071_filter.
@@ -111,10 +110,6 @@ CLASS zcl_abapgit_object_filter_tran IMPLEMENTATION.
       ls_filter-object = 'DEVC'.
       ls_filter-obj_name = iv_package.
       INSERT ls_filter INTO TABLE rt_filter.
-
-      lt_filter = get_all_sub_packages( iv_package ).
-      INSERT LINES OF lt_filter INTO TABLE rt_filter.
-
     ENDIF.
 
     SORT rt_filter.

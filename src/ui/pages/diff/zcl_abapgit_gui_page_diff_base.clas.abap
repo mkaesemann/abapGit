@@ -88,6 +88,7 @@ CLASS zcl_abapgit_gui_page_diff_base DEFINITION
       IMPORTING
         !is_file   TYPE zif_abapgit_git_definitions=>ty_file
         !is_object TYPE zif_abapgit_definitions=>ty_item
+        !it_files  TYPE zif_abapgit_definitions=>ty_stage_tt OPTIONAL
       EXPORTING
         et_remote  TYPE zif_abapgit_git_definitions=>ty_files_tt
         et_local   TYPE zif_abapgit_definitions=>ty_files_item_tt
@@ -545,6 +546,7 @@ CLASS zcl_abapgit_gui_page_diff_base IMPLEMENTATION.
       EXPORTING
         is_file   = is_file
         is_object = is_object
+        it_files  = it_files
       IMPORTING
         et_local  = lt_local
         et_remote = lt_remote
@@ -630,8 +632,10 @@ CLASS zcl_abapgit_gui_page_diff_base IMPLEMENTATION.
 
   METHOD get_files_and_status.
 
-    DATA ls_item   TYPE zif_abapgit_definitions=>ty_item.
-    DATA lo_filter TYPE REF TO lcl_filter.
+    DATA ls_item         TYPE zif_abapgit_definitions=>ty_item.
+    DATA lo_filter       TYPE REF TO lcl_filter.
+    DATA lo_multi_filter TYPE REF TO lcl_multi_filter.
+    DATA li_obj_filter   TYPE REF TO zif_abapgit_object_filter.
     DATA lv_reset_remote_cache TYPE abap_bool.
     DATA lv_use_ortec TYPE abap_bool.
 
@@ -650,9 +654,17 @@ CLASS zcl_abapgit_gui_page_diff_base IMPLEMENTATION.
     ENDIF.
 
     IF ls_item IS NOT INITIAL.
+      " Single-object filter (single file or object diff)
       CREATE OBJECT lo_filter EXPORTING is_item = ls_item.
+      li_obj_filter = lo_filter.
+    ELSEIF it_files IS NOT INITIAL.
+      " Multi-object filter built from the Stage-page subset (patch/diff from stage)
+      CREATE OBJECT lo_multi_filter EXPORTING it_files = it_files.
+      li_obj_filter = lo_multi_filter.
+    ENDIF.
 
-      et_local  = mi_repo->get_files_local_filtered( lo_filter ).
+    IF li_obj_filter IS NOT INITIAL.
+      et_local  = mi_repo->get_files_local_filtered( li_obj_filter ).
 
       TRY.
           lv_use_ortec = zcl_abapgit_ortec_git_switch=>is_active_for_repo(
@@ -666,7 +678,7 @@ CLASS zcl_abapgit_gui_page_diff_base IMPLEMENTATION.
             CALL METHOD ('ZCL_ABAPGIT_ORTEC_FILTER_WALK')=>('GET_REMOTE_FILES_FOR_DIFF')
               EXPORTING
                 ii_repo_online = mi_repo
-                ii_obj_filter  = lo_filter
+                ii_obj_filter  = li_obj_filter
               RECEIVING
                 rt_files       = et_remote.
 
@@ -676,17 +688,17 @@ CLASS zcl_abapgit_gui_page_diff_base IMPLEMENTATION.
           CATCH cx_root.
             et_remote = mi_repo->get_files_remote(
               iv_ignore_files = abap_true
-              ii_obj_filter   = lo_filter ).
+              ii_obj_filter   = li_obj_filter ).
         ENDTRY.
       ELSE.
         et_remote = mi_repo->get_files_remote(
           iv_ignore_files = abap_true
-          ii_obj_filter   = lo_filter ).
+          ii_obj_filter   = li_obj_filter ).
       ENDIF.
 
       et_status = zcl_abapgit_repo_status=>calculate(
         ii_repo       = mi_repo
-        ii_obj_filter = lo_filter ).
+        ii_obj_filter = li_obj_filter ).
 
       IF lv_reset_remote_cache = abap_true.
         mi_repo->refresh(
