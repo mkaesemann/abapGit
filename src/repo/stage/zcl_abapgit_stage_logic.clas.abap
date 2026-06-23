@@ -115,26 +115,38 @@ CLASS zcl_abapgit_stage_logic IMPLEMENTATION.
   METHOD zif_abapgit_stage_logic~get.
 
     DATA lv_reset_remote_cache TYPE abap_bool.
+    DATA lv_use_ortec         TYPE abap_bool.
 
     " Getting REMOTE before LOCAL is critical to ensure that DATA config is loaded first
     IF ii_obj_filter IS INITIAL.
       rs_files-remote = ii_repo_online->get_files_remote( ii_obj_filter ).
     ELSE.
       TRY.
-          CALL METHOD ('ZCL_ABAPGIT_ORTEC_FILTER_WALK')=>('GET_REMOTE_FILES_FOR_STAGE')
-            EXPORTING
-              ii_repo_online = ii_repo_online
-              ii_obj_filter  = ii_obj_filter
-            RECEIVING
-              rt_files       = rs_files-remote.
-
-          " Repo status calculation calls get_files_remote again; preload the filtered
-          " set to keep that second call on the same lightweight data.
-          ii_repo_online->set_files_remote( rs_files-remote ).
-          lv_reset_remote_cache = abap_true.
+          lv_use_ortec = zcl_abapgit_ortec_git_switch=>is_active_for_repo(
+            CAST zif_abapgit_repo_online( ii_repo_online )->get_url( ) ).
         CATCH cx_root.
-          rs_files-remote = ii_repo_online->get_files_remote( ii_obj_filter ).
+          lv_use_ortec = abap_false.
       ENDTRY.
+
+      IF lv_use_ortec = abap_true.
+        TRY.
+            CALL METHOD ('ZCL_ABAPGIT_ORTEC_FILTER_WALK')=>('GET_REMOTE_FILES_FOR_STAGE')
+              EXPORTING
+                ii_repo_online = ii_repo_online
+                ii_obj_filter  = ii_obj_filter
+              RECEIVING
+                rt_files       = rs_files-remote.
+
+            " Repo status calculation calls get_files_remote again; preload the filtered
+            " set to keep that second call on the same lightweight data.
+            ii_repo_online->set_files_remote( rs_files-remote ).
+            lv_reset_remote_cache = abap_true.
+          CATCH cx_root.
+            rs_files-remote = ii_repo_online->get_files_remote( ii_obj_filter ).
+        ENDTRY.
+      ELSE.
+        rs_files-remote = ii_repo_online->get_files_remote( ii_obj_filter ).
+      ENDIF.
     ENDIF.
 
     IF ii_obj_filter IS INITIAL.

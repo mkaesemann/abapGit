@@ -33,6 +33,7 @@ CLASS zcl_abapgit_ortec_git_switch DEFINITION
       BEGIN OF ty_clear_result,
         repo_key   TYPE zcl_abapgit_ortec_repo_state=>ty_repo_key,
         obj_store  TYPE i,
+        obj_index  TYPE i,
         pack_idx   TYPE i,
         pack_meta  TYPE i,
         raw_pack   TYPE i,
@@ -176,6 +177,9 @@ CLASS zcl_abapgit_ortec_git_switch IMPLEMENTATION.
     DELETE FROM zaog_obj_store WHERE repo_key = lv_repo_key.
     rs_result-obj_store = sy-dbcnt.
 
+    DELETE FROM zaog_obj_index WHERE repo_key = lv_repo_key.
+    rs_result-obj_index = sy-dbcnt.
+
     DELETE FROM zaog_pack_idx WHERE repo_key = lv_repo_key.
     rs_result-pack_idx = sy-dbcnt.
 
@@ -201,14 +205,18 @@ CLASS zcl_abapgit_ortec_git_switch IMPLEMENTATION.
     DATA lv_total TYPE i.
 
     lv_total = is_result-obj_store
+             + is_result-obj_index
              + is_result-pack_idx
              + is_result-pack_meta
              + is_result-raw_pack
              + is_result-fetch_sess
              + is_result-repo_state.
 
-    rv_message = |Repository cache cleared (key { is_result-repo_key }): { lv_total } row(s) removed|.
-    rv_message = |{ rv_message } [OBJ={ is_result-obj_store }, IDX={ is_result-pack_idx }, META={ is_result-pack_meta }, RAW={ is_result-raw_pack }, SESS={ is_result-fetch_sess }, STATE={ is_result-repo_state }]|.
+    rv_message = |ORTEC cache cleared for repo key { is_result-repo_key }: { lv_total } row(s) removed|.
+    rv_message = |{ rv_message } [OBJ_STORE={ is_result-obj_store }, OBJ_INDEX={ is_result-obj_index },|.
+    rv_message = |{ rv_message } PACK_IDX={ is_result-pack_idx }, PACK_META={ is_result-pack_meta },|.
+    rv_message = |{ rv_message } RAW_PACK={ is_result-raw_pack }, FETCH_SESS={ is_result-fetch_sess },|.
+    rv_message = |{ rv_message } REPO_STATE={ is_result-repo_state }]|.
   ENDMETHOD.
 
   METHOD get_use_repo_cache.
@@ -262,4 +270,3 @@ CLASS zcl_abapgit_ortec_git_switch IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
-

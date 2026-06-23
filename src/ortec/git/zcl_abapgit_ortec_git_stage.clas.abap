@@ -519,8 +519,8 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
 
     " Page number (1-based) and total pages for the navigation display
     IF iv_window_size > 0.
-      lv_current_page = lv_offset / iv_window_size + 1.
-      lv_total_pages  = ( lv_total_count + iv_window_size - 1 ) / iv_window_size.
+      lv_current_page = lv_offset DIV iv_window_size + 1.
+      lv_total_pages  = ( lv_total_count + iv_window_size - 1 ) DIV iv_window_size.
     ELSE.
       lv_current_page = 1.
       lv_total_pages  = 1.
@@ -816,8 +816,13 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
     ri_html->add( '    if (meBtn) { meBtn.onclick = function(evt) {' ).
     ri_html->add( '      if (evt && evt.preventDefault) { evt.preventDefault(); }' ).
     ri_html->add( '      var srch = id(gStageParams.ids.objectSearch);' ).
-    ri_html->add( '      if (srch) { srch.value = gStageParams.user || ""; }' ).
-    ri_html->add( '      submitVirtualFilter(); return false;' ).
+    ri_html->add( '      if (srch) {' ).
+    ri_html->add( '        srch.value = gStageParams.user || "";' ).
+    ri_html->add( '        if (srch.focus) { srch.focus(); }' ).
+    ri_html->add( '        if (srch.select) { srch.select(); }' ).
+    ri_html->add( '        applyFilter();' ).
+    ri_html->add( '      }' ).
+    ri_html->add( '      return false;' ).
     ri_html->add( '    }; }' ).
     ri_html->add( '    var commitSelected = id(gStageParams.ids.commitSelectedBtn); if (commitSelected) { commitSelected.onclick = function(){ submit(gStageParams.formAction); return false; }; }' ).
     ri_html->add( '    var commitFiltered = id(gStageParams.ids.commitFilteredBtn); if (commitFiltered) { commitFiltered.onclick = function(){ markFilteredAndSubmit(); return false; }; }' ).
