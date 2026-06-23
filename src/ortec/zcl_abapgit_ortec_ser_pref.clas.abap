@@ -69,7 +69,9 @@ CLASS zcl_abapgit_ortec_ser_pref DEFINITION
     TYPES ty_msg_ids TYPE HASHED TABLE OF rglif-message_id WITH UNIQUE KEY table_line.
 
     CLASS-DATA mt_msag TYPE ty_msag_cache_tt.
-    CLASS-DATA mt_dokil TYPE SORTED TABLE OF dokil WITH NON-UNIQUE KEY id object.
+    CLASS-DATA mt_dokil TYPE SORTED TABLE OF dokil
+      WITH NON-UNIQUE KEY id object
+      WITH NON-UNIQUE SORTED KEY object_prefix COMPONENTS object.
     CLASS-DATA mv_dokil_prepared TYPE abap_bool.
     CLASS-DATA mv_language TYPE spras.
 
@@ -236,6 +238,9 @@ CLASS zcl_abapgit_ortec_ser_pref IMPLEMENTATION.
     DATA lt_msag TYPE ty_msag_cache_tt.
     DATA lt_dokil LIKE mt_dokil.
     DATA lv_object TYPE dokil-object.
+    DATA lv_object_high TYPE dokil-object.
+    DATA lv_object_len TYPE i.
+    DATA lv_object_type_len TYPE i.
 
     " Extract MSAG data for this object
     IF is_tadir-object = 'MSAG'.
@@ -249,14 +254,28 @@ CLASS zcl_abapgit_ortec_ser_pref IMPLEMENTATION.
     " Extract DOKIL entries for this object (prefix match on obj_name)
     IF mv_dokil_prepared = abap_true.
       lv_object = is_tadir-obj_name.
-      DATA(lv_objname_str) = condense( CONV string( is_tadir-obj_name ) ).
-      DATA(lv_len) = strlen( lv_objname_str ).
-      IF lv_len > 0.
-        LOOP AT mt_dokil INTO DATA(ls_dokil).
-          IF ls_dokil-object(lv_len) = lv_object(lv_len).
+      lv_object_len = strlen( lv_object ).
+      IF lv_object_len > 0.
+        DESCRIBE FIELD lv_object_high LENGTH lv_object_type_len IN CHARACTER MODE.
+
+        IF lv_object_len < lv_object_type_len.
+          lv_object_high = lv_object.
+          " Build an exclusive upper bound for object prefix range selection
+          lv_object_high+lv_object_len(1) = cl_abap_char_utilities=>maxchar.
+
+          LOOP AT mt_dokil INTO DATA(ls_dokil)
+               USING KEY object_prefix
+               WHERE object >= lv_object
+                 AND object <  lv_object_high.
             INSERT ls_dokil INTO TABLE lt_dokil.
-          ENDIF.
-        ENDLOOP.
+          ENDLOOP.
+        ELSE.
+          LOOP AT mt_dokil INTO ls_dokil
+               USING KEY object_prefix
+               WHERE object = lv_object.
+            INSERT ls_dokil INTO TABLE lt_dokil.
+          ENDLOOP.
+        ENDIF.
       ENDIF.
     ENDIF.
 
