@@ -282,27 +282,19 @@ CLASS zcl_abapgit_ortec_git_patch IMPLEMENTATION.
 
   METHOD render_nav_json.
 
-    DATA lt_data    TYPE ty_file_info_tt.
-    DATA ls_info    TYPE ty_file_info.
-    DATA ls_hunk    TYPE ty_hunk_info.
-    DATA ls_sub     TYPE ty_subblock_info.
-    DATA lv_first_f TYPE abap_bool.
-    DATA lv_first_h TYPE abap_bool.
-    DATA lv_first_s TYPE abap_bool.
+    DATA lt_data       TYPE ty_file_info_tt.
+    DATA lt_files_json TYPE string_table.
+    DATA ls_info       TYPE ty_file_info.
+    DATA ls_hunk       TYPE ty_hunk_info.
+    DATA ls_sub        TYPE ty_subblock_info.
+    DATA lv_file_json  TYPE string.
+    DATA lv_first_h    TYPE abap_bool.
+    DATA lv_first_s    TYPE abap_bool.
 
     lt_data = build_nav_data( it_diff_files ).
 
-    rv_json = '['.
-    lv_first_f = abap_true.
-
     LOOP AT lt_data INTO ls_info.
-      IF lv_first_f = abap_false.
-        rv_json = rv_json && ','.
-      ENDIF.
-      lv_first_f = abap_false.
-
-      rv_json = rv_json
-        && '{"idx":' && ls_info-file_index
+      lv_file_json = '{"idx":' && ls_info-file_index
         && ',"filename":"' && escape_json( ls_info-filename ) && '"'
         && ',"nfname":"' && escape_json( ls_info-nfname ) && '"'
         && ',"lstate":"' && ls_info-lstate && '"'
@@ -314,11 +306,11 @@ CLASS zcl_abapgit_ortec_git_patch IMPLEMENTATION.
       lv_first_h = abap_true.
       LOOP AT ls_info-hunks INTO ls_hunk.
         IF lv_first_h = abap_false.
-          rv_json = rv_json && ','.
+          lv_file_json = lv_file_json && ','.
         ENDIF.
         lv_first_h = abap_false.
 
-        rv_json = rv_json
+        lv_file_json = lv_file_json
           && '{"sec":' && ls_hunk-section_num
           && ',"text":"' && escape_json( ls_hunk-beacon_text ) && '"'
           && ',"ins":' && ls_hunk-inserted
@@ -328,11 +320,11 @@ CLASS zcl_abapgit_ortec_git_patch IMPLEMENTATION.
         lv_first_s = abap_true.
         LOOP AT ls_hunk-subblocks INTO ls_sub.
           IF lv_first_s = abap_false.
-            rv_json = rv_json && ','.
+            lv_file_json = lv_file_json && ','.
           ENDIF.
           lv_first_s = abap_false.
 
-          rv_json = rv_json
+          lv_file_json = lv_file_json
             && '{"f":' && ls_sub-first_line
             && ',"l":' && ls_sub-last_line
             && ',"i":' && ls_sub-inserted
@@ -340,13 +332,14 @@ CLASS zcl_abapgit_ortec_git_patch IMPLEMENTATION.
             && '}'.
         ENDLOOP.
 
-        rv_json = rv_json && ']}'.
+        lv_file_json = lv_file_json && ']}'.
       ENDLOOP.
 
-      rv_json = rv_json && ']}'.
+      lv_file_json = lv_file_json && ']}'.
+      APPEND lv_file_json TO lt_files_json.
     ENDLOOP.
 
-    rv_json = rv_json && ']'.
+    rv_json = |[{ concat_lines_of( table = lt_files_json sep = ',' ) }]|.
 
   ENDMETHOD.
 
@@ -480,12 +473,30 @@ CLASS zcl_abapgit_ortec_git_patch IMPLEMENTATION.
     ri_html->add( '  if (allDiffs.length === 0) return;' ).
     ri_html->add( '  var activeIdx = 0;' ).
     ri_html->add( '  var Q=String.fromCharCode(39);' ).
+    ri_html->add( '  var lineCacheByFile=Object.create(null);' ).
+    ri_html->add( '  var lineCacheByHunk=Object.create(null);' ).
 
     ri_html->add( '  function escHtml(s){' ).
     ri_html->add( '    return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");' ).
     ri_html->add( '  }' ).
     ri_html->add( '  function escAttr(s){return s.replace(/&/g,"&amp;").replace(/"/g,"&quot;");}' ).
     ri_html->add( '  function escSel(s){return s.replace(/[.#\[\]]/g,"\\$&");}' ).
+    ri_html->add( '  function getFileLines(nfname){' ).
+    ri_html->add( '    var k=nfname;' ).
+    ri_html->add( '    if(!lineCacheByFile[k]){' ).
+    ri_html->add( '      var nf=escSel(k);' ).
+    ri_html->add( '      lineCacheByFile[k]=Array.from(document.querySelectorAll("input[id^="+Q+"patch_line_"+nf+Q+"]"));' ).
+    ri_html->add( '    }' ).
+    ri_html->add( '    return lineCacheByFile[k];' ).
+    ri_html->add( '  }' ).
+    ri_html->add( '  function getHunkLines(nfname,sec){' ).
+    ri_html->add( '    var k=nfname+"|"+sec;' ).
+    ri_html->add( '    if(!lineCacheByHunk[k]){' ).
+    ri_html->add( '      var nf=escSel(nfname);' ).
+    ri_html->add( '      lineCacheByHunk[k]=Array.from(document.querySelectorAll("input[id^="+Q+"patch_line_"+nf+"_"+sec+"_"+Q+"]"));' ).
+    ri_html->add( '    }' ).
+    ri_html->add( '    return lineCacheByHunk[k];' ).
+    ri_html->add( '  }' ).
     ri_html->add( '  function stateClass(l,r){' ).
     ri_html->add( '    if(l==="A"||r==="A")return" ortec-state-added";' ).
     ri_html->add( '    if(l==="D"||r==="D")return" ortec-state-deleted";' ).
@@ -662,9 +673,7 @@ CLASS zcl_abapgit_ortec_git_patch IMPLEMENTATION.
 
     ri_html->add( '  function syncFileFromLines(idx){' ).
     ri_html->add( '    var f=navData[idx]; if(!f) return;' ).
-    ri_html->add( '    var nf=escSel(f.nfname);' ).
-    ri_html->add( '    var sel="input[id^="+Q+"patch_line_"+nf+Q+"]";' ).
-    ri_html->add( '    var lines=document.querySelectorAll(sel);' ).
+    ri_html->add( '    var lines=getFileLines(f.nfname);' ).
     ri_html->add( '    var c=0,t=lines.length;' ).
     ri_html->add( '    for(var i=0;i<t;i++){if(lines[i].checked)c++;}' ).
     ri_html->add( '    var sbSel=".ortec-file-cb[data-idx="+Q+idx+Q+"]";' ).
@@ -675,9 +684,7 @@ CLASS zcl_abapgit_ortec_git_patch IMPLEMENTATION.
     ri_html->add( '  }' ).
 
     ri_html->add( '  function syncHunkCb(idx,nfname,sec){' ).
-    ri_html->add( '    var nf=escSel(nfname);' ).
-    ri_html->add( '    var sel="input[id^="+Q+"patch_line_"+nf+"_"+sec+"_"+Q+"]";' ).
-    ri_html->add( '    var lines=document.querySelectorAll(sel);' ).
+    ri_html->add( '    var lines=getHunkLines(nfname,sec);' ).
     ri_html->add( '    var c=0,t=lines.length;' ).
     ri_html->add( '    for(var i=0;i<t;i++){if(lines[i].checked)c++;}' ).
     ri_html->add( '    var hSel=".ortec-hunk-cb[data-idx="+Q+idx+Q+"][data-sec="+Q+sec+Q+"]";' ).
@@ -739,7 +746,7 @@ CLASS zcl_abapgit_ortec_git_patch IMPLEMENTATION.
     ri_html->add( '      var ilCb=document.getElementById("patch_file_"+nf);' ).
     ri_html->add( '      if(ilCb&&ilCb.checked!==chk){ilCb.checked=chk;}' ).
     ri_html->add( '      var nfE=escSel(nf);' ).
-    ri_html->add( '      var allL=document.querySelectorAll("input[id^="+Q+"patch_line_"+nfE+Q+"]");' ).
+    ri_html->add( '      var allL=getFileLines(nf);' ).
     ri_html->add( '      var allS=document.querySelectorAll("input[id^="+Q+"patch_section_"+nfE+Q+"]");' ).
     ri_html->add( '      for(var i=0;i<allL.length;i++)allL[i].checked=chk;' ).
     ri_html->add( '      for(var i=0;i<allS.length;i++)allS[i].checked=chk;' ).
@@ -758,8 +765,7 @@ CLASS zcl_abapgit_ortec_git_patch IMPLEMENTATION.
     ri_html->add( '      var chk=t.checked;' ).
     ri_html->add( '      var ilCb=document.getElementById("patch_section_"+nf+"_"+sec);' ).
     ri_html->add( '      if(ilCb)ilCb.checked=chk;' ).
-    ri_html->add( '      var nfE=escSel(nf);' ).
-    ri_html->add( '      var allL=document.querySelectorAll("input[id^="+Q+"patch_line_"+nfE+"_"+sec+"_"+Q+"]");' ).
+    ri_html->add( '      var allL=getHunkLines(nf,sec);' ).
     ri_html->add( '      for(var i=0;i<allL.length;i++)allL[i].checked=chk;' ).
     ri_html->add( '      var sSel=".ortec-sub-cb[data-idx="+Q+hIdx+Q+"][data-sec="+Q+sec+Q+"]";' ).
     ri_html->add( '      var sCbs=sidebar.querySelectorAll(sSel);' ).
@@ -914,3 +920,4 @@ CLASS zcl_abapgit_ortec_git_patch IMPLEMENTATION.
 
 
 ENDCLASS.
+

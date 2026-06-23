@@ -247,6 +247,7 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
     DATA lv_first_after TYPE i VALUE -1.
     DATA lv_first_before TYPE i VALUE -1.
     DATA ls_item TYPE zif_abapgit_definitions=>ty_item.
+    DATA lo_dot TYPE REF TO zcl_abapgit_dot_abapgit.
 
     FIELD-SYMBOLS <ls_local> LIKE LINE OF it_files-local.
     FIELD-SYMBOLS <ls_remote> LIKE LINE OF it_files-remote.
@@ -270,6 +271,8 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
     IF lv_total <= 0.
       RETURN.
     ENDIF.
+
+    lo_dot = ii_repo->get_dot_abapgit( ).
 
     " Search-next semantics: start at the first row of the NEXT page
     lv_page_start = ( nmax( val1 = 0 val2 = iv_current_offset ) / iv_window_size ) * iv_window_size.
@@ -298,7 +301,7 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
             EXPORTING
               iv_filename = <ls_remote>-filename
               iv_path     = <ls_remote>-path
-              io_dot      = ii_repo->get_dot_abapgit( )
+              io_dot      = lo_dot
             IMPORTING
               es_item     = ls_item ).
         CATCH zcx_abapgit_exception ##NO_HANDLER.
@@ -328,6 +331,8 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
   METHOD render_stage_data_json.
 
     DATA lv_first TYPE abap_bool VALUE abap_true.
+    DATA lt_rows TYPE string_table.
+    DATA lv_row TYPE string.
     DATA lv_key TYPE string.
     DATA lv_filename TYPE string.
     DATA lv_diff_action TYPE string.
@@ -338,12 +343,13 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
     DATA ls_changed_by LIKE LINE OF it_changed_by.
     DATA ls_transport LIKE LINE OF it_transports.
     DATA ls_item_remote TYPE zif_abapgit_definitions=>ty_item.
+    DATA lo_dot TYPE REF TO zcl_abapgit_dot_abapgit.
 
     FIELD-SYMBOLS <ls_local> LIKE LINE OF it_files-local.
     FIELD-SYMBOLS <ls_remote> LIKE LINE OF it_files-remote.
     FIELD-SYMBOLS <ls_status> LIKE LINE OF it_files-status.
 
-    rv_json = '['.
+    lo_dot = ii_repo->get_dot_abapgit( ).
 
     LOOP AT it_files-local ASSIGNING <ls_local>.
       CLEAR: ls_changed_by, ls_transport, lv_diff_action, lv_transport_html, lv_changed_by_html, lv_user_action.
@@ -383,28 +389,28 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
 
       IF lv_first = abap_true.
         lv_first = abap_false.
-      ELSE.
-        rv_json = rv_json && ','.
       ENDIF.
-      rv_json = rv_json && '{'.
-      append_json_field( EXPORTING iv_name = 'key' iv_value = lv_key CHANGING cv_json = rv_json ).
-      append_json_field( EXPORTING iv_name = 'context' iv_value = 'local' CHANGING cv_json = rv_json ).
-      append_json_field( EXPORTING iv_name = 'path' iv_value = <ls_local>-file-path CHANGING cv_json = rv_json ).
-      append_json_field( EXPORTING iv_name = 'filename' iv_value = <ls_local>-file-filename CHANGING cv_json = rv_json ).
-      append_json_field( EXPORTING iv_name = 'objType' iv_value = <ls_local>-item-obj_type CHANGING cv_json = rv_json ).
-      append_json_field( EXPORTING iv_name = 'objName' iv_value = <ls_local>-item-obj_name CHANGING cv_json = rv_json ).
-      append_json_field( EXPORTING iv_name = 'displayName' iv_value = lv_filename CHANGING cv_json = rv_json ).
-      append_json_field( EXPORTING iv_name = 'diffAction' iv_value = lv_diff_action CHANGING cv_json = rv_json ).
-      append_json_field( EXPORTING iv_name = 'changedBy' iv_value = ls_changed_by-name CHANGING cv_json = rv_json ).
-      append_json_field( EXPORTING iv_name = 'changedByHtml' iv_value = lv_changed_by_html CHANGING cv_json = rv_json ).
-      append_json_field( EXPORTING iv_name = 'userAction' iv_value = lv_user_action CHANGING cv_json = rv_json ).
-      append_json_field( EXPORTING iv_name = 'transport' iv_value = ls_transport-trkorr CHANGING cv_json = rv_json ).
-      append_json_field( EXPORTING iv_name = 'lstate' iv_value = <ls_status>-lstate CHANGING cv_json = rv_json ).
-      append_json_field( EXPORTING iv_name = 'rstate' iv_value = <ls_status>-rstate CHANGING cv_json = rv_json ).
-      append_json_field( EXPORTING iv_name = 'stateHtml' iv_value = lv_state_html CHANGING cv_json = rv_json ).
-      append_json_field( EXPORTING iv_name = 'transportHtml' iv_value = lv_transport_html CHANGING cv_json = rv_json ).
-      append_json_field( EXPORTING iv_name = 'defaultMethod' iv_value = zif_abapgit_definitions=>c_method-add iv_last = abap_true CHANGING cv_json = rv_json ).
-      rv_json = rv_json && '}'.
+
+      lv_row = '{'.
+      append_json_field( EXPORTING iv_name = 'key' iv_value = lv_key CHANGING cv_json = lv_row ).
+      append_json_field( EXPORTING iv_name = 'context' iv_value = 'local' CHANGING cv_json = lv_row ).
+      append_json_field( EXPORTING iv_name = 'path' iv_value = <ls_local>-file-path CHANGING cv_json = lv_row ).
+      append_json_field( EXPORTING iv_name = 'filename' iv_value = <ls_local>-file-filename CHANGING cv_json = lv_row ).
+      append_json_field( EXPORTING iv_name = 'objType' iv_value = <ls_local>-item-obj_type CHANGING cv_json = lv_row ).
+      append_json_field( EXPORTING iv_name = 'objName' iv_value = <ls_local>-item-obj_name CHANGING cv_json = lv_row ).
+      append_json_field( EXPORTING iv_name = 'displayName' iv_value = lv_filename CHANGING cv_json = lv_row ).
+      append_json_field( EXPORTING iv_name = 'diffAction' iv_value = lv_diff_action CHANGING cv_json = lv_row ).
+      append_json_field( EXPORTING iv_name = 'changedBy' iv_value = ls_changed_by-name CHANGING cv_json = lv_row ).
+      append_json_field( EXPORTING iv_name = 'changedByHtml' iv_value = lv_changed_by_html CHANGING cv_json = lv_row ).
+      append_json_field( EXPORTING iv_name = 'userAction' iv_value = lv_user_action CHANGING cv_json = lv_row ).
+      append_json_field( EXPORTING iv_name = 'transport' iv_value = ls_transport-trkorr CHANGING cv_json = lv_row ).
+      append_json_field( EXPORTING iv_name = 'lstate' iv_value = <ls_status>-lstate CHANGING cv_json = lv_row ).
+      append_json_field( EXPORTING iv_name = 'rstate' iv_value = <ls_status>-rstate CHANGING cv_json = lv_row ).
+      append_json_field( EXPORTING iv_name = 'stateHtml' iv_value = lv_state_html CHANGING cv_json = lv_row ).
+      append_json_field( EXPORTING iv_name = 'transportHtml' iv_value = lv_transport_html CHANGING cv_json = lv_row ).
+      append_json_field( EXPORTING iv_name = 'defaultMethod' iv_value = zif_abapgit_definitions=>c_method-add iv_last = abap_true CHANGING cv_json = lv_row ).
+      lv_row = lv_row && '}'.
+      APPEND lv_row TO lt_rows.
     ENDLOOP.
 
     LOOP AT it_files-remote ASSIGNING <ls_remote>.
@@ -414,7 +420,7 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
       ASSERT sy-subrc = 0.
       TRY.
           zcl_abapgit_filename_logic=>file_to_object(
-            EXPORTING iv_filename = <ls_remote>-filename iv_path = <ls_remote>-path io_dot = ii_repo->get_dot_abapgit( )
+            EXPORTING iv_filename = <ls_remote>-filename iv_path = <ls_remote>-path io_dot = lo_dot
             IMPORTING es_item = ls_item_remote ).
         CATCH zcx_abapgit_exception ##NO_HANDLER.
       ENDTRY.
@@ -449,31 +455,31 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
 
       IF lv_first = abap_true.
         lv_first = abap_false.
-      ELSE.
-        rv_json = rv_json && ','.
       ENDIF.
-      rv_json = rv_json && '{'.
-      append_json_field( EXPORTING iv_name = 'key' iv_value = lv_key CHANGING cv_json = rv_json ).
-      append_json_field( EXPORTING iv_name = 'context' iv_value = 'remote' CHANGING cv_json = rv_json ).
-      append_json_field( EXPORTING iv_name = 'path' iv_value = <ls_remote>-path CHANGING cv_json = rv_json ).
-      append_json_field( EXPORTING iv_name = 'filename' iv_value = <ls_remote>-filename CHANGING cv_json = rv_json ).
-      append_json_field( EXPORTING iv_name = 'objType' iv_value = ls_item_remote-obj_type CHANGING cv_json = rv_json ).
-      append_json_field( EXPORTING iv_name = 'objName' iv_value = ls_item_remote-obj_name CHANGING cv_json = rv_json ).
-      append_json_field( EXPORTING iv_name = 'displayName' iv_value = lv_filename CHANGING cv_json = rv_json ).
-      append_json_field( EXPORTING iv_name = 'diffAction' iv_value = lv_diff_action CHANGING cv_json = rv_json ).
-      append_json_field( EXPORTING iv_name = 'changedBy' iv_value = ls_changed_by-name CHANGING cv_json = rv_json ).
-      append_json_field( EXPORTING iv_name = 'changedByHtml' iv_value = lv_changed_by_html CHANGING cv_json = rv_json ).
-      append_json_field( EXPORTING iv_name = 'userAction' iv_value = lv_user_action CHANGING cv_json = rv_json ).
-      append_json_field( EXPORTING iv_name = 'transport' iv_value = ls_transport-trkorr CHANGING cv_json = rv_json ).
-      append_json_field( EXPORTING iv_name = 'lstate' iv_value = <ls_status>-lstate CHANGING cv_json = rv_json ).
-      append_json_field( EXPORTING iv_name = 'rstate' iv_value = <ls_status>-rstate CHANGING cv_json = rv_json ).
-      append_json_field( EXPORTING iv_name = 'stateHtml' iv_value = lv_state_html CHANGING cv_json = rv_json ).
-      append_json_field( EXPORTING iv_name = 'transportHtml' iv_value = lv_transport_html CHANGING cv_json = rv_json ).
-      append_json_field( EXPORTING iv_name = 'defaultMethod' iv_value = zif_abapgit_definitions=>c_method-rm iv_last = abap_true CHANGING cv_json = rv_json ).
-      rv_json = rv_json && '}'.
+
+      lv_row = '{'.
+      append_json_field( EXPORTING iv_name = 'key' iv_value = lv_key CHANGING cv_json = lv_row ).
+      append_json_field( EXPORTING iv_name = 'context' iv_value = 'remote' CHANGING cv_json = lv_row ).
+      append_json_field( EXPORTING iv_name = 'path' iv_value = <ls_remote>-path CHANGING cv_json = lv_row ).
+      append_json_field( EXPORTING iv_name = 'filename' iv_value = <ls_remote>-filename CHANGING cv_json = lv_row ).
+      append_json_field( EXPORTING iv_name = 'objType' iv_value = ls_item_remote-obj_type CHANGING cv_json = lv_row ).
+      append_json_field( EXPORTING iv_name = 'objName' iv_value = ls_item_remote-obj_name CHANGING cv_json = lv_row ).
+      append_json_field( EXPORTING iv_name = 'displayName' iv_value = lv_filename CHANGING cv_json = lv_row ).
+      append_json_field( EXPORTING iv_name = 'diffAction' iv_value = lv_diff_action CHANGING cv_json = lv_row ).
+      append_json_field( EXPORTING iv_name = 'changedBy' iv_value = ls_changed_by-name CHANGING cv_json = lv_row ).
+      append_json_field( EXPORTING iv_name = 'changedByHtml' iv_value = lv_changed_by_html CHANGING cv_json = lv_row ).
+      append_json_field( EXPORTING iv_name = 'userAction' iv_value = lv_user_action CHANGING cv_json = lv_row ).
+      append_json_field( EXPORTING iv_name = 'transport' iv_value = ls_transport-trkorr CHANGING cv_json = lv_row ).
+      append_json_field( EXPORTING iv_name = 'lstate' iv_value = <ls_status>-lstate CHANGING cv_json = lv_row ).
+      append_json_field( EXPORTING iv_name = 'rstate' iv_value = <ls_status>-rstate CHANGING cv_json = lv_row ).
+      append_json_field( EXPORTING iv_name = 'stateHtml' iv_value = lv_state_html CHANGING cv_json = lv_row ).
+      append_json_field( EXPORTING iv_name = 'transportHtml' iv_value = lv_transport_html CHANGING cv_json = lv_row ).
+      append_json_field( EXPORTING iv_name = 'defaultMethod' iv_value = zif_abapgit_definitions=>c_method-rm iv_last = abap_true CHANGING cv_json = lv_row ).
+      lv_row = lv_row && '}'.
+      APPEND lv_row TO lt_rows.
     ENDLOOP.
 
-    rv_json = rv_json && ']'.
+    rv_json = |[{ concat_lines_of( table = lt_rows sep = ',' ) }]|.
 
   ENDMETHOD.
 
@@ -501,6 +507,7 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
     DATA lt_filter_changed_by TYPE zcl_abapgit_cts_integration=>ty_changed_by_tt.
     DATA ls_filter_transport LIKE LINE OF lt_filter_transports.
     DATA ls_filter_changed_by LIKE LINE OF lt_filter_changed_by.
+    DATA lo_dot TYPE REF TO zcl_abapgit_dot_abapgit.
 
     FIELD-SYMBOLS <ls_local> LIKE LINE OF it_files-local.
     FIELD-SYMBOLS <ls_remote> LIKE LINE OF it_files-remote.
@@ -509,6 +516,7 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
       ls_filtered = it_files.
     ELSE.
       lv_pattern = '*' && to_upper( iv_filter_value ) && '*'.
+      lo_dot = ii_repo->get_dot_abapgit( ).
 
       " Pre-fetch transports and changed-by for all files so they can be included in filter matching.
       lt_filter_transports = find_transports( ii_repo = ii_repo it_files = it_files ).
@@ -555,7 +563,7 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
               EXPORTING
                 iv_filename = <ls_remote>-filename
                 iv_path     = <ls_remote>-path
-                io_dot      = ii_repo->get_dot_abapgit( )
+                io_dot      = lo_dot
               IMPORTING
                 es_item     = ls_item ).
           CATCH zcx_abapgit_exception ##NO_HANDLER.

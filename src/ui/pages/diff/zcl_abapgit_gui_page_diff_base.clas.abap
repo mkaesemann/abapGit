@@ -196,6 +196,7 @@ CLASS zcl_abapgit_gui_page_diff_base DEFINITION
       IMPORTING
         !is_diff_line  TYPE zif_abapgit_definitions=>ty_diff
         !is_diff       TYPE zif_abapgit_gui_diff=>ty_file_diff
+        !it_beacons    TYPE zif_abapgit_definitions=>ty_string_tt OPTIONAL
       RETURNING
         VALUE(ri_html) TYPE REF TO zif_abapgit_html .
     METHODS render_line_no_diffs
@@ -900,7 +901,11 @@ CLASS zcl_abapgit_gui_page_diff_base IMPLEMENTATION.
     CREATE OBJECT ri_html TYPE zcl_abapgit_html.
 
     IF is_diff_line-beacon > 0.
-      lt_beacons = is_diff-o_diff->get_beacons( ).
+      IF it_beacons IS SUPPLIED.
+        lt_beacons = it_beacons.
+      ELSE.
+        lt_beacons = is_diff-o_diff->get_beacons( ).
+      ENDIF.
       READ TABLE lt_beacons INTO lv_beacon INDEX is_diff_line-beacon.
     ELSE.
       lv_beacon = '---'.
@@ -1086,6 +1091,8 @@ CLASS zcl_abapgit_gui_page_diff_base IMPLEMENTATION.
 
     DATA: lo_highlighter TYPE REF TO zcl_abapgit_syntax_highlighter,
           lt_diffs       TYPE zif_abapgit_definitions=>ty_diffs_tt,
+          lt_beacons     TYPE zif_abapgit_definitions=>ty_string_tt,
+          lv_filename    TYPE string,
           lv_insert_nav  TYPE abap_bool,
           lv_tabix       TYPE syst-tabix.
 
@@ -1097,6 +1104,8 @@ CLASS zcl_abapgit_gui_page_diff_base IMPLEMENTATION.
     CREATE OBJECT ri_html TYPE zcl_abapgit_html.
 
     lt_diffs = is_diff-o_diff->get( ).
+    lt_beacons = is_diff-o_diff->get_beacons( ).
+    lv_filename = get_normalized_fname_with_path( is_diff ).
 
     IF has_diffs( lt_diffs ) = abap_false.
       ri_html->add( render_line_no_diffs( ) ).
@@ -1126,7 +1135,8 @@ CLASS zcl_abapgit_gui_page_diff_base IMPLEMENTATION.
           ASSERT <ls_diff_line> IS ASSIGNED.
         ENDIF.
         ri_html->add( render_beacon( is_diff_line = <ls_diff_line>
-                                     is_diff      = is_diff ) ).
+                                     is_diff      = is_diff
+                                     it_beacons   = lt_beacons ) ).
         lv_insert_nav = abap_false.
       ENDIF.
 
@@ -1147,7 +1157,7 @@ CLASS zcl_abapgit_gui_page_diff_base IMPLEMENTATION.
         ri_html->add( render_line_unified( is_diff_line = <ls_diff> ) ).
       ELSE.
         ri_html->add( render_line_split( is_diff_line = <ls_diff>
-                                         iv_filename  = get_normalized_fname_with_path( is_diff )
+                                         iv_filename  = lv_filename
                                          iv_fstate    = is_diff-fstate
                                          iv_index     = lv_tabix ) ).
       ENDIF.
