@@ -3,7 +3,7 @@
  <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
   <asx:values>
    <VSEOCLASS>
-    <CLSNAME>ZCL_ABAPGIT_ORTEC_MISSING_OBJECTS</CLSNAME>
+    <CLSNAME>ZCL_ABAPGIT_ORTEC_MISSING_OBJ</CLSNAME>
     <LANGU>E</LANGU>
     <DESCRIPT>ORTEC Bulk Missing-Object Collector</DESCRIPT>
     <STATE>1</STATE>

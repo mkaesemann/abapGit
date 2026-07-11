@@ -4,7 +4,7 @@
 "! the local check once. Never performs a network call for a repository that has
 "! not opted into the ORTEC write/protocol behavior, so a read-only caller (e.g.
 "! filtered Stage/Diff resolution) never pays a surprise full-fetch cost.
-CLASS zcl_abapgit_ortec_missing_objects DEFINITION
+CLASS zcl_abapgit_ortec_missing_obj DEFINITION
   PUBLIC
   FINAL
   CREATE PUBLIC.
@@ -40,7 +40,7 @@ CLASS zcl_abapgit_ortec_missing_objects DEFINITION
 ENDCLASS.
 
 
-CLASS zcl_abapgit_ortec_missing_objects IMPLEMENTATION.
+CLASS zcl_abapgit_ortec_missing_obj IMPLEMENTATION.
 
   METHOD ensure_available.
 

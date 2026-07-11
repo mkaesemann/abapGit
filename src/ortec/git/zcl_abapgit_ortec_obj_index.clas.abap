@@ -504,7 +504,7 @@ CLASS zcl_abapgit_ortec_obj_index IMPLEMENTATION.
     " swallowed and the normal miss-handling below still applies.
     IF iv_url IS NOT INITIAL AND iv_commit IS NOT INITIAL.
       TRY.
-          zcl_abapgit_ortec_missing_objects=>ensure_available(
+          zcl_abapgit_ortec_missing_obj=>ensure_available(
             iv_repo_key = iv_repo_key
             iv_url      = iv_url
             iv_commit   = iv_commit

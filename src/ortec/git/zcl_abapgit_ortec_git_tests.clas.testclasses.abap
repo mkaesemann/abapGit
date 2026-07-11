@@ -236,7 +236,7 @@ CLASS ltcl_missing_objects IMPLEMENTATION.
     " Everything is already buffered, so this must return without ever
     " attempting a network call (a blank/unreachable URL would fail loudly
     " if a fetch were attempted).
-    zcl_abapgit_ortec_missing_objects=>ensure_available(
+    zcl_abapgit_ortec_missing_obj=>ensure_available(
       iv_repo_key = mc_repo
       iv_url      = 'https://example.invalid/not-a-real-remote.git'
       iv_commit   = '8888888888888888888888888888888888888888'
@@ -249,7 +249,7 @@ CLASS ltcl_missing_objects IMPLEMENTATION.
     " Object is not buffered and no URL is supplied - must raise immediately
     " without attempting any network access.
     TRY.
-        zcl_abapgit_ortec_missing_objects=>ensure_available(
+        zcl_abapgit_ortec_missing_obj=>ensure_available(
           iv_repo_key = mc_repo
           iv_url      = ''
           iv_commit   = '8888888888888888888888888888888888888888'
@@ -266,7 +266,7 @@ CLASS ltcl_missing_objects IMPLEMENTATION.
     " URL, so ensure_available must refuse to fetch and raise rather than
     " attempt a non-negotiated network call.
     TRY.
-        zcl_abapgit_ortec_missing_objects=>ensure_available(
+        zcl_abapgit_ortec_missing_obj=>ensure_available(
           iv_repo_key = mc_repo
           iv_url      = 'https://example.invalid/opt-in-off-repo.git'
           iv_commit   = '8888888888888888888888888888888888888888'
