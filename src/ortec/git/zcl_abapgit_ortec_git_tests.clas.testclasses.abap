@@ -427,6 +427,192 @@ CLASS ltcl_obj_index IMPLEMENTATION.
   ENDMETHOD.
 ENDCLASS.
 
+CLASS ltcl_ofs_delta DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+  PRIVATE SECTION.
+    CONSTANTS mc_repo TYPE c LENGTH 12 VALUE 'ZAOGT_OFSDLT'.
+    METHODS offset_single_byte    FOR TESTING RAISING cx_static_check.
+    METHODS offset_multi_byte     FOR TESTING RAISING cx_static_check.
+    METHODS apply_copy_and_insert FOR TESTING RAISING cx_static_check.
+    METHODS resolve_ofs_direct    FOR TESTING RAISING cx_static_check.
+    METHODS resolve_ofs_chain     FOR TESTING RAISING cx_static_check.
+ENDCLASS.
+CLASS ltcl_ofs_delta IMPLEMENTATION.
+
+  METHOD offset_single_byte.
+    DATA lv_data   TYPE xstring.
+    DATA lv_offset TYPE i.
+
+    " Vectors from target_design_phase5.md §1.2 (T1). The +1 continuation
+    " bias is the single highest-risk line in the whole OFS_DELTA feature -
+    " these vectors pin it exactly.
+    lv_data = '00'.
+    lv_offset = zcl_abapgit_ortec_delta=>get_offset( CHANGING cv_data = lv_data ).
+    cl_abap_unit_assert=>assert_equals( act = lv_offset exp = 0 ).
+    cl_abap_unit_assert=>assert_equals( act = xstrlen( lv_data ) exp = 0
+      msg = 'A single-byte varint must consume exactly 1 byte' ).
+
+    lv_data = '7F'.
+    lv_offset = zcl_abapgit_ortec_delta=>get_offset( CHANGING cv_data = lv_data ).
+    cl_abap_unit_assert=>assert_equals( act = lv_offset exp = 127 ).
+  ENDMETHOD.
+
+  METHOD offset_multi_byte.
+    DATA lv_data   TYPE xstring.
+    DATA lv_offset TYPE i.
+
+    " Each vector is followed by a trailer byte 'AA' to prove the decoder
+    " stops exactly at the varint boundary and leaves the remainder untouched
+    " (important: cv_data must be correctly positioned for the caller to
+    " continue parsing the delta instruction stream that follows).
+    lv_data = '8000AA'.
+    lv_offset = zcl_abapgit_ortec_delta=>get_offset( CHANGING cv_data = lv_data ).
+    cl_abap_unit_assert=>assert_equals( act = lv_offset exp = 128 ).
+    cl_abap_unit_assert=>assert_equals( act = lv_data exp = 'AA' ).
+
+    lv_data = '807FAA'.
+    lv_offset = zcl_abapgit_ortec_delta=>get_offset( CHANGING cv_data = lv_data ).
+    cl_abap_unit_assert=>assert_equals( act = lv_offset exp = 255 ).
+    cl_abap_unit_assert=>assert_equals( act = lv_data exp = 'AA' ).
+
+    lv_data = '8100AA'.
+    lv_offset = zcl_abapgit_ortec_delta=>get_offset( CHANGING cv_data = lv_data ).
+    cl_abap_unit_assert=>assert_equals( act = lv_offset exp = 256 ).
+
+    lv_data = 'FF7FAA'.
+    lv_offset = zcl_abapgit_ortec_delta=>get_offset( CHANGING cv_data = lv_data ).
+    cl_abap_unit_assert=>assert_equals( act = lv_offset exp = 16383 ).
+
+    lv_data = '808000AA'.
+    lv_offset = zcl_abapgit_ortec_delta=>get_offset( CHANGING cv_data = lv_data ).
+    cl_abap_unit_assert=>assert_equals( act = lv_offset exp = 16512 ).
+    cl_abap_unit_assert=>assert_equals( act = lv_data exp = 'AA' ).
+  ENDMETHOD.
+
+  METHOD apply_copy_and_insert.
+    DATA lv_base   TYPE xstring.
+    DATA lv_delta  TYPE xstring.
+    DATA lv_result TYPE xstring.
+
+    " base = "Hello". delta = base-size(5) result-size(6)
+    " copy-op 0x90 (copy, size-byte0 present, no offset bytes -> offset 0)
+    " + size-byte 0x05 (copy length 5) + insert-op 0x01 + literal 0x21 ('!').
+    " Expected result = "Hello!" - see target_design_phase5.md §7.2 (T2).
+    lv_base  = '48656C6C6F'.
+    lv_delta = '050690050121'.
+
+    lv_result = zcl_abapgit_ortec_delta=>apply( iv_base = lv_base iv_delta = lv_delta ).
+
+    cl_abap_unit_assert=>assert_equals( act = lv_result exp = '48656C6C6F21' ).
+  ENDMETHOD.
+
+  METHOD resolve_ofs_direct.
+    DATA lt_objects     TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA ls_object      LIKE LINE OF lt_objects.
+    DATA lt_offset_map  TYPE zcl_abapgit_ortec_delta=>ty_offset_map_tt.
+    DATA lt_ofs_meta    TYPE zcl_abapgit_ortec_delta=>ty_ofs_meta_tt.
+    DATA lv_expected_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+
+    " Object 1: full blob "Hello" at pack_offset 0.
+    CLEAR ls_object.
+    ls_object-type  = zif_abapgit_git_definitions=>c_type-blob.
+    ls_object-data  = '48656C6C6F'.
+    ls_object-sha1  = zcl_abapgit_hash=>sha1_blob( ls_object-data ).
+    ls_object-index = 1.
+    APPEND ls_object TO lt_objects.
+    INSERT VALUE #( pack_offset = 0 obj_index = 1 ) INTO TABLE lt_offset_map.
+
+    " Object 2: OFS_DELTA at pack_offset 20, base_offset 0 (points back to
+    " object 1). Same delta bytes as apply_copy_and_insert: "Hello" -> "Hello!".
+    CLEAR ls_object.
+    ls_object-type  = zcl_abapgit_ortec_delta=>c_type_ofs_d.
+    ls_object-data  = '050690050121'.
+    ls_object-index = 2.
+    APPEND ls_object TO lt_objects.
+    INSERT VALUE #( pack_offset = 20 obj_index = 2 ) INTO TABLE lt_offset_map.
+    INSERT VALUE #( obj_index = 2 base_offset = 0 ) INTO TABLE lt_ofs_meta.
+
+    zcl_abapgit_ortec_delta=>resolve_all(
+      EXPORTING
+        it_offset_map = lt_offset_map
+        it_ofs_meta   = lt_ofs_meta
+        iv_repo_key   = mc_repo
+      CHANGING
+        ct_objects    = lt_objects ).
+
+    READ TABLE lt_objects INTO ls_object WITH KEY index = 2.
+    cl_abap_unit_assert=>assert_subrc( msg = 'Resolved OFS_DELTA object must remain in ct_objects' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_object-data exp = '48656C6C6F21'
+      msg = 'OFS_DELTA must resolve to the base object located by pack offset' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_object-type
+      exp = zif_abapgit_git_definitions=>c_type-blob
+      msg = 'A resolved delta inherits its type from its ultimate base' ).
+
+    lv_expected_sha = zcl_abapgit_hash=>sha1_blob( '48656C6C6F21' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_object-sha1 exp = lv_expected_sha
+      msg = 'Resolved object must carry its real recomputed content SHA1' ).
+  ENDMETHOD.
+
+  METHOD resolve_ofs_chain.
+    DATA lt_objects    TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA ls_object     LIKE LINE OF lt_objects.
+    DATA lt_offset_map TYPE zcl_abapgit_ortec_delta=>ty_offset_map_tt.
+    DATA lt_ofs_meta   TYPE zcl_abapgit_ortec_delta=>ty_ofs_meta_tt.
+    DATA lv_expected_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+
+    " A 2-hop OFS_DELTA chain: obj1 "Hello" -> obj2 "Hello!" -> obj3 "Hello!!".
+    " Proves dependency-ordered resolution: obj3's base (obj2) is itself an
+    " unresolved delta at the time obj3 is visited - the case a one-pass
+    " offset->sha rewrite would resolve incorrectly (see
+    " target_design_phase5.md §2.1 / T4).
+
+    CLEAR ls_object.
+    ls_object-type  = zif_abapgit_git_definitions=>c_type-blob.
+    ls_object-data  = '48656C6C6F'. " "Hello"
+    ls_object-sha1  = zcl_abapgit_hash=>sha1_blob( ls_object-data ).
+    ls_object-index = 1.
+    APPEND ls_object TO lt_objects.
+    INSERT VALUE #( pack_offset = 0 obj_index = 1 ) INTO TABLE lt_offset_map.
+
+    CLEAR ls_object.
+    ls_object-type  = zcl_abapgit_ortec_delta=>c_type_ofs_d.
+    ls_object-data  = '050690050121'. " "Hello" -> "Hello!"
+    ls_object-index = 2.
+    APPEND ls_object TO lt_objects.
+    INSERT VALUE #( pack_offset = 20 obj_index = 2 ) INTO TABLE lt_offset_map.
+    INSERT VALUE #( obj_index = 2 base_offset = 0 ) INTO TABLE lt_ofs_meta.
+
+    CLEAR ls_object.
+    ls_object-type  = zcl_abapgit_ortec_delta=>c_type_ofs_d.
+    " base-size(6) result-size(7) copy(off=0,len=6) insert(1,'!') -> "Hello!!"
+    ls_object-data  = '060790060121'.
+    ls_object-index = 3.
+    APPEND ls_object TO lt_objects.
+    INSERT VALUE #( pack_offset = 40 obj_index = 3 ) INTO TABLE lt_offset_map.
+    INSERT VALUE #( obj_index = 3 base_offset = 20 ) INTO TABLE lt_ofs_meta.
+
+    zcl_abapgit_ortec_delta=>resolve_all(
+      EXPORTING
+        it_offset_map = lt_offset_map
+        it_ofs_meta   = lt_ofs_meta
+        iv_repo_key   = mc_repo
+      CHANGING
+        ct_objects    = lt_objects ).
+
+    READ TABLE lt_objects INTO ls_object WITH KEY index = 2.
+    cl_abap_unit_assert=>assert_equals( act = ls_object-data exp = '48656C6C6F21'
+      msg = 'First hop of the chain must resolve to "Hello!"' ).
+
+    READ TABLE lt_objects INTO ls_object WITH KEY index = 3.
+    cl_abap_unit_assert=>assert_equals( act = ls_object-data exp = '48656C6C6F2121'
+      msg = 'Second hop of the chain must resolve to "Hello!!", proving the ' &&
+            'base (object 2) was resolved before object 3 applied its delta' ).
+
+    lv_expected_sha = zcl_abapgit_hash=>sha1_blob( '48656C6C6F2121' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_object-sha1 exp = lv_expected_sha ).
+  ENDMETHOD.
+
+ENDCLASS.
+
 CLASS ltcl_switch DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
   PRIVATE SECTION.
     METHODS no_dump FOR TESTING.

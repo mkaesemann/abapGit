@@ -734,6 +734,12 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
                                   WITH UNIQUE KEY table_line.
     DATA lt_delta_bases     TYPE SORTED TABLE OF zif_abapgit_git_definitions=>ty_sha1
                                   WITH UNIQUE KEY table_line.
+    " OFS_DELTA support (Phase 5a): pack-offset -> object-index map for every
+    " object, and the resolved base_offset for every OFS_DELTA entry. Fed to
+    " zcl_abapgit_ortec_delta=>resolve_all, which replaces decode_deltas below.
+    DATA lt_offset_map      TYPE zcl_abapgit_ortec_delta=>ty_offset_map_tt.
+    DATA lt_ofs_meta        TYPE zcl_abapgit_ortec_delta=>ty_ofs_meta_tt.
+    DATA lv_base_offset     TYPE i.
 
     lv_commit_interval = iv_commit_interval.
     IF lv_commit_interval <= 0.
@@ -796,14 +802,36 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
         ls_object-index   = ls_done_idx-obj_index.
         ls_object-adler32 = ls_done_idx-adler32.
 
+        CLEAR lv_base_offset.
         IF ls_object-type = zif_abapgit_git_definitions=>c_type-ref_d.
           ls_object-sha1 = ls_done_idx-delta_base.
+        ELSEIF ls_object-type = zcl_abapgit_ortec_delta=>c_type_ofs_d.
+          " The raw negative offset is not persisted (only ever needed once,
+          " during the same decode pass), so it is recomputed from the raw
+          " pack bytes at this entry's own recorded PACK_OFFSET - cheap (a
+          " handful of header bytes) and only exercised when a resume happens
+          " to include an OFS_DELTA entry.
+          DATA(lv_peek) = iv_data+ls_done_idx-pack_offset.
+          get_length(
+            IMPORTING ev_length = DATA(lv_peek_len)
+            CHANGING  cv_data   = lv_peek ).
+          lv_base_offset = ls_done_idx-pack_offset
+                            - zcl_abapgit_ortec_delta=>get_offset( CHANGING cv_data = lv_peek ).
         ELSE.
           ls_object-sha1 = zcl_abapgit_hash=>sha1(
                                iv_type = ls_object-type
                                iv_data = ls_object-data ).
         ENDIF.
         APPEND ls_object TO rt_objects.
+
+        INSERT VALUE #( pack_offset = ls_done_idx-pack_offset
+                        obj_index   = ls_done_idx-obj_index )
+          INTO TABLE lt_offset_map.
+        IF ls_object-type = zcl_abapgit_ortec_delta=>c_type_ofs_d.
+          INSERT VALUE #( obj_index   = ls_done_idx-obj_index
+                          base_offset = lv_base_offset )
+            INTO TABLE lt_ofs_meta.
+        ENDIF.
       ENDLOOP.
     ENDIF.
 
@@ -832,9 +860,20 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
         CHANGING
           cv_data   = lv_data ).
 
+      INSERT VALUE #( pack_offset = lv_curr_offset
+                      obj_index   = lv_uindex )
+        INTO TABLE lt_offset_map.
+
       IF lv_type = zif_abapgit_git_definitions=>c_type-ref_d.
         lv_ref_delta = lv_data(20).
         lv_data = lv_data+20.
+      ELSEIF lv_type = zcl_abapgit_ortec_delta=>c_type_ofs_d.
+        CLEAR lv_ref_delta.
+        lv_base_offset = lv_curr_offset
+                          - zcl_abapgit_ortec_delta=>get_offset( CHANGING cv_data = lv_data ).
+        INSERT VALUE #( obj_index   = lv_uindex
+                        base_offset = lv_base_offset )
+          INTO TABLE lt_ofs_meta.
       ELSE.
         CLEAR lv_ref_delta.
       ENDIF.
@@ -1135,7 +1174,13 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
       ENDLOOP.
     ENDIF.
 
-    zcl_abapgit_git_delta=>decode_deltas( CHANGING ct_objects = rt_objects ).
+    zcl_abapgit_ortec_delta=>resolve_all(
+      EXPORTING
+        it_offset_map = lt_offset_map
+        it_ofs_meta   = lt_ofs_meta
+        iv_repo_key   = iv_repo_key
+      CHANGING
+        ct_objects    = rt_objects ).
 
     " Promote temp rows to resolved object store rows (batched for performance).
     " Skip base objects (lt_base_shas): they already exist in DB with status 'R'.
@@ -1250,6 +1295,8 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
         rv_type = zif_abapgit_git_definitions=>c_type-tag.
       WHEN 112.
         rv_type = zif_abapgit_git_definitions=>c_type-ref_d.
+      WHEN 96.
+        rv_type = zcl_abapgit_ortec_delta=>c_type_ofs_d.
       WHEN OTHERS.
         zcx_abapgit_exception=>raise( |Todo, unknown git pack type| ).
     ENDCASE.
