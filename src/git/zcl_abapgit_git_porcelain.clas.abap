@@ -141,6 +141,7 @@ CLASS zcl_abapgit_git_porcelain DEFINITION
         !it_objects        TYPE zif_abapgit_definitions=>ty_objects_tt
         !iv_tree           TYPE zif_abapgit_git_definitions=>ty_sha1
         !iv_base           TYPE string
+        !iv_repo_key       TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key OPTIONAL
       RETURNING
         VALUE(rt_expanded) TYPE zif_abapgit_git_definitions=>ty_expanded_tt
       RAISING
@@ -963,7 +964,8 @@ CLASS ZCL_ABAPGIT_GIT_PORCELAIN IMPLEMENTATION.
 * ORTEC: try persistent object store for tree omitted by incremental fetch
       TRY.
           ls_ortec_object = zcl_abapgit_ortec_obj_store=>get_object(
-            iv_sha1 = iv_tree ).
+            iv_repo_key = iv_repo_key
+            iv_sha1     = iv_tree ).
           IF ls_ortec_object-type <> zif_abapgit_git_definitions=>c_type-tree.
             zcx_abapgit_exception=>raise( 'walk_tree, tree not found' ).
           ENDIF.
@@ -986,9 +988,10 @@ CLASS ZCL_ABAPGIT_GIT_PORCELAIN IMPLEMENTATION.
           <ls_exp>-chmod = <ls_node>-chmod.
         WHEN zif_abapgit_git_definitions=>c_chmod-dir.
           lt_expanded = walk_tree(
-            it_objects = it_objects
-            iv_tree    = <ls_node>-sha1
-            iv_base    = iv_base && <ls_node>-name && '/' ).
+            it_objects  = it_objects
+            iv_tree     = <ls_node>-sha1
+            iv_base     = iv_base && <ls_node>-name && '/'
+            iv_repo_key = iv_repo_key ).
           APPEND LINES OF lt_expanded TO rt_expanded.
         WHEN OTHERS.
           zcx_abapgit_exception=>raise( |walk_tree: unknown chmod { <ls_node>-chmod }| ).

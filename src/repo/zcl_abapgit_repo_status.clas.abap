@@ -11,6 +11,7 @@ CLASS zcl_abapgit_repo_status DEFINITION
         !ii_log           TYPE REF TO zif_abapgit_log OPTIONAL
         !ii_obj_filter    TYPE REF TO zif_abapgit_object_filter OPTIONAL
         !it_local         TYPE zif_abapgit_definitions=>ty_files_item_tt OPTIONAL
+        !it_remote        TYPE zif_abapgit_git_definitions=>ty_files_tt OPTIONAL
       RETURNING
         VALUE(rt_results) TYPE zif_abapgit_definitions=>ty_results_tt
       RAISING
@@ -54,8 +55,15 @@ CLASS zcl_abapgit_repo_status IMPLEMENTATION.
       ii_repo->find_remote_dot_abapgit( ).
     ENDIF.
 
-    lt_remote = ii_repo->get_files_remote( ii_obj_filter = ii_obj_filter
-                                           iv_ignore_files = abap_true ).
+    IF it_remote IS SUPPLIED.
+      " ORTEC: caller already resolved a filtered remote set (e.g. via the ORTEC
+      " filtered walk facade). Reuse it directly instead of fetching remote files
+      " again, and never mutate the repository's cached remote-file baseline.
+      lt_remote = it_remote.
+    ELSE.
+      lt_remote = ii_repo->get_files_remote( ii_obj_filter = ii_obj_filter
+                                             iv_ignore_files = abap_true ).
+    ENDIF.
 
     li_exit = zcl_abapgit_exit=>get_instance( ).
     li_exit->pre_calculate_repo_status(

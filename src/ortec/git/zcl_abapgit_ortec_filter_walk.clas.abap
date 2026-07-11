@@ -107,11 +107,6 @@ CLASS zcl_abapgit_ortec_filter_walk IMPLEMENTATION.
     TRY.
         lv_url = li_repo_online->get_url( ).
 
-        IF zcl_abapgit_ortec_git_switch=>is_active_for_repo( lv_url ) = abap_false.
-          rt_files = ii_repo_online->get_files_remote( ii_obj_filter ).
-          RETURN.
-        ENDIF.
-
         lv_repo_key = zcl_abapgit_ortec_repo_state=>get_repo_key_for_url( lv_url ).
 
         IF lv_repo_key IS INITIAL.

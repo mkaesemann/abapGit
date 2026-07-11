@@ -637,8 +637,6 @@ CLASS zcl_abapgit_gui_page_diff_base IMPLEMENTATION.
     DATA lo_filter       TYPE REF TO lcl_filter.
     DATA lo_multi_filter TYPE REF TO lcl_multi_filter.
     DATA li_obj_filter   TYPE REF TO zif_abapgit_object_filter.
-    DATA lv_reset_remote_cache TYPE abap_bool.
-    DATA lv_use_ortec TYPE abap_bool.
 
     " For single file or object, use a filter instead of processing complete repo
     IF is_file IS NOT INITIAL.
@@ -668,44 +666,26 @@ CLASS zcl_abapgit_gui_page_diff_base IMPLEMENTATION.
       et_local  = mi_repo->get_files_local_filtered( li_obj_filter ).
 
       TRY.
-          lv_use_ortec = zcl_abapgit_ortec_git_switch=>is_active_for_repo(
-            CAST zif_abapgit_repo_online( mi_repo )->get_url( ) ).
+          CALL METHOD ('ZCL_ABAPGIT_ORTEC_GIT_FACADE')=>('RESOLVE_FILTERED_REMOTE')
+            EXPORTING
+              ii_repo_online = mi_repo
+              ii_obj_filter  = li_obj_filter
+            RECEIVING
+              rt_files       = et_remote.
         CATCH cx_root.
-          lv_use_ortec = abap_false.
+          et_remote = mi_repo->get_files_remote(
+            iv_ignore_files = abap_true
+            ii_obj_filter   = li_obj_filter ).
       ENDTRY.
 
-      IF lv_use_ortec = abap_true.
-        TRY.
-            CALL METHOD ('ZCL_ABAPGIT_ORTEC_FILTER_WALK')=>('GET_REMOTE_FILES_FOR_DIFF')
-              EXPORTING
-                ii_repo_online = mi_repo
-                ii_obj_filter  = li_obj_filter
-              RECEIVING
-                rt_files       = et_remote.
-
-            " Keep status-calc remote retrieval on the same filtered baseline.
-            mi_repo->set_files_remote( et_remote ).
-            lv_reset_remote_cache = abap_true.
-          CATCH cx_root.
-            et_remote = mi_repo->get_files_remote(
-              iv_ignore_files = abap_true
-              ii_obj_filter   = li_obj_filter ).
-        ENDTRY.
-      ELSE.
-        et_remote = mi_repo->get_files_remote(
-          iv_ignore_files = abap_true
-          ii_obj_filter   = li_obj_filter ).
-      ENDIF.
-
+      " ORTEC: it_local/it_remote reuse the already-resolved sets above, so status is
+      " computed in one pass, without re-fetching local/remote or mutating the
+      " repository's cached remote-file baseline (no set_files_remote/refresh cycle).
       et_status = zcl_abapgit_repo_status=>calculate(
         ii_repo       = mi_repo
-        ii_obj_filter = li_obj_filter ).
-
-      IF lv_reset_remote_cache = abap_true.
-        mi_repo->refresh(
-          iv_drop_cache = abap_false
-          iv_drop_log   = abap_false ).
-      ENDIF.
+        ii_obj_filter = li_obj_filter
+        it_local      = et_local
+        it_remote     = et_remote ).
     ELSE.
       et_remote = mi_repo->get_files_remote( ).
       et_local  = mi_repo->get_files_local( ).
