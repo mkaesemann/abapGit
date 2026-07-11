@@ -8,6 +8,8 @@ CLASS ltcl_obj_store DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
     METHODS get_objects_missing FOR TESTING RAISING cx_static_check.
     METHODS reachable_objects_graph FOR TESTING RAISING cx_static_check.
     METHODS reachable_objects_missing_tree FOR TESTING RAISING cx_static_check.
+    METHODS missing_sha1s_none FOR TESTING RAISING cx_static_check.
+    METHODS missing_sha1s_some FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 CLASS ltcl_obj_store IMPLEMENTATION.
   METHOD setup. DELETE FROM zaog_obj_store WHERE repo_key = mc_repo. ENDMETHOD.
@@ -154,6 +156,122 @@ CLASS ltcl_obj_store IMPLEMENTATION.
           iv_repo_key = mc_repo
           iv_commit   = lv_commit_sha ).
         cl_abap_unit_assert=>fail( 'Missing reachable tree must raise' ).
+      CATCH zcx_abapgit_ortec_git.
+    ENDTRY.
+  ENDMETHOD.
+  METHOD missing_sha1s_none.
+    DATA lt_sha1s TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_missing TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lv TYPE xstring.
+    lv = '31'.
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = '4444444444444444444444444444444444444444'
+      iv_type     = zif_abapgit_git_definitions=>c_type-blob
+      iv_data     = lv ).
+
+    APPEND '4444444444444444444444444444444444444444' TO lt_sha1s.
+
+    lt_missing = zcl_abapgit_ortec_obj_store=>get_missing_sha1s(
+      iv_repo_key = mc_repo
+      it_sha1s    = lt_sha1s ).
+
+    cl_abap_unit_assert=>assert_initial(
+      act = lt_missing
+      msg = 'A fully-stored SHA1 must not be reported missing' ).
+  ENDMETHOD.
+  METHOD missing_sha1s_some.
+    DATA lt_sha1s TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_missing TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lv TYPE xstring.
+    lv = '31'.
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = '5555555555555555555555555555555555555555'
+      iv_type     = zif_abapgit_git_definitions=>c_type-blob
+      iv_data     = lv ).
+
+    APPEND '5555555555555555555555555555555555555555' TO lt_sha1s.
+    APPEND '6666666666666666666666666666666666666666' TO lt_sha1s.
+
+    lt_missing = zcl_abapgit_ortec_obj_store=>get_missing_sha1s(
+      iv_repo_key = mc_repo
+      it_sha1s    = lt_sha1s ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lines( lt_missing )
+      exp = 1
+      msg = 'Only the non-stored SHA1 should be reported missing' ).
+    READ TABLE lt_missing WITH KEY table_line = '6666666666666666666666666666666666666666'
+      TRANSPORTING NO FIELDS.
+    cl_abap_unit_assert=>assert_subrc( msg = 'The specific missing SHA1 must be in the result' ).
+  ENDMETHOD.
+ENDCLASS.
+
+CLASS ltcl_missing_objects DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+  PRIVATE SECTION.
+    CONSTANTS mc_repo TYPE c LENGTH 12 VALUE 'ZAOGT_MISOB'.
+    METHODS setup. METHODS teardown.
+    METHODS noop_when_nothing_missing FOR TESTING RAISING cx_static_check.
+    METHODS no_fetch_without_url FOR TESTING RAISING cx_static_check.
+    METHODS no_fetch_when_opt_in_off FOR TESTING RAISING cx_static_check.
+ENDCLASS.
+CLASS ltcl_missing_objects IMPLEMENTATION.
+  METHOD setup. DELETE FROM zaog_obj_store WHERE repo_key = mc_repo. ENDMETHOD.
+  METHOD teardown. DELETE FROM zaog_obj_store WHERE repo_key = mc_repo. ROLLBACK WORK. ENDMETHOD.
+  METHOD noop_when_nothing_missing.
+    DATA lt_sha1s TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lv TYPE xstring.
+    lv = '31'.
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = '7777777777777777777777777777777777777777'
+      iv_type     = zif_abapgit_git_definitions=>c_type-blob
+      iv_data     = lv ).
+    APPEND '7777777777777777777777777777777777777777' TO lt_sha1s.
+
+    " Everything is already buffered, so this must return without ever
+    " attempting a network call (a blank/unreachable URL would fail loudly
+    " if a fetch were attempted).
+    zcl_abapgit_ortec_missing_objects=>ensure_available(
+      iv_repo_key = mc_repo
+      iv_url      = 'https://example.invalid/not-a-real-remote.git'
+      iv_commit   = '8888888888888888888888888888888888888888'
+      it_sha1s    = lt_sha1s ).
+  ENDMETHOD.
+  METHOD no_fetch_without_url.
+    DATA lt_sha1s TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    APPEND '9999999999999999999999999999999999999999' TO lt_sha1s.
+
+    " Object is not buffered and no URL is supplied - must raise immediately
+    " without attempting any network access.
+    TRY.
+        zcl_abapgit_ortec_missing_objects=>ensure_available(
+          iv_repo_key = mc_repo
+          iv_url      = ''
+          iv_commit   = '8888888888888888888888888888888888888888'
+          it_sha1s    = lt_sha1s ).
+        cl_abap_unit_assert=>fail( 'Missing object without a URL must raise' ).
+      CATCH zcx_abapgit_ortec_git.
+    ENDTRY.
+  ENDMETHOD.
+  METHOD no_fetch_when_opt_in_off.
+    DATA lt_sha1s TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    APPEND 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' TO lt_sha1s.
+
+    " No repository has opted into the ORTEC write/protocol behavior for this
+    " URL, so ensure_available must refuse to fetch and raise rather than
+    " attempt a non-negotiated network call.
+    TRY.
+        zcl_abapgit_ortec_missing_objects=>ensure_available(
+          iv_repo_key = mc_repo
+          iv_url      = 'https://example.invalid/opt-in-off-repo.git'
+          iv_commit   = '8888888888888888888888888888888888888888'
+          it_sha1s    = lt_sha1s ).
+        cl_abap_unit_assert=>fail( 'Missing object with opt-in inactive must raise' ).
       CATCH zcx_abapgit_ortec_git.
     ENDTRY.
   ENDMETHOD.

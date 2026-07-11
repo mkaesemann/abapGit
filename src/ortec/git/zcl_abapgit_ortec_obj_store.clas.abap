@@ -40,6 +40,20 @@ CLASS zcl_abapgit_ortec_obj_store DEFINITION
       RETURNING VALUE(rt_objects) TYPE zif_abapgit_definitions=>ty_objects_tt
       RAISING   zcx_abapgit_ortec_git.
 
+    "! Set-based check for which of the given SHA1s are NOT present (status 'R')
+    "! in the persistent store for this repository. One chunked SELECT per
+    "! c_select_package_size objects; no per-object DB reads.
+    "! @parameter iv_repo_key |
+    "! Repository key
+    "! @parameter it_sha1s |
+    "! Candidate SHA1s to check
+    "! @parameter rt_missing |
+    "! Subset of it_sha1s (deduplicated) not found in the store
+    CLASS-METHODS get_missing_sha1s
+      IMPORTING iv_repo_key       TYPE ty_repo_key
+                it_sha1s          TYPE zif_abapgit_git_definitions=>ty_sha1_tt
+      RETURNING VALUE(rt_missing) TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+
     CLASS-METHODS exists
       IMPORTING iv_repo_key      TYPE ty_repo_key
                 iv_sha1          TYPE zif_abapgit_git_definitions=>ty_sha1
@@ -547,5 +561,54 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
       WHERE repo_key = iv_repo_key
         AND obj_sha1 IN lr_sha1s
         AND status   = 'R'.
+  ENDMETHOD.
+
+
+  METHOD get_missing_sha1s.
+    DATA lt_unique_sha1s TYPE ty_sha1_set.
+    DATA lt_found_sha1s  TYPE ty_sha1_set.
+    DATA lt_package      TYPE ty_sha1_rows.
+    DATA lt_db_rows      TYPE ty_obj_store_tt.
+
+    FIELD-SYMBOLS <lv_sha1> LIKE LINE OF it_sha1s.
+    FIELD-SYMBOLS <ls_row>  LIKE LINE OF lt_db_rows.
+
+    IF iv_repo_key IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    LOOP AT it_sha1s ASSIGNING <lv_sha1> WHERE table_line IS NOT INITIAL.
+      INSERT <lv_sha1> INTO TABLE lt_unique_sha1s.
+    ENDLOOP.
+
+    IF lt_unique_sha1s IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    LOOP AT lt_unique_sha1s ASSIGNING <lv_sha1>.
+      APPEND VALUE #( sha1 = <lv_sha1> ) TO lt_package.
+      IF lines( lt_package ) >= c_select_package_size.
+        lt_db_rows = read_object_rows( iv_repo_key = iv_repo_key
+                                       it_sha1s    = lt_package ).
+        LOOP AT lt_db_rows ASSIGNING <ls_row>.
+          INSERT <ls_row>-obj_sha1 INTO TABLE lt_found_sha1s.
+        ENDLOOP.
+        CLEAR lt_package.
+      ENDIF.
+    ENDLOOP.
+
+    IF lt_package IS NOT INITIAL.
+      lt_db_rows = read_object_rows( iv_repo_key = iv_repo_key
+                                     it_sha1s    = lt_package ).
+      LOOP AT lt_db_rows ASSIGNING <ls_row>.
+        INSERT <ls_row>-obj_sha1 INTO TABLE lt_found_sha1s.
+      ENDLOOP.
+    ENDIF.
+
+    LOOP AT lt_unique_sha1s ASSIGNING <lv_sha1>.
+      IF NOT line_exists( lt_found_sha1s[ table_line = <lv_sha1> ] ).
+        APPEND <lv_sha1> TO rt_missing.
+      ENDIF.
+    ENDLOOP.
   ENDMETHOD.
 ENDCLASS.

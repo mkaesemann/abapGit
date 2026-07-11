@@ -146,7 +146,8 @@ CLASS zcl_abapgit_ortec_filter_walk IMPLEMENTATION.
           iv_commit     = lv_commit
           ii_obj_filter = ii_obj_filter
           io_dot        = ii_repo_online->get_dot_abapgit( )
-          iv_devclass   = ii_repo_online->get_package( ) ).
+          iv_devclass   = ii_repo_online->get_package( )
+          iv_url        = lv_url ).
       CATCH zcx_abapgit_exception.
         rt_files = ii_repo_online->get_files_remote( ii_obj_filter ).
     ENDTRY.

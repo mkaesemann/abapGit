@@ -19,6 +19,11 @@ CLASS zcl_abapgit_ortec_obj_index DEFINITION
     "! Parsed .abapgit configuration
     "! @parameter iv_devclass |
     "! Repository package
+    "! @parameter iv_url |
+    "! Remote URL. Optional; when supplied and the ORTEC write/protocol opt-in is
+    "! active for it, a missing blob triggers one targeted negotiated fetch
+    "! before falling back to the full remote read. Pass initial to keep the
+    "! prior behavior (fall back immediately on any missing blob).
     "! @parameter rt_files |
     "! Filtered remote files with payload
     "! @raising zcx_abapgit_exception |
@@ -30,6 +35,7 @@ CLASS zcl_abapgit_ortec_obj_index DEFINITION
         ii_obj_filter TYPE REF TO zif_abapgit_object_filter
         io_dot        TYPE REF TO zcl_abapgit_dot_abapgit
         iv_devclass   TYPE devclass
+        iv_url        TYPE string OPTIONAL
       RETURNING
         VALUE(rt_files) TYPE zif_abapgit_git_definitions=>ty_files_tt
       RAISING
@@ -105,6 +111,8 @@ CLASS zcl_abapgit_ortec_obj_index DEFINITION
       IMPORTING
         iv_repo_key TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
         it_rows     TYPE ty_index_rows_tt
+        iv_url      TYPE string OPTIONAL
+        iv_commit   TYPE zif_abapgit_git_definitions=>ty_sha1 OPTIONAL
       RETURNING
         VALUE(rt_files) TYPE zif_abapgit_git_definitions=>ty_files_tt
       RAISING
@@ -169,7 +177,9 @@ CLASS zcl_abapgit_ortec_obj_index IMPLEMENTATION.
     TRY.
         rt_files = build_files_from_rows(
           iv_repo_key = iv_repo_key
-          it_rows     = lt_rows ).
+          it_rows     = lt_rows
+          iv_url      = iv_url
+          iv_commit   = iv_commit ).
       CATCH zcx_abapgit_exception.
         " Index rows can become stale after partial cleanups. Rebuild once and retry.
         DELETE FROM zaog_obj_index
@@ -199,7 +209,9 @@ CLASS zcl_abapgit_ortec_obj_index IMPLEMENTATION.
 
         rt_files = build_files_from_rows(
           iv_repo_key = iv_repo_key
-          it_rows     = lt_rows ).
+          it_rows     = lt_rows
+          iv_url      = iv_url
+          iv_commit   = iv_commit ).
     ENDTRY.
 
     " Keep generated-object handling aligned with standard apply_object_filter logic.
@@ -483,6 +495,24 @@ CLASS zcl_abapgit_ortec_obj_index IMPLEMENTATION.
 
     IF lt_sha1s IS INITIAL.
       RETURN.
+    ENDIF.
+
+    " ORTEC: best-effort bulk top-up. If some blobs are missing from the local
+    " store, try one targeted negotiated fetch before falling through to the
+    " existing get_objects call (which raises on any remaining miss, exactly as
+    " before). Never worse than the prior behavior: any failure here is
+    " swallowed and the normal miss-handling below still applies.
+    IF iv_url IS NOT INITIAL AND iv_commit IS NOT INITIAL.
+      TRY.
+          zcl_abapgit_ortec_missing_objects=>ensure_available(
+            iv_repo_key = iv_repo_key
+            iv_url      = iv_url
+            iv_commit   = iv_commit
+            it_sha1s    = lt_sha1s ).
+        CATCH zcx_abapgit_ortec_git.
+          " No fast-path benefit available; fall through to the standard miss
+          " handling below (raises zcx_abapgit_exception, caller falls back).
+      ENDTRY.
     ENDIF.
 
     TRY.
