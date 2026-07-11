@@ -4,6 +4,12 @@
 "! the local check once. Never performs a network call for a repository that has
 "! not opted into the ORTEC write/protocol behavior, so a read-only caller (e.g.
 "! filtered Stage/Diff resolution) never pays a surprise full-fetch cost.
+"! In terms of zcl_abapgit_ortec_obj_store=>cs_object_state, this class moves
+"! objects from NOT_BUFFERED to LOADED via one bulk fetch + persist. It never
+"! resolves CONFIRMED_ABSENT itself (that requires positively-resolved parent
+"! tree/path context this class does not have) - if an object is still missing
+"! after the retry, that is reported as a failure (effectively
+"! CORRUPT_OR_INCOMPLETE/unresolved), never as a deleted-file signal.
 CLASS zcl_abapgit_ortec_missing_obj DEFINITION
   PUBLIC
   FINAL

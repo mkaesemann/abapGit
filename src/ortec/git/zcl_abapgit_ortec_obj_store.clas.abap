@@ -6,6 +6,34 @@ CLASS zcl_abapgit_ortec_obj_store DEFINITION
 
   PUBLIC SECTION.
     TYPES ty_repo_key TYPE c LENGTH 12.
+    TYPES ty_object_state TYPE string.
+
+    "! Explicit object/path buffering state (target design §2 - the boolean
+    "! "found / not found" model is deliberately abolished). Every object or
+    "! path resolution in the ORTEC fast path lands on exactly one of these
+    "! six states. Non-negotiable rule: only CONFIRMED_ABSENT may ever be
+    "! classified as remote-Deleted, and only once the remote tip, commit,
+    "! parent tree, and path have ALL been positively resolved - NOT_BUFFERED,
+    "! UNKNOWN_NEEDS_FETCH, and CORRUPT_OR_INCOMPLETE must never be
+    "! classified as deleted, they must trigger a collect/fetch/repair retry
+    "! or a safe fallback instead.
+    CONSTANTS:
+      BEGIN OF cs_object_state,
+        "! Object decoded and present in memory for this operation.
+        loaded                TYPE ty_object_state VALUE 'LOADED',
+        "! Present in the index/store but not yet decoded into memory.
+        indexed_needs_load    TYPE ty_object_state VALUE 'INDEXED_NEEDS_LOAD',
+        "! Referenced by a resolved tree but absent from the local store.
+        not_buffered          TYPE ty_object_state VALUE 'NOT_BUFFERED',
+        "! Existence undetermined; remote refs/commit/tree not yet resolved.
+        unknown_needs_fetch   TYPE ty_object_state VALUE 'UNKNOWN_NEEDS_FETCH',
+        "! Remote tip + commit + parent tree + path all positively resolved,
+        "! and the object is genuinely not present. The ONLY state that may
+        "! be classified as remote-Deleted.
+        confirmed_absent      TYPE ty_object_state VALUE 'CONFIRMED_ABSENT',
+        "! Present but fails decode / delta-base resolution / type check.
+        corrupt_or_incomplete TYPE ty_object_state VALUE 'CORRUPT_OR_INCOMPLETE',
+      END OF cs_object_state.
 
     CLASS-METHODS store_object
       IMPORTING iv_repo_key TYPE ty_repo_key

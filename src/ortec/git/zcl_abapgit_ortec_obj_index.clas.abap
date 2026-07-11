@@ -229,9 +229,33 @@ CLASS zcl_abapgit_ortec_obj_index IMPLEMENTATION.
   METHOD is_index_ready.
     DATA lv_dummy TYPE zaog_obj_index-path_hash.
 
+    IF zcl_abapgit_ortec_git_switch=>cs_absent_strictness-mode
+        = zcl_abapgit_ortec_git_switch=>cs_absent_strictness-mode_relaxed.
+      " RELAXED (benchmark-only, see cs_absent_strictness doc): trust the
+      " first indexed row found for this commit. Does not distinguish a
+      " fully-built index from one interrupted mid-rebuild - never ships as
+      " default.
+      SELECT SINGLE path_hash FROM zaog_obj_index INTO lv_dummy
+        WHERE repo_key    = iv_repo_key
+          AND commit_sha1 = iv_commit
+          AND idx_status  = c_status_ready.
+
+      rv_yes = boolc( sy-subrc = 0 ).
+      RETURN.
+    ENDIF.
+
+    " STRICT (default): only the explicit completion marker proves the
+    " walk for this commit's index finished fully - see rebuild_index. A
+    " rebuild interrupted partway through (corrupt tree, missing object,
+    " decode failure) leaves data rows behind without ever reaching the
+    " marker write, so it is correctly detected here as NOT ready and gets
+    " rebuilt again, instead of silently serving an incomplete index as if
+    " it were CONFIRMED_ABSENT/complete.
     SELECT SINGLE path_hash FROM zaog_obj_index INTO lv_dummy
       WHERE repo_key    = iv_repo_key
         AND commit_sha1 = iv_commit
+        AND obj_type    = c_marker_obj_type
+        AND obj_name    = c_marker_obj_name
         AND idx_status  = c_status_ready.
 
     rv_yes = boolc( sy-subrc = 0 ).
@@ -273,7 +297,6 @@ CLASS zcl_abapgit_ortec_obj_index IMPLEMENTATION.
     DATA lt_rows TYPE ty_index_rows_tt.
     DATA lv_path_hash TYPE zif_abapgit_git_definitions=>ty_sha1.
     DATA lv_next_path TYPE string.
-    DATA lv_row_count TYPE i.
 
     FIELD-SYMBOLS <ls_work> TYPE ty_tree_work.
     FIELD-SYMBOLS <ls_obj>  TYPE zif_abapgit_definitions=>ty_object.
@@ -410,7 +433,6 @@ CLASS zcl_abapgit_ortec_obj_index IMPLEMENTATION.
                   ls_row-tree_sha1   = <ls_work>-tree_sha1.
                   ls_row-idx_status  = c_status_ready.
                   APPEND ls_row TO lt_rows.
-                  lv_row_count = lv_row_count + 1.
 
                   IF lines( lt_rows ) >= 1000.
                     MODIFY zaog_obj_index FROM TABLE lt_rows.
@@ -430,16 +452,23 @@ CLASS zcl_abapgit_ortec_obj_index IMPLEMENTATION.
           MODIFY zaog_obj_index FROM TABLE lt_rows.
         ENDIF.
 
-        IF lv_row_count = 0.
-          CLEAR ls_row.
-          ls_row-repo_key    = iv_repo_key.
-          ls_row-commit_sha1 = iv_commit.
-          ls_row-obj_type    = c_marker_obj_type.
-          ls_row-obj_name    = c_marker_obj_name.
-          ls_row-path_hash   = c_marker_path_hash.
-          ls_row-idx_status  = c_status_ready.
-          MODIFY zaog_obj_index FROM ls_row.
-        ENDIF.
+        " Always write the completion marker as the LAST step of a fully
+        " successful walk, regardless of how many filter-relevant rows were
+        " found. This is the sole positive signal that this commit's index
+        " is completely built (see is_index_ready STRICT mode). Without an
+        " unconditional marker write, a walk interrupted partway through
+        " (corrupt tree, missing object, decode failure) would leave only
+        " partial data rows behind, and any completeness check based on
+        " "does at least one row exist" would wrongly treat that partial
+        " index as fully built.
+        CLEAR ls_row.
+        ls_row-repo_key    = iv_repo_key.
+        ls_row-commit_sha1 = iv_commit.
+        ls_row-obj_type    = c_marker_obj_type.
+        ls_row-obj_name    = c_marker_obj_name.
+        ls_row-path_hash   = c_marker_path_hash.
+        ls_row-idx_status  = c_status_ready.
+        MODIFY zaog_obj_index FROM ls_row.
 
         zcl_abapgit_ortec_pack_raw=>release_repo_lock( lv_lock_id ).
       CATCH zcx_abapgit_exception INTO DATA(lx_index).
@@ -536,8 +565,17 @@ CLASS zcl_abapgit_ortec_obj_index IMPLEMENTATION.
       READ TABLE lt_blob_data INTO ls_blob_data
         WITH TABLE KEY sha1 = <ls_row>-blob_sha1.
       IF sy-subrc <> 0.
+        " get_objects above already guarantees every requested SHA1 exists as
+        " SOME object in the store (it raises otherwise), so reaching here
+        " means the SHA1 exists but is not of type blob - a genuine
+        " CORRUPT_OR_INCOMPLETE condition (index/store inconsistency), never
+        " a legitimate "file deleted" signal. Raise so the caller falls back
+        " to the full, always-correct remote read instead of risking a wrong
+        " verdict from inconsistent data.
         zcx_abapgit_exception=>raise(
-          |Index resolve: blob { <ls_row>-blob_sha1 } missing| ).
+          |{ zcl_abapgit_ortec_obj_store=>cs_object_state-corrupt_or_incomplete }: | &&
+          |blob { <ls_row>-blob_sha1 } for { <ls_row>-file_path }{ <ls_row>-file_name } | &&
+          |is not a valid blob object in the store| ).
       ENDIF.
 
       CLEAR ls_file.

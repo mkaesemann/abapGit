@@ -29,6 +29,31 @@ CLASS zcl_abapgit_ortec_git_switch DEFINITION
         intf_active TYPE abap_bool VALUE abap_true,
       END OF cs_bulk_exists.
 
+    "! D4 completeness-strictness mode for object/path resolution (see
+    "! .memory/logs/target_design.md §2.3). This is a compile-time constant,
+    "! not a session-runtime toggle: switching modes is an explicit code
+    "! change + redeploy, used to benchmark the two modes side-by-side.
+    "! STRICT (default, ships): a per-commit filtered index is only trusted
+    "! as complete once its explicit completion marker row is found; an
+    "! index left behind by an interrupted/partial rebuild (corrupt tree,
+    "! missing object, decode failure) is correctly detected as incomplete
+    "! and is rebuilt again from the persistent object store before any
+    "! file is resolved from it. RELAXED (benchmark-only, must never ship as
+    "! default): trusts the first indexed row found for the commit, which
+    "! does not distinguish a fully-built index from one interrupted
+    "! mid-rebuild - kept only to measure the cost of the STRICT marker
+    "! check on very large repositories. In both modes, an unresolved
+    "! object/path state can never be turned into a Deleted/Modified/Added
+    "! verdict (see zcl_abapgit_ortec_obj_store=>cs_object_state); RELAXED
+    "! only reduces how many positive resolutions are gathered before an
+    "! already-unambiguous outcome is trusted.
+    CONSTANTS:
+      BEGIN OF cs_absent_strictness,
+        mode_strict  TYPE string VALUE 'STRICT',
+        mode_relaxed TYPE string VALUE 'RELAXED',
+        mode         TYPE string VALUE 'STRICT',
+      END OF cs_absent_strictness.
+
     TYPES:
       BEGIN OF ty_clear_result,
         repo_key   TYPE zcl_abapgit_ortec_repo_state=>ty_repo_key,
