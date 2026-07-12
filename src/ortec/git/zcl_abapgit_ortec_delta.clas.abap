@@ -170,25 +170,29 @@ CLASS zcl_abapgit_ortec_delta IMPLEMENTATION.
     DATA lv_low  TYPE x LENGTH 1.
     DATA lv_int  TYPE i.
 
-    IF xstrlen( cv_data ) = 0.
-      zcx_abapgit_exception=>raise( |OFS varint truncated| ).
-    ENDIF.
+    TRY.
+        IF xstrlen( cv_data ) = 0.
+          zcx_abapgit_exception=>raise( |OFS varint truncated| ).
+        ENDIF.
 
-    lv_byte   = cv_data(1).
-    cv_data   = cv_data+1.
-    lv_low    = lv_byte BIT-AND lc_low7.
-    rv_offset = lv_low.
+        lv_byte   = cv_data(1).
+        cv_data   = cv_data+1.
+        lv_low    = lv_byte BIT-AND lc_low7.
+        rv_offset = lv_low.
 
-    WHILE lv_byte BIT-AND lc_msb <> lc_zero.
-      IF xstrlen( cv_data ) = 0.
-        zcx_abapgit_exception=>raise( |OFS varint truncated| ).
-      ENDIF.
-      lv_byte   = cv_data(1).
-      cv_data   = cv_data+1.
-      lv_low    = lv_byte BIT-AND lc_low7.
-      lv_int    = lv_low.
-      rv_offset = ( rv_offset + 1 ) * 128 + lv_int.  " ((off+1) << 7) | payload
-    ENDWHILE.
+        WHILE lv_byte BIT-AND lc_msb <> lc_zero.
+          IF xstrlen( cv_data ) = 0.
+            zcx_abapgit_exception=>raise( |OFS varint truncated| ).
+          ENDIF.
+          lv_byte   = cv_data(1).
+          cv_data   = cv_data+1.
+          lv_low    = lv_byte BIT-AND lc_low7.
+          lv_int    = lv_low.
+          rv_offset = ( rv_offset + 1 ) * 128 + lv_int.  " ((off+1) << 7) | payload
+        ENDWHILE.
+      CATCH cx_sy_range_out_of_bounds INTO DATA(lx_range_offset).
+        zcx_abapgit_exception=>raise( |OFS varint decode error: { lx_range_offset->get_text( ) }| ).
+    ENDTRY.
 
   ENDMETHOD.
 
@@ -199,18 +203,22 @@ CLASS zcl_abapgit_ortec_delta IMPLEMENTATION.
 
     DATA lv_byte TYPE x LENGTH 1.
 
-    DO 2 TIMES.
-      DO.
-        IF xstrlen( cv_data ) = 0.
-          zcx_abapgit_exception=>raise( |Delta header truncated| ).
-        ENDIF.
-        lv_byte = cv_data(1).
-        cv_data = cv_data+1.
-        IF lv_byte BIT-AND lc_msb = lc_zero.
-          EXIT.
-        ENDIF.
-      ENDDO.
-    ENDDO.
+    TRY.
+        DO 2 TIMES.
+          DO.
+            IF xstrlen( cv_data ) = 0.
+              zcx_abapgit_exception=>raise( |Delta header truncated| ).
+            ENDIF.
+            lv_byte = cv_data(1).
+            cv_data = cv_data+1.
+            IF lv_byte BIT-AND lc_msb = lc_zero.
+              EXIT.
+            ENDIF.
+          ENDDO.
+        ENDDO.
+      CATCH cx_sy_range_out_of_bounds INTO DATA(lx_range_header).
+        zcx_abapgit_exception=>raise( |Delta header decode error: { lx_range_header->get_text( ) }| ).
+    ENDTRY.
   ENDMETHOD.
 
 
@@ -236,76 +244,80 @@ CLASS zcl_abapgit_ortec_delta IMPLEMENTATION.
     lv_data = iv_delta.
     skip_size_header( CHANGING cv_data = lv_data ).
 
-    WHILE xstrlen( lv_data ) > 0.
-      lv_instr = lv_data(1).
-      lv_data  = lv_data+1.
+    TRY.
+        WHILE xstrlen( lv_data ) > 0.
+          lv_instr = lv_data(1).
+          lv_data  = lv_data+1.
 
-      IF lv_instr BIT-AND lc_msb = lc_msb.
-        " Copy instruction: offset/length sub-bytes are present only where the
-        " corresponding flag bit is set; a missing byte defaults to 0 for that
-        " position. A decoded length of 0 means 0x10000 (65536) - a documented
-        " quirk of the git delta format, not a special case invented here.
-        lv_offset = 0.
-        IF lv_instr BIT-AND lc_1 = lc_1.
-          IF xstrlen( lv_data ) = 0. zcx_abapgit_exception=>raise( |Delta stream truncated| ). ENDIF.
-          lv_byte = lv_data(1). lv_data = lv_data+1.
-          lv_offset = lv_byte.
-        ENDIF.
-        IF lv_instr BIT-AND lc_2 = lc_2.
-          IF xstrlen( lv_data ) = 0. zcx_abapgit_exception=>raise( |Delta stream truncated| ). ENDIF.
-          lv_byte = lv_data(1). lv_data = lv_data+1.
-          lv_offset = lv_offset + lv_byte * 256.
-        ENDIF.
-        IF lv_instr BIT-AND lc_4 = lc_4.
-          IF xstrlen( lv_data ) = 0. zcx_abapgit_exception=>raise( |Delta stream truncated| ). ENDIF.
-          lv_byte = lv_data(1). lv_data = lv_data+1.
-          lv_offset = lv_offset + lv_byte * 65536.
-        ENDIF.
-        IF lv_instr BIT-AND lc_8 = lc_8.
-          IF xstrlen( lv_data ) = 0. zcx_abapgit_exception=>raise( |Delta stream truncated| ). ENDIF.
-          lv_byte = lv_data(1). lv_data = lv_data+1.
-          lv_offset = lv_offset + lv_byte * 16777216.
-        ENDIF.
+          IF lv_instr BIT-AND lc_msb = lc_msb.
+            " Copy instruction: offset/length sub-bytes are present only where the
+            " corresponding flag bit is set; a missing byte defaults to 0 for that
+            " position. A decoded length of 0 means 0x10000 (65536) - a documented
+            " quirk of the git delta format, not a special case invented here.
+            lv_offset = 0.
+            IF lv_instr BIT-AND lc_1 = lc_1.
+              IF xstrlen( lv_data ) = 0. zcx_abapgit_exception=>raise( |Delta stream truncated| ). ENDIF.
+              lv_byte = lv_data(1). lv_data = lv_data+1.
+              lv_offset = lv_byte.
+            ENDIF.
+            IF lv_instr BIT-AND lc_2 = lc_2.
+              IF xstrlen( lv_data ) = 0. zcx_abapgit_exception=>raise( |Delta stream truncated| ). ENDIF.
+              lv_byte = lv_data(1). lv_data = lv_data+1.
+              lv_offset = lv_offset + lv_byte * 256.
+            ENDIF.
+            IF lv_instr BIT-AND lc_4 = lc_4.
+              IF xstrlen( lv_data ) = 0. zcx_abapgit_exception=>raise( |Delta stream truncated| ). ENDIF.
+              lv_byte = lv_data(1). lv_data = lv_data+1.
+              lv_offset = lv_offset + lv_byte * 65536.
+            ENDIF.
+            IF lv_instr BIT-AND lc_8 = lc_8.
+              IF xstrlen( lv_data ) = 0. zcx_abapgit_exception=>raise( |Delta stream truncated| ). ENDIF.
+              lv_byte = lv_data(1). lv_data = lv_data+1.
+              lv_offset = lv_offset + lv_byte * 16777216.
+            ENDIF.
 
-        lv_length = 0.
-        IF lv_instr BIT-AND lc_16 = lc_16.
-          IF xstrlen( lv_data ) = 0. zcx_abapgit_exception=>raise( |Delta stream truncated| ). ENDIF.
-          lv_byte = lv_data(1). lv_data = lv_data+1.
-          lv_length = lv_byte.
-        ENDIF.
-        IF lv_instr BIT-AND lc_32 = lc_32.
-          IF xstrlen( lv_data ) = 0. zcx_abapgit_exception=>raise( |Delta stream truncated| ). ENDIF.
-          lv_byte = lv_data(1). lv_data = lv_data+1.
-          lv_length = lv_length + lv_byte * 256.
-        ENDIF.
-        IF lv_instr BIT-AND lc_64 = lc_64.
-          IF xstrlen( lv_data ) = 0. zcx_abapgit_exception=>raise( |Delta stream truncated| ). ENDIF.
-          lv_byte = lv_data(1). lv_data = lv_data+1.
-          lv_length = lv_length + lv_byte * 65536.
-        ENDIF.
-        IF lv_length = 0.
-          lv_length = 65536.
-        ENDIF.
+            lv_length = 0.
+            IF lv_instr BIT-AND lc_16 = lc_16.
+              IF xstrlen( lv_data ) = 0. zcx_abapgit_exception=>raise( |Delta stream truncated| ). ENDIF.
+              lv_byte = lv_data(1). lv_data = lv_data+1.
+              lv_length = lv_byte.
+            ENDIF.
+            IF lv_instr BIT-AND lc_32 = lc_32.
+              IF xstrlen( lv_data ) = 0. zcx_abapgit_exception=>raise( |Delta stream truncated| ). ENDIF.
+              lv_byte = lv_data(1). lv_data = lv_data+1.
+              lv_length = lv_length + lv_byte * 256.
+            ENDIF.
+            IF lv_instr BIT-AND lc_64 = lc_64.
+              IF xstrlen( lv_data ) = 0. zcx_abapgit_exception=>raise( |Delta stream truncated| ). ENDIF.
+              lv_byte = lv_data(1). lv_data = lv_data+1.
+              lv_length = lv_length + lv_byte * 65536.
+            ENDIF.
+            IF lv_length = 0.
+              lv_length = 65536.
+            ENDIF.
 
-        IF lv_offset + lv_length > xstrlen( iv_base ).
-          zcx_abapgit_exception=>raise( |Delta copy instruction exceeds base length| ).
-        ENDIF.
+            IF lv_offset + lv_length > xstrlen( iv_base ).
+              zcx_abapgit_exception=>raise( |Delta copy instruction exceeds base length| ).
+            ENDIF.
 
-        CONCATENATE rv_result iv_base+lv_offset(lv_length) INTO rv_result IN BYTE MODE.
+            CONCATENATE rv_result iv_base+lv_offset(lv_length) INTO rv_result IN BYTE MODE.
 
-      ELSEIF lv_instr = lc_zero.
-        " 0x00 is reserved (never a valid instruction) per the git delta format.
-        zcx_abapgit_exception=>raise( |Reserved delta instruction 0x00| ).
-      ELSE.
-        " Insert instruction: the low 7 bits ARE the literal length directly.
-        lv_insert_len = lv_instr.
-        IF lv_insert_len > xstrlen( lv_data ).
-          zcx_abapgit_exception=>raise( |Delta insert instruction exceeds stream length| ).
-        ENDIF.
-        CONCATENATE rv_result lv_data(lv_insert_len) INTO rv_result IN BYTE MODE.
-        lv_data = lv_data+lv_insert_len.
-      ENDIF.
-    ENDWHILE.
+          ELSEIF lv_instr = lc_zero.
+            " 0x00 is reserved (never a valid instruction) per the git delta format.
+            zcx_abapgit_exception=>raise( |Reserved delta instruction 0x00| ).
+          ELSE.
+            " Insert instruction: the low 7 bits ARE the literal length directly.
+            lv_insert_len = lv_instr.
+            IF lv_insert_len > xstrlen( lv_data ).
+              zcx_abapgit_exception=>raise( |Delta insert instruction exceeds stream length| ).
+            ENDIF.
+            CONCATENATE rv_result lv_data(lv_insert_len) INTO rv_result IN BYTE MODE.
+            lv_data = lv_data+lv_insert_len.
+          ENDIF.
+        ENDWHILE.
+      CATCH cx_sy_range_out_of_bounds INTO DATA(lx_range_apply).
+        zcx_abapgit_exception=>raise( |Delta apply decode error: { lx_range_apply->get_text( ) }| ).
+    ENDTRY.
 
   ENDMETHOD.
 

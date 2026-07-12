@@ -177,14 +177,21 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
     lv_null = zcl_abapgit_git_utils=>get_null( ).
     FIND FIRST OCCURRENCE OF lv_null IN lv_ref_data MATCH OFFSET lv_null_pos.
     IF sy-subrc = 0.
-      lv_offset = lv_null_pos + 1.
-      lv_caps = lv_ref_data+lv_offset.
-      FIND FIRST OCCURRENCE OF cl_abap_char_utilities=>newline IN lv_caps
-        MATCH OFFSET lv_nl_pos.
-      IF sy-subrc = 0 AND lv_nl_pos > 0.
-        lv_caps = lv_caps(lv_nl_pos).
-        lv_has_filter = xsdbool( lv_caps CS 'filter' ).
-      ENDIF.
+      TRY.
+          lv_offset = lv_null_pos + 1.
+          lv_caps = lv_ref_data+lv_offset.
+          FIND FIRST OCCURRENCE OF cl_abap_char_utilities=>newline IN lv_caps
+            MATCH OFFSET lv_nl_pos.
+          IF sy-subrc = 0 AND lv_nl_pos > 0.
+            lv_caps = lv_caps(lv_nl_pos).
+            lv_has_filter = xsdbool( lv_caps CS 'filter' ).
+          ENDIF.
+        CATCH cx_sy_range_out_of_bounds.
+          " Malformed/unexpected capability advertisement - treat as "no
+          " filter capability", which the existing check below already
+          " handles safely (returns early), never a hard failure.
+          lv_has_filter = abap_false.
+      ENDTRY.
     ENDIF.
 
     IF lv_has_filter = abap_false.
@@ -691,27 +698,38 @@ METHOD upload_pack.
     DATA lv_pack     TYPE xstring.
 
 
-    WHILE xstrlen( cv_data ) >= 4.
-      lv_len = zcl_abapgit_git_utils=>length_utf8_hex( cv_data ).
+    TRY.
+        WHILE xstrlen( cv_data ) >= 4.
+          lv_len = zcl_abapgit_git_utils=>length_utf8_hex( cv_data ).
 
-      IF lv_len > xstrlen( cv_data ).
-        zcx_abapgit_ortec_git=>raise( 'parse, string length too large' ).
-      ENDIF.
+          IF lv_len > xstrlen( cv_data ).
+            zcx_abapgit_ortec_git=>raise( 'parse, string length too large' ).
+          ENDIF.
 
-      lv_contents = cv_data(lv_len).
-      IF lv_len = 0.
-        cv_data = cv_data+4.
-        CONTINUE.
-      ELSE.
-        cv_data = cv_data+lv_len.
-      ENDIF.
+          IF lv_len = 0.
+            cv_data = cv_data+4.
+            CONTINUE.
+          ENDIF.
 
-      lv_contents = lv_contents+4.
+          IF lv_len < 4.
+            " A non-flush pkt-line always includes its own 4-byte length
+            " header, so any length 1-3 is an invalid/malformed frame -
+            " without this check, the +4 strip below could slice past the
+            " end of a too-short lv_contents.
+            zcx_abapgit_ortec_git=>raise( 'parse, invalid pkt-line length' ).
+          ENDIF.
 
-      IF xstrlen( lv_contents ) > 1 AND lv_contents(1) = lc_band1.
-        CONCATENATE lv_pack lv_contents+1 INTO lv_pack IN BYTE MODE.
-      ENDIF.
-    ENDWHILE.
+          lv_contents = cv_data(lv_len).
+          cv_data = cv_data+lv_len.
+          lv_contents = lv_contents+4.
+
+          IF xstrlen( lv_contents ) > 1 AND lv_contents(1) = lc_band1.
+            CONCATENATE lv_pack lv_contents+1 INTO lv_pack IN BYTE MODE.
+          ENDIF.
+        ENDWHILE.
+      CATCH cx_sy_range_out_of_bounds INTO DATA(lx_range).
+        zcx_abapgit_ortec_git=>raise( |parse, pkt-line framing error: { lx_range->get_text( ) }| ).
+    ENDTRY.
 
     ev_pack = lv_pack.
 
