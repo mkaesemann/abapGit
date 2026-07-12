@@ -925,12 +925,16 @@ CLASS ltcl_repo_state DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
     METHODS get_or_create_key        FOR TESTING RAISING cx_static_check.
     METHODS get_or_create_idempotent FOR TESTING RAISING cx_static_check.
     METHODS state_roundtrip          FOR TESTING RAISING cx_static_check.
+    METHODS stale_tip_invalidated_from_cache FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 CLASS ltcl_repo_state IMPLEMENTATION.
   METHOD setup.
     DATA lv_key TYPE c LENGTH 12.
     lv_key = zcl_abapgit_ortec_repo_state=>get_or_create_repo_key_for_url( mc_url ).
-    IF lv_key IS NOT INITIAL. zcl_abapgit_ortec_repo_state=>clear_state( lv_key ). ENDIF.
+    IF lv_key IS NOT INITIAL.
+      zcl_abapgit_ortec_repo_state=>clear_state( lv_key ).
+      DELETE FROM zaog_commit_hist WHERE repo_key = lv_key.
+    ENDIF.
   ENDMETHOD.
   METHOD teardown.
     DATA lv_key TYPE c LENGTH 12.
@@ -938,6 +942,7 @@ CLASS ltcl_repo_state IMPLEMENTATION.
     IF lv_key IS NOT INITIAL.
       zcl_abapgit_ortec_repo_state=>clear_state( lv_key ).
       DELETE FROM zaog_obj_store WHERE repo_key = lv_key.
+      DELETE FROM zaog_commit_hist WHERE repo_key = lv_key.
     ENDIF. ROLLBACK WORK.
   ENDMETHOD.
   METHOD get_or_create_key.
@@ -963,6 +968,51 @@ CLASS ltcl_repo_state IMPLEMENTATION.
     ls_state = zcl_abapgit_ortec_repo_state=>get_state( iv_repo_key = lv_key iv_branch_name = 'refs/heads/main' ).
     cl_abap_unit_assert=>assert_equals( act = ls_state-fetch_commit
       exp = 'aabbccddee00112233445566778899aabbccddee' msg = 'Commit must match' ).
+  ENDMETHOD.
+  METHOD stale_tip_invalidated_from_cache.
+    " Phase 7 coverage: the "stale-tip fallback" behavior relied on by
+    " zcl_abapgit_ortec_filter_walk (and the walk/walk_tree repair path) is
+    " driven by invalidate_tip_commit removing the "fully materialised"
+    " signal that get_complete_commits/have-negotiation trust. Once a live
+    " remote tip no longer matches what's cached, invalidating the tip must
+    " make the read path treat it as no longer safe to serve from the local
+    " store - forcing a fallback/re-fetch instead of silently serving stale
+    " data.
+    DATA lv_key TYPE c LENGTH 12.
+    DATA lt_commits TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    CONSTANTS lc_commit TYPE zif_abapgit_git_definitions=>ty_sha1
+      VALUE 'cccc000000000000000000000000000000000009'.
+
+    lv_key = zcl_abapgit_ortec_repo_state=>get_or_create_repo_key_for_url( mc_url ).
+    zcl_abapgit_ortec_repo_state=>update_after_fetch(
+      iv_repo_key = lv_key iv_branch_name = 'refs/heads/main'
+      iv_url = mc_url iv_commit = lc_commit ).
+
+    " ZAOG_COMMIT_HIST is what actually marks a commit as fully materialised
+    " for get_complete_commits/have-negotiation purposes.
+    INSERT zaog_commit_hist FROM VALUE #(
+      repo_key = lv_key commit_sha1 = lc_commit branch_name = 'refs/heads/main' ).
+    COMMIT WORK.
+
+    lt_commits = zcl_abapgit_ortec_repo_state=>get_complete_commits( lv_key ).
+    READ TABLE lt_commits WITH KEY table_line = lc_commit TRANSPORTING NO FIELDS.
+    cl_abap_unit_assert=>assert_subrc(
+      msg = 'Commit must be considered fully materialised before invalidation' ).
+
+    zcl_abapgit_ortec_repo_state=>invalidate_tip_commit(
+      iv_repo_key = lv_key iv_commit = lc_commit iv_branch_name = 'refs/heads/main' ).
+
+    CLEAR lt_commits.
+    lt_commits = zcl_abapgit_ortec_repo_state=>get_complete_commits( lv_key ).
+    READ TABLE lt_commits WITH KEY table_line = lc_commit TRANSPORTING NO FIELDS.
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 4
+      msg = 'A stale/invalidated tip must no longer be considered fully materialised, ' &&
+            'forcing the read path to fall back instead of trusting cached data' ).
+
+    DATA(ls_state) = zcl_abapgit_ortec_repo_state=>get_state(
+      iv_repo_key = lv_key iv_branch_name = 'refs/heads/main' ).
+    cl_abap_unit_assert=>assert_initial( act = ls_state-fetch_commit
+      msg = 'fetch_commit must be blanked so a stale tip cannot be reused for Phase 3 reconstitution' ).
   ENDMETHOD.
 ENDCLASS.
 
