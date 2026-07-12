@@ -537,7 +537,7 @@ CLASS ZCL_ABAPGIT_GIT_PORCELAIN IMPLEMENTATION.
         IF rs_result IS NOT INITIAL.
           RETURN.
         ENDIF.
-      CATCH zcx_abapgit_ortec_git.
+      CATCH zcx_abapgit_ortec_git zcx_abapgit_exception.
         "ORTEC: fast-path failed, continue with standard behavior
     ENDTRY.
 

@@ -24,7 +24,8 @@ CLASS zcl_abapgit_ortec_fastpath DEFINITION
                 iv_branch_name   TYPE string
                 iv_deepen_level  TYPE i DEFAULT 1
       RETURNING VALUE(rs_result) TYPE zcl_abapgit_git_porcelain=>ty_pull_result
-      RAISING   zcx_abapgit_ortec_git.
+      RAISING   zcx_abapgit_ortec_git
+                zcx_abapgit_exception.
 
     "! ORTEC-aware upload-pack by branch.
     CLASS-METHODS upload_pack_by_branch
@@ -118,7 +119,8 @@ CLASS zcl_abapgit_ortec_fastpath DEFINITION
       RETURNING
         VALUE(rt_objects) TYPE zif_abapgit_definitions=>ty_objects_tt
       RAISING
-        zcx_abapgit_ortec_git.
+        zcx_abapgit_ortec_git
+        zcx_abapgit_exception.
 
     CLASS-METHODS parse
       EXPORTING
@@ -126,7 +128,8 @@ CLASS zcl_abapgit_ortec_fastpath DEFINITION
       CHANGING
         cv_data TYPE xstring
       RAISING
-        zcx_abapgit_ortec_git.
+        zcx_abapgit_ortec_git
+        zcx_abapgit_exception.
 
 ENDCLASS.
 

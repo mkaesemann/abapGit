@@ -431,7 +431,7 @@ CLASS ZCL_ABAPGIT_GIT_TRANSPORT IMPLEMENTATION.
               et_objects      = et_objects
               ev_branch       = ev_branch ).
           RETURN.
-        CATCH zcx_abapgit_ortec_git.
+        CATCH zcx_abapgit_ortec_git zcx_abapgit_exception.
       ENDTRY.
     ENDIF.
 
@@ -471,15 +471,21 @@ CLASS ZCL_ABAPGIT_GIT_TRANSPORT IMPLEMENTATION.
            ev_commit.
 
     IF zcl_abapgit_ortec_git_switch=>is_active_for_repo( iv_url ) = abap_true.
-      zcl_abapgit_ortec_fastpath=>upload_pack_by_commit(
-        EXPORTING
-          iv_url          = iv_url
-          iv_hash         = iv_hash
-          iv_deepen_level = iv_deepen_level
-        IMPORTING
-          et_objects      = et_objects
-          ev_commit       = ev_commit ).
-      RETURN.
+      TRY.
+          zcl_abapgit_ortec_fastpath=>upload_pack_by_commit(
+            EXPORTING
+              iv_url          = iv_url
+              iv_hash         = iv_hash
+              iv_deepen_level = iv_deepen_level
+            IMPORTING
+              et_objects      = et_objects
+              ev_commit       = ev_commit ).
+          RETURN.
+        CATCH zcx_abapgit_ortec_git zcx_abapgit_exception.
+          " Fastpath cascade failed (thin + non-thin both unsuccessful) - fall
+          " through to the standard, non-Ortec upload-pack below instead of
+          " letting the failure propagate uncaught.
+      ENDTRY.
     ENDIF.
 
     APPEND iv_hash TO lt_hashes.
