@@ -410,6 +410,25 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
 
         release_repo_lock( lv_repo_lock_id ).
       CATCH zcx_abapgit_exception INTO DATA(lx_decode).
+        " Clean up this failed attempt so it leaves the store exactly as if
+        " it never started. A genuine decode/resolve failure (as opposed to
+        " a work-process crash/timeout, which never reaches this CATCH) means
+        " retrying the identical data would just fail again - the raw pack
+        " and every temp row for this pack_id are removed rather than left
+        " for a future resume attempt to stumble over.
+        DELETE FROM zaog_obj_store WHERE repo_key = iv_repo_key AND pack_id = lv_pack_id AND status = 'P'.
+        DELETE FROM zaog_pack_idx WHERE repo_key = iv_repo_key AND pack_id = lv_pack_id.
+        DELETE FROM zaog_pack_meta WHERE repo_key = iv_repo_key AND pack_id = lv_pack_id.
+        TRY.
+            zcl_abapgit_ortec_pack_raw=>delete(
+                iv_repo_key = iv_repo_key
+                iv_pack_id  = lv_pack_id ).
+          CATCH zcx_abapgit_exception.
+        ENDTRY.
+        IF lv_session_id IS NOT INITIAL.
+          fail_session( iv_session_id = lv_session_id iv_obj_done = 0 ).
+        ENDIF.
+        COMMIT WORK.
         release_repo_lock( lv_repo_lock_id ).
         RAISE EXCEPTION lx_decode.
     ENDTRY.

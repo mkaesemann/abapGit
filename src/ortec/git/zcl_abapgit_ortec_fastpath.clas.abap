@@ -114,6 +114,7 @@ CLASS zcl_abapgit_ortec_fastpath DEFINITION
         iv_url          TYPE string
         iv_deepen_level TYPE i DEFAULT 0
         it_hashes       TYPE zif_abapgit_git_definitions=>ty_sha1_tt
+        iv_allow_thin   TYPE abap_bool DEFAULT abap_false
       RETURNING
         VALUE(rt_objects) TYPE zif_abapgit_definitions=>ty_objects_tt
       RAISING
@@ -479,11 +480,51 @@ METHOD pull_by_branch.
       APPEND ev_branch TO lt_hashes.
     ENDIF.
 
-    et_objects = upload_pack(
-      io_client       = lo_client
-      iv_url          = iv_url
-      iv_deepen_level = iv_deepen_level
-      it_hashes       = lt_hashes ).
+    TRY.
+        et_objects = upload_pack(
+          io_client       = lo_client
+          iv_url          = iv_url
+          iv_deepen_level = iv_deepen_level
+          it_hashes       = lt_hashes
+          iv_allow_thin   = abap_true ).
+      CATCH zcx_abapgit_ortec_git zcx_abapgit_exception INTO DATA(lx_thin_branch).
+        " Thin/ofs attempt failed - retry once, non-thin, with a fresh
+        " client (the failed attempt's request/response is already
+        " consumed). See target_design_phase5.md §6 fail-safe cascade.
+        " Both exception types are caught: a decode/resolve failure inside
+        " the Ortec pack decoder raises zcx_abapgit_ortec_git, but a
+        " fallback to the standard decoder (which cannot understand an
+        " ofs-delta/thin pack) raises zcx_abapgit_exception instead.
+        zcl_abapgit_git_transport=>find_branch_ortec(
+          EXPORTING
+            iv_url         = iv_url
+            iv_service     = 'upload'
+            iv_branch_name = iv_branch_name
+          IMPORTING
+            eo_client      = lo_client
+            ev_branch      = ev_branch ).
+        IF it_branches IS INITIAL.
+          CLEAR lt_hashes.
+          APPEND ev_branch TO lt_hashes.
+        ENDIF.
+        TRY.
+            et_objects = upload_pack(
+              io_client       = lo_client
+              iv_url          = iv_url
+              iv_deepen_level = iv_deepen_level
+              it_hashes       = lt_hashes
+              iv_allow_thin   = abap_false ).
+          CATCH zcx_abapgit_ortec_git zcx_abapgit_exception INTO DATA(lx_nonthin_branch).
+            " Non-thin Ortec retry also failed - convert to
+            " zcx_abapgit_ortec_git (this method's own declared type) so
+            " the existing standard CATCH zcx_abapgit_ortec_git in
+            " zcl_abapgit_git_transport falls through to the fully
+            " standard fetch path.
+            zcx_abapgit_ortec_git=>raise(
+              |Ortec fastpath failed after thin+non-thin retry - thin: { lx_thin_branch->get_text( ) }, | &&
+              |non-thin: { lx_nonthin_branch->get_text( ) }| ).
+        ENDTRY.
+    ENDTRY.
 
   ENDMETHOD.
 
@@ -510,11 +551,35 @@ METHOD pull_by_branch.
       iv_url     = iv_url
       it_headers = lt_headers ).
 
-    et_objects = upload_pack(
-      io_client       = lo_client
-      iv_url          = iv_url
-      iv_deepen_level = iv_deepen_level
-      it_hashes       = lt_hashes ).
+    TRY.
+        et_objects = upload_pack(
+          io_client       = lo_client
+          iv_url          = iv_url
+          iv_deepen_level = iv_deepen_level
+          it_hashes       = lt_hashes
+          iv_allow_thin   = abap_true ).
+      CATCH zcx_abapgit_ortec_git zcx_abapgit_exception INTO DATA(lx_thin_commit).
+        " Thin/ofs attempt failed - retry once, non-thin, with a fresh
+        " client (the failed attempt's request/response is already
+        " consumed). See target_design_phase5.md §6 fail-safe cascade.
+        " Both exception types are caught - see the matching comment in
+        " upload_pack_by_branch for why zcx_abapgit_exception can also occur.
+        lo_client = zcl_abapgit_http=>create_by_url(
+          iv_url     = iv_url
+          it_headers = lt_headers ).
+        TRY.
+            et_objects = upload_pack(
+              io_client       = lo_client
+              iv_url          = iv_url
+              iv_deepen_level = iv_deepen_level
+              it_hashes       = lt_hashes
+              iv_allow_thin   = abap_false ).
+          CATCH zcx_abapgit_ortec_git zcx_abapgit_exception INTO DATA(lx_nonthin_commit).
+            zcx_abapgit_ortec_git=>raise(
+              |Ortec fastpath failed after thin+non-thin retry - thin: { lx_thin_commit->get_text( ) }, | &&
+              |non-thin: { lx_nonthin_commit->get_text( ) }| ).
+        ENDTRY.
+    ENDTRY.
 
   ENDMETHOD.
 
@@ -532,6 +597,7 @@ METHOD upload_pack.
     DATA lt_reachable TYPE zif_abapgit_definitions=>ty_objects_tt.
     DATA lt_cached_shas TYPE HASHED TABLE OF zif_abapgit_git_definitions=>ty_sha1
                WITH UNIQUE KEY table_line.
+    DATA lv_advertise_thin TYPE abap_bool.
 
     DATA lo_fetch_timer   TYPE REF TO zcl_abapgit_timer.
     DATA lv_fetch_duration TYPE string.
@@ -546,9 +612,40 @@ METHOD upload_pack.
       iv_url     = iv_url
       iv_service = 'upload' ).
 
+    " Resolve have commits BEFORE assembling the want/capability line, so the
+    " capability string can correctly reflect whether thin-pack/ofs-delta are
+    " safe to advertise. When thin is requested, only VERIFIED-COMPLETE haves
+    " (index-ready, every reachable object present, no dangling delta base -
+    " see zcl_abapgit_ortec_fetch_neg=>get_verified_have_commits) are used;
+    " advertising thin-pack against an unverified have would let the server
+    " send back an unresolvable delta. When thin is not requested, the
+    " existing unfiltered have-set is used exactly as before.
+    TRY.
+        IF iv_allow_thin = abap_true.
+          lt_ortec_haves = zcl_abapgit_ortec_fetch_neg=>get_verified_have_commits(
+            iv_url         = iv_url
+            it_want_hashes = it_hashes ).
+        ELSE.
+          lt_ortec_haves = zcl_abapgit_ortec_fetch_neg=>get_have_commits(
+            iv_url         = iv_url
+            it_want_hashes = it_hashes ).
+        ENDIF.
+      CATCH zcx_abapgit_ortec_git.
+    ENDTRY.
+
+    " Only advertise thin-pack/ofs-delta when the caller allowed it AND at
+    " least one verified-complete have exists to delta against - otherwise
+    " thin capability would be pointless (nothing to delta against) or, if
+    " haves existed but were unverified, unsafe.
+    lv_advertise_thin = xsdbool( iv_allow_thin = abap_true AND lt_ortec_haves IS NOT INITIAL ).
+
     LOOP AT it_hashes FROM 1 ASSIGNING <lv_hash>.
       IF sy-tabix = 1.
-        lv_capa = 'side-band-64k no-progress multi_ack'.
+        IF lv_advertise_thin = abap_true.
+          lv_capa = 'side-band-64k no-progress multi_ack thin-pack ofs-delta'.
+        ELSE.
+          lv_capa = 'side-band-64k no-progress multi_ack'.
+        ENDIF.
         lv_line = 'want' && ` ` && <lv_hash>
           && ` ` && lv_capa && cl_abap_char_utilities=>newline.
       ELSE.
@@ -557,16 +654,6 @@ METHOD upload_pack.
       ENDIF.
       lv_buffer = lv_buffer && zcl_abapgit_git_utils=>pkt_string( lv_line ).
     ENDLOOP.
-
-    " Resolve have commits BEFORE assembling the deepen line.
-    " If we have cached objects to use as delta base, suppress deepen
-    " so the server can send a thin delta pack instead of full shallow pack.
-    TRY.
-        lt_ortec_haves = zcl_abapgit_ortec_fetch_neg=>get_have_commits(
-          iv_url         = iv_url
-          it_want_hashes = it_hashes ).
-      CATCH zcx_abapgit_ortec_git.
-    ENDTRY.
 
     " Only send deepen when we have NO cached objects (first fetch).
     " With deepen, the server ignores have lines and sends a full shallow pack.

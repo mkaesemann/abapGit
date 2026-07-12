@@ -1067,6 +1067,12 @@ CLASS ltcl_pack_decoder DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHOR
     METHODS resume_after_partial FOR TESTING RAISING cx_static_check.
     "! resume_decode with no active session: must return empty, no side effects.
     METHODS resume_no_session    FOR TESTING RAISING cx_static_check.
+    "! decode_and_persist when resumable_decode fails after temp rows were
+    "! already written (corrupt trailing pack SHA1): verifies the CATCH
+    "! zcx_abapgit_exception cleanup block removes every temp/meta/raw row
+    "! it created, instead of leaving orphaned data for a future resume
+    "! attempt to stumble over.
+    METHODS cleanup_after_decode_failure FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 CLASS ltcl_pack_decoder IMPLEMENTATION.
   METHOD setup.
@@ -1190,6 +1196,54 @@ CLASS ltcl_pack_decoder IMPLEMENTATION.
     DATA lt_res TYPE zif_abapgit_definitions=>ty_objects_tt.
     lt_res = zcl_abapgit_ortec_pack_dec=>resume_decode( mc_repo ).
     cl_abap_unit_assert=>assert_initial( act = lt_res msg = 'No session = empty result' ).
+  ENDMETHOD.
+
+  METHOD cleanup_after_decode_failure.
+    DATA lt_obj    TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA ls_obj    TYPE zif_abapgit_definitions=>ty_object.
+    DATA lv_pack   TYPE xstring.
+    DATA lv_len    TYPE i.
+    DATA lt_res    TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lv_caught TYPE abap_bool.
+    DATA lv_count  TYPE i.
+
+    ls_obj-data  = '48656C6C6F'. " ASCII: Hello
+    ls_obj-type  = zif_abapgit_git_definitions=>c_type-blob.
+    ls_obj-sha1  = zcl_abapgit_hash=>sha1( iv_type = ls_obj-type iv_data = ls_obj-data ).
+    ls_obj-index = 1.
+    APPEND ls_obj TO lt_obj.
+
+    lv_pack = zcl_abapgit_git_pack=>encode( lt_obj ).
+
+    " Corrupt only the last byte of the trailing 20-byte pack SHA1 so every
+    " object still decompresses and parses correctly, and temp rows are
+    " persisted as usual; only the final trailer-integrity check fails,
+    " forcing decode_and_persist into its CATCH zcx_abapgit_exception
+    " cleanup path with real, already-committed temp data to remove.
+    lv_len = xstrlen( lv_pack ) - 1.
+    lv_pack = lv_pack(lv_len) && 'FF'.
+
+    lv_caught = abap_false.
+    TRY.
+        lt_res = zcl_abapgit_ortec_pack_dec=>decode_and_persist(
+          iv_data     = lv_pack
+          iv_repo_key = mc_repo ).
+      CATCH zcx_abapgit_exception.
+        lv_caught = abap_true.
+    ENDTRY.
+    cl_abap_unit_assert=>assert_true( act = lv_caught msg = 'Corrupt trailer must raise zcx_abapgit_exception' ).
+
+    SELECT COUNT(*) FROM zaog_obj_store INTO lv_count WHERE repo_key = mc_repo.
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 0 msg = 'obj_store temp rows cleaned up after failure' ).
+
+    SELECT COUNT(*) FROM zaog_pack_idx INTO lv_count WHERE repo_key = mc_repo.
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 0 msg = 'pack_idx rows cleaned up after failure' ).
+
+    SELECT COUNT(*) FROM zaog_pack_meta INTO lv_count WHERE repo_key = mc_repo.
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 0 msg = 'pack_meta row cleaned up after failure' ).
+
+    SELECT COUNT(*) FROM zaog_raw_pack INTO lv_count WHERE repo_key = mc_repo.
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 0 msg = 'raw_pack cleaned up after failure' ).
   ENDMETHOD.
 ENDCLASS.
 
