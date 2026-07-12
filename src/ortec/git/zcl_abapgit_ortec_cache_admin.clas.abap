@@ -229,10 +229,14 @@ CLASS zcl_abapgit_ortec_cache_admin IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD acquire_lock.
+    DATA lv_session_id TYPE zaog_fetch_sess-session_id.
+
+    lv_session_id = iv_repo_key.
+
     CALL FUNCTION 'ENQUEUE_EZAOG_REPO_LOCK'
       EXPORTING
         mode_zaog_fetch_sess = 'E'
-        session_id           = iv_repo_key
+        session_id           = lv_session_id
         _scope               = '2'
         _wait                = space
         _collect             = space
@@ -244,10 +248,14 @@ CLASS zcl_abapgit_ortec_cache_admin IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD release_lock.
+    DATA lv_session_id TYPE zaog_fetch_sess-session_id.
+
+    lv_session_id = iv_repo_key.
+
     CALL FUNCTION 'DEQUEUE_EZAOG_REPO_LOCK'
       EXPORTING
         mode_zaog_fetch_sess = 'E'
-        session_id           = iv_repo_key
+        session_id           = lv_session_id
         _scope               = '2'
         _synchron            = space
         _collect             = space.
