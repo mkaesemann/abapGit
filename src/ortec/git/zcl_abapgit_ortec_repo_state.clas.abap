@@ -214,6 +214,7 @@ CLASS zcl_abapgit_ortec_repo_state IMPLEMENTATION.
 
   METHOD get_complete_commits.
     DATA lv_fc TYPE zaog_repo_state-fetch_commit.
+    DATA lt_fc TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
     " Primary: fully-materialised commits from history table
     SELECT DISTINCT commit_sha1 FROM zaog_commit_hist
       INTO TABLE rt_commits
@@ -223,7 +224,7 @@ CLASS zcl_abapgit_ortec_repo_state IMPLEMENTATION.
     ENDIF.
     " Fallback: use fetch_commit entries from repo state table
     SELECT DISTINCT fetch_commit FROM zaog_repo_state
-      INTO TABLE @DATA(lt_fc)
+      INTO TABLE @lt_fc
       WHERE repo_key    = @iv_repo_key
         AND fetch_commit <> ''.
     LOOP AT lt_fc INTO lv_fc.

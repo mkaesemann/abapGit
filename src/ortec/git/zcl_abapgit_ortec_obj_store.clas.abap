@@ -662,6 +662,7 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
     DATA lt_bases   TYPE ty_sha1_set.
     DATA lt_present TYPE ty_sha1_set.
     DATA lt_db_rows TYPE ty_obj_store_tt.
+    DATA lt_chunk_bases TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
 
     FIELD-SYMBOLS <lv_sha1> LIKE LINE OF it_sha1s.
     FIELD-SYMBOLS <lv_base> LIKE LINE OF lt_bases.
@@ -675,8 +676,9 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
     LOOP AT it_sha1s ASSIGNING <lv_sha1> WHERE table_line IS NOT INITIAL.
       APPEND VALUE #( sha1 = <lv_sha1> ) TO lt_package.
       IF lines( lt_package ) >= c_select_package_size.
+        CLEAR lt_chunk_bases.
         SELECT delta_base FROM zaog_pack_idx
-          INTO TABLE @DATA(lt_chunk_bases)
+          INTO TABLE @lt_chunk_bases
           FOR ALL ENTRIES IN @lt_package
           WHERE repo_key   = @iv_repo_key
             AND obj_sha1   = @lt_package-sha1
@@ -689,13 +691,14 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
     ENDLOOP.
 
     IF lt_package IS NOT INITIAL.
+      CLEAR lt_chunk_bases.
       SELECT delta_base FROM zaog_pack_idx
-        INTO TABLE @DATA(lt_chunk_bases2)
+        INTO TABLE @lt_chunk_bases
         FOR ALL ENTRIES IN @lt_package
         WHERE repo_key   = @iv_repo_key
           AND obj_sha1   = @lt_package-sha1
           AND delta_base <> @space.
-      LOOP AT lt_chunk_bases2 INTO DATA(lv_chunk_base2).
+      LOOP AT lt_chunk_bases INTO DATA(lv_chunk_base2).
         INSERT lv_chunk_base2 INTO TABLE lt_bases.
       ENDLOOP.
     ENDIF.
