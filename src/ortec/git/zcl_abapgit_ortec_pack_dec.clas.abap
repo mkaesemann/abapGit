@@ -719,6 +719,7 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
     DATA lt_done_idx        TYPE STANDARD TABLE OF zaog_pack_idx.
     DATA ls_done_idx        TYPE zaog_pack_idx.
     DATA ls_tmp_obj         TYPE zaog_obj_store.
+    DATA lt_done_objs       TYPE HASHED TABLE OF zaog_obj_store WITH UNIQUE KEY obj_sha1.
     DATA lv_last_redispatch TYPE timestampl.
     DATA lv_uindex          TYPE sy-index.
     DATA lv_curr_offset     TYPE i.
@@ -804,13 +805,26 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
           AND obj_index  <= lv_obj_done
         ORDER BY obj_index.
 
+      " Bulk-prefetch the temp object rows for every done index entry in one
+      " round-trip instead of a SELECT SINGLE per iteration below - OBJ_SHA1
+      " is already globally unique per REPO_KEY (the table's full primary
+      " key), so a HASHED lookup table with a unique key is always safe.
+      CLEAR lt_done_objs.
+      IF lt_done_idx IS NOT INITIAL.
+        SELECT * FROM zaog_obj_store
+          FOR ALL ENTRIES IN @lt_done_idx
+          WHERE repo_key = @iv_repo_key
+            AND pack_id  = @iv_pack_id
+            AND obj_sha1 = @lt_done_idx-obj_sha1
+            AND status   = 'P'
+          INTO TABLE @DATA(lt_done_objs_sel).
+        LOOP AT lt_done_objs_sel INTO ls_tmp_obj.
+          INSERT ls_tmp_obj INTO TABLE lt_done_objs.
+        ENDLOOP.
+      ENDIF.
+
       LOOP AT lt_done_idx INTO ls_done_idx.
-        SELECT SINGLE * FROM zaog_obj_store
-          INTO ls_tmp_obj
-          WHERE repo_key = iv_repo_key
-            AND pack_id  = iv_pack_id
-            AND obj_sha1 = ls_done_idx-obj_sha1
-            AND status   = 'P'.
+        READ TABLE lt_done_objs INTO ls_tmp_obj WITH TABLE KEY obj_sha1 = ls_done_idx-obj_sha1.
         IF sy-subrc <> 0.
           CONTINUE.
         ENDIF.
