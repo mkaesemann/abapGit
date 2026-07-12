@@ -23,6 +23,42 @@ CLASS zcl_abapgit_ortec_fetch_neg DEFINITION
       RETURNING VALUE(rt_haves) TYPE zif_abapgit_git_definitions=>ty_sha1_tt
       RAISING   zcx_abapgit_ortec_git.
 
+    "! Filter get_have_commits' candidates down to those that are
+    "! verified-complete: the per-commit filtered index is fully built
+    "! (STRICT marker), every object reachable from the commit is present,
+    "! and no reachable object's recorded delta base is dangling. Only
+    "! verified-complete commits are safe to offer as thin-pack base
+    "! sources to the server - an incomplete "have" could make the
+    "! server's response deltas unresolvable on receipt.
+    "! @parameter iv_url |
+    "! Remote URL (used to resolve repository key)
+    "! @parameter it_want_hashes |
+    "! SHA1s being requested (want lines) - forwarded to get_have_commits
+    "! @parameter rt_haves |
+    "! Subset of get_have_commits' result that is verified-complete
+    "! @raising zcx_abapgit_ortec_git |
+    "! On error resolving the candidate haves
+    CLASS-METHODS get_verified_have_commits
+      IMPORTING iv_url          TYPE string
+                it_want_hashes  TYPE zif_abapgit_git_definitions=>ty_sha1_tt
+      RETURNING VALUE(rt_haves) TYPE zif_abapgit_git_definitions=>ty_sha1_tt
+      RAISING   zcx_abapgit_ortec_git.
+
+    "! Check whether a single commit's full object graph is verified-complete:
+    "! index-ready, every reachable object present, and no dangling delta
+    "! base among them. This is the completeness gate a commit must pass
+    "! before it may be offered as a thin-pack base source.
+    "! @parameter iv_repo_key |
+    "! Repository key
+    "! @parameter iv_commit |
+    "! Commit SHA1
+    "! @parameter rv_yes |
+    "! ABAP_TRUE if verified-complete
+    CLASS-METHODS is_commit_complete
+      IMPORTING iv_repo_key   TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
+                iv_commit     TYPE zif_abapgit_git_definitions=>ty_sha1
+      RETURNING VALUE(rv_yes) TYPE abap_bool.
+
   PROTECTED SECTION.
   PRIVATE SECTION.
     "! BFS walk over locally-stored commit ancestors.
@@ -90,6 +126,73 @@ CLASS zcl_abapgit_ortec_fetch_neg IMPLEMENTATION.
       DELETE rt_haves FROM 201.
     ENDIF.
 
+  ENDMETHOD.
+
+  METHOD get_verified_have_commits.
+    DATA lv_repo_key   TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key.
+    DATA lt_candidates TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+
+    FIELD-SYMBOLS <lv_sha1> LIKE LINE OF lt_candidates.
+
+    lt_candidates = get_have_commits(
+      iv_url         = iv_url
+      it_want_hashes = it_want_hashes ).
+    IF lt_candidates IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    lv_repo_key = zcl_abapgit_ortec_repo_state=>get_repo_key_for_url( iv_url ).
+    IF lv_repo_key IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    LOOP AT lt_candidates ASSIGNING <lv_sha1>.
+      IF is_commit_complete( iv_repo_key = lv_repo_key iv_commit = <lv_sha1> ) = abap_true.
+        APPEND <lv_sha1> TO rt_haves.
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD is_commit_complete.
+    DATA lt_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lt_sha1s   TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+
+    FIELD-SYMBOLS <ls_obj> LIKE LINE OF lt_objects.
+
+    IF iv_repo_key IS INITIAL OR iv_commit IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    " Cheapest check first: the filtered path index must be fully built
+    " (STRICT marker - see zcl_abapgit_ortec_obj_index=>is_index_ready).
+    IF zcl_abapgit_ortec_obj_index=>is_index_ready(
+        iv_repo_key = iv_repo_key
+        iv_commit   = iv_commit ) = abap_false.
+      RETURN.
+    ENDIF.
+
+    " get_reachable_objects already raises if any commit/tree/blob reachable
+    " from this commit is missing from the store - a clean success here is
+    " itself proof every reachable object is present.
+    TRY.
+        lt_objects = zcl_abapgit_ortec_obj_store=>get_reachable_objects(
+          iv_repo_key = iv_repo_key
+          iv_commit   = iv_commit ).
+      CATCH zcx_abapgit_ortec_git.
+        RETURN.
+    ENDTRY.
+
+    LOOP AT lt_objects ASSIGNING <ls_obj>.
+      APPEND <ls_obj>-sha1 TO lt_sha1s.
+    ENDLOOP.
+
+    IF zcl_abapgit_ortec_obj_store=>has_dangling_delta_base(
+        iv_repo_key = iv_repo_key
+        it_sha1s    = lt_sha1s ) = abap_true.
+      RETURN.
+    ENDIF.
+
+    rv_yes = abap_true.
   ENDMETHOD.
 
   METHOD collect_ancestor_haves.

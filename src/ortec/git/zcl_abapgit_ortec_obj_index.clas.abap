@@ -41,6 +41,24 @@ CLASS zcl_abapgit_ortec_obj_index DEFINITION
       RAISING
         zcx_abapgit_exception.
 
+    "! Check whether a commit's filtered path index is fully built (STRICT
+    "! completeness mode - requires the explicit $IDX/__READY__ marker, see
+    "! zcl_abapgit_ortec_git_switch=>cs_absent_strictness). Exposed publicly
+    "! so other Ortec components (e.g. the delta-base completeness gate) can
+    "! reuse the same completeness signal instead of re-deriving it.
+    "! @parameter iv_repo_key |
+    "! Repository key
+    "! @parameter iv_commit |
+    "! Commit SHA1
+    "! @parameter rv_yes |
+    "! ABAP_TRUE if the index for this commit is fully built
+    CLASS-METHODS is_index_ready
+      IMPORTING
+        iv_repo_key TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
+        iv_commit   TYPE zif_abapgit_git_definitions=>ty_sha1
+      RETURNING
+        VALUE(rv_yes) TYPE abap_bool.
+
   PRIVATE SECTION.
     CONSTANTS c_status_ready TYPE c LENGTH 1 VALUE 'R'.
     CONSTANTS c_marker_obj_type TYPE tadir-object VALUE '$IDX'.
@@ -73,13 +91,6 @@ CLASS zcl_abapgit_ortec_obj_index DEFINITION
         data TYPE xstring,
       END OF ty_blob_data,
       ty_blob_data_tt TYPE HASHED TABLE OF ty_blob_data WITH UNIQUE KEY sha1.
-
-    CLASS-METHODS is_index_ready
-      IMPORTING
-        iv_repo_key TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
-        iv_commit   TYPE zif_abapgit_git_definitions=>ty_sha1
-      RETURNING
-        VALUE(rv_yes) TYPE abap_bool.
 
     CLASS-METHODS ensure_index
       IMPORTING

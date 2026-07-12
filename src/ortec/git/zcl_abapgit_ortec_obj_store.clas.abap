@@ -82,6 +82,23 @@ CLASS zcl_abapgit_ortec_obj_store DEFINITION
                 it_sha1s          TYPE zif_abapgit_git_definitions=>ty_sha1_tt
       RETURNING VALUE(rt_missing) TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
 
+    "! Set-based check for whether any of the given SHA1s was originally
+    "! decoded as a delta whose recorded base (ZAOG_PACK_IDX-DELTA_BASE) is
+    "! not itself present in the store with status 'R'. Used by the
+    "! delta-base completeness gate before a commit's objects are trusted as
+    "! thin-pack-safe "have" candidates. Chunked, set-based; no per-object
+    "! DB reads.
+    "! @parameter iv_repo_key |
+    "! Repository key
+    "! @parameter it_sha1s |
+    "! Candidate SHA1s to check (e.g. every object reachable from a commit)
+    "! @parameter rv_dangling |
+    "! ABAP_TRUE if at least one dangling delta base was found
+    CLASS-METHODS has_dangling_delta_base
+      IMPORTING iv_repo_key        TYPE ty_repo_key
+                it_sha1s           TYPE zif_abapgit_git_definitions=>ty_sha1_tt
+      RETURNING VALUE(rv_dangling) TYPE abap_bool.
+
     CLASS-METHODS exists
       IMPORTING iv_repo_key      TYPE ty_repo_key
                 iv_sha1          TYPE zif_abapgit_git_definitions=>ty_sha1
@@ -636,6 +653,84 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
     LOOP AT lt_unique_sha1s ASSIGNING <lv_sha1>.
       IF NOT line_exists( lt_found_sha1s[ table_line = <lv_sha1> ] ).
         APPEND <lv_sha1> TO rt_missing.
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD has_dangling_delta_base.
+    DATA lt_package TYPE ty_sha1_rows.
+    DATA lt_bases   TYPE ty_sha1_set.
+    DATA lt_present TYPE ty_sha1_set.
+    DATA lt_db_rows TYPE ty_obj_store_tt.
+
+    FIELD-SYMBOLS <lv_sha1> LIKE LINE OF it_sha1s.
+    FIELD-SYMBOLS <lv_base> LIKE LINE OF lt_bases.
+    FIELD-SYMBOLS <ls_row>  LIKE LINE OF lt_db_rows.
+
+    IF iv_repo_key IS INITIAL OR it_sha1s IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    " Step 1: collect the DELTA_BASE values recorded for these objects.
+    LOOP AT it_sha1s ASSIGNING <lv_sha1> WHERE table_line IS NOT INITIAL.
+      APPEND VALUE #( sha1 = <lv_sha1> ) TO lt_package.
+      IF lines( lt_package ) >= c_select_package_size.
+        SELECT delta_base FROM zaog_pack_idx
+          INTO TABLE @DATA(lt_chunk_bases)
+          FOR ALL ENTRIES IN @lt_package
+          WHERE repo_key   = @iv_repo_key
+            AND obj_sha1   = @lt_package-sha1
+            AND delta_base <> @space.
+        LOOP AT lt_chunk_bases INTO DATA(lv_chunk_base).
+          INSERT lv_chunk_base INTO TABLE lt_bases.
+        ENDLOOP.
+        CLEAR lt_package.
+      ENDIF.
+    ENDLOOP.
+
+    IF lt_package IS NOT INITIAL.
+      SELECT delta_base FROM zaog_pack_idx
+        INTO TABLE @DATA(lt_chunk_bases2)
+        FOR ALL ENTRIES IN @lt_package
+        WHERE repo_key   = @iv_repo_key
+          AND obj_sha1   = @lt_package-sha1
+          AND delta_base <> @space.
+      LOOP AT lt_chunk_bases2 INTO DATA(lv_chunk_base2).
+        INSERT lv_chunk_base2 INTO TABLE lt_bases.
+      ENDLOOP.
+    ENDIF.
+
+    IF lt_bases IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    " Step 2: verify each referenced base is present with status = 'R'
+    " (reuse the existing chunked object-store reader).
+    CLEAR lt_package.
+    LOOP AT lt_bases ASSIGNING <lv_base>.
+      APPEND VALUE #( sha1 = <lv_base> ) TO lt_package.
+      IF lines( lt_package ) >= c_select_package_size.
+        lt_db_rows = read_object_rows( iv_repo_key = iv_repo_key
+                                       it_sha1s    = lt_package ).
+        LOOP AT lt_db_rows ASSIGNING <ls_row>.
+          INSERT <ls_row>-obj_sha1 INTO TABLE lt_present.
+        ENDLOOP.
+        CLEAR lt_package.
+      ENDIF.
+    ENDLOOP.
+
+    IF lt_package IS NOT INITIAL.
+      lt_db_rows = read_object_rows( iv_repo_key = iv_repo_key
+                                     it_sha1s    = lt_package ).
+      LOOP AT lt_db_rows ASSIGNING <ls_row>.
+        INSERT <ls_row>-obj_sha1 INTO TABLE lt_present.
+      ENDLOOP.
+    ENDIF.
+
+    LOOP AT lt_bases ASSIGNING <lv_base>.
+      IF NOT line_exists( lt_present[ table_line = <lv_base> ] ).
+        rv_dangling = abap_true.
+        RETURN.
       ENDIF.
     ENDLOOP.
   ENDMETHOD.
