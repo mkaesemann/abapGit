@@ -127,6 +127,23 @@ CLASS zcl_abapgit_ortec_repo_state DEFINITION
                 iv_commit      TYPE zif_abapgit_git_definitions=>ty_sha1
                 iv_branch_name TYPE string OPTIONAL.
 
+    "! Invalidate ALL fully-materialised commit history and ALL branches'
+    "! fetch_commit pointers for this repository (not just one commit or
+    "! branch). Stronger self-heal than invalidate_tip_commit/
+    "! reset_fetch_commit, used when a walk failure shows the persistent
+    "! store is missing objects for a commit ZAOG_COMMIT_HIST claims is
+    "! complete, but it is unclear WHICH commit or shared ancestor is
+    "! actually incomplete - all branches of a repo share the same have-set,
+    "! so per-commit/per-branch invalidation is not reliable in that case.
+    "! With no haves left to advertise, the next fetch negotiation degrades
+    "! to a deepen/full-clone request, guaranteeing a complete,
+    "! self-contained pack from the server. Existing objects in the
+    "! persistent store are NOT deleted; they remain available as
+    "! delta-base/walk-recovery context.
+    "! @parameter iv_repo_key | Repository key
+    CLASS-METHODS invalidate_all_history
+      IMPORTING iv_repo_key TYPE ty_repo_key.
+
   PROTECTED SECTION.
   PRIVATE SECTION.
 ENDCLASS.
@@ -246,6 +263,13 @@ CLASS zcl_abapgit_ortec_repo_state IMPLEMENTATION.
         lv_sha = '000000000000'.
     ENDTRY.
     rv_key = lv_sha(12).
+  ENDMETHOD.
+
+  METHOD invalidate_all_history.
+    DELETE FROM zaog_commit_hist WHERE repo_key = iv_repo_key.
+    UPDATE zaog_repo_state
+      SET fetch_commit = ''
+      WHERE repo_key = iv_repo_key.
   ENDMETHOD.
 
   METHOD invalidate_tip_commit.

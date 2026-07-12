@@ -769,6 +769,13 @@ METHOD upload_pack.
       CATCH zcx_abapgit_exception.
     ENDTRY.
 
+    " Fastpath decode failed or was not applicable - falling back to the
+    " standard decoder. It may still need to resolve a ref-delta base via
+    " zcl_abapgit_ortec_obj_store=>get_object's blank-iv_repo_key fallback
+    " (zcl_abapgit_git_delta=>delta has no repo context in its signature),
+    " so make sure the correct repo_key is active rather than relying on it
+    " being set as an accidental side effect of an earlier, unrelated call.
+    zcl_abapgit_ortec_obj_store=>set_active_repo_key( lv_ortec_rk ).
     rt_objects = zcl_abapgit_git_pack=>decode( lv_pack ).
     lv_fetch_duration = lo_fetch_timer->end( ).
     li_progress = zcl_abapgit_progress=>get_instance( 1 ).

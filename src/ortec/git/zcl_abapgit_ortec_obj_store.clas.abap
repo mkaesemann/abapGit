@@ -55,6 +55,20 @@ CLASS zcl_abapgit_ortec_obj_store DEFINITION
       RETURNING VALUE(rs_object) TYPE zif_abapgit_definitions=>ty_object
       RAISING   zcx_abapgit_ortec_git.
 
+    "! Explicitly set the repo_key used by get_object's blank-iv_repo_key
+    "! fallback (e.g. delta-base resolution during standard pack decode,
+    "! where no repo context is available in the caller's own signature).
+    "! Callers that may trigger that fallback must call this with a
+    "! definitively-correct value (or blank) immediately before the decode -
+    "! never rely on an accidental side effect of an unrelated get_objects/
+    "! populate_cache call, which can leak a stale, unrelated repo's key.
+    "! @parameter iv_repo_key |
+    "! Repository key to use for subsequent blank-iv_repo_key get_object
+    "! calls, or blank to clear (safe default - forces get_object to raise
+    "! instead of silently resolving against a stale, unrelated repo).
+    CLASS-METHODS set_active_repo_key
+      IMPORTING iv_repo_key TYPE ty_repo_key.
+
     CLASS-METHODS get_objects
       IMPORTING iv_repo_key       TYPE ty_repo_key
                 it_sha1s          TYPE zif_abapgit_git_definitions=>ty_sha1_tt
@@ -221,6 +235,11 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
       MODIFY zaog_obj_store FROM TABLE lt_rows.
     ENDIF.
     invalidate_cache( ).
+  ENDMETHOD.
+
+
+  METHOD set_active_repo_key.
+    mv_cache_repo_key = iv_repo_key.
   ENDMETHOD.
 
 

@@ -11,10 +11,18 @@ CLASS ltcl_obj_store DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
     METHODS missing_sha1s_none FOR TESTING RAISING cx_static_check.
     METHODS missing_sha1s_some FOR TESTING RAISING cx_static_check.
     METHODS object_state_constants FOR TESTING RAISING cx_static_check.
+    METHODS active_repo_key_fallback FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 CLASS ltcl_obj_store IMPLEMENTATION.
   METHOD setup. DELETE FROM zaog_obj_store WHERE repo_key = mc_repo. ENDMETHOD.
-  METHOD teardown. DELETE FROM zaog_obj_store WHERE repo_key = mc_repo. ROLLBACK WORK. ENDMETHOD.
+  METHOD teardown.
+    DELETE FROM zaog_obj_store WHERE repo_key = mc_repo.
+    ROLLBACK WORK.
+    " mv_cache_repo_key is CLASS-DATA (session-global) - reset it so a
+    " set_active_repo_key( mc_repo ) call in one test cannot leak into an
+    " unrelated test that relies on a blank/uninitialized active repo.
+    zcl_abapgit_ortec_obj_store=>invalidate_cache( ).
+  ENDMETHOD.
   METHOD store_and_get.
     DATA lv TYPE xstring. DATA ls TYPE zif_abapgit_definitions=>ty_object. lv = '48656C6C6F'.
     zcl_abapgit_ortec_obj_store=>store_object( iv_repo_key = mc_repo iv_sha1 = 'aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d' iv_type = 'blob' iv_data = lv ).
@@ -227,6 +235,50 @@ CLASS ltcl_obj_store IMPLEMENTATION.
       exp = 'CONFIRMED_ABSENT' ).
     cl_abap_unit_assert=>assert_equals( act = zcl_abapgit_ortec_obj_store=>cs_object_state-corrupt_or_incomplete
       exp = 'CORRUPT_OR_INCOMPLETE' ).
+  ENDMETHOD.
+  METHOD active_repo_key_fallback.
+    " Regression coverage for the ES6 branch-switch incident: zcl_abapgit_git_
+    " delta's delta-base fallback calls get_object with a blank iv_repo_key,
+    " relying entirely on set_active_repo_key having been called first with
+    " the correct repo (there is no repo context in that call chain's own
+    " signature). Verify both halves: blank/wrong active key must fail, and
+    " the correct one, once set, must resolve.
+    DATA lv TYPE xstring.
+    DATA ls TYPE zif_abapgit_definitions=>ty_object.
+    lv = '48656C6C6F'.
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = '7777777777777777777777777777777777777777'
+      iv_type     = zif_abapgit_git_definitions=>c_type-blob
+      iv_data     = lv ).
+
+    " No active repo key set (fresh/invalidated cache) - blank iv_repo_key
+    " must fail rather than silently guessing.
+    TRY.
+        zcl_abapgit_ortec_obj_store=>get_object(
+          iv_sha1 = '7777777777777777777777777777777777777777' ).
+        cl_abap_unit_assert=>fail( 'Blank repo_key must not resolve without an active key' ).
+      CATCH zcx_abapgit_ortec_git.
+    ENDTRY.
+
+    " A stale, unrelated active key must not leak into this lookup either.
+    zcl_abapgit_ortec_obj_store=>set_active_repo_key( 'OTHER_REPO01' ).
+    TRY.
+        zcl_abapgit_ortec_obj_store=>get_object(
+          iv_sha1 = '7777777777777777777777777777777777777777' ).
+        cl_abap_unit_assert=>fail( 'A stale, unrelated active repo_key must not resolve this object' ).
+      CATCH zcx_abapgit_ortec_git.
+    ENDTRY.
+
+    " Once explicitly set to the correct repo, the blank-iv_repo_key fallback
+    " must resolve reliably.
+    zcl_abapgit_ortec_obj_store=>set_active_repo_key( mc_repo ).
+    ls = zcl_abapgit_ortec_obj_store=>get_object(
+      iv_sha1 = '7777777777777777777777777777777777777777' ).
+    cl_abap_unit_assert=>assert_equals(
+      act = ls-sha1
+      exp = '7777777777777777777777777777777777777777'
+      msg = 'Blank iv_repo_key must resolve via the explicitly set active repo key' ).
   ENDMETHOD.
 ENDCLASS.
 
@@ -926,6 +978,7 @@ CLASS ltcl_repo_state DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
     METHODS get_or_create_idempotent FOR TESTING RAISING cx_static_check.
     METHODS state_roundtrip          FOR TESTING RAISING cx_static_check.
     METHODS stale_tip_invalidated_from_cache FOR TESTING RAISING cx_static_check.
+    METHODS invalidate_all_history_repo_wide FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 CLASS ltcl_repo_state IMPLEMENTATION.
   METHOD setup.
@@ -1013,6 +1066,53 @@ CLASS ltcl_repo_state IMPLEMENTATION.
       iv_repo_key = lv_key iv_branch_name = 'refs/heads/main' ).
     cl_abap_unit_assert=>assert_initial( act = ls_state-fetch_commit
       msg = 'fetch_commit must be blanked so a stale tip cannot be reused for Phase 3 reconstitution' ).
+  ENDMETHOD.
+  METHOD invalidate_all_history_repo_wide.
+    " ES6 incident coverage: pull_by_branch's self-heal must guarantee an
+    " empty have-set on retry (forcing a full/deepen pack), not just clear
+    " the ONE commit/branch that happened to fail its walk. Reproduces two
+    " branches sharing one repo, both marked fully materialised, then
+    " verifies invalidate_all_history wipes ZAOG_COMMIT_HIST for the WHOLE
+    " repo and blanks fetch_commit for EVERY branch, not just one.
+    DATA lv_key TYPE c LENGTH 12.
+    DATA lt_commits TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    CONSTANTS lc_commit_main TYPE zif_abapgit_git_definitions=>ty_sha1
+      VALUE 'dddd000000000000000000000000000000000001'.
+    CONSTANTS lc_commit_dev TYPE zif_abapgit_git_definitions=>ty_sha1
+      VALUE 'dddd000000000000000000000000000000000002'.
+
+    lv_key = zcl_abapgit_ortec_repo_state=>get_or_create_repo_key_for_url( mc_url ).
+    zcl_abapgit_ortec_repo_state=>update_after_fetch(
+      iv_repo_key = lv_key iv_branch_name = 'refs/heads/main'
+      iv_url = mc_url iv_commit = lc_commit_main ).
+    zcl_abapgit_ortec_repo_state=>update_after_fetch(
+      iv_repo_key = lv_key iv_branch_name = 'refs/heads/dev'
+      iv_url = mc_url iv_commit = lc_commit_dev ).
+    INSERT zaog_commit_hist FROM VALUE #(
+      repo_key = lv_key commit_sha1 = lc_commit_main branch_name = 'refs/heads/main' ).
+    INSERT zaog_commit_hist FROM VALUE #(
+      repo_key = lv_key commit_sha1 = lc_commit_dev branch_name = 'refs/heads/dev' ).
+    COMMIT WORK.
+
+    lt_commits = zcl_abapgit_ortec_repo_state=>get_complete_commits( lv_key ).
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_commits ) exp = 2
+      msg = 'Both branches'' commits must be considered fully materialised before invalidation' ).
+
+    zcl_abapgit_ortec_repo_state=>invalidate_all_history( lv_key ).
+
+    lt_commits = zcl_abapgit_ortec_repo_state=>get_complete_commits( lv_key ).
+    cl_abap_unit_assert=>assert_initial( act = lt_commits
+      msg = 'invalidate_all_history must leave NO commit advertisable as a have, ' &&
+            'so the retry degrades to a full/deepen pack instead of repeating the same thin fetch' ).
+
+    DATA(ls_main) = zcl_abapgit_ortec_repo_state=>get_state(
+      iv_repo_key = lv_key iv_branch_name = 'refs/heads/main' ).
+    DATA(ls_dev) = zcl_abapgit_ortec_repo_state=>get_state(
+      iv_repo_key = lv_key iv_branch_name = 'refs/heads/dev' ).
+    cl_abap_unit_assert=>assert_initial( act = ls_main-fetch_commit
+      msg = 'fetch_commit must be blanked for EVERY branch, not just the one that failed its walk' ).
+    cl_abap_unit_assert=>assert_initial( act = ls_dev-fetch_commit
+      msg = 'fetch_commit must be blanked for EVERY branch, not just the one that failed its walk' ).
   ENDMETHOD.
 ENDCLASS.
 

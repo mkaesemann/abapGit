@@ -452,6 +452,15 @@ CLASS ZCL_ABAPGIT_GIT_TRANSPORT IMPLEMENTATION.
       ENDLOOP.
     ENDIF.
 
+    " The Ortec fastpath cascade above already failed (or is inactive for
+    " this repo); the standard decode below may still need to resolve a
+    " ref-delta base via the object store's blank-iv_repo_key fallback
+    " (zcl_abapgit_git_delta=>delta has no repo context in its signature),
+    " so make sure the correct repo_key is active rather than relying on it
+    " being set as an accidental side effect of an earlier, unrelated call.
+    zcl_abapgit_ortec_obj_store=>set_active_repo_key(
+      zcl_abapgit_ortec_repo_state=>get_repo_key_for_url( iv_url ) ).
+
     et_objects = upload_pack( io_client       = lo_client
                               iv_url          = iv_url
                               iv_deepen_level = iv_deepen_level
@@ -499,6 +508,15 @@ CLASS ZCL_ABAPGIT_GIT_TRANSPORT IMPLEMENTATION.
     lo_client = zcl_abapgit_http=>create_by_url(
       iv_url     = iv_url
       it_headers = lt_headers ).
+
+    " The Ortec fastpath cascade above already failed (or is inactive for
+    " this repo); the standard decode below may still need to resolve a
+    " ref-delta base via the object store's blank-iv_repo_key fallback
+    " (zcl_abapgit_git_delta=>delta has no repo context in its signature),
+    " so make sure the correct repo_key is active rather than relying on it
+    " being set as an accidental side effect of an earlier, unrelated call.
+    zcl_abapgit_ortec_obj_store=>set_active_repo_key(
+      zcl_abapgit_ortec_repo_state=>get_repo_key_for_url( iv_url ) ).
 
     et_objects = upload_pack( io_client       = lo_client
                               iv_url          = iv_url

@@ -578,23 +578,29 @@ CLASS ZCL_ABAPGIT_GIT_PORCELAIN IMPLEMENTATION.
              AND lv_ortec_repo_key IS NOT INITIAL
              AND lv_pull_error CS 'Walk,'.
             " The walk failed because the persistent store has some objects
-            " but not every blob/tree reachable from the fetched commit.
-            " Repair strategy: reset ONLY the branch's fetch_commit in ZAOG_REPO_STATE
-            " so the next upload-pack sends NO have-lines for this branch
-            " (forcing the server to deliver a complete, non-thin pack).
+            " but not every blob/tree reachable from the fetched commit, even
+            " though ZAOG_COMMIT_HIST/ZAOG_REPO_STATE claim otherwise for at
+            " least one advertised have. Repair strategy: invalidate ALL
+            " recorded history/have-state for the whole repo (not just this
+            " branch's fetch_commit) so the retry cannot advertise ANY commit
+            " as already complete, forcing the server to fall back to a
+            " full/deepen, self-contained pack. Per-branch/per-commit
+            " invalidation is not reliable here because haves are shared
+            " across all branches of a repo, and we don't know which shared
+            " ancestor is actually incomplete.
             " The object store itself is kept intact: its objects still serve
-            " as delta-base context inside decode_and_persist, and other branches
-            " cached for the same repo are unaffected.
+            " as delta-base context inside decode_and_persist, and other
+            " branches cached for the same repo simply redo have-negotiation
+            " on their own next fetch.
             TRY.
                 TRY.
                     zcl_abapgit_progress=>get_instance( 1 )->show(
                       iv_current = 1
-                      iv_text    = |ORTEC: Walk error on { iv_branch_name } - self-healing retry (reset fetch_commit)| ).
+                      iv_text    = |ORTEC: Walk error on { iv_branch_name } - self-healing retry (invalidate history)| ).
                   CATCH zcx_abapgit_exception. "#EC NO_HANDLER
                 ENDTRY.
-                zcl_abapgit_ortec_repo_state=>reset_fetch_commit(
-                  iv_repo_key    = lv_ortec_repo_key
-                  iv_branch_name = iv_branch_name ).
+                zcl_abapgit_ortec_repo_state=>invalidate_all_history(
+                  iv_repo_key = lv_ortec_repo_key ).
                 COMMIT WORK.
 
                 CLEAR rs_result.
