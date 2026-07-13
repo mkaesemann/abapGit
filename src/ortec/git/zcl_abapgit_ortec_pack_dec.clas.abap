@@ -749,6 +749,19 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
     DATA lv_sha1            TYPE zif_abapgit_git_definitions=>ty_sha1.
     DATA lt_final_rows      TYPE STANDARD TABLE OF zaog_obj_store.
     DATA ls_object          LIKE LINE OF rt_objects.
+    DATA lt_pack_shas       TYPE HASHED TABLE OF zif_abapgit_git_definitions=>ty_sha1
+                                  WITH UNIQUE KEY table_line.
+    DATA lt_db_delta_bases  TYPE STANDARD TABLE OF zif_abapgit_git_definitions=>ty_sha1
+                    WITH EMPTY KEY.
+    DATA lt_missing_bases   TYPE STANDARD TABLE OF zif_abapgit_git_definitions=>ty_sha1
+                                  WITH EMPTY KEY.
+    TYPES: BEGIN OF ty_base_row,
+             obj_sha1 TYPE zaog_obj_store-obj_sha1,
+             obj_type TYPE zaog_obj_store-obj_type,
+             obj_data TYPE zaog_obj_store-obj_data,
+           END OF ty_base_row.
+    DATA lt_base_fetch       TYPE STANDARD TABLE OF ty_base_row WITH EMPTY KEY.
+    DATA ls_base_row         TYPE ty_base_row.
     " SHA1 set of base objects to suppress re-persisting them in the final promote step.
     DATA lt_base_shas       TYPE HASHED TABLE OF zif_abapgit_git_definitions=>ty_sha1
                                   WITH UNIQUE KEY table_line.
@@ -1162,49 +1175,61 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
 
     " FOR ALL ENTRIES crashes on an empty driving table — skip SELECT for full packs.
     IF lt_delta_bases IS NOT INITIAL.
-      SELECT *
-        FROM zaog_obj_store
-        FOR ALL ENTRIES IN @lt_delta_bases
-        WHERE repo_key = @iv_repo_key
-          AND obj_sha1 = @lt_delta_bases-table_line
-          AND status   = 'R'
-        INTO TABLE @DATA(lt_base_fetch).
-      LOOP AT lt_base_fetch INTO ls_row.
+      " Bases already materialized in this pack do not require any DB read.
+      " (REF_DELTA bases can point to objects included in the same pack.)
+      LOOP AT rt_objects INTO ls_object
+          WHERE type <> zif_abapgit_git_definitions=>c_type-ref_d
+            AND type <> zcl_abapgit_ortec_delta=>c_type_ofs_d.
+        INSERT ls_object-sha1 INTO TABLE lt_pack_shas.
+      ENDLOOP.
+
+      LOOP AT lt_delta_bases INTO DATA(lv_delta_base).
+        READ TABLE lt_pack_shas WITH TABLE KEY table_line = lv_delta_base
+          TRANSPORTING NO FIELDS.
+        IF sy-subrc <> 0.
+          APPEND lv_delta_base TO lt_db_delta_bases.
+        ENDIF.
+      ENDLOOP.
+
+      IF lt_db_delta_bases IS NOT INITIAL.
+        SELECT obj_sha1, obj_type, obj_data
+          FROM zaog_obj_store
+          FOR ALL ENTRIES IN @lt_db_delta_bases
+          WHERE repo_key = @iv_repo_key
+            AND obj_sha1 = @lt_db_delta_bases-table_line
+            AND status   = 'R'
+          INTO TABLE @lt_base_fetch.
+      ENDIF.
+      LOOP AT lt_base_fetch INTO ls_base_row.
         CLEAR ls_object.
-        ls_object-sha1 = ls_row-obj_sha1.
-        ls_object-type = ls_row-obj_type.
-        ls_object-data = ls_row-obj_data.
+        ls_object-sha1 = ls_base_row-obj_sha1.
+        ls_object-type = ls_base_row-obj_type.
+        ls_object-data = ls_base_row-obj_data.
         INSERT ls_object INTO TABLE rt_objects.
         INSERT ls_object-sha1 INTO TABLE lt_base_shas.
       ENDLOOP.
 
-      " Edge-case guard: if any expected base was not found (incomplete store),
-      " fall back to a full-repo SELECT and merge only the missing entries.
-      " This path is taken at most once per decode — EXIT after full load.
+      " Missing bases should be very rare after verified-have negotiation and
+      " invalidate_all_history self-heal. Never do a full-repo scan here: it
+      " explodes DB I/O on large repos and can itself cause timeout. Bases
+      " already present in the current pack are valid and exempt from the DB set.
       LOOP AT lt_delta_bases INTO DATA(lv_need).
+        READ TABLE lt_pack_shas WITH TABLE KEY table_line = lv_need
+          TRANSPORTING NO FIELDS.
+        IF sy-subrc = 0.
+          CONTINUE.
+        ENDIF.
         READ TABLE lt_base_shas WITH TABLE KEY table_line = lv_need
           TRANSPORTING NO FIELDS.
         IF sy-subrc <> 0.
-          SELECT *
-            FROM zaog_obj_store
-            INTO TABLE @DATA(lt_full_fetch)
-            WHERE repo_key = @iv_repo_key
-              AND status   = 'R'.
-          LOOP AT lt_full_fetch INTO ls_row.
-            READ TABLE lt_base_shas WITH TABLE KEY table_line = ls_row-obj_sha1
-              TRANSPORTING NO FIELDS.
-            IF sy-subrc <> 0.
-              CLEAR ls_object.
-              ls_object-sha1 = ls_row-obj_sha1.
-              ls_object-type = ls_row-obj_type.
-              ls_object-data = ls_row-obj_data.
-              INSERT ls_object INTO TABLE rt_objects.
-              INSERT ls_object-sha1 INTO TABLE lt_base_shas.
-            ENDIF.
-          ENDLOOP.
-          EXIT. " One full load is sufficient
+          APPEND lv_need TO lt_missing_bases.
         ENDIF.
       ENDLOOP.
+
+      IF lt_missing_bases IS NOT INITIAL.
+        zcx_abapgit_exception=>raise(
+          |Delta base not found in pack/store ({ lines( lt_missing_bases ) } missing) - retry with full/deepen fetch| ).
+      ENDIF.
     ENDIF.
 
     zcl_abapgit_ortec_delta=>resolve_all(
