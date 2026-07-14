@@ -28,6 +28,18 @@
      <ENTRY>Manual clear</ENTRY>
      <LENGTH>12</LENGTH>
     </item>
+    <item>
+     <ID>S</ID>
+     <KEY>P_CLEAR</KEY>
+     <ENTRY>Clear repository cache</ENTRY>
+     <LENGTH>22</LENGTH>
+    </item>
+    <item>
+     <ID>S</ID>
+     <KEY>P_REPO</KEY>
+     <ENTRY>Repository key</ENTRY>
+     <LENGTH>14</LENGTH>
+    </item>
    </TPOOL>
   </asx:values>
  </asx:abap>

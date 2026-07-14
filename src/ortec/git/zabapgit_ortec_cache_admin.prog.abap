@@ -8,6 +8,47 @@ SELECTION-SCREEN BEGIN OF BLOCK b2 WITH FRAME TITLE TEXT-002.
 PARAMETERS p_clear TYPE abap_bool AS CHECKBOX DEFAULT abap_false.
 SELECTION-SCREEN END OF BLOCK b2.
 
+AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_repo.
+  TYPES: BEGIN OF ty_repo_f4,
+           repo_key TYPE zcl_abapgit_ortec_repo_state=>ty_repo_key,
+         END OF ty_repo_f4.
+
+  DATA lt_repo_values TYPE STANDARD TABLE OF ty_repo_f4 WITH EMPTY KEY.
+  DATA lt_return      TYPE STANDARD TABLE OF ddshretval WITH EMPTY KEY.
+
+  LOOP AT zcl_abapgit_ortec_cache_admin=>get_overview( ) ASSIGNING FIELD-SYMBOL(<ls_overview>).
+    APPEND VALUE #( repo_key = <ls_overview>-repo_key ) TO lt_repo_values.
+  ENDLOOP.
+
+  SORT lt_repo_values BY repo_key.
+  DELETE ADJACENT DUPLICATES FROM lt_repo_values COMPARING repo_key.
+
+  IF lt_repo_values IS INITIAL.
+    RETURN.
+  ENDIF.
+
+  CALL FUNCTION 'F4IF_INT_TABLE_VALUE_REQUEST'
+    EXPORTING
+      retfield    = 'REPO_KEY'
+      dynpprog    = sy-repid
+      dynpnr      = sy-dynnr
+      dynprofield = 'P_REPO'
+      value_org   = 'S'
+    TABLES
+      value_tab   = lt_repo_values
+      return_tab  = lt_return
+    EXCEPTIONS
+      parameter_error = 1
+      no_values_found = 2
+      OTHERS          = 3.
+
+  IF sy-subrc = 0.
+    READ TABLE lt_return INDEX 1 ASSIGNING FIELD-SYMBOL(<ls_return>).
+    IF sy-subrc = 0 AND <ls_return>-fieldval IS NOT INITIAL.
+      p_repo = <ls_return>-fieldval.
+    ENDIF.
+  ENDIF.
+
 START-OF-SELECTION.
 
   AUTHORITY-CHECK OBJECT 'S_DEVELOP'
