@@ -9,23 +9,47 @@ PARAMETERS p_clear TYPE abap_bool AS CHECKBOX DEFAULT abap_false.
 SELECTION-SCREEN END OF BLOCK b2.
 
 AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_repo.
-  TYPES: BEGIN OF ty_repo_f4,
-           repo_key TYPE zcl_abapgit_ortec_repo_state=>ty_repo_key,
-         END OF ty_repo_f4.
-
-  DATA lt_repo_values TYPE STANDARD TABLE OF ty_repo_f4 WITH EMPTY KEY.
+  DATA lt_repo_values TYPE STANDARD TABLE OF zcl_abapgit_ortec_cache_admin=>ty_repo_f4 WITH EMPTY KEY.
   DATA lt_return      TYPE STANDARD TABLE OF ddshretval WITH EMPTY KEY.
+  DATA lt_field_tab   TYPE STANDARD TABLE OF dfies.
+  DATA ls_field       TYPE dfies.
 
-  LOOP AT zcl_abapgit_ortec_cache_admin=>get_overview( ) ASSIGNING FIELD-SYMBOL(<ls_overview>).
-    APPEND VALUE #( repo_key = <ls_overview>-repo_key ) TO lt_repo_values.
-  ENDLOOP.
-
-  SORT lt_repo_values BY repo_key.
-  DELETE ADJACENT DUPLICATES FROM lt_repo_values COMPARING repo_key.
+  lt_repo_values = zcl_abapgit_ortec_cache_admin=>get_repo_f4_values( ).
 
   IF lt_repo_values IS INITIAL.
+    MESSAGE 'No cached repositories found (ZAOG_REPO_STATE)' TYPE 'S'.
     RETURN.
   ENDIF.
+
+  CLEAR ls_field.
+  ls_field-fieldname = 'REPO_KEY'.
+  ls_field-datatype  = 'C'.
+  ls_field-intlen    = 24.
+  ls_field-outputlen = 12.
+  ls_field-inttype   = 'C'.
+  ls_field-position  = 1.
+  ls_field-offset    = 0.
+  APPEND ls_field TO lt_field_tab.
+
+  CLEAR ls_field.
+  ls_field-fieldname = 'BRANCH_NAME'.
+  ls_field-datatype  = 'C'.
+  ls_field-intlen    = 510.
+  ls_field-outputlen = 255.
+  ls_field-inttype   = 'C'.
+  ls_field-position  = 2.
+  ls_field-offset    = 24.
+  APPEND ls_field TO lt_field_tab.
+
+  CLEAR ls_field.
+  ls_field-fieldname = 'REMOTE_URL'.
+  ls_field-datatype  = 'C'.
+  ls_field-intlen    = 510.
+  ls_field-outputlen = 255.
+  ls_field-inttype   = 'C'.
+  ls_field-position  = 3.
+  ls_field-offset    = 534.
+  APPEND ls_field TO lt_field_tab.
 
   CALL FUNCTION 'F4IF_INT_TABLE_VALUE_REQUEST'
     EXPORTING
@@ -36,6 +60,7 @@ AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_repo.
       value_org   = 'S'
     TABLES
       value_tab   = lt_repo_values
+      field_tab   = lt_field_tab
       return_tab  = lt_return
     EXCEPTIONS
       parameter_error = 1

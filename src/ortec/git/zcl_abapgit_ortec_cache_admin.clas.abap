@@ -24,14 +24,21 @@ CLASS zcl_abapgit_ortec_cache_admin DEFINITION
         fetch_ts      TYPE zaog_repo_state-fetch_ts,
         is_shallow    TYPE zaog_repo_state-is_shallow,
         obj_count     TYPE i,
-        obj_size_mb   TYPE p LENGTH 8 DECIMALS 2,
+        obj_size_mb   TYPE p LENGTH 8                                DECIMALS 2,
         idx_entries   TYPE i,
         pack_count    TYPE i,
-        pack_mb_disk  TYPE p LENGTH 8 DECIMALS 2,
+        pack_mb_disk  TYPE p LENGTH 8                                DECIMALS 2,
         commit_count  TYPE i,
         open_sessions TYPE i,
       END OF ty_overview.
     TYPES ty_overview_tt TYPE STANDARD TABLE OF ty_overview WITH DEFAULT KEY.
+
+    TYPES: BEGIN OF ty_repo_f4,
+             repo_key    TYPE zcl_abapgit_ortec_repo_state=>ty_repo_key,
+             branch_name TYPE c LENGTH 255,
+             remote_url  TYPE c LENGTH 255,
+           END OF ty_repo_f4.
+    TYPES ty_repo_f4_tt TYPE STANDARD TABLE OF ty_repo_f4 WITH DEFAULT KEY.
 
     "! Build a read-only size/count overview, one row per (repo_key, branch).
     "! Aggregated counts (object/index/pack/commit/session) are computed once
@@ -42,6 +49,12 @@ CLASS zcl_abapgit_ortec_cache_admin DEFINITION
     "! One row per (repo_key, branch_name) with size/count columns
     CLASS-METHODS get_overview
       RETURNING VALUE(rt_overview) TYPE ty_overview_tt.
+
+    "! Return repository keys currently known in ZAOG_REPO_STATE for F4 help.
+    "! @parameter rt_repo_f4 |
+    "! Repository-key value help rows with repo key, branch and remote URL
+    CLASS-METHODS get_repo_f4_values
+      RETURNING VALUE(rt_repo_f4) TYPE ty_repo_f4_tt.
 
     "! Manually clear all cached ZAOG_* rows for one repository.
     "! Acquires the repo-scoped enqueue lock (same lock object as the
@@ -71,34 +84,32 @@ ENDCLASS.
 
 
 CLASS zcl_abapgit_ortec_cache_admin IMPLEMENTATION.
-
   METHOD get_overview.
-    TYPES:
-      BEGIN OF ty_obj_agg,
-        repo_key  TYPE zaog_obj_store-repo_key,
-        obj_count TYPE i,
-        obj_size  TYPE p LENGTH 15 DECIMALS 0,
-      END OF ty_obj_agg,
-      BEGIN OF ty_idx_agg,
-        repo_key    TYPE zaog_obj_index-repo_key,
-        idx_entries TYPE i,
-      END OF ty_idx_agg,
-      BEGIN OF ty_pack_agg,
-        repo_key   TYPE zaog_pack_meta-repo_key,
-        pack_count TYPE i,
-      END OF ty_pack_agg,
-      BEGIN OF ty_pack_disk_agg,
-        repo_key  TYPE zaog_pack_meta-repo_key,
-        pack_size TYPE p LENGTH 15 DECIMALS 0,
-      END OF ty_pack_disk_agg,
-      BEGIN OF ty_commit_agg,
-        repo_key     TYPE zaog_commit_hist-repo_key,
-        commit_count TYPE i,
-      END OF ty_commit_agg,
-      BEGIN OF ty_sess_agg,
-        repo_key      TYPE zaog_fetch_sess-repo_key,
-        open_sessions TYPE i,
-      END OF ty_sess_agg.
+    TYPES: BEGIN OF ty_obj_agg,
+             repo_key  TYPE zaog_obj_store-repo_key,
+             obj_count TYPE i,
+             obj_size  TYPE p LENGTH 15 DECIMALS 0,
+           END OF ty_obj_agg.
+    TYPES: BEGIN OF ty_idx_agg,
+             repo_key    TYPE zaog_obj_index-repo_key,
+             idx_entries TYPE i,
+           END OF ty_idx_agg.
+    TYPES: BEGIN OF ty_pack_agg,
+             repo_key   TYPE zaog_pack_meta-repo_key,
+             pack_count TYPE i,
+           END OF ty_pack_agg.
+    TYPES: BEGIN OF ty_pack_disk_agg,
+             repo_key  TYPE zaog_pack_meta-repo_key,
+             pack_size TYPE p LENGTH 15 DECIMALS 0,
+           END OF ty_pack_disk_agg.
+    TYPES: BEGIN OF ty_commit_agg,
+             repo_key     TYPE zaog_commit_hist-repo_key,
+             commit_count TYPE i,
+           END OF ty_commit_agg.
+    TYPES: BEGIN OF ty_sess_agg,
+             repo_key      TYPE zaog_fetch_sess-repo_key,
+             open_sessions TYPE i,
+           END OF ty_sess_agg.
 
     DATA lt_state         TYPE STANDARD TABLE OF zaog_repo_state.
     DATA lt_obj_agg       TYPE STANDARD TABLE OF ty_obj_agg.
@@ -108,43 +119,50 @@ CLASS zcl_abapgit_ortec_cache_admin IMPLEMENTATION.
     DATA lt_commit_agg    TYPE STANDARD TABLE OF ty_commit_agg.
     DATA lt_sess_agg      TYPE STANDARD TABLE OF ty_sess_agg.
     DATA ls_overview      TYPE ty_overview.
+
     FIELD-SYMBOLS <ls_state> LIKE LINE OF lt_state.
 
-    SELECT *
-      FROM zaog_repo_state
+    SELECT * FROM zaog_repo_state
       ORDER BY repo_key, branch_name
       INTO TABLE @lt_state.
     IF lt_state IS INITIAL.
       RETURN.
     ENDIF.
 
-    SELECT repo_key, COUNT(*) AS obj_count, SUM( obj_size ) AS obj_size
+    SELECT repo_key,
+           COUNT(*)        AS obj_count,
+           SUM( obj_size ) AS obj_size
       FROM zaog_obj_store
       GROUP BY repo_key
       INTO TABLE @lt_obj_agg.
 
-    SELECT repo_key, COUNT(*) AS idx_entries
+    SELECT repo_key,
+           COUNT(*) AS idx_entries
       FROM zaog_obj_index
       GROUP BY repo_key
       INTO TABLE @lt_idx_agg.
 
-    SELECT repo_key, COUNT(*) AS pack_count
+    SELECT repo_key,
+           COUNT(*) AS pack_count
       FROM zaog_pack_meta
       GROUP BY repo_key
       INTO TABLE @lt_pack_agg.
 
-    SELECT repo_key, SUM( total_size ) AS pack_size
+    SELECT repo_key,
+           SUM( total_size ) AS pack_size
       FROM zaog_pack_meta
       WHERE raw_stored = @abap_true
       GROUP BY repo_key
       INTO TABLE @lt_pack_disk_agg.
 
-    SELECT repo_key, COUNT(*) AS commit_count
+    SELECT repo_key,
+           COUNT(*) AS commit_count
       FROM zaog_commit_hist
       GROUP BY repo_key
       INTO TABLE @lt_commit_agg.
 
-    SELECT repo_key, COUNT(*) AS open_sessions
+    SELECT repo_key,
+           COUNT(*) AS open_sessions
       FROM zaog_fetch_sess
       WHERE status = 'A'
       GROUP BY repo_key
@@ -160,38 +178,62 @@ CLASS zcl_abapgit_ortec_cache_admin IMPLEMENTATION.
       ls_overview-fetch_ts     = <ls_state>-fetch_ts.
       ls_overview-is_shallow   = <ls_state>-is_shallow.
 
-      READ TABLE lt_obj_agg ASSIGNING FIELD-SYMBOL(<ls_obj_agg>) WITH KEY repo_key = <ls_state>-repo_key.
+      ASSIGN lt_obj_agg[ repo_key = <ls_state>-repo_key ] TO FIELD-SYMBOL(<ls_obj_agg>).
       IF sy-subrc = 0.
         ls_overview-obj_count   = <ls_obj_agg>-obj_count.
         ls_overview-obj_size_mb = <ls_obj_agg>-obj_size / 1048576.
       ENDIF.
 
-      READ TABLE lt_idx_agg ASSIGNING FIELD-SYMBOL(<ls_idx_agg>) WITH KEY repo_key = <ls_state>-repo_key.
+      ASSIGN lt_idx_agg[ repo_key = <ls_state>-repo_key ] TO FIELD-SYMBOL(<ls_idx_agg>).
       IF sy-subrc = 0.
         ls_overview-idx_entries = <ls_idx_agg>-idx_entries.
       ENDIF.
 
-      READ TABLE lt_pack_agg ASSIGNING FIELD-SYMBOL(<ls_pack_agg>) WITH KEY repo_key = <ls_state>-repo_key.
+      ASSIGN lt_pack_agg[ repo_key = <ls_state>-repo_key ] TO FIELD-SYMBOL(<ls_pack_agg>).
       IF sy-subrc = 0.
         ls_overview-pack_count = <ls_pack_agg>-pack_count.
       ENDIF.
 
-      READ TABLE lt_pack_disk_agg ASSIGNING FIELD-SYMBOL(<ls_pack_disk_agg>) WITH KEY repo_key = <ls_state>-repo_key.
+      ASSIGN lt_pack_disk_agg[ repo_key = <ls_state>-repo_key ] TO FIELD-SYMBOL(<ls_pack_disk_agg>).
       IF sy-subrc = 0.
         ls_overview-pack_mb_disk = <ls_pack_disk_agg>-pack_size / 1048576.
       ENDIF.
 
-      READ TABLE lt_commit_agg ASSIGNING FIELD-SYMBOL(<ls_commit_agg>) WITH KEY repo_key = <ls_state>-repo_key.
+      ASSIGN lt_commit_agg[ repo_key = <ls_state>-repo_key ] TO FIELD-SYMBOL(<ls_commit_agg>).
       IF sy-subrc = 0.
         ls_overview-commit_count = <ls_commit_agg>-commit_count.
       ENDIF.
 
-      READ TABLE lt_sess_agg ASSIGNING FIELD-SYMBOL(<ls_sess_agg>) WITH KEY repo_key = <ls_state>-repo_key.
+      ASSIGN lt_sess_agg[ repo_key = <ls_state>-repo_key ] TO FIELD-SYMBOL(<ls_sess_agg>).
       IF sy-subrc = 0.
         ls_overview-open_sessions = <ls_sess_agg>-open_sessions.
       ENDIF.
 
       APPEND ls_overview TO rt_overview.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD get_repo_f4_values.
+    DATA lt_state   TYPE STANDARD TABLE OF zaog_repo_state.
+    DATA ls_repo_f4 TYPE ty_repo_f4.
+
+    FIELD-SYMBOLS <ls_state> TYPE zaog_repo_state.
+
+    SELECT repo_key, branch_name, remote_url
+      FROM zaog_repo_state
+      ORDER BY repo_key, branch_name
+      INTO CORRESPONDING FIELDS OF TABLE @lt_state.
+
+    LOOP AT lt_state ASSIGNING <ls_state>.
+      CLEAR ls_repo_f4.
+      ls_repo_f4-repo_key    = <ls_state>-repo_key.
+      ls_repo_f4-branch_name = <ls_state>-branch_name.
+      IF ls_repo_f4-branch_name CP 'refs/heads/*'.
+        DATA(leadin) = strlen( 'refs/heads/' ).
+        SHIFT ls_repo_f4-branch_name BY leadin PLACES.
+      ENDIF.
+      ls_repo_f4-remote_url = <ls_state>-remote_url.
+      APPEND ls_repo_f4 TO rt_repo_f4.
     ENDLOOP.
   ENDMETHOD.
 
@@ -203,8 +245,7 @@ CLASS zcl_abapgit_ortec_cache_admin IMPLEMENTATION.
       zcx_abapgit_ortec_git=>raise( 'Cache admin: repository key required' ).
     ENDIF.
 
-    SELECT SINGLE remote_url
-      FROM zaog_repo_state
+    SELECT SINGLE remote_url FROM zaog_repo_state
       WHERE repo_key = @iv_repo_key
       INTO @lv_url.
     IF sy-subrc <> 0 OR lv_url IS INITIAL.
@@ -213,7 +254,7 @@ CLASS zcl_abapgit_ortec_cache_admin IMPLEMENTATION.
 
     IF acquire_lock( iv_repo_key ) = abap_false.
       zcx_abapgit_ortec_git=>raise(
-        |Cache admin: repository { iv_repo_key } is locked by a concurrent fetch - try again shortly| ).
+          |Cache admin: repository { iv_repo_key } is locked by a concurrent fetch - try again shortly| ).
     ENDIF.
 
     TRY.
@@ -260,5 +301,4 @@ CLASS zcl_abapgit_ortec_cache_admin IMPLEMENTATION.
         _synchron            = space
         _collect             = space.
   ENDMETHOD.
-
 ENDCLASS.
