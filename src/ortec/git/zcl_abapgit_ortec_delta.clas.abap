@@ -369,14 +369,36 @@ CLASS zcl_abapgit_ortec_delta IMPLEMENTATION.
     ENDIF.
 
     IF <ls_object>-type = zif_abapgit_git_definitions=>c_type-ref_d.
-      " Base identified by content SHA1 - look it up among the objects already
-      " known from this pack first (a sibling in this same pack, possibly still
-      " unresolved itself), then fall back to the persistent object store for a
-      " thin base (mirrors the existing fallback in standard
-      " zcl_abapgit_git_delta=>delta()).
-      READ TABLE ct_objects ASSIGNING <ls_base>
-        WITH KEY sha COMPONENTS sha1 = <ls_object>-sha1.
-      IF sy-subrc <> 0.
+      " Base identified by content SHA1. -sha1 is overloaded: an unresolved
+      " ref_d/ofs_d entry's -sha1 holds ITS OWN declared base (a
+      " placeholder), never its own eventual identity - so a genuinely
+      " unresolved base can NEVER legitimately match this search. Because
+      " the "sha" key is NON-UNIQUE, multiple entries (including possibly
+      " this very entry itself, or a sibling that shares the same declared
+      " base, or a true base that happens to be positioned AFTER its
+      " dependent in the pack - REF_DELTA carries no ordering guarantee)
+      " can simultaneously carry the identical placeholder/identity value.
+      " A plain first-match lookup can then pick an unresolved delta's raw,
+      " still-undecoded instruction bytes instead of the true base,
+      " producing failures such as "Delta copy instruction exceeds base
+      " length" or a spurious "chain exceeds maximum depth" (self-match).
+      " Skip any candidate still of type ref_d/ofs_d and keep scanning
+      " same-valued rows for one that is already genuinely resolved.
+      CLEAR lv_base_tabix.
+      LOOP AT ct_objects ASSIGNING <ls_base>
+          USING KEY sha
+          WHERE sha1 = <ls_object>-sha1.
+        IF <ls_base>-type <> zif_abapgit_git_definitions=>c_type-ref_d
+            AND <ls_base>-type <> c_type_ofs_d.
+          lv_base_tabix = sy-tabix.
+          EXIT.
+        ENDIF.
+      ENDLOOP.
+
+      IF lv_base_tabix IS INITIAL.
+        " No already-resolved candidate exists yet - thin base (fetch from
+        " the persistent object store), or a case this decoder cannot
+        " safely resolve from the current pack alone.
         TRY.
             ls_base_object = zcl_abapgit_ortec_obj_store=>get_object(
               iv_repo_key = iv_repo_key
@@ -391,14 +413,8 @@ CLASS zcl_abapgit_ortec_delta IMPLEMENTATION.
           zcx_abapgit_exception=>raise( |Delta base not found, { <ls_object>-sha1 }| ).
         ENDIF.
       ELSE.
-        " Base is a sibling in this pack - ensure it is resolved FIRST (it may
-        " itself be an unresolved ref/ofs delta: a chain).
-        READ TABLE ct_objects TRANSPORTING NO FIELDS
-          WITH KEY sha COMPONENTS sha1 = <ls_object>-sha1.
-        IF sy-subrc <> 0.
-          zcx_abapgit_exception=>raise( |Delta base not found, { <ls_object>-sha1 }| ).
-        ENDIF.
-        lv_base_tabix = sy-tabix.
+        " Already resolved (or always a plain object) - resolve_one is a
+        " no-op in that case; kept for symmetry/defensiveness.
         resolve_one(
           EXPORTING
             iv_tabix      = lv_base_tabix

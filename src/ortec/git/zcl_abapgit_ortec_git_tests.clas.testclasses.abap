@@ -954,6 +954,83 @@ CLASS ltcl_ofs_delta IMPLEMENTATION.
 
 ENDCLASS.
 
+CLASS ltcl_ref_delta DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+  PRIVATE SECTION.
+    CONSTANTS mc_repo TYPE c LENGTH 12 VALUE 'ZAOGT_REFDLT'.
+    METHODS base_positioned_after_dependent FOR TESTING RAISING cx_static_check.
+ENDCLASS.
+CLASS ltcl_ref_delta IMPLEMENTATION.
+
+  METHOD base_positioned_after_dependent.
+    " REF_DELTA carries no ordering guarantee (unlike OFS_DELTA, which is
+    " always positioned strictly backwards in the pack byte stream): the
+    " base object CAN legitimately appear AFTER the delta that depends on
+    " it. Before the fix, resolve_one's base lookup for object 1 (a ref_d
+    " entry whose OWN row also shows the searched-for sha1 as its own
+    " unresolved placeholder) would match itself first and recurse forever
+    " (spurious "chain exceeds maximum depth"), instead of finding the
+    " real, already-resolved base at object 2 (a plain blob, positioned
+    " AFTER object 1). This test pins the corrected behavior: the base
+    " lookup must skip any still-unresolved ref_d/ofs_d candidate and find
+    " the genuinely resolved one regardless of table position.
+    DATA lt_objects      TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA ls_object       LIKE LINE OF lt_objects.
+    DATA lt_offset_map   TYPE zcl_abapgit_ortec_delta=>ty_offset_map_tt.
+    DATA lt_ofs_meta     TYPE zcl_abapgit_ortec_delta=>ty_ofs_meta_tt.
+    DATA lv_expected_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_base_sha     TYPE zif_abapgit_git_definitions=>ty_sha1.
+
+    " The true base, "Hello!" (6 bytes), is placed at index 2 - AFTER the
+    " delta (index 1) that depends on it.
+    lv_base_sha = zcl_abapgit_hash=>sha1_blob( '48656C6C6F21' ). " "Hello!"
+
+    " Object 1: REF_DELTA whose declared base is the blob at object 2.
+    " Delta instructions: base-size(6) result-size(7)
+    " copy-op 0x90 (copy, size-byte0 present, no offset bytes -> offset 0)
+    " + size-byte 0x06 (copy length 6) + insert-op 0x01 + literal 0x21 ('!').
+    " Applying this against the real 6-byte base "Hello!" must produce
+    " "Hello!!" (7 bytes).
+    CLEAR ls_object.
+    ls_object-type  = zif_abapgit_git_definitions=>c_type-ref_d.
+    ls_object-sha1  = lv_base_sha. " declared base, NOT this entry's own identity
+    ls_object-data  = '060790060121'.
+    ls_object-index = 1.
+    APPEND ls_object TO lt_objects.
+    INSERT VALUE #( pack_offset = 0 obj_index = 1 ) INTO TABLE lt_offset_map.
+
+    " Object 2: the real, already-resolved base, positioned AFTER object 1.
+    CLEAR ls_object.
+    ls_object-type  = zif_abapgit_git_definitions=>c_type-blob.
+    ls_object-data  = '48656C6C6F21'. " "Hello!"
+    ls_object-sha1  = lv_base_sha.
+    ls_object-index = 2.
+    APPEND ls_object TO lt_objects.
+    INSERT VALUE #( pack_offset = 20 obj_index = 2 ) INTO TABLE lt_offset_map.
+
+    zcl_abapgit_ortec_delta=>resolve_all(
+      EXPORTING
+        it_offset_map = lt_offset_map
+        it_ofs_meta   = lt_ofs_meta
+        iv_repo_key   = mc_repo
+      CHANGING
+        ct_objects    = lt_objects ).
+
+    READ TABLE lt_objects INTO ls_object WITH KEY index = 1.
+    cl_abap_unit_assert=>assert_subrc( msg = 'Resolved REF_DELTA object must remain in ct_objects' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_object-data exp = '48656C6C6F2121'
+      msg = 'REF_DELTA must resolve against its real base even when that base is ' &&
+            'positioned after the delta in the pack, not self-match or misresolve' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_object-type
+      exp = zif_abapgit_git_definitions=>c_type-blob
+      msg = 'A resolved delta inherits its type from its ultimate base' ).
+
+    lv_expected_sha = zcl_abapgit_hash=>sha1_blob( '48656C6C6F2121' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_object-sha1 exp = lv_expected_sha
+      msg = 'Resolved object must carry its real recomputed content SHA1' ).
+  ENDMETHOD.
+
+ENDCLASS.
+
 CLASS ltcl_switch DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
   PRIVATE SECTION.
     METHODS no_dump FOR TESTING.
