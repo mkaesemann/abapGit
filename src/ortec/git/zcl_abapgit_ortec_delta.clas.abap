@@ -297,7 +297,9 @@ CLASS zcl_abapgit_ortec_delta IMPLEMENTATION.
             ENDIF.
 
             IF lv_offset + lv_length > xstrlen( iv_base ).
-              zcx_abapgit_exception=>raise( |Delta copy instruction exceeds base length| ).
+              zcx_abapgit_exception=>raise(
+                |Delta copy instruction exceeds base length (offset { lv_offset }, | &&
+                |length { lv_length }, base length { xstrlen( iv_base ) })| ).
             ENDIF.
 
             CONCATENATE rv_result iv_base+lv_offset(lv_length) INTO rv_result IN BYTE MODE.
@@ -430,6 +432,21 @@ CLASS zcl_abapgit_ortec_delta IMPLEMENTATION.
         ENDIF.
       ENDIF.
 
+      " Defensive sanity check: the found/fetched base's real identity must
+      " exactly match the declared base. Two prior bugs in this exact area
+      " (an unresolved-sibling match, then a stale secondary key after
+      " in-place promotion) would both have been caught immediately and
+      " unambiguously by this check instead of surfacing indirectly as a
+      " generic "exceeds base length" failure from apply(). If this ever
+      " fires, it proves the base-FINDING mechanism is still at fault,
+      " ruling out a separate base-RECONSTRUCTION issue.
+      IF <ls_base>-sha1 <> <ls_object>-sha1.
+        zcx_abapgit_exception=>raise(
+          |Delta base identity mismatch: declared { <ls_object>-sha1 }, | &&
+          |resolved { <ls_base>-sha1 } (type { <ls_base>-type }, | &&
+          |{ xstrlen( <ls_base>-data ) } bytes)| ).
+      ENDIF.
+
     ELSE. " c_type_ofs_d
       READ TABLE it_ofs_meta INTO ls_ofs_meta
         WITH TABLE KEY by_index COMPONENTS obj_index = <ls_object>-index.
@@ -502,7 +519,14 @@ CLASS zcl_abapgit_ortec_delta IMPLEMENTATION.
       zcx_abapgit_exception=>raise( |Delta resolve: internal index { iv_tabix } out of range| ).
     ENDIF.
 
-    lv_result = apply( iv_base = <ls_base>-data iv_delta = <ls_object>-data ).
+    TRY.
+        lv_result = apply( iv_base = <ls_base>-data iv_delta = <ls_object>-data ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_apply).
+        zcx_abapgit_exception=>raise(
+          |{ lx_apply->get_text( ) } - base sha1 { <ls_base>-sha1 } type { <ls_base>-type } | &&
+          |{ xstrlen( <ls_base>-data ) } bytes, delta { xstrlen( <ls_object>-data ) } bytes, | &&
+          |depth { iv_depth }| ).
+    ENDTRY.
     lv_final_sha1 = zcl_abapgit_hash=>sha1( iv_type = <ls_base>-type iv_data = lv_result ).
 
     " Promote via MODIFY, not a field-symbol write: sha1 is a component of
