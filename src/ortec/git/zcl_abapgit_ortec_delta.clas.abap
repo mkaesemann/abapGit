@@ -140,13 +140,28 @@ CLASS zcl_abapgit_ortec_delta DEFINITION
       RAISING   zcx_abapgit_exception.
 
   PRIVATE SECTION.
+    "! Maps an object's stable pack "index" (ty_object-index) to its current
+    "! PRIMARY table index in ct_objects. Built once, up front, in resolve_all
+    "! (a plain, non-keyed LOOP AT, where sy-tabix IS the correct primary
+    "! index), and extended incrementally whenever a thin base is appended
+    "! during resolution. Exists so every base lookup by "index" is an O(1)
+    "! hashed read instead of a linear scan over ct_objects (which has no
+    "! secondary key on "index") - resolve_one runs once per delta object, so
+    "! a per-call linear scan would risk O(n^2) total cost on large packs.
+    TYPES: BEGIN OF ty_tabix_by_index,
+             obj_index TYPE i,
+             tabix     TYPE i,
+           END OF ty_tabix_by_index.
+    TYPES ty_tabix_by_index_tt TYPE HASHED TABLE OF ty_tabix_by_index WITH UNIQUE KEY obj_index.
+
     CLASS-METHODS resolve_one
-      IMPORTING iv_tabix      TYPE i
-                iv_depth      TYPE i
-                it_offset_map TYPE ty_offset_map_tt
-                it_ofs_meta   TYPE ty_ofs_meta_tt
-                iv_repo_key   TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
-      CHANGING  ct_objects    TYPE zif_abapgit_definitions=>ty_objects_tt
+      IMPORTING iv_tabix          TYPE i
+                iv_depth          TYPE i
+                it_offset_map     TYPE ty_offset_map_tt
+                it_ofs_meta       TYPE ty_ofs_meta_tt
+                iv_repo_key       TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
+      CHANGING  ct_objects        TYPE zif_abapgit_definitions=>ty_objects_tt
+                ct_tabix_by_index TYPE ty_tabix_by_index_tt
       RAISING   zcx_abapgit_exception.
 
     "! Skip the two leading size varints (base size, result size) that every
@@ -325,7 +340,17 @@ CLASS zcl_abapgit_ortec_delta IMPLEMENTATION.
 
 
   METHOD resolve_all.
-    DATA lv_tabix TYPE i.
+    DATA lv_tabix          TYPE i.
+    DATA lt_tabix_by_index TYPE ty_tabix_by_index_tt.
+
+    FIELD-SYMBOLS <ls_object_init> TYPE zif_abapgit_definitions=>ty_object.
+
+    " Plain (non-keyed) loop over the primary table - sy-tabix here IS the
+    " correct primary index. See ty_tabix_by_index for why this exists.
+    LOOP AT ct_objects ASSIGNING <ls_object_init>.
+      INSERT VALUE #( obj_index = <ls_object_init>-index tabix = sy-tabix )
+        INTO TABLE lt_tabix_by_index.
+    ENDLOOP.
 
     lv_tabix = 0.
     WHILE lv_tabix < lines( ct_objects ).
@@ -338,7 +363,8 @@ CLASS zcl_abapgit_ortec_delta IMPLEMENTATION.
           it_ofs_meta   = it_ofs_meta
           iv_repo_key   = iv_repo_key
         CHANGING
-          ct_objects    = ct_objects ).
+          ct_objects        = ct_objects
+          ct_tabix_by_index = lt_tabix_by_index ).
     ENDWHILE.
   ENDMETHOD.
 
@@ -352,6 +378,7 @@ CLASS zcl_abapgit_ortec_delta IMPLEMENTATION.
     DATA ls_ofs_meta        TYPE ty_ofs_meta.
     DATA ls_offset_entry    TYPE ty_offset_entry.
     DATA lv_found_obj_index TYPE i.
+    DATA ls_tabix_by_index  TYPE ty_tabix_by_index.
 
     FIELD-SYMBOLS <ls_object> TYPE zif_abapgit_definitions=>ty_object.
     FIELD-SYMBOLS <ls_base>   TYPE zif_abapgit_definitions=>ty_object.
@@ -402,17 +429,16 @@ CLASS zcl_abapgit_ortec_delta IMPLEMENTATION.
       IF lv_found_obj_index <> -1.
         " sy-tabix inside a "LOOP AT ... USING KEY sha" reflects the
         " position within that SORTED SECONDARY key's own iteration order,
-        " NOT the primary table index (documented ABAP behavior). Using it
-        " directly as a primary index below would silently operate on an
-        " unrelated row whenever the pack's SHA1-sorted order differs from
-        " its pack/primary order - the normal case for any non-trivial
-        " pack. Re-derive the correct PRIMARY tabix from the object's own
-        " stable "index" field via a plain, non-keyed READ TABLE instead of
-        " trusting sy-tabix from the secondary-key loop.
-        READ TABLE ct_objects TRANSPORTING NO FIELDS
-          WITH KEY index = lv_found_obj_index.
+        " NOT the primary table index (documented ABAP behavior). Re-derive
+        " the correct PRIMARY tabix via the O(1) hashed side-index instead
+        " of trusting sy-tabix from the secondary-key loop, and instead of
+        " a linear "WITH KEY index = ..." scan (ct_objects has no secondary
+        " key on "index"; resolve_one runs once per delta object, so a
+        " per-call linear scan would risk O(n^2) total cost on large packs).
+        READ TABLE ct_tabix_by_index INTO ls_tabix_by_index
+          WITH TABLE KEY obj_index = lv_found_obj_index.
         IF sy-subrc = 0.
-          lv_base_tabix = sy-tabix.
+          lv_base_tabix = ls_tabix_by_index-tabix.
         ENDIF.
       ENDIF.
 
@@ -427,6 +453,12 @@ CLASS zcl_abapgit_ortec_delta IMPLEMENTATION.
           CATCH zcx_abapgit_ortec_git.
             zcx_abapgit_exception=>raise( |Delta base not found, { <ls_object>-sha1 }| ).
         ENDTRY.
+        " The object store never populates -index (it is a pack-decode-only
+        " concept - get_object/get_objects only set sha1/type/data), so every
+        " thin-fetched object would otherwise default to index = 0 and
+        " collide with any other thin base fetched in the same pass. Assign
+        " a fresh, unique index matching its new primary position instead.
+        ls_base_object-index = lines( ct_objects ) + 1.
         APPEND ls_base_object TO ct_objects.
         " Bind directly to the row just appended (its primary index is
         " exactly lines(ct_objects) at this point) instead of a first-match
@@ -437,6 +469,8 @@ CLASS zcl_abapgit_ortec_delta IMPLEMENTATION.
         IF sy-subrc <> 0.
           zcx_abapgit_exception=>raise( |Delta base not found, { <ls_object>-sha1 }| ).
         ENDIF.
+        INSERT VALUE #( obj_index = ls_base_object-index tabix = lines( ct_objects ) )
+          INTO TABLE ct_tabix_by_index.
       ELSE.
         " Already resolved (or always a plain object) - resolve_one is a
         " no-op in that case; kept for symmetry/defensiveness.
@@ -448,7 +482,8 @@ CLASS zcl_abapgit_ortec_delta IMPLEMENTATION.
             it_ofs_meta   = it_ofs_meta
             iv_repo_key   = iv_repo_key
           CHANGING
-            ct_objects    = ct_objects ).
+            ct_objects        = ct_objects
+            ct_tabix_by_index = ct_tabix_by_index ).
         READ TABLE ct_objects ASSIGNING <ls_base> INDEX lv_base_tabix.
         IF sy-subrc <> 0.
           zcx_abapgit_exception=>raise( |Delta resolve: internal index { lv_base_tabix } out of range| ).
@@ -490,8 +525,17 @@ CLASS zcl_abapgit_ortec_delta IMPLEMENTATION.
           |OFS delta: no object found at base offset { lv_base_offset }| ).
       ENDIF.
 
-      READ TABLE ct_objects ASSIGNING <ls_base>
-        WITH KEY index = ls_offset_entry-obj_index.
+      " O(1) hashed lookup instead of a linear "WITH KEY index = ..." scan
+      " (ct_objects has no secondary key on "index") - see ty_tabix_by_index.
+      READ TABLE ct_tabix_by_index INTO ls_tabix_by_index
+        WITH TABLE KEY obj_index = ls_offset_entry-obj_index.
+      IF sy-subrc <> 0.
+        zcx_abapgit_exception=>raise(
+          |OFS delta: object index { ls_offset_entry-obj_index } not found| ).
+      ENDIF.
+      lv_base_tabix = ls_tabix_by_index-tabix.
+
+      READ TABLE ct_objects ASSIGNING <ls_base> INDEX lv_base_tabix.
       IF sy-subrc <> 0.
         zcx_abapgit_exception=>raise(
           |OFS delta: object index { ls_offset_entry-obj_index } not found| ).
@@ -503,13 +547,6 @@ CLASS zcl_abapgit_ortec_delta IMPLEMENTATION.
       " ref/ofs delta (a chain), so resolve it first.
       IF <ls_base>-type = zif_abapgit_git_definitions=>c_type-ref_d
           OR <ls_base>-type = c_type_ofs_d.
-        READ TABLE ct_objects TRANSPORTING NO FIELDS
-          WITH KEY index = ls_offset_entry-obj_index.
-        IF sy-subrc <> 0.
-          zcx_abapgit_exception=>raise(
-            |OFS delta: object index { ls_offset_entry-obj_index } not found| ).
-        ENDIF.
-        lv_base_tabix = sy-tabix.
         resolve_one(
           EXPORTING
             iv_tabix      = lv_base_tabix
@@ -518,7 +555,8 @@ CLASS zcl_abapgit_ortec_delta IMPLEMENTATION.
             it_ofs_meta   = it_ofs_meta
             iv_repo_key   = iv_repo_key
           CHANGING
-            ct_objects    = ct_objects ).
+            ct_objects        = ct_objects
+            ct_tabix_by_index = ct_tabix_by_index ).
         READ TABLE ct_objects ASSIGNING <ls_base> INDEX lv_base_tabix.
         IF sy-subrc <> 0.
           zcx_abapgit_exception=>raise( |Delta resolve: internal index { lv_base_tabix } out of range| ).

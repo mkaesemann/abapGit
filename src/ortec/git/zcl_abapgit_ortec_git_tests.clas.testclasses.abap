@@ -957,10 +957,22 @@ ENDCLASS.
 CLASS ltcl_ref_delta DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
   PRIVATE SECTION.
     CONSTANTS mc_repo TYPE c LENGTH 12 VALUE 'ZAOGT_REFDLT'.
+    METHODS setup.
+    METHODS teardown.
     METHODS base_positioned_after_dependent FOR TESTING RAISING cx_static_check.
     METHODS resolve_after_prior_resolution_in_same_pass FOR TESTING RAISING cx_static_check.
+    METHODS two_thin_bases_do_not_collide FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 CLASS ltcl_ref_delta IMPLEMENTATION.
+
+  METHOD setup.
+    DELETE FROM zaog_obj_store WHERE repo_key = mc_repo.
+  ENDMETHOD.
+
+  METHOD teardown.
+    DELETE FROM zaog_obj_store WHERE repo_key = mc_repo.
+    ROLLBACK WORK.
+  ENDMETHOD.
 
   METHOD base_positioned_after_dependent.
     " REF_DELTA carries no ordering guarantee (unlike OFS_DELTA, which is
@@ -1110,6 +1122,67 @@ CLASS ltcl_ref_delta IMPLEMENTATION.
 
     lv_expected_sha = zcl_abapgit_hash=>sha1_blob( '48656C6C6F2121' ).
     cl_abap_unit_assert=>assert_equals( act = ls_object-sha1 exp = lv_expected_sha ).
+  ENDMETHOD.
+
+  METHOD two_thin_bases_do_not_collide.
+    " Regression for a gap found alongside the tabix hotfix:
+    " zcl_abapgit_ortec_obj_store=>get_object never populates the returned
+    " object's -index field, so every thin-fetched base previously defaulted
+    " to index = 0. If two different REF_DELTA entries in the same
+    " resolve_all pass each need a DIFFERENT thin base (neither present in
+    " ct_objects), both fetched bases would collide on index = 0 and an
+    " index-keyed lookup could bind the wrong delta to the wrong base. This
+    " test forces exactly two distinct thin fetches in one pass and asserts
+    " each delta resolves against its own, correct base.
+    DATA lt_objects    TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA ls_object     LIKE LINE OF lt_objects.
+    DATA lt_offset_map TYPE zcl_abapgit_ortec_delta=>ty_offset_map_tt.
+    DATA lt_ofs_meta   TYPE zcl_abapgit_ortec_delta=>ty_ofs_meta_tt.
+    DATA lv_base1_sha  TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_base2_sha  TYPE zif_abapgit_git_definitions=>ty_sha1.
+
+    lv_base1_sha = zcl_abapgit_hash=>sha1_blob( '41414141' ). " "AAAA"
+    lv_base2_sha = zcl_abapgit_hash=>sha1_blob( '42424242' ). " "BBBB"
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_base1_sha iv_type = 'blob' iv_data = '41414141' ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_base2_sha iv_type = 'blob' iv_data = '42424242' ).
+
+    " Both bases are absent from ct_objects - each delta must go through
+    " the thin-base persistent-store fetch, not an in-pack lookup.
+    " base-size(4) result-size(5) copy(off=0,len=4) insert(1,'!') -> base+'!'.
+    CLEAR ls_object.
+    ls_object-type  = zif_abapgit_git_definitions=>c_type-ref_d.
+    ls_object-sha1  = lv_base1_sha.
+    ls_object-data  = '040590040121'.
+    ls_object-index = 1.
+    APPEND ls_object TO lt_objects.
+    INSERT VALUE #( pack_offset = 0 obj_index = 1 ) INTO TABLE lt_offset_map.
+
+    CLEAR ls_object.
+    ls_object-type  = zif_abapgit_git_definitions=>c_type-ref_d.
+    ls_object-sha1  = lv_base2_sha.
+    ls_object-data  = '040590040121'.
+    ls_object-index = 2.
+    APPEND ls_object TO lt_objects.
+    INSERT VALUE #( pack_offset = 10 obj_index = 2 ) INTO TABLE lt_offset_map.
+
+    zcl_abapgit_ortec_delta=>resolve_all(
+      EXPORTING
+        it_offset_map = lt_offset_map
+        it_ofs_meta   = lt_ofs_meta
+        iv_repo_key   = mc_repo
+      CHANGING
+        ct_objects    = lt_objects ).
+
+    READ TABLE lt_objects INTO ls_object WITH KEY index = 1.
+    cl_abap_unit_assert=>assert_equals( act = ls_object-data exp = '4141414121'
+      msg = 'The first delta must resolve against its own thin base "AAAA", not the second' ).
+
+    READ TABLE lt_objects INTO ls_object WITH KEY index = 2.
+    cl_abap_unit_assert=>assert_equals( act = ls_object-data exp = '4242424221'
+      msg = 'The second delta must resolve against its own thin base "BBBB", not the first' ).
   ENDMETHOD.
 
 ENDCLASS.
