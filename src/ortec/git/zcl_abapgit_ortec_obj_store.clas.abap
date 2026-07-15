@@ -82,6 +82,33 @@ CLASS zcl_abapgit_ortec_obj_store DEFINITION
       RETURNING VALUE(rt_objects) TYPE zif_abapgit_definitions=>ty_objects_tt
       RAISING   zcx_abapgit_ortec_git.
 
+    "! Lighter-weight counterpart to get_reachable_objects for completeness
+    "! verification only: walks the SAME commit -> tree -> blob structure and
+    "! raises under the SAME conditions (missing/undecodable commit or tree,
+    "! missing blob, unknown chmod), but never materializes blob DATA and
+    "! never triggers a full-repo cache preload - only commit/tree objects
+    "! (whose total size is bounded by directory structure, not file
+    "! content) are ever fetched with their data; blob presence is proven
+    "! via a SHA1-only existence check. Callers that actually need object
+    "! CONTENT (e.g. building a working tree) must keep using
+    "! get_reachable_objects - this method exists purely to answer "is
+    "! everything reachable from this commit present", which never needs to
+    "! read a single byte of blob data.
+    "! @parameter iv_repo_key |
+    "! Repository key
+    "! @parameter iv_commit |
+    "! Commit SHA1 to walk from
+    "! @parameter rt_sha1s |
+    "! SHA1 of the commit, every reachable tree, and every reachable blob
+    "! @raising zcx_abapgit_ortec_git |
+    "! If the commit, a tree, or a blob reachable from it is not found or
+    "! cannot be decoded
+    CLASS-METHODS get_reachable_sha1s
+      IMPORTING iv_repo_key      TYPE ty_repo_key
+                iv_commit        TYPE zif_abapgit_git_definitions=>ty_sha1
+      RETURNING VALUE(rt_sha1s) TYPE zif_abapgit_git_definitions=>ty_sha1_tt
+      RAISING   zcx_abapgit_ortec_git.
+
     "! Set-based check for which of the given SHA1s are NOT present (status 'R')
     "! in the persistent store for this repository. One chunked SELECT per
     "! c_select_package_size objects; no per-object DB reads.
@@ -186,6 +213,15 @@ CLASS zcl_abapgit_ortec_obj_store DEFINITION
       IMPORTING iv_repo_key    TYPE ty_repo_key
                 it_sha1s       TYPE ty_sha1_rows
       RETURNING VALUE(rt_rows) TYPE ty_obj_store_tt.
+
+    "! Chunked, obj_data-free existence check against the persistent store:
+    "! selects ONLY obj_sha1, never obj_data, so a caller that only needs to
+    "! prove presence (not read content) never pays the cost of
+    "! transferring potentially large blob data over the DB connection.
+    CLASS-METHODS get_present_sha1s
+      IMPORTING iv_repo_key       TYPE ty_repo_key
+                it_sha1s          TYPE zif_abapgit_git_definitions=>ty_sha1_tt
+      RETURNING VALUE(rt_present) TYPE ty_sha1_set.
 ENDCLASS.
 
 
@@ -475,6 +511,116 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD get_reachable_sha1s.
+    " Same commit -> tree -> blob walk as get_reachable_objects, but never
+    " calls populate_cache (no full-repo preload) and never fetches blob
+    " DATA - only tree/commit objects (bounded by directory structure, not
+    " file content) are fetched with their data; blob presence is proven
+    " via a SHA1-only existence check (get_present_sha1s).
+    DATA lt_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_commit_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lt_current_trees TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_next_trees TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_tree_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lt_blob_sha1s TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_seen_trees TYPE ty_sha1_set.
+    DATA lt_seen_blobs TYPE ty_sha1_set.
+    DATA lt_present TYPE ty_sha1_set.
+    DATA ls_commit_object TYPE zif_abapgit_definitions=>ty_object.
+    DATA ls_commit TYPE zcl_abapgit_git_pack=>ty_commit.
+    DATA lt_nodes TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+
+    FIELD-SYMBOLS <ls_tree_object> LIKE LINE OF lt_tree_objects.
+    FIELD-SYMBOLS <ls_node> LIKE LINE OF lt_nodes.
+    FIELD-SYMBOLS <lv_blob> LIKE LINE OF lt_blob_sha1s.
+
+    APPEND iv_commit TO lt_commit_sha.
+    lt_commit_objects = get_objects( iv_repo_key   = iv_repo_key
+                                     it_sha1s      = lt_commit_sha
+                                     iv_bulk_fetch = abap_true ).
+    READ TABLE lt_commit_objects INTO ls_commit_object INDEX 1.
+    IF sy-subrc <> 0 OR ls_commit_object-type <> zif_abapgit_git_definitions=>c_type-commit.
+      zcx_abapgit_ortec_git=>raise( |Commit { iv_commit } not found in store| ).
+    ENDIF.
+
+    TRY.
+        ls_commit = zcl_abapgit_git_pack=>decode_commit( ls_commit_object-data ).
+      CATCH zcx_abapgit_exception.
+        zcx_abapgit_ortec_git=>raise( |Commit { iv_commit } could not be decoded| ).
+    ENDTRY.
+
+    APPEND ls_commit_object-sha1 TO rt_sha1s.
+
+    IF ls_commit-tree IS INITIAL.
+      zcx_abapgit_ortec_git=>raise( |Commit { iv_commit } has no tree| ).
+    ENDIF.
+
+    APPEND ls_commit-tree TO lt_current_trees.
+    INSERT ls_commit-tree INTO TABLE lt_seen_trees.
+
+    WHILE lt_current_trees IS NOT INITIAL.
+      CLEAR lt_next_trees.
+      lt_tree_objects = get_objects( iv_repo_key   = iv_repo_key
+                                     it_sha1s      = lt_current_trees
+                                     iv_bulk_fetch = abap_true ).
+
+      LOOP AT lt_tree_objects ASSIGNING <ls_tree_object>.
+        IF <ls_tree_object>-type <> zif_abapgit_git_definitions=>c_type-tree.
+          zcx_abapgit_ortec_git=>raise( |Object { <ls_tree_object>-sha1 } is not a tree| ).
+        ENDIF.
+
+        APPEND <ls_tree_object>-sha1 TO rt_sha1s.
+
+        TRY.
+            lt_nodes = zcl_abapgit_git_pack=>decode_tree( <ls_tree_object>-data ).
+          CATCH zcx_abapgit_exception.
+            zcx_abapgit_ortec_git=>raise( |Tree { <ls_tree_object>-sha1 } could not be decoded| ).
+        ENDTRY.
+
+        LOOP AT lt_nodes ASSIGNING <ls_node>.
+          CASE <ls_node>-chmod.
+            WHEN zif_abapgit_git_definitions=>c_chmod-dir.
+              READ TABLE lt_seen_trees WITH TABLE KEY table_line = <ls_node>-sha1 TRANSPORTING NO FIELDS.
+              IF sy-subrc <> 0.
+                INSERT <ls_node>-sha1 INTO TABLE lt_seen_trees.
+                APPEND <ls_node>-sha1 TO lt_next_trees.
+              ENDIF.
+            WHEN zif_abapgit_git_definitions=>c_chmod-file
+              OR zif_abapgit_git_definitions=>c_chmod-executable
+              OR zif_abapgit_git_definitions=>c_chmod-symbolic_link.
+              READ TABLE lt_seen_blobs WITH TABLE KEY table_line = <ls_node>-sha1 TRANSPORTING NO FIELDS.
+              IF sy-subrc <> 0.
+                INSERT <ls_node>-sha1 INTO TABLE lt_seen_blobs.
+                APPEND <ls_node>-sha1 TO lt_blob_sha1s.
+              ENDIF.
+            WHEN zif_abapgit_git_definitions=>c_chmod-submodule.
+              CONTINUE.
+            WHEN OTHERS.
+              zcx_abapgit_ortec_git=>raise( |Tree { <ls_tree_object>-sha1 } contains unknown chmod { <ls_node>-chmod }| ).
+          ENDCASE.
+        ENDLOOP.
+      ENDLOOP.
+
+      lt_current_trees = lt_next_trees.
+    ENDWHILE.
+
+    IF lt_blob_sha1s IS NOT INITIAL.
+      " Existence-only: never fetch blob DATA to prove a blob is present -
+      " this is the entire reason this method exists alongside
+      " get_reachable_objects.
+      lt_present = get_present_sha1s( iv_repo_key = iv_repo_key
+                                       it_sha1s    = lt_blob_sha1s ).
+      LOOP AT lt_blob_sha1s ASSIGNING <lv_blob>.
+        READ TABLE lt_present WITH TABLE KEY table_line = <lv_blob> TRANSPORTING NO FIELDS.
+        IF sy-subrc <> 0.
+          zcx_abapgit_ortec_git=>raise( |Object { <lv_blob> } not found in store| ).
+        ENDIF.
+        APPEND <lv_blob> TO rt_sha1s.
+      ENDLOOP.
+    ENDIF.
+  ENDMETHOD.
+
+
   METHOD exists.
     " TODO: variable is assigned but never used (ABAP cleaner)
     DATA lv_dummy TYPE c LENGTH 40.
@@ -628,14 +774,13 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD get_missing_sha1s.
+  METHOD get_present_sha1s.
     DATA lt_unique_sha1s TYPE ty_sha1_set.
-    DATA lt_found_sha1s  TYPE ty_sha1_set.
-    DATA lt_package      TYPE ty_sha1_rows.
-    DATA lt_db_rows      TYPE ty_obj_store_tt.
+    DATA lr_sha1s        TYPE RANGE OF zaog_obj_store-obj_sha1.
+    DATA lt_found        TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
 
     FIELD-SYMBOLS <lv_sha1> LIKE LINE OF it_sha1s.
-    FIELD-SYMBOLS <ls_row>  LIKE LINE OF lt_db_rows.
+    FIELD-SYMBOLS <lv_found> LIKE LINE OF lt_found.
 
     IF iv_repo_key IS INITIAL.
       RETURN.
@@ -650,27 +795,63 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
     ENDIF.
 
     LOOP AT lt_unique_sha1s ASSIGNING <lv_sha1>.
-      APPEND VALUE #( sha1 = <lv_sha1> ) TO lt_package.
-      IF lines( lt_package ) >= c_select_package_size.
-        lt_db_rows = read_object_rows( iv_repo_key = iv_repo_key
-                                       it_sha1s    = lt_package ).
-        LOOP AT lt_db_rows ASSIGNING <ls_row>.
-          INSERT <ls_row>-obj_sha1 INTO TABLE lt_found_sha1s.
+      APPEND VALUE #( sign   = 'I'
+                      option = 'EQ'
+                      low    = <lv_sha1> ) TO lr_sha1s.
+      IF lines( lr_sha1s ) >= c_select_package_size.
+        CLEAR lt_found.
+        SELECT obj_sha1 FROM zaog_obj_store
+          INTO TABLE lt_found
+          WHERE repo_key = iv_repo_key
+            AND obj_sha1 IN lr_sha1s
+            AND status   = 'R'.
+        LOOP AT lt_found ASSIGNING <lv_found>.
+          INSERT <lv_found> INTO TABLE rt_present.
         ENDLOOP.
-        CLEAR lt_package.
+        CLEAR lr_sha1s.
       ENDIF.
     ENDLOOP.
 
-    IF lt_package IS NOT INITIAL.
-      lt_db_rows = read_object_rows( iv_repo_key = iv_repo_key
-                                     it_sha1s    = lt_package ).
-      LOOP AT lt_db_rows ASSIGNING <ls_row>.
-        INSERT <ls_row>-obj_sha1 INTO TABLE lt_found_sha1s.
+    IF lr_sha1s IS NOT INITIAL.
+      CLEAR lt_found.
+      SELECT obj_sha1 FROM zaog_obj_store
+        INTO TABLE lt_found
+        WHERE repo_key = iv_repo_key
+          AND obj_sha1 IN lr_sha1s
+          AND status   = 'R'.
+      LOOP AT lt_found ASSIGNING <lv_found>.
+        INSERT <lv_found> INTO TABLE rt_present.
       ENDLOOP.
     ENDIF.
+  ENDMETHOD.
+
+
+  METHOD get_missing_sha1s.
+    DATA lt_unique_sha1s TYPE ty_sha1_set.
+    DATA lt_present      TYPE ty_sha1_set.
+
+    FIELD-SYMBOLS <lv_sha1> LIKE LINE OF it_sha1s.
+
+    IF iv_repo_key IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    LOOP AT it_sha1s ASSIGNING <lv_sha1> WHERE table_line IS NOT INITIAL.
+      INSERT <lv_sha1> INTO TABLE lt_unique_sha1s.
+    ENDLOOP.
+
+    IF lt_unique_sha1s IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    " Existence-only (never loads obj_data) - see get_present_sha1s.
+    lt_present = get_present_sha1s( iv_repo_key = iv_repo_key
+                                     it_sha1s    = it_sha1s ).
 
     LOOP AT lt_unique_sha1s ASSIGNING <lv_sha1>.
-      IF NOT line_exists( lt_found_sha1s[ table_line = <lv_sha1> ] ).
+      READ TABLE lt_present WITH TABLE KEY table_line = <lv_sha1>
+        TRANSPORTING NO FIELDS.
+      IF sy-subrc <> 0.
         APPEND <lv_sha1> TO rt_missing.
       ENDIF.
     ENDLOOP.

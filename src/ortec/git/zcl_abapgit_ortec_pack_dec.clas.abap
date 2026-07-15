@@ -319,6 +319,17 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
 
     lv_repo_lock_id = acquire_repo_lock( iv_repo_key = iv_repo_key ).
 
+    " Defense in depth: any earlier step in this same request (e.g. have-
+    " negotiation's completeness verification) may have populated the
+    " object store's static, session-lifetime cache. That cache must never
+    " coexist with this method's own decode working set (raw pack +
+    " decompressed objects) - confirmed as the direct cause of a
+    " SYSTEM_NO_ROLL crash on a branch-switch fetch. The primary fix is
+    " that verification (zcl_abapgit_ortec_fetch_neg=>is_commit_complete)
+    " no longer populates it at all; this clears anything any OTHER path
+    " may still have left behind before the potentially large decode below.
+    zcl_abapgit_ortec_obj_store=>invalidate_cache( ).
+
     TRY.
 
         " Generate a unique pack ID for this packfile

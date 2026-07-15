@@ -8,6 +8,8 @@ CLASS ltcl_obj_store DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
     METHODS get_objects_missing FOR TESTING RAISING cx_static_check.
     METHODS reachable_objects_graph FOR TESTING RAISING cx_static_check.
     METHODS reachable_objects_missing_tree FOR TESTING RAISING cx_static_check.
+    METHODS reachable_sha1s_graph FOR TESTING RAISING cx_static_check.
+    METHODS reachable_sha1s_missing_blob FOR TESTING RAISING cx_static_check.
     METHODS missing_sha1s_none FOR TESTING RAISING cx_static_check.
     METHODS missing_sha1s_some FOR TESTING RAISING cx_static_check.
     METHODS object_state_constants FOR TESTING RAISING cx_static_check.
@@ -165,6 +167,121 @@ CLASS ltcl_obj_store IMPLEMENTATION.
           iv_repo_key = mc_repo
           iv_commit   = lv_commit_sha ).
         cl_abap_unit_assert=>fail( 'Missing reachable tree must raise' ).
+      CATCH zcx_abapgit_ortec_git.
+    ENDTRY.
+  ENDMETHOD.
+  METHOD reachable_sha1s_graph.
+    " get_reachable_sha1s must return the exact same commit+tree+blob SHA1
+    " set as get_reachable_objects, without ever reading blob DATA - this
+    " test only verifies the identity set is correct (that blob content is
+    " never touched is verified by construction: this method contains no
+    " get_objects call for blob SHA1s at all, only get_present_sha1s).
+    DATA lt_nodes TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+    DATA ls_node LIKE LINE OF lt_nodes.
+    DATA ls_commit TYPE zcl_abapgit_git_pack=>ty_commit.
+    DATA lt_sha1s TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lv_blob_data TYPE xstring.
+    DATA lv_blob_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_tree_data TYPE xstring.
+    DATA lv_tree_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_commit_data TYPE xstring.
+    DATA lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+
+    lv_blob_data = '48656C6C6F'.
+    lv_blob_sha = zcl_abapgit_hash=>sha1_blob( lv_blob_data ).
+
+    ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-file.
+    ls_node-name  = 'hello.txt'.
+    ls_node-sha1  = lv_blob_sha.
+    APPEND ls_node TO lt_nodes.
+
+    lv_tree_data = zcl_abapgit_git_pack=>encode_tree( lt_nodes ).
+    lv_tree_sha = zcl_abapgit_hash=>sha1_tree( lv_tree_data ).
+
+    ls_commit-tree = lv_tree_sha.
+    ls_commit-author = 'Test <test@example.com> 0 +0000'.
+    ls_commit-committer = 'Test <test@example.com> 0 +0000'.
+    ls_commit-body = 'test'.
+    lv_commit_data = zcl_abapgit_git_pack=>encode_commit( ls_commit ).
+    lv_commit_sha = zcl_abapgit_hash=>sha1_commit( lv_commit_data ).
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_commit_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-commit
+      iv_data     = lv_commit_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_tree_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-tree
+      iv_data     = lv_tree_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_blob_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-blob
+      iv_data     = lv_blob_data ).
+
+    lt_sha1s = zcl_abapgit_ortec_obj_store=>get_reachable_sha1s(
+      iv_repo_key = mc_repo
+      iv_commit   = lv_commit_sha ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lines( lt_sha1s )
+      exp = 3
+      msg = 'Commit, tree and blob SHA1s are all reachable' ).
+    READ TABLE lt_sha1s TRANSPORTING NO FIELDS WITH KEY table_line = lv_commit_sha.
+    cl_abap_unit_assert=>assert_subrc( msg = 'Commit SHA1 present' ).
+    READ TABLE lt_sha1s TRANSPORTING NO FIELDS WITH KEY table_line = lv_tree_sha.
+    cl_abap_unit_assert=>assert_subrc( msg = 'Tree SHA1 present' ).
+    READ TABLE lt_sha1s TRANSPORTING NO FIELDS WITH KEY table_line = lv_blob_sha.
+    cl_abap_unit_assert=>assert_subrc( msg = 'Blob SHA1 present (proven via existence check, not content read)' ).
+  ENDMETHOD.
+  METHOD reachable_sha1s_missing_blob.
+    " Regression for the SYSTEM_NO_ROLL memory fix: get_reachable_sha1s
+    " proves blob presence via get_present_sha1s (SHA1-only) instead of
+    " get_objects (which would fetch and require full blob DATA) - this
+    " test pins that a genuinely missing blob is still correctly detected
+    " and raises, exactly like get_reachable_objects would.
+    DATA lt_nodes TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+    DATA ls_node LIKE LINE OF lt_nodes.
+    DATA ls_commit TYPE zcl_abapgit_git_pack=>ty_commit.
+    DATA lv_tree_data TYPE xstring.
+    DATA lv_tree_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_commit_data TYPE xstring.
+    DATA lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+
+    " Blob deliberately never stored - only referenced by the tree.
+    ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-file.
+    ls_node-name  = 'missing.txt'.
+    ls_node-sha1  = '5555555555555555555555555555555555555555'.
+    APPEND ls_node TO lt_nodes.
+
+    lv_tree_data = zcl_abapgit_git_pack=>encode_tree( lt_nodes ).
+    lv_tree_sha = zcl_abapgit_hash=>sha1_tree( lv_tree_data ).
+
+    ls_commit-tree = lv_tree_sha.
+    ls_commit-author = 'Test <test@example.com> 0 +0000'.
+    ls_commit-committer = 'Test <test@example.com> 0 +0000'.
+    ls_commit-body = 'missing blob'.
+    lv_commit_data = zcl_abapgit_git_pack=>encode_commit( ls_commit ).
+    lv_commit_sha = zcl_abapgit_hash=>sha1_commit( lv_commit_data ).
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_commit_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-commit
+      iv_data     = lv_commit_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_tree_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-tree
+      iv_data     = lv_tree_data ).
+
+    TRY.
+        zcl_abapgit_ortec_obj_store=>get_reachable_sha1s(
+          iv_repo_key = mc_repo
+          iv_commit   = lv_commit_sha ).
+        cl_abap_unit_assert=>fail( 'Missing reachable blob must raise' ).
       CATCH zcx_abapgit_ortec_git.
     ENDTRY.
   ENDMETHOD.

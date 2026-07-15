@@ -154,10 +154,7 @@ CLASS zcl_abapgit_ortec_fetch_neg IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD is_commit_complete.
-    DATA lt_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
     DATA lt_sha1s   TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
-
-    FIELD-SYMBOLS <ls_obj> LIKE LINE OF lt_objects.
 
     IF iv_repo_key IS INITIAL OR iv_commit IS INITIAL.
       RETURN.
@@ -171,20 +168,24 @@ CLASS zcl_abapgit_ortec_fetch_neg IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    " get_reachable_objects already raises if any commit/tree/blob reachable
+    " get_reachable_sha1s already raises if any commit/tree/blob reachable
     " from this commit is missing from the store - a clean success here is
-    " itself proof every reachable object is present.
+    " itself proof every reachable object is present. Uses the SHA1-only
+    " variant (never materializes blob DATA, never preloads the full-repo
+    " cache): this is a completeness CHECK, not a data read, and for a
+    " large/long-lived repo the general get_reachable_objects + its
+    " up-front populate_cache full-store preload can hold gigabytes of
+    " blob content in memory for no reason other than proving presence -
+    " confirmed as the direct cause of a SYSTEM_NO_ROLL crash on a
+    " branch-switch fetch (the negotiation-time full-store load coexisting
+    " with the subsequent pack decode's own working set).
     TRY.
-        lt_objects = zcl_abapgit_ortec_obj_store=>get_reachable_objects(
+        lt_sha1s = zcl_abapgit_ortec_obj_store=>get_reachable_sha1s(
           iv_repo_key = iv_repo_key
           iv_commit   = iv_commit ).
       CATCH zcx_abapgit_ortec_git.
         RETURN.
     ENDTRY.
-
-    LOOP AT lt_objects ASSIGNING <ls_obj>.
-      APPEND <ls_obj>-sha1 TO lt_sha1s.
-    ENDLOOP.
 
     IF zcl_abapgit_ortec_obj_store=>has_dangling_delta_base(
         iv_repo_key = iv_repo_key
