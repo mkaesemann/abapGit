@@ -505,9 +505,20 @@ CLASS zcl_abapgit_ortec_delta IMPLEMENTATION.
     lv_result = apply( iv_base = <ls_base>-data iv_delta = <ls_object>-data ).
     lv_final_sha1 = zcl_abapgit_hash=>sha1( iv_type = <ls_base>-type iv_data = lv_result ).
 
+    " Promote via MODIFY, not a field-symbol write: sha1 is a component of
+    " the "sha" secondary sorted key (see the type definition of
+    " ty_objects_tt). Writing to a key-participating field through a field
+    " symbol obtained via ASSIGNING does NOT update the secondary key's
+    " internal sort structure - this is documented ABAP behavior, not a
+    " defect isolated to this class. Every later REF_DELTA base lookup in
+    " the same resolve_all pass would then risk matching the WRONG row via
+    " that now-stale key, feeding an unrelated (but genuinely "already
+    " resolved") object into apply(). MODIFY correctly re-integrates the
+    " row and keeps the "sha" key valid for every subsequent lookup.
     <ls_object>-type = <ls_base>-type.
     <ls_object>-data = lv_result.
     <ls_object>-sha1 = lv_final_sha1.
+    MODIFY ct_objects FROM <ls_object> INDEX iv_tabix TRANSPORTING type data sha1.
 
   ENDMETHOD.
 

@@ -958,6 +958,7 @@ CLASS ltcl_ref_delta DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
   PRIVATE SECTION.
     CONSTANTS mc_repo TYPE c LENGTH 12 VALUE 'ZAOGT_REFDLT'.
     METHODS base_positioned_after_dependent FOR TESTING RAISING cx_static_check.
+    METHODS resolve_after_prior_resolution_in_same_pass FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 CLASS ltcl_ref_delta IMPLEMENTATION.
 
@@ -1027,6 +1028,88 @@ CLASS ltcl_ref_delta IMPLEMENTATION.
     lv_expected_sha = zcl_abapgit_hash=>sha1_blob( '48656C6C6F2121' ).
     cl_abap_unit_assert=>assert_equals( act = ls_object-sha1 exp = lv_expected_sha
       msg = 'Resolved object must carry its real recomputed content SHA1' ).
+  ENDMETHOD.
+
+  METHOD resolve_after_prior_resolution_in_same_pass.
+    " Regression for the MODIFY fix: resolve_one previously promoted a
+    " resolved delta via direct field-symbol writes to <ls_object>-sha1, a
+    " component of the "sha" secondary sorted key. That does not update the
+    " key's internal structure (documented ABAP behavior), so any base
+    " lookup performed AFTER at least one prior promotion in the same
+    " resolve_all pass risked matching the wrong row via a now-stale key.
+    " This test forces exactly that ordering: object 2 is fully resolved
+    " and promoted BEFORE object 3 performs its own base lookup for a true
+    " base (object 4) positioned even later.
+    DATA lt_objects      TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA ls_object       LIKE LINE OF lt_objects.
+    DATA lt_offset_map   TYPE zcl_abapgit_ortec_delta=>ty_offset_map_tt.
+    DATA lt_ofs_meta     TYPE zcl_abapgit_ortec_delta=>ty_ofs_meta_tt.
+    DATA lv_expected_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_base_sha     TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_hi_sha       TYPE zif_abapgit_git_definitions=>ty_sha1.
+
+    lv_hi_sha   = zcl_abapgit_hash=>sha1_blob( '4869' ). " "Hi"
+    lv_base_sha = zcl_abapgit_hash=>sha1_blob( '48656C6C6F21' ). " "Hello!"
+
+    " Object 1: plain blob "Hi" (2 bytes).
+    CLEAR ls_object.
+    ls_object-type  = zif_abapgit_git_definitions=>c_type-blob.
+    ls_object-data  = '4869'.
+    ls_object-sha1  = lv_hi_sha.
+    ls_object-index = 1.
+    APPEND ls_object TO lt_objects.
+    INSERT VALUE #( pack_offset = 0 obj_index = 1 ) INTO TABLE lt_offset_map.
+
+    " Object 2: REF_DELTA depending on object 1, resolved FIRST by
+    " resolve_all's sequential walk (index 2 < 3), forcing a promotion
+    " (and, with the fix, a MODIFY) before object 3's own lookup runs.
+    " base-size(2) result-size(3) copy(off=0,len=2) insert(1,'!') -> "Hi!".
+    CLEAR ls_object.
+    ls_object-type  = zif_abapgit_git_definitions=>c_type-ref_d.
+    ls_object-sha1  = lv_hi_sha.
+    ls_object-data  = '020390020121'.
+    ls_object-index = 2.
+    APPEND ls_object TO lt_objects.
+    INSERT VALUE #( pack_offset = 10 obj_index = 2 ) INTO TABLE lt_offset_map.
+
+    " Object 3: the entry under test - REF_DELTA whose true base (object 4)
+    " is positioned AFTER it, unrelated to objects 1/2.
+    CLEAR ls_object.
+    ls_object-type  = zif_abapgit_git_definitions=>c_type-ref_d.
+    ls_object-sha1  = lv_base_sha.
+    ls_object-data  = '060790060121'.
+    ls_object-index = 3.
+    APPEND ls_object TO lt_objects.
+    INSERT VALUE #( pack_offset = 20 obj_index = 3 ) INTO TABLE lt_offset_map.
+
+    " Object 4: the true base, "Hello!" (6 bytes), positioned after object 3.
+    CLEAR ls_object.
+    ls_object-type  = zif_abapgit_git_definitions=>c_type-blob.
+    ls_object-data  = '48656C6C6F21'.
+    ls_object-sha1  = lv_base_sha.
+    ls_object-index = 4.
+    APPEND ls_object TO lt_objects.
+    INSERT VALUE #( pack_offset = 30 obj_index = 4 ) INTO TABLE lt_offset_map.
+
+    zcl_abapgit_ortec_delta=>resolve_all(
+      EXPORTING
+        it_offset_map = lt_offset_map
+        it_ofs_meta   = lt_ofs_meta
+        iv_repo_key   = mc_repo
+      CHANGING
+        ct_objects    = lt_objects ).
+
+    READ TABLE lt_objects INTO ls_object WITH KEY index = 2.
+    cl_abap_unit_assert=>assert_equals( act = ls_object-data exp = '486921'
+      msg = 'The unrelated, earlier-resolved delta must still resolve correctly to "Hi!"' ).
+
+    READ TABLE lt_objects INTO ls_object WITH KEY index = 3.
+    cl_abap_unit_assert=>assert_equals( act = ls_object-data exp = '48656C6C6F2121'
+      msg = 'The entry under test must resolve against its real, later-positioned base ' &&
+            'even after another delta was already promoted earlier in the same pass' ).
+
+    lv_expected_sha = zcl_abapgit_hash=>sha1_blob( '48656C6C6F2121' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_object-sha1 exp = lv_expected_sha ).
   ENDMETHOD.
 
 ENDCLASS.
