@@ -1156,8 +1156,17 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
     COMMIT WORK.
 
     lv_len = xstrlen( iv_data ) - 20.
-    lv_xstring = iv_data(lv_len).
-    lv_sha1 = zcl_abapgit_hash=>sha1_raw( lv_xstring ).
+    " Pass the slice directly instead of assigning it to a named variable
+    " first: lv_xstring is reused elsewhere in this method for a 4-byte
+    " value, so assigning it here would reallocate it to hold a second,
+    " near-full copy of iv_data that then stays resident (a named local
+    " is never freed until the method returns) for the remainder of this
+    " method's execution - on top of iv_data itself and the already fully
+    " materialised rt_objects, this was the tipping point that caused a
+    " SYSTEM_NO_ROLL crash on a large incremental (branch-switch) pack. An
+    " inline actual parameter is a temporary the runtime can release right
+    " after this statement instead.
+    lv_sha1 = zcl_abapgit_hash=>sha1_raw( iv_data(lv_len) ).
     IF to_upper( lv_sha1 ) <> lv_data.
       zcx_abapgit_exception=>raise( |SHA1 at end of pack doesn't match| ).
     ENDIF.
