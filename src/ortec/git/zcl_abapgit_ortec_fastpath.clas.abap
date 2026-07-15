@@ -766,22 +766,29 @@ METHOD upload_pack.
             ENDIF.
           ENDIF.
         ENDIF.
-      CATCH zcx_abapgit_exception.
+      CATCH zcx_abapgit_exception INTO DATA(lx_decode).
+        " Do not fall back to standard decode on THESE SAME bytes here: a
+        " thin/deepen fetch can legitimately contain OBJ_OFS_DELTA entries,
+        " which the standard decoder cannot parse at all (it has no OFS
+        " support), and even a genuinely self-contained pack that failed
+        " here for some other reason should be re-fetched fresh rather than
+        " re-parsed by a decoder never built/tested for Ortec-scale packs.
+        " Feeding such bytes to zcl_abapgit_git_pack=>decode's
+        " cl_abap_gzip=>decompress_binary call can desynchronize its
+        " position tracking and crash the work process with SYSTEM_NO_ROLL
+        " (kernel attempting an unbounded allocation on corrupt/misaligned
+        " input) rather than failing cleanly. Re-raise instead and let the
+        " caller's existing thin -> non-thin -> standard-via-transport-catch
+        " cascade handle escalation, which always re-negotiates a fresh,
+        " capability-appropriate pack rather than reusing these bytes.
+        zcx_abapgit_ortec_git=>raise( |Ortec decode failed: { lx_decode->get_text( ) }| ).
     ENDTRY.
 
-    " Fastpath decode failed or was not applicable - falling back to the
-    " standard decoder. It may still need to resolve a ref-delta base via
-    " zcl_abapgit_ortec_obj_store=>get_object's blank-iv_repo_key fallback
-    " (zcl_abapgit_git_delta=>delta has no repo context in its signature),
-    " so make sure the correct repo_key is active rather than relying on it
-    " being set as an accidental side effect of an earlier, unrelated call.
-    zcl_abapgit_ortec_obj_store=>set_active_repo_key( lv_ortec_rk ).
-    rt_objects = zcl_abapgit_git_pack=>decode( lv_pack ).
-    lv_fetch_duration = lo_fetch_timer->end( ).
-    li_progress = zcl_abapgit_progress=>get_instance( 1 ).
-    li_progress->show(
-      iv_current = 1
-      iv_text    = |Fetch: { lines( rt_objects ) } git objects, { lv_fetch_duration }| ).
+    " decode_and_persist is only skipped when Ortec is inactive for this repo
+    " (is_active_for_repo = false) or no repo key could be resolved; both are
+    " legitimate reasons this method may be reached with fastpath having
+    " done nothing. Any actual decode failure above already re-raised.
+    zcx_abapgit_ortec_git=>raise( 'Ortec decode not applicable for this repo' ).
 
   ENDMETHOD.
 

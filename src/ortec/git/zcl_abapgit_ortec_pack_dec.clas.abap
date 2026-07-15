@@ -753,8 +753,6 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
                                   WITH UNIQUE KEY table_line.
     DATA lt_db_delta_bases  TYPE STANDARD TABLE OF zif_abapgit_git_definitions=>ty_sha1
                     WITH EMPTY KEY.
-    DATA lt_missing_bases   TYPE STANDARD TABLE OF zif_abapgit_git_definitions=>ty_sha1
-                                  WITH EMPTY KEY.
     TYPES: BEGIN OF ty_base_row,
              obj_sha1 TYPE zaog_obj_store-obj_sha1,
              obj_type TYPE zaog_obj_store-obj_type,
@@ -1209,27 +1207,18 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
         INSERT ls_object-sha1 INTO TABLE lt_base_shas.
       ENDLOOP.
 
-      " Missing bases should be very rare after verified-have negotiation and
-      " invalidate_all_history self-heal. Never do a full-repo scan here: it
-      " explodes DB I/O on large repos and can itself cause timeout. Bases
-      " already present in the current pack are valid and exempt from the DB set.
-      LOOP AT lt_delta_bases INTO DATA(lv_need).
-        READ TABLE lt_pack_shas WITH TABLE KEY table_line = lv_need
-          TRANSPORTING NO FIELDS.
-        IF sy-subrc = 0.
-          CONTINUE.
-        ENDIF.
-        READ TABLE lt_base_shas WITH TABLE KEY table_line = lv_need
-          TRANSPORTING NO FIELDS.
-        IF sy-subrc <> 0.
-          APPEND lv_need TO lt_missing_bases.
-        ENDIF.
-      ENDLOOP.
-
-      IF lt_missing_bases IS NOT INITIAL.
-        zcx_abapgit_exception=>raise(
-          |Delta base not found in pack/store ({ lines( lt_missing_bases ) } missing) - retry with full/deepen fetch| ).
-      ENDIF.
+      " No "missing base" pre-check here anymore. lt_pack_shas only records
+      " objects that are ALREADY non-delta at this raw-scan point, before any
+      " resolution has run - a base that is itself still an unresolved
+      " ref_d/ofs_d entry in this very pack (a delta chained onto another
+      " delta, extremely common in real packs) would be wrongly flagged as
+      " "missing" even though zcl_abapgit_ortec_delta=>resolve_all/resolve_one
+      " below can resolve it directly from the pack, regardless of pack
+      " order. resolve_one already raises a precise, per-object
+      " "Delta base not found, <sha1>" error (via its own on-demand thin
+      " fetch) for any base that turns out to be genuinely absent from both
+      " this pack and the object store - that is the single, correct place
+      " to detect and report an actually-missing base.
     ENDIF.
 
     zcl_abapgit_ortec_delta=>resolve_all(

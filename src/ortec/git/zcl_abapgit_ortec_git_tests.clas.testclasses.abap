@@ -962,6 +962,7 @@ CLASS ltcl_ref_delta DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
     METHODS base_positioned_after_dependent FOR TESTING RAISING cx_static_check.
     METHODS resolve_after_prior_resolution_in_same_pass FOR TESTING RAISING cx_static_check.
     METHODS two_thin_bases_do_not_collide FOR TESTING RAISING cx_static_check.
+    METHODS chain_onto_later_unresolved_delta FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 CLASS ltcl_ref_delta IMPLEMENTATION.
 
@@ -1183,6 +1184,91 @@ CLASS ltcl_ref_delta IMPLEMENTATION.
     READ TABLE lt_objects INTO ls_object WITH KEY index = 2.
     cl_abap_unit_assert=>assert_equals( act = ls_object-data exp = '4242424221'
       msg = 'The second delta must resolve against its own thin base "BBBB", not the first' ).
+  ENDMETHOD.
+
+  METHOD chain_onto_later_unresolved_delta.
+    " Regression for the multi-pass fixpoint fix: A (index 1) is a REF_DELTA
+    " declaring a dependency on B's REAL identity, but B (index 2, positioned
+    " AFTER A) is ITSELF still an unresolved REF_DELTA at pack-scan time - its
+    " -sha1 field currently holds ITS OWN declared dependency (C's identity),
+    " not yet B's real identity. A single ascending pass over the pack can
+    " never find B for A (B's row does not carry B's real identity until AFTER
+    " B itself is resolved, and resolve_all would already have moved past
+    " object 1 by the time object 2 is reached). Before the fix this raised
+    " "Delta base not found" even though the whole chain is fully resolvable
+    " from within this single pack. This is also the shape of the real-world
+    " "Delta base not found in pack/store (N missing)" failure: a raw
+    " pre-scan (in zcl_abapgit_ortec_pack_dec) that only recognizes
+    " ALREADY-non-delta objects as "in the pack" would flag B's needed
+    " identity as external/missing purely because B had not been resolved
+    " yet, even though it never leaves this pack.
+    DATA lt_objects      TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA ls_object       LIKE LINE OF lt_objects.
+    DATA lt_offset_map   TYPE zcl_abapgit_ortec_delta=>ty_offset_map_tt.
+    DATA lt_ofs_meta     TYPE zcl_abapgit_ortec_delta=>ty_ofs_meta_tt.
+    DATA lv_expected_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_b_sha        TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_c_sha        TYPE zif_abapgit_git_definitions=>ty_sha1.
+
+    " C = "Hi" (2 bytes), the real, plain base at the end of the chain.
+    lv_c_sha = zcl_abapgit_hash=>sha1_blob( '4869' ).
+    " B = "Hi!" (3 bytes), produced by applying object 2's delta to C.
+    lv_b_sha = zcl_abapgit_hash=>sha1_blob( '486921' ).
+
+    " Object 1 (A): REF_DELTA declaring a dependency on B's real identity.
+    " Delta: base-size(3) result-size(4), copy(off=0,len=3), insert(1,'!')
+    " -> applying against B's eventual content "Hi!" yields "Hi!!".
+    CLEAR ls_object.
+    ls_object-type  = zif_abapgit_git_definitions=>c_type-ref_d.
+    ls_object-sha1  = lv_b_sha. " declared dependency: B's real identity
+    ls_object-data  = '030490030121'.
+    ls_object-index = 1.
+    APPEND ls_object TO lt_objects.
+    INSERT VALUE #( pack_offset = 0 obj_index = 1 ) INTO TABLE lt_offset_map.
+
+    " Object 2 (B): REF_DELTA declaring a dependency on C's real identity -
+    " ITS OWN -sha1 is C's identity, NOT B's identity, until resolved.
+    " Positioned AFTER object 1, the dependent that needs B.
+    " Delta: base-size(2) result-size(3), copy(off=0,len=2), insert(1,'!')
+    " -> applying against C's content "Hi" yields "Hi!".
+    CLEAR ls_object.
+    ls_object-type  = zif_abapgit_git_definitions=>c_type-ref_d.
+    ls_object-sha1  = lv_c_sha. " declared dependency: C's real identity
+    ls_object-data  = '020390020121'.
+    ls_object-index = 2.
+    APPEND ls_object TO lt_objects.
+    INSERT VALUE #( pack_offset = 10 obj_index = 2 ) INTO TABLE lt_offset_map.
+
+    " Object 3 (C): the real, plain base at the very end of the chain.
+    CLEAR ls_object.
+    ls_object-type  = zif_abapgit_git_definitions=>c_type-blob.
+    ls_object-data  = '4869'.
+    ls_object-sha1  = lv_c_sha.
+    ls_object-index = 3.
+    APPEND ls_object TO lt_objects.
+    INSERT VALUE #( pack_offset = 20 obj_index = 3 ) INTO TABLE lt_offset_map.
+
+    zcl_abapgit_ortec_delta=>resolve_all(
+      EXPORTING
+        it_offset_map = lt_offset_map
+        it_ofs_meta   = lt_ofs_meta
+        iv_repo_key   = mc_repo
+      CHANGING
+        ct_objects    = lt_objects ).
+
+    READ TABLE lt_objects INTO ls_object WITH KEY index = 2.
+    cl_abap_unit_assert=>assert_equals( act = ls_object-data exp = '486921'
+      msg = 'The intermediate delta (B) must resolve against its real base (C) ' &&
+            'even though B itself is only reached later in the ascending pass' ).
+
+    READ TABLE lt_objects INTO ls_object WITH KEY index = 1.
+    cl_abap_unit_assert=>assert_equals( act = ls_object-data exp = '48692121'
+      msg = 'The dependent delta (A) must resolve against its real base (B) even ' &&
+            'though B was still an unresolved delta - not yet a plain object - the ' &&
+            'first time A was attempted' ).
+
+    lv_expected_sha = zcl_abapgit_hash=>sha1_blob( '48692121' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_object-sha1 exp = lv_expected_sha ).
   ENDMETHOD.
 
 ENDCLASS.

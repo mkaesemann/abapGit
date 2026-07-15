@@ -155,11 +155,26 @@ CLASS zcl_abapgit_ortec_delta DEFINITION
     TYPES ty_tabix_by_index_tt TYPE HASHED TABLE OF ty_tabix_by_index WITH UNIQUE KEY obj_index.
 
     CLASS-METHODS resolve_one
-      IMPORTING iv_tabix          TYPE i
-                iv_depth          TYPE i
-                it_offset_map     TYPE ty_offset_map_tt
-                it_ofs_meta       TYPE ty_ofs_meta_tt
-                iv_repo_key       TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
+      IMPORTING iv_tabix            TYPE i
+                iv_depth            TYPE i
+                it_offset_map       TYPE ty_offset_map_tt
+                it_ofs_meta         TYPE ty_ofs_meta_tt
+                iv_repo_key         TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
+                "! When abap_false, a REF_DELTA base not yet reconstructable
+                "! from ct_objects alone is left unresolved (RETURN, no
+                "! object-store fetch, no raise) instead of being treated as
+                "! authoritative. Used by resolve_all's phase-1 sweeps: a
+                "! single ascending pass cannot resolve a REF_DELTA chained
+                "! onto ANOTHER unresolved REF_DELTA positioned later in the
+                "! pack (REF_DELTA carries no ordering guarantee), so
+                "! multiple in-pack-only sweeps run first: each sweep can
+                "! only newly resolve entries whose base was resolved by a
+                "! PRIOR sweep, so repeating them converges on any chain
+                "! regardless of topological order without repeatedly
+                "! hitting the object store for the same still-unresolved
+                "! object. Defaults to abap_true (fetch/raise immediately)
+                "! for the final pass and every existing/recursive caller.
+                iv_allow_thin_fetch TYPE abap_bool DEFAULT abap_true
       CHANGING  ct_objects        TYPE zif_abapgit_definitions=>ty_objects_tt
                 ct_tabix_by_index TYPE ty_tabix_by_index_tt
       RAISING   zcx_abapgit_exception.
@@ -342,8 +357,10 @@ CLASS zcl_abapgit_ortec_delta IMPLEMENTATION.
   METHOD resolve_all.
     DATA lv_tabix          TYPE i.
     DATA lt_tabix_by_index TYPE ty_tabix_by_index_tt.
+    DATA lv_pass_progress  TYPE abap_bool.
 
     FIELD-SYMBOLS <ls_object_init> TYPE zif_abapgit_definitions=>ty_object.
+    FIELD-SYMBOLS <ls_sweep>       TYPE zif_abapgit_definitions=>ty_object.
 
     " Plain (non-keyed) loop over the primary table - sy-tabix here IS the
     " correct primary index. See ty_tabix_by_index for why this exists.
@@ -352,6 +369,58 @@ CLASS zcl_abapgit_ortec_delta IMPLEMENTATION.
         INTO TABLE lt_tabix_by_index.
     ENDLOOP.
 
+    " Phase 1: repeat ascending sweeps, resolving only bases already
+    " reconstructable purely in-pack (iv_allow_thin_fetch = abap_false - no
+    " object-store round-trip, no raise on "not found yet"). A single
+    " ascending pass cannot resolve a REF_DELTA chained onto ANOTHER
+    " unresolved REF_DELTA positioned LATER in the pack (REF_DELTA carries
+    " no ordering guarantee, and delta-on-delta chains are common in real
+    " packs) - each sweep can only newly resolve entries whose base was
+    " resolved by a PRIOR sweep, so repeating full sweeps until one makes no
+    " further progress converges on any such chain regardless of
+    " topological order. Bounded by the pack's actual maximum delta-chain
+    " depth (c_max_chain_depth <= 64), not by object count, since real
+    " chains are always shallow - never O(n^2) in practice.
+    DO.
+      lv_pass_progress = abap_false.
+      lv_tabix = 0.
+      WHILE lv_tabix < lines( ct_objects ).
+        lv_tabix = lv_tabix + 1.
+        READ TABLE ct_objects ASSIGNING <ls_sweep> INDEX lv_tabix.
+        IF sy-subrc <> 0.
+          CONTINUE.
+        ENDIF.
+        IF <ls_sweep>-type <> zif_abapgit_git_definitions=>c_type-ref_d
+            AND <ls_sweep>-type <> c_type_ofs_d.
+          CONTINUE. " already resolved
+        ENDIF.
+        resolve_one(
+          EXPORTING
+            iv_tabix            = lv_tabix
+            iv_depth             = 1
+            it_offset_map        = it_offset_map
+            it_ofs_meta          = it_ofs_meta
+            iv_repo_key          = iv_repo_key
+            iv_allow_thin_fetch  = abap_false
+          CHANGING
+            ct_objects        = ct_objects
+            ct_tabix_by_index = lt_tabix_by_index ).
+        READ TABLE ct_objects ASSIGNING <ls_sweep> INDEX lv_tabix.
+        IF sy-subrc = 0
+            AND <ls_sweep>-type <> zif_abapgit_git_definitions=>c_type-ref_d
+            AND <ls_sweep>-type <> c_type_ofs_d.
+          lv_pass_progress = abap_true.
+        ENDIF.
+      ENDWHILE.
+      IF lv_pass_progress = abap_false.
+        EXIT.
+      ENDIF.
+    ENDDO.
+
+    " Phase 2: one final ascending pass, now allowing the object-store fetch
+    " and the precise "Delta base not found" raise - whatever remains
+    " unresolved after phase 1's fixpoint is either genuinely external
+    " (resolved via the object store) or truly missing.
     lv_tabix = 0.
     WHILE lv_tabix < lines( ct_objects ).
       lv_tabix = lv_tabix + 1.
@@ -403,22 +472,24 @@ CLASS zcl_abapgit_ortec_delta IMPLEMENTATION.
       " ref_d/ofs_d entry's -sha1 holds ITS OWN declared base (a
       " placeholder), never its own eventual identity - so a genuinely
       " unresolved base can NEVER legitimately match this search. Because
-      " the "sha" key is NON-UNIQUE, multiple entries (including possibly
-      " this very entry itself, or a sibling that shares the same declared
-      " base, or a true base that happens to be positioned AFTER its
-      " dependent in the pack - REF_DELTA carries no ordering guarantee)
-      " can simultaneously carry the identical placeholder/identity value.
-      " A plain first-match lookup can then pick an unresolved delta's raw,
-      " still-undecoded instruction bytes instead of the true base,
-      " producing failures such as "Delta copy instruction exceeds base
-      " length" or a spurious "chain exceeds maximum depth" (self-match).
-      " Skip any candidate still of type ref_d/ofs_d and keep scanning
-      " same-valued rows for one that is already genuinely resolved.
+      " the "sha" key is NON-UNIQUE, multiple entries (including a sibling
+      " that shares the same declared base, or a true base that happens to
+      " be positioned AFTER its dependent in the pack - REF_DELTA carries
+      " no ordering guarantee) can simultaneously carry the identical
+      " placeholder/identity value. Skip self and anything still
+      " ref_d/ofs_d (an unresolved candidate can never be a valid match:
+      " resolving it only changes ITS OWN identity, it does not retroactively
+      " make it equal the value being searched for) - resolve_all's
+      " multi-pass sweep is what makes a later-resolved base find-able here,
+      " by the time this same entry is revisited in a subsequent pass.
       CLEAR lv_base_tabix.
       lv_found_obj_index = -1.
       LOOP AT ct_objects ASSIGNING <ls_base>
           USING KEY sha
           WHERE sha1 = <ls_object>-sha1.
+        IF <ls_base>-index = <ls_object>-index.
+          CONTINUE. " never match self
+        ENDIF.
         IF <ls_base>-type <> zif_abapgit_git_definitions=>c_type-ref_d
             AND <ls_base>-type <> c_type_ofs_d.
           lv_found_obj_index = <ls_base>-index.
@@ -443,9 +514,19 @@ CLASS zcl_abapgit_ortec_delta IMPLEMENTATION.
       ENDIF.
 
       IF lv_base_tabix IS INITIAL.
-        " No already-resolved candidate exists yet - thin base (fetch from
-        " the persistent object store), or a case this decoder cannot
-        " safely resolve from the current pack alone.
+        IF iv_allow_thin_fetch = abap_false.
+          " Not yet resolvable purely in-pack (its true base may itself be
+          " an unresolved delta elsewhere in the pack, not reached by a
+          " prior sweep yet). Leave this entry as-is; resolve_all's next
+          " sweep will retry it. Do NOT fetch from the object store or
+          " raise here - that would treat "not yet" as "never", the exact
+          " bug this parameter exists to avoid.
+          RETURN.
+        ENDIF.
+        " No already-resolved candidate exists anywhere in the pack, even
+        " after every possible in-pack sweep - thin base (fetch from the
+        " persistent object store), or a case this decoder cannot safely
+        " resolve from the current pack alone.
         TRY.
             ls_base_object = zcl_abapgit_ortec_obj_store=>get_object(
               iv_repo_key = iv_repo_key
@@ -471,16 +552,24 @@ CLASS zcl_abapgit_ortec_delta IMPLEMENTATION.
         ENDIF.
         INSERT VALUE #( obj_index = ls_base_object-index tabix = lines( ct_objects ) )
           INTO TABLE ct_tabix_by_index.
+        " The APPEND above may have reallocated ct_objects, invalidating
+        " <ls_object> (obtained before it ran) - re-bind before it is read
+        " again by the sanity check below.
+        READ TABLE ct_objects ASSIGNING <ls_object> INDEX iv_tabix.
+        IF sy-subrc <> 0.
+          zcx_abapgit_exception=>raise( |Delta resolve: internal index { iv_tabix } out of range| ).
+        ENDIF.
       ELSE.
         " Already resolved (or always a plain object) - resolve_one is a
         " no-op in that case; kept for symmetry/defensiveness.
         resolve_one(
           EXPORTING
-            iv_tabix      = lv_base_tabix
-            iv_depth      = iv_depth + 1
-            it_offset_map = it_offset_map
-            it_ofs_meta   = it_ofs_meta
-            iv_repo_key   = iv_repo_key
+            iv_tabix            = lv_base_tabix
+            iv_depth            = iv_depth + 1
+            it_offset_map       = it_offset_map
+            it_ofs_meta         = it_ofs_meta
+            iv_repo_key         = iv_repo_key
+            iv_allow_thin_fetch = iv_allow_thin_fetch
           CHANGING
             ct_objects        = ct_objects
             ct_tabix_by_index = ct_tabix_by_index ).
@@ -549,11 +638,12 @@ CLASS zcl_abapgit_ortec_delta IMPLEMENTATION.
           OR <ls_base>-type = c_type_ofs_d.
         resolve_one(
           EXPORTING
-            iv_tabix      = lv_base_tabix
-            iv_depth      = iv_depth + 1
-            it_offset_map = it_offset_map
-            it_ofs_meta   = it_ofs_meta
-            iv_repo_key   = iv_repo_key
+            iv_tabix            = lv_base_tabix
+            iv_depth            = iv_depth + 1
+            it_offset_map       = it_offset_map
+            it_ofs_meta         = it_ofs_meta
+            iv_repo_key         = iv_repo_key
+            iv_allow_thin_fetch = iv_allow_thin_fetch
           CHANGING
             ct_objects        = ct_objects
             ct_tabix_by_index = ct_tabix_by_index ).
@@ -566,9 +656,17 @@ CLASS zcl_abapgit_ortec_delta IMPLEMENTATION.
 
     IF <ls_base>-type = zif_abapgit_git_definitions=>c_type-ref_d
         OR <ls_base>-type = c_type_ofs_d.
+      IF iv_allow_thin_fetch = abap_false.
+        " OFS base is itself a REF_DELTA/OFS_DELTA that couldn't be resolved
+        " purely in-pack yet this sweep (e.g. ITS OWN base is a REF_DELTA
+        " positioned later in the pack) - leave this entry unresolved too;
+        " resolve_all's next sweep will retry it once that dependency is
+        " resolved.
+        RETURN.
+      ENDIF.
       " Defensive: resolve_one above must have turned the base into a real
-      " object; this should be unreachable, but never apply a delta on top of
-      " another unresolved delta.
+      " object; this should be unreachable during the final pass, but never
+      " apply a delta on top of another unresolved delta.
       zcx_abapgit_exception=>raise( |Delta, base still unresolved| ).
     ENDIF.
 
