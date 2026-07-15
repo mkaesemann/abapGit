@@ -1167,17 +1167,21 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
     COMMIT WORK.
 
     lv_len = xstrlen( iv_data ) - 20.
-    " Pass the slice directly instead of assigning it to a named variable
-    " first: lv_xstring is reused elsewhere in this method for a 4-byte
-    " value, so assigning it here would reallocate it to hold a second,
-    " near-full copy of iv_data that then stays resident (a named local
-    " is never freed until the method returns) for the remainder of this
+    " ABAP does not allow offset/length notation on a STRING/XSTRING field
+    " to be used as an inline expression inside a method call's actual
+    " parameter (syntax error "Offsets or lengths cannot be specified for
+    " fields of type STRING or XSTRING in the current statement") - the
+    " assignment below is required. lv_xstring is reused earlier in this
+    " method for an unrelated 4-byte value, so this reallocates it to hold
+    " a near-full copy of iv_data; CLEAR it immediately after the hash call
+    " instead of leaving it resident (a named local otherwise stays
+    " allocated until the method returns) for the remainder of this
     " method's execution - on top of iv_data itself and the already fully
     " materialised rt_objects, this was the tipping point that caused a
-    " SYSTEM_NO_ROLL crash on a large incremental (branch-switch) pack. An
-    " inline actual parameter is a temporary the runtime can release right
-    " after this statement instead.
-    lv_sha1 = zcl_abapgit_hash=>sha1_raw( iv_data(lv_len) ).
+    " SYSTEM_NO_ROLL crash on a large incremental (branch-switch) pack.
+    lv_xstring = iv_data(lv_len).
+    lv_sha1 = zcl_abapgit_hash=>sha1_raw( lv_xstring ).
+    CLEAR lv_xstring.
     IF to_upper( lv_sha1 ) <> lv_data.
       zcx_abapgit_exception=>raise( |SHA1 at end of pack doesn't match| ).
     ENDIF.
