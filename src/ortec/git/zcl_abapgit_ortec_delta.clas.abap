@@ -344,13 +344,14 @@ CLASS zcl_abapgit_ortec_delta IMPLEMENTATION.
 
 
   METHOD resolve_one.
-    DATA ls_base_object  TYPE zif_abapgit_definitions=>ty_object.
-    DATA lv_base_tabix   TYPE i.
-    DATA lv_base_offset  TYPE i.
-    DATA lv_result       TYPE xstring.
-    DATA lv_final_sha1   TYPE zif_abapgit_git_definitions=>ty_sha1.
-    DATA ls_ofs_meta     TYPE ty_ofs_meta.
-    DATA ls_offset_entry TYPE ty_offset_entry.
+    DATA ls_base_object     TYPE zif_abapgit_definitions=>ty_object.
+    DATA lv_base_tabix      TYPE i.
+    DATA lv_base_offset     TYPE i.
+    DATA lv_result          TYPE xstring.
+    DATA lv_final_sha1      TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA ls_ofs_meta        TYPE ty_ofs_meta.
+    DATA ls_offset_entry    TYPE ty_offset_entry.
+    DATA lv_found_obj_index TYPE i.
 
     FIELD-SYMBOLS <ls_object> TYPE zif_abapgit_definitions=>ty_object.
     FIELD-SYMBOLS <ls_base>   TYPE zif_abapgit_definitions=>ty_object.
@@ -387,15 +388,33 @@ CLASS zcl_abapgit_ortec_delta IMPLEMENTATION.
       " Skip any candidate still of type ref_d/ofs_d and keep scanning
       " same-valued rows for one that is already genuinely resolved.
       CLEAR lv_base_tabix.
+      lv_found_obj_index = -1.
       LOOP AT ct_objects ASSIGNING <ls_base>
           USING KEY sha
           WHERE sha1 = <ls_object>-sha1.
         IF <ls_base>-type <> zif_abapgit_git_definitions=>c_type-ref_d
             AND <ls_base>-type <> c_type_ofs_d.
-          lv_base_tabix = sy-tabix.
+          lv_found_obj_index = <ls_base>-index.
           EXIT.
         ENDIF.
       ENDLOOP.
+
+      IF lv_found_obj_index <> -1.
+        " sy-tabix inside a "LOOP AT ... USING KEY sha" reflects the
+        " position within that SORTED SECONDARY key's own iteration order,
+        " NOT the primary table index (documented ABAP behavior). Using it
+        " directly as a primary index below would silently operate on an
+        " unrelated row whenever the pack's SHA1-sorted order differs from
+        " its pack/primary order - the normal case for any non-trivial
+        " pack. Re-derive the correct PRIMARY tabix from the object's own
+        " stable "index" field via a plain, non-keyed READ TABLE instead of
+        " trusting sy-tabix from the secondary-key loop.
+        READ TABLE ct_objects TRANSPORTING NO FIELDS
+          WITH KEY index = lv_found_obj_index.
+        IF sy-subrc = 0.
+          lv_base_tabix = sy-tabix.
+        ENDIF.
+      ENDIF.
 
       IF lv_base_tabix IS INITIAL.
         " No already-resolved candidate exists yet - thin base (fetch from
@@ -409,8 +428,12 @@ CLASS zcl_abapgit_ortec_delta IMPLEMENTATION.
             zcx_abapgit_exception=>raise( |Delta base not found, { <ls_object>-sha1 }| ).
         ENDTRY.
         APPEND ls_base_object TO ct_objects.
-        READ TABLE ct_objects ASSIGNING <ls_base>
-          WITH KEY sha COMPONENTS sha1 = <ls_object>-sha1.
+        " Bind directly to the row just appended (its primary index is
+        " exactly lines(ct_objects) at this point) instead of a first-match
+        " lookup on the non-unique "sha" key, which could otherwise match
+        " an unresolved sibling delta that merely shares the same declared
+        " base placeholder value.
+        READ TABLE ct_objects ASSIGNING <ls_base> INDEX lines( ct_objects ).
         IF sy-subrc <> 0.
           zcx_abapgit_exception=>raise( |Delta base not found, { <ls_object>-sha1 }| ).
         ENDIF.
