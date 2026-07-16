@@ -1659,6 +1659,14 @@ CLASS ltcl_pack_decoder DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHOR
     "! it created, instead of leaving orphaned data for a future resume
     "! attempt to stumble over.
     METHODS cleanup_after_decode_failure FOR TESTING RAISING cx_static_check.
+    "! Regression: resumable_decode's bulk external-delta-base prefetch merge
+    "! never set the merged objects' -index, so every prefetched base
+    "! defaulted to index = 0 and collided in resolve_all's UNIQUE-KEY
+    "! obj_index side-index, causing a delta correctly found by SHA1 to be
+    "! resolved against a completely different, unrelated prefetched base
+    "! ("Delta base identity mismatch"). Forces two distinct external bases
+    "! to be bulk-prefetched in one decode_and_persist call.
+    METHODS prefetch_bases_do_not_collide FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 CLASS ltcl_pack_decoder IMPLEMENTATION.
   METHOD setup.
@@ -1830,6 +1838,80 @@ CLASS ltcl_pack_decoder IMPLEMENTATION.
 
     SELECT COUNT(*) FROM zaog_raw_pack INTO lv_count WHERE repo_key = mc_repo.
     cl_abap_unit_assert=>assert_equals( act = lv_count exp = 0 msg = 'raw_pack cleaned up after failure' ).
+  ENDMETHOD.
+
+  METHOD prefetch_bases_do_not_collide.
+    DATA lv_base1_data TYPE xstring.
+    DATA lv_base2_data TYPE xstring.
+    DATA lv_base1_sha   TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_base2_sha   TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_base1_raw   TYPE x LENGTH 20.
+    DATA lv_base2_raw   TYPE x LENGTH 20.
+    DATA lv_delta       TYPE xstring.
+    DATA lv_compressed  TYPE xstring.
+    DATA lv_adler       TYPE zif_abapgit_git_definitions=>ty_adler32.
+    DATA lv_pack_magic  TYPE x LENGTH 4 VALUE '5041434B'.
+    DATA lv_version     TYPE x LENGTH 4 VALUE '00000002'.
+    DATA lv_obj_count   TYPE x LENGTH 4 VALUE '00000002'.
+    DATA lv_zlib_hdr    TYPE x LENGTH 2 VALUE '789C'.
+    DATA lv_type_len    TYPE x LENGTH 1 VALUE '76'. " ref_d (0x70) | length 6, no continuation
+    DATA lv_pack        TYPE xstring.
+    DATA lv_trailer_hex TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_trailer_raw TYPE x LENGTH 20.
+    DATA lt_res         TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lv_expect1_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_expect2_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+
+    lv_base1_data = '41414141'. " "AAAA"
+    lv_base2_data = '42424242'. " "BBBB"
+    lv_base1_sha = zcl_abapgit_hash=>sha1_blob( lv_base1_data ).
+    lv_base2_sha = zcl_abapgit_hash=>sha1_blob( lv_base2_data ).
+
+    " Both bases stored externally (as if from a prior fetch) - NEITHER is
+    " included in this pack, forcing resumable_decode's bulk external-base
+    " prefetch (the buggy merge loop) to fire for both.
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_base1_sha iv_type = 'blob' iv_data = lv_base1_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_base2_sha iv_type = 'blob' iv_data = lv_base2_data ).
+
+    " Delta: base-size(4) result-size(5), copy(off=0,len=4), insert(1,'!')
+    " -> applies identically to any 4-byte base, producing base & "!". Both
+    " pack entries use this exact same delta; they are distinguished only
+    " by their declared (20-byte raw) base SHA1.
+    lv_delta = '040590040121'.
+    cl_abap_gzip=>compress_binary( EXPORTING raw_in = lv_delta IMPORTING gzip_out = lv_compressed ).
+    lv_adler = zcl_abapgit_hash=>adler32( lv_delta ).
+
+    lv_base1_raw = lv_base1_sha.
+    lv_base2_raw = lv_base2_sha.
+
+    CONCATENATE lv_pack_magic lv_version lv_obj_count INTO lv_pack IN BYTE MODE.
+    CONCATENATE lv_pack lv_type_len lv_base1_raw lv_zlib_hdr lv_compressed lv_adler
+      INTO lv_pack IN BYTE MODE.
+    CONCATENATE lv_pack lv_type_len lv_base2_raw lv_zlib_hdr lv_compressed lv_adler
+      INTO lv_pack IN BYTE MODE.
+
+    lv_trailer_hex = zcl_abapgit_hash=>sha1_raw( lv_pack ).
+    lv_trailer_raw = lv_trailer_hex.
+    CONCATENATE lv_pack lv_trailer_raw INTO lv_pack IN BYTE MODE.
+
+    lt_res = zcl_abapgit_ortec_pack_dec=>decode_and_persist(
+      iv_data     = lv_pack
+      iv_repo_key = mc_repo ).
+
+    lv_expect1_sha = zcl_abapgit_hash=>sha1_blob( '4141414121' ). " "AAAA!"
+    lv_expect2_sha = zcl_abapgit_hash=>sha1_blob( '4242424221' ). " "BBBB!"
+
+    READ TABLE lt_res TRANSPORTING NO FIELDS
+      WITH KEY type COMPONENTS type = zif_abapgit_git_definitions=>c_type-blob sha1 = lv_expect1_sha.
+    cl_abap_unit_assert=>assert_subrc(
+      msg = 'The delta declaring base1 must resolve against base1 ("AAAA!"), not collide with base2' ).
+
+    READ TABLE lt_res TRANSPORTING NO FIELDS
+      WITH KEY type COMPONENTS type = zif_abapgit_git_definitions=>c_type-blob sha1 = lv_expect2_sha.
+    cl_abap_unit_assert=>assert_subrc(
+      msg = 'The delta declaring base2 must resolve against base2 ("BBBB!"), not collide with base1' ).
   ENDMETHOD.
 ENDCLASS.
 

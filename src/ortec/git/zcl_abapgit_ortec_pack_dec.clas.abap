@@ -1224,9 +1224,25 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
       ENDIF.
       LOOP AT lt_base_fetch INTO ls_base_row.
         CLEAR ls_object.
-        ls_object-sha1 = ls_base_row-obj_sha1.
-        ls_object-type = ls_base_row-obj_type.
-        ls_object-data = ls_base_row-obj_data.
+        ls_object-sha1  = ls_base_row-obj_sha1.
+        ls_object-type  = ls_base_row-obj_type.
+        ls_object-data  = ls_base_row-obj_data.
+        " This bulk prefetch never populated -index (only sha1/type/data
+        " were set above), so every prefetched base defaulted to index = 0.
+        " zcl_abapgit_ortec_delta=>resolve_all builds a HASHED TABLE keyed
+        " UNIQUE BY obj_index from every object's -index - with multiple
+        " bases all carrying index = 0, only the FIRST one actually got
+        " registered (INSERT into a hashed table silently no-ops on a
+        " duplicate key); resolve_one would then find the CORRECT base by
+        " SHA1, read its index (0, same for all), and look up that shared
+        " index - landing on whichever unrelated base was registered first
+        " instead of the one actually found. This is exactly the same class
+        " of bug already fixed for resolve_one's OWN on-demand thin-fetch
+        " (see two_thin_bases_do_not_collide) - this bulk prefetch is a
+        " separate code path that needed the identical fix: assign each
+        " merged object a real, unique index matching its actual position
+        " before it is added.
+        ls_object-index = lines( rt_objects ) + 1.
         INSERT ls_object INTO TABLE rt_objects.
         INSERT ls_object-sha1 INTO TABLE lt_base_shas.
       ENDLOOP.
