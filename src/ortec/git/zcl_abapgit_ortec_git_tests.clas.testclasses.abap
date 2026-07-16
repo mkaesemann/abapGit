@@ -2095,7 +2095,8 @@ CLASS ltcl_pack_decoder IMPLEMENTATION.
     " BEFORE calling decode_and_persist - isolates a test-construction bug
     " from a real decode-loop byte-miscount.
     DATA(lv_diag_len) = xstrlen( lv_pack ) - 20.
-    DATA(lv_diag_sha1) = to_upper( zcl_abapgit_hash=>sha1_raw( lv_pack(lv_diag_len) ) ).
+    DATA(lv_diag_body) = lv_pack(lv_diag_len).
+    DATA(lv_diag_sha1) = to_upper( zcl_abapgit_hash=>sha1_raw( lv_diag_body ) ).
     DATA(lv_diag_trailer) = lv_pack+lv_diag_len(20).
     cl_abap_unit_assert=>assert_equals( act = lv_diag_sha1 exp = lv_diag_trailer
       msg = |DIAG SELFCHECK: pack_len={ xstrlen( lv_pack ) } computed={ lv_diag_sha1 } trailer={ lv_diag_trailer }| ).
