@@ -1269,8 +1269,17 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
       CHANGING
         ct_objects    = rt_objects ).
 
-    " Promote temp rows to resolved object store rows (batched for performance).
-    " Skip base objects (lt_base_shas): they already exist in DB with status 'R'.
+    " Promote temp rows to resolved object store rows AND update pack index
+    " status to 'D' (decoded), in one merged pass, batched every
+    " lv_commit_interval objects instead of accumulating a second full-size
+    " copy of every new object's data (lt_final_rows) alongside rt_objects
+    " for the whole method - that double-buffering was a major contributor
+    " to SYSTEM_NO_ROLL crashes on large packs. Skip base objects
+    " (lt_base_shas): they already exist in DB with status 'R' and have no
+    " entry in this pack's index.
+    DATA lt_idx_upd      TYPE zcl_abapgit_ortec_pack_index=>tty_index_entries_upd.
+    DATA ls_idx_upd      TYPE zcl_abapgit_ortec_pack_index=>ty_index_entries_upd.
+    DATA lv_final_count  TYPE i.
     GET TIME STAMP FIELD lv_ts.
     LOOP AT rt_objects INTO ls_object.
       " Skip base objects that were merged for delta resolution only.
@@ -1279,6 +1288,7 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
           TRANSPORTING NO FIELDS.
         IF sy-subrc = 0. CONTINUE. ENDIF.
       ENDIF.
+
       CLEAR ls_row.
       ls_row-repo_key   = iv_repo_key.
       ls_row-pack_id    = iv_pack_id.
@@ -1289,28 +1299,24 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
       ls_row-created_at = lv_ts.
       ls_row-status     = 'R'.
       APPEND ls_row TO lt_final_rows.
-    ENDLOOP.
-    IF lt_final_rows IS NOT INITIAL.
-      MODIFY zaog_obj_store FROM TABLE lt_final_rows.
-    ENDIF.
 
-    " Batch update pack index status to 'D' (decoded) — new objects only.
-    " Base objects (lt_base_shas) have no entries in this pack's index; skip them.
-    DATA lt_idx_upd TYPE zcl_abapgit_ortec_pack_index=>tty_index_entries_upd.
-    DATA ls_idx_upd TYPE zcl_abapgit_ortec_pack_index=>ty_index_entries_upd.
-    LOOP AT rt_objects INTO ls_object.
-      IF lt_base_shas IS NOT INITIAL.
-        READ TABLE lt_base_shas WITH TABLE KEY table_line = ls_object-sha1
-          TRANSPORTING NO FIELDS.
-        IF sy-subrc = 0. CONTINUE. ENDIF.
-      ENDIF.
       CLEAR ls_idx_upd.
       ls_idx_upd-dec_status          = 'D'.
       ls_idx_upd-obj_sha1            = ls_object-sha1.
       ls_idx_upd-_control-dec_status = if_abap_behv=>mk-on.
       ls_idx_upd-_control-obj_sha1   = if_abap_behv=>mk-on.
       APPEND ls_idx_upd TO lt_idx_upd.
+
+      lv_final_count = lv_final_count + 1.
+      IF lv_final_count MOD lv_commit_interval = 0.
+        MODIFY zaog_obj_store FROM TABLE lt_final_rows.
+        CLEAR lt_final_rows.
+      ENDIF.
     ENDLOOP.
+    IF lt_final_rows IS NOT INITIAL.
+      MODIFY zaog_obj_store FROM TABLE lt_final_rows.
+    ENDIF.
+
     zcl_abapgit_ortec_pack_index=>update_entries(
         iv_repo_key = iv_repo_key
         iv_pack_id  = iv_pack_id
