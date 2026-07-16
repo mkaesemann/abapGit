@@ -134,6 +134,39 @@ CLASS zcl_abapgit_ortec_fastpath DEFINITION
                 iv_repo_key        TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
       RETURNING VALUE(rv_applicable) TYPE abap_bool.
 
+    "! Build the pkt-line request buffer for a git upload-pack request
+    "! (want/shallow/deepen/flush/have/done). Public so unit tests can
+    "! verify the wire-line shape and ordering directly without a live
+    "! HTTP client - see zcl_abapgit_ortec_git_tests.clas.testclasses.abap
+    "! ltcl_fastpath_protocol.
+    CLASS-METHODS build_upload_pack_buffer
+      IMPORTING
+        iv_deepen_level TYPE i DEFAULT 0
+        it_hashes       TYPE zif_abapgit_git_definitions=>ty_sha1_tt
+        it_ortec_haves  TYPE zif_abapgit_git_definitions=>ty_sha1_tt OPTIONAL
+        iv_allow_thin   TYPE abap_bool DEFAULT abap_false
+        iv_force_full   TYPE abap_bool DEFAULT abap_false
+      RETURNING
+        VALUE(rv_buffer) TYPE string.
+
+    "! Parse a pkt-line response stream: extracts side-band channel 1
+    "! (packfile) bytes into ev_pack, and best-effort collects any plain
+    "! (non-side-band) "shallow"/"unshallow" response lines the server may
+    "! send before the packfile when the request included shallow/deepen
+    "! lines. Public so unit tests can verify pkt-line parsing directly
+    "! without a live HTTP client - see
+    "! zcl_abapgit_ortec_git_tests.clas.testclasses.abap ltcl_fastpath_protocol.
+    CLASS-METHODS parse
+      EXPORTING
+        ev_pack       TYPE xstring
+        et_shallow    TYPE zif_abapgit_git_definitions=>ty_sha1_tt
+        et_unshallow  TYPE zif_abapgit_git_definitions=>ty_sha1_tt
+      CHANGING
+        cv_data TYPE xstring
+      RAISING
+        zcx_abapgit_ortec_git
+        zcx_abapgit_exception.
+
   PRIVATE SECTION.
     "! Resolve repo key from URL. Creates new key if none found.
     "! @parameter iv_url |
@@ -154,15 +187,6 @@ CLASS zcl_abapgit_ortec_fastpath DEFINITION
         iv_force_full   TYPE abap_bool DEFAULT abap_false
       RETURNING
         VALUE(rt_objects) TYPE zif_abapgit_definitions=>ty_objects_tt
-      RAISING
-        zcx_abapgit_ortec_git
-        zcx_abapgit_exception.
-
-    CLASS-METHODS parse
-      EXPORTING
-        ev_pack TYPE xstring
-      CHANGING
-        cv_data TYPE xstring
       RAISING
         zcx_abapgit_ortec_git
         zcx_abapgit_exception.
@@ -811,21 +835,14 @@ METHOD pull_by_branch.
 
 METHOD upload_pack.
 
-    DATA lv_capa    TYPE string.
-    DATA lv_line    TYPE string.
     DATA lv_buffer  TYPE string.
     DATA lv_xstring TYPE xstring.
     DATA lv_pack    TYPE xstring.
     DATA lt_ortec_haves TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
-    DATA lv_advertise_thin TYPE abap_bool.
-    DATA lv_effective_deepen TYPE i.
 
     DATA lo_fetch_timer   TYPE REF TO zcl_abapgit_timer.
     DATA lv_fetch_duration TYPE string.
     DATA li_progress      TYPE REF TO zif_abapgit_progress.
-
-    FIELD-SYMBOLS <lv_hash> LIKE LINE OF it_hashes.
-    FIELD-SYMBOLS <lv_ortec_have> LIKE LINE OF lt_ortec_haves.
 
 
     io_client->set_headers(
@@ -860,56 +877,12 @@ METHOD upload_pack.
       ENDTRY.
     ENDIF.
 
-    " Only advertise thin-pack/ofs-delta when the caller allowed it AND at
-    " least one verified-complete have exists to delta against - otherwise
-    " thin capability would be pointless (nothing to delta against) or, if
-    " haves existed but were unverified, unsafe.
-    lv_advertise_thin = xsdbool( iv_allow_thin = abap_true AND lt_ortec_haves IS NOT INITIAL ).
-
-    LOOP AT it_hashes FROM 1 ASSIGNING <lv_hash>.
-      IF sy-tabix = 1.
-        IF lv_advertise_thin = abap_true.
-          lv_capa = 'side-band-64k no-progress multi_ack thin-pack ofs-delta'.
-        ELSE.
-          lv_capa = 'side-band-64k no-progress multi_ack'.
-        ENDIF.
-        lv_line = 'want' && ` ` && <lv_hash>
-          && ` ` && lv_capa && cl_abap_char_utilities=>newline.
-      ELSE.
-        lv_line = 'want' && ` ` && <lv_hash>
-          && cl_abap_char_utilities=>newline.
-      ENDIF.
-      lv_buffer = lv_buffer && zcl_abapgit_git_utils=>pkt_string( lv_line ).
-    ENDLOOP.
-
-    " Only send deepen when we have NO cached objects (first fetch).
-    " With deepen, the server ignores have lines and sends a full shallow pack.
-    " Without deepen (but with haves), the server sends only the delta.
-    " Whenever there are NO haves at all, ALWAYS send at least deepen 1 -
-    " confirmed live that an empty have-set combined with iv_deepen_level=0
-    " sends neither a deepen line nor any have lines, which is standard git
-    " wire-protocol shorthand for "send the complete history from the
-    " beginning of the repo" (the same class of bug fixed for
-    " zcl_abapgit_ortec_missing_obj=>ensure_available's own call site
-    " earlier - this closes the same gap for every caller of this method,
-    " not just that one).
-    IF lt_ortec_haves IS INITIAL.
-      lv_effective_deepen = iv_deepen_level.
-      IF lv_effective_deepen <= 0.
-        lv_effective_deepen = 1.
-      ENDIF.
-      lv_buffer = lv_buffer && zcl_abapgit_git_utils=>pkt_string( |deepen { lv_effective_deepen }| &&
-        cl_abap_char_utilities=>newline ).
-    ENDIF.
-
-    lv_buffer = lv_buffer && '0000'.
-
-    LOOP AT lt_ortec_haves ASSIGNING <lv_ortec_have>.
-      lv_buffer = lv_buffer && zcl_abapgit_git_utils=>pkt_string(
-        |have { <lv_ortec_have> }{ cl_abap_char_utilities=>newline }| ).
-    ENDLOOP.
-
-    lv_buffer = lv_buffer && '0009done' && cl_abap_char_utilities=>newline.
+    lv_buffer = build_upload_pack_buffer(
+      iv_deepen_level = iv_deepen_level
+      it_hashes       = it_hashes
+      it_ortec_haves  = lt_ortec_haves
+      iv_allow_thin   = iv_allow_thin
+      iv_force_full   = iv_force_full ).
 
     lo_fetch_timer = zcl_abapgit_timer=>create( )->start( ).
     lv_xstring = io_client->send_receive_close( zcl_abapgit_convert=>string_to_xstring_utf8( lv_buffer ) ).
@@ -1083,6 +1056,82 @@ METHOD upload_pack.
   ENDMETHOD.
 
 
+  METHOD build_upload_pack_buffer.
+
+    DATA lv_capa    TYPE string.
+    DATA lv_line    TYPE string.
+    DATA lv_buffer  TYPE string.
+    DATA lv_advertise_thin TYPE abap_bool.
+    DATA lv_effective_deepen TYPE i.
+
+    FIELD-SYMBOLS <lv_hash> LIKE LINE OF it_hashes.
+    FIELD-SYMBOLS <lv_ortec_have> LIKE LINE OF it_ortec_haves.
+
+    " Only advertise thin-pack/ofs-delta when the caller allowed it AND at
+    " least one verified-complete have exists to delta against - otherwise
+    " thin capability would be pointless (nothing to delta against) or, if
+    " haves existed but were unverified, unsafe.
+    lv_advertise_thin = xsdbool( iv_allow_thin = abap_true AND it_ortec_haves IS NOT INITIAL ).
+
+    LOOP AT it_hashes FROM 1 ASSIGNING <lv_hash>.
+      IF sy-tabix = 1.
+        IF lv_advertise_thin = abap_true.
+          lv_capa = 'side-band-64k no-progress multi_ack thin-pack ofs-delta'.
+        ELSE.
+          lv_capa = 'side-band-64k no-progress multi_ack'.
+        ENDIF.
+        lv_line = 'want' && ` ` && <lv_hash>
+          && ` ` && lv_capa && cl_abap_char_utilities=>newline.
+      ELSE.
+        lv_line = 'want' && ` ` && <lv_hash>
+          && cl_abap_char_utilities=>newline.
+      ENDIF.
+      lv_buffer = lv_buffer && zcl_abapgit_git_utils=>pkt_string( lv_line ).
+    ENDLOOP.
+
+    IF iv_force_full = abap_false AND it_ortec_haves IS NOT INITIAL.
+      LOOP AT it_ortec_haves ASSIGNING <lv_ortec_have>.
+        lv_buffer = lv_buffer && zcl_abapgit_git_utils=>pkt_string(
+          |shallow { <lv_ortec_have> }{ cl_abap_char_utilities=>newline }| ).
+      ENDLOOP.
+    ENDIF.
+
+    " Only send deepen when we have NO cached objects (first fetch).
+    " With deepen, the server ignores have lines and sends a full shallow pack.
+    " Without deepen (but with haves), the server sends only the delta.
+    " Whenever there are NO haves at all, ALWAYS send at least deepen 1 -
+    " confirmed live that an empty have-set combined with iv_deepen_level=0
+    " sends neither a deepen line nor any have lines, which is standard git
+    " wire-protocol shorthand for "send the complete history from the
+    " beginning of the repo" (the same class of bug fixed for
+    " zcl_abapgit_ortec_missing_obj=>ensure_available's own call site
+    " earlier - this closes the same gap for every caller of this method,
+    " not just that one).
+    IF it_ortec_haves IS INITIAL.
+      lv_effective_deepen = iv_deepen_level.
+      IF lv_effective_deepen <= 0.
+        lv_effective_deepen = 1.
+      ENDIF.
+      lv_buffer = lv_buffer && zcl_abapgit_git_utils=>pkt_string( |deepen { lv_effective_deepen }| &&
+        cl_abap_char_utilities=>newline ).
+    ENDIF.
+
+    lv_buffer = lv_buffer && '0000'.
+
+    IF iv_force_full = abap_false AND it_ortec_haves IS NOT INITIAL.
+      LOOP AT it_ortec_haves ASSIGNING <lv_ortec_have>.
+        lv_buffer = lv_buffer && zcl_abapgit_git_utils=>pkt_string(
+          |have { <lv_ortec_have> }{ cl_abap_char_utilities=>newline }| ).
+      ENDLOOP.
+    ENDIF.
+
+    lv_buffer = lv_buffer && '0009done' && cl_abap_char_utilities=>newline.
+
+    rv_buffer = lv_buffer.
+
+  ENDMETHOD.
+
+
   METHOD parse.
 
     CONSTANTS lc_band1 TYPE x VALUE '01'.
@@ -1090,7 +1139,10 @@ METHOD upload_pack.
     DATA lv_len      TYPE i.
     DATA lv_contents TYPE xstring.
     DATA lv_pack     TYPE xstring.
+    DATA lv_text     TYPE string.
+    DATA lv_sha1     TYPE zif_abapgit_git_definitions=>ty_sha1.
 
+    CLEAR: et_shallow, et_unshallow.
 
     TRY.
         WHILE xstrlen( cv_data ) >= 4.
@@ -1119,6 +1171,24 @@ METHOD upload_pack.
 
           IF xstrlen( lv_contents ) > 1 AND lv_contents(1) = lc_band1.
             CONCATENATE lv_pack lv_contents+1 INTO lv_pack IN BYTE MODE.
+            CONTINUE.
+          ENDIF.
+
+          TRY.
+            lv_text = zcl_abapgit_convert=>xstring_to_string_utf8_raw( lv_contents ).
+          CATCH zcx_abapgit_exception.
+            CONTINUE.
+          ENDTRY.
+
+          REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>cr_lf IN lv_text WITH ''.
+          REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>newline IN lv_text WITH ''.
+
+          IF lv_text CP 'shallow *' AND strlen( lv_text ) > 8.
+            lv_sha1 = lv_text+8.
+            APPEND lv_sha1 TO et_shallow.
+          ELSEIF lv_text CP 'unshallow *' AND strlen( lv_text ) > 10.
+            lv_sha1 = lv_text+10.
+            APPEND lv_sha1 TO et_unshallow.
           ENDIF.
         ENDWHILE.
       CATCH cx_sy_range_out_of_bounds INTO DATA(lx_range).

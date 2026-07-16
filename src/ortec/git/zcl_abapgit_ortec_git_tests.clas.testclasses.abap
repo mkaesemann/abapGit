@@ -2183,6 +2183,143 @@ CLASS ltcl_fetch_neg IMPLEMENTATION.
   ENDMETHOD.
 ENDCLASS.
 
+CLASS ltcl_fastpath_protocol DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+  PRIVATE SECTION.
+    METHODS upload_pack_buffer_emits_shallow_lines FOR TESTING RAISING cx_static_check.
+    METHODS upload_pack_buffer_skips_shallow_when_full_forced FOR TESTING RAISING cx_static_check.
+    METHODS parse_collects_shallow_and_unshallow FOR TESTING RAISING cx_static_check.
+    METHODS parse_ignores_malformed_shallow_update FOR TESTING RAISING cx_static_check.
+ENDCLASS.
+CLASS ltcl_fastpath_protocol IMPLEMENTATION.
+  METHOD upload_pack_buffer_emits_shallow_lines.
+    DATA lt_hashes TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_haves  TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lv_buffer TYPE string.
+
+    APPEND '1111111111111111111111111111111111111111' TO lt_hashes.
+    APPEND '2222222222222222222222222222222222222222' TO lt_haves.
+
+    lv_buffer = zcl_abapgit_ortec_fastpath=>build_upload_pack_buffer(
+      iv_deepen_level = 0
+      it_hashes       = lt_hashes
+      it_ortec_haves  = lt_haves
+      iv_allow_thin   = abap_false
+      iv_force_full   = abap_false ).
+
+    FIND FIRST OCCURRENCE OF 'want 1111111111111111111111111111111111111111' IN lv_buffer.
+    cl_abap_unit_assert=>assert_subrc( exp = 0 msg = 'Want line must be present' ).
+    FIND FIRST OCCURRENCE OF 'shallow 2222222222222222222222222222222222222222' IN lv_buffer.
+    cl_abap_unit_assert=>assert_subrc( exp = 0 msg = 'Shallow line must be present' ).
+    FIND FIRST OCCURRENCE OF '0000' IN lv_buffer.
+    cl_abap_unit_assert=>assert_subrc( exp = 0 msg = 'Flush pkt must be present' ).
+
+    FIND FIRST OCCURRENCE OF 'shallow 2222222222222222222222222222222222222222' IN lv_buffer MATCH OFFSET DATA(lv_shallow_pos).
+    FIND FIRST OCCURRENCE OF '0000' IN lv_buffer MATCH OFFSET DATA(lv_flush_pos).
+    cl_abap_unit_assert=>assert_true( act = xsdbool( lv_shallow_pos < lv_flush_pos ) msg = 'Shallow lines must be emitted before the flush pkt' ).
+  ENDMETHOD.
+
+  METHOD upload_pack_buffer_skips_shallow_when_full_forced.
+    DATA lt_hashes TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_haves  TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lv_buffer TYPE string.
+
+    APPEND '1111111111111111111111111111111111111111' TO lt_hashes.
+
+    lv_buffer = zcl_abapgit_ortec_fastpath=>build_upload_pack_buffer(
+      iv_deepen_level = 0
+      it_hashes       = lt_hashes
+      it_ortec_haves  = lt_haves
+      iv_allow_thin   = abap_false
+      iv_force_full   = abap_false ).
+
+    FIND FIRST OCCURRENCE OF 'shallow ' IN lv_buffer.
+    cl_abap_unit_assert=>assert_subrc( exp = 4 msg = 'Shallow lines must be skipped when no haves are provided' ).
+
+    lv_buffer = zcl_abapgit_ortec_fastpath=>build_upload_pack_buffer(
+      iv_deepen_level = 0
+      it_hashes       = lt_hashes
+      it_ortec_haves  = VALUE zif_abapgit_git_definitions=>ty_sha1_tt( ( '2222222222222222222222222222222222222222' ) )
+      iv_allow_thin   = abap_false
+      iv_force_full   = abap_true ).
+
+    FIND FIRST OCCURRENCE OF 'shallow ' IN lv_buffer.
+    cl_abap_unit_assert=>assert_subrc( exp = 4 msg = 'Shallow lines must be skipped when iv_force_full is true' ).
+  ENDMETHOD.
+
+  METHOD parse_collects_shallow_and_unshallow.
+    DATA lv_data TYPE xstring.
+    DATA lv_pack TYPE xstring.
+    DATA lt_shallow TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_unshallow TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lv_pkt TYPE string.
+
+    " Build a minimal pkt-line stream: plain shallow/unshallow lines, then
+    " a flush pkt, and one ordinary text pkt-line.
+    lv_pkt = zcl_abapgit_git_utils=>pkt_string( |shallow 1111111111111111111111111111111111111111| ).
+    lv_data = zcl_abapgit_convert=>string_to_xstring_utf8( lv_pkt ).
+
+    lv_pkt = zcl_abapgit_git_utils=>pkt_string( |unshallow 2222222222222222222222222222222222222222| ).
+    lv_data = lv_data && zcl_abapgit_convert=>string_to_xstring_utf8( lv_pkt ).
+
+    lv_data = lv_data && zcl_abapgit_convert=>string_to_xstring_utf8( '0000' ).
+
+    lv_pkt = zcl_abapgit_git_utils=>pkt_string( |ok| ).
+    lv_data = lv_data && zcl_abapgit_convert=>string_to_xstring_utf8( lv_pkt ).
+
+    zcl_abapgit_ortec_fastpath=>parse(
+      EXPORTING
+        et_shallow = lt_shallow
+        et_unshallow = lt_unshallow
+      IMPORTING
+        ev_pack = lv_pack
+      CHANGING
+        cv_data = lv_data ).
+
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_shallow ) exp = 1 msg = 'Shallow SHA should be collected' ).
+    cl_abap_unit_assert=>assert_equals( act = lt_shallow[ 1 ] exp = '1111111111111111111111111111111111111111' msg = 'Shallow SHA value must be preserved' ).
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_unshallow ) exp = 1 msg = 'Unshallow SHA should be collected' ).
+    cl_abap_unit_assert=>assert_equals( act = lt_unshallow[ 1 ] exp = '2222222222222222222222222222222222222222' msg = 'Unshallow SHA value must be preserved' ).
+    cl_abap_unit_assert=>assert_equals( act = lv_pack exp = '' msg = 'No pack data should be parsed from a plain text pkt-line stream' ).
+  ENDMETHOD.
+
+  METHOD parse_ignores_malformed_shallow_update.
+    DATA lv_data TYPE xstring.
+    DATA lv_pack TYPE xstring.
+    DATA lt_shallow TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_unshallow TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+
+    DATA lv_pkt TYPE string.
+
+    lv_pkt = zcl_abapgit_git_utils=>pkt_string( |shallow| ).
+    lv_data = zcl_abapgit_convert=>string_to_xstring_utf8( lv_pkt ).
+
+    lv_pkt = zcl_abapgit_git_utils=>pkt_string( |unshallow 2222222222222222222222222222222222222222| ).
+    lv_data = lv_data && zcl_abapgit_convert=>string_to_xstring_utf8( lv_pkt ).
+
+    lv_data = lv_data && zcl_abapgit_convert=>string_to_xstring_utf8( '0000' ).
+
+    lv_pkt = zcl_abapgit_git_utils=>pkt_string( |ok| ).
+    lv_data = lv_data && zcl_abapgit_convert=>string_to_xstring_utf8( lv_pkt ).
+
+    TRY.
+        zcl_abapgit_ortec_fastpath=>parse(
+          EXPORTING
+            et_shallow = lt_shallow
+            et_unshallow = lt_unshallow
+          IMPORTING
+            ev_pack = lv_pack
+          CHANGING
+            cv_data = lv_data ).
+      CATCH zcx_abapgit_ortec_git.
+        cl_abap_unit_assert=>fail( 'Malformed shallow-update lines must not raise' ).
+    ENDTRY.
+
+    cl_abap_unit_assert=>assert_initial( act = lt_shallow msg = 'Malformed shallow line should be ignored' ).
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_unshallow ) exp = 1 msg = 'Well-formed unshallow line should still be collected' ).
+    cl_abap_unit_assert=>assert_initial( act = lv_pack msg = 'Plain text pkt-lines should not be treated as pack data' ).
+  ENDMETHOD.
+ENDCLASS.
+
 CLASS ltcl_ortec_git_exception DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
   PRIVATE SECTION.
     "! Regression: zcx_abapgit_ortec_git never populates the T100 message
