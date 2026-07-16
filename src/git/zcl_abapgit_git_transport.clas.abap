@@ -431,7 +431,21 @@ CLASS ZCL_ABAPGIT_GIT_TRANSPORT IMPLEMENTATION.
               et_objects      = et_objects
               ev_branch       = ev_branch ).
           RETURN.
-        CATCH zcx_abapgit_ortec_git zcx_abapgit_exception.
+        CATCH zcx_abapgit_ortec_git zcx_abapgit_exception INTO DATA(lx_ortec_branch).
+          " Deliberately NOT falling through to the standard upload_pack/
+          " decode below for a repo that opted into the Ortec fastpath:
+          " confirmed live that the standard, non-incremental
+          " zcl_abapgit_git_pack=>decode (and the ZCL_ABAPGIT_ZLIB_HUFFMAN
+          " inflate it relies on) is not viable for these large DevOps-hosted
+          " packs regardless - it does not recover anything, it only silently
+          " discards the real Ortec failure reason and then fails again
+          " anyway (memory exhaustion or timeout), several stack frames away
+          " from the actual root cause. Raising immediately here, with the
+          " original failure text preserved, keeps the two code paths
+          " cleanly separated and makes every future Ortec bug directly
+          " diagnosable instead of surfacing as an unrelated crash deep in
+          " standard decode.
+          zcx_abapgit_exception=>raise_with_text( lx_ortec_branch ).
       ENDTRY.
     ENDIF.
 
@@ -452,12 +466,13 @@ CLASS ZCL_ABAPGIT_GIT_TRANSPORT IMPLEMENTATION.
       ENDLOOP.
     ENDIF.
 
-    " The Ortec fastpath cascade above already failed (or is inactive for
-    " this repo); the standard decode below may still need to resolve a
-    " ref-delta base via the object store's blank-iv_repo_key fallback
-    " (zcl_abapgit_git_delta=>delta has no repo context in its signature),
-    " so make sure the correct repo_key is active rather than relying on it
-    " being set as an accidental side effect of an earlier, unrelated call.
+    " Reached only when the Ortec fastpath is inactive for this repo (the
+    " active case above now always RETURNs or raises, never falls through).
+    " The standard decode below may still need to resolve a ref-delta base
+    " via the object store's blank-iv_repo_key fallback (zcl_abapgit_git_delta
+    " =>delta has no repo context in its signature), so make sure the
+    " correct repo_key is active rather than relying on it being set as an
+    " accidental side effect of an earlier, unrelated call.
     zcl_abapgit_ortec_obj_store=>set_active_repo_key(
       zcl_abapgit_ortec_repo_state=>get_repo_key_for_url( iv_url ) ).
 
@@ -490,10 +505,17 @@ CLASS ZCL_ABAPGIT_GIT_TRANSPORT IMPLEMENTATION.
               et_objects      = et_objects
               ev_commit       = ev_commit ).
           RETURN.
-        CATCH zcx_abapgit_ortec_git zcx_abapgit_exception.
-          " Fastpath cascade failed (thin + non-thin both unsuccessful) - fall
-          " through to the standard, non-Ortec upload-pack below instead of
-          " letting the failure propagate uncaught.
+        CATCH zcx_abapgit_ortec_git zcx_abapgit_exception INTO DATA(lx_ortec_commit).
+          " Deliberately NOT falling through to the standard upload-pack/
+          " decode below for a repo that opted into the Ortec fastpath - see
+          " the matching comment in upload_pack_by_branch for the full
+          " rationale (confirmed live: standard zcl_abapgit_git_pack=>decode
+          " is not viable for these large DevOps-hosted packs regardless of
+          " why the Ortec cascade failed, so falling through only hid the
+          " real failure reason and then failed again anyway). Raising
+          " immediately here, with the original failure text preserved,
+          " keeps the two code paths cleanly separated.
+          zcx_abapgit_exception=>raise_with_text( lx_ortec_commit ).
       ENDTRY.
     ENDIF.
 
@@ -509,12 +531,13 @@ CLASS ZCL_ABAPGIT_GIT_TRANSPORT IMPLEMENTATION.
       iv_url     = iv_url
       it_headers = lt_headers ).
 
-    " The Ortec fastpath cascade above already failed (or is inactive for
-    " this repo); the standard decode below may still need to resolve a
-    " ref-delta base via the object store's blank-iv_repo_key fallback
-    " (zcl_abapgit_git_delta=>delta has no repo context in its signature),
-    " so make sure the correct repo_key is active rather than relying on it
-    " being set as an accidental side effect of an earlier, unrelated call.
+    " Reached only when the Ortec fastpath is inactive for this repo (the
+    " active case above now always RETURNs or raises, never falls through).
+    " The standard decode below may still need to resolve a ref-delta base
+    " via the object store's blank-iv_repo_key fallback (zcl_abapgit_git_delta
+    " =>delta has no repo context in its signature), so make sure the
+    " correct repo_key is active rather than relying on it being set as an
+    " accidental side effect of an earlier, unrelated call.
     zcl_abapgit_ortec_obj_store=>set_active_repo_key(
       zcl_abapgit_ortec_repo_state=>get_repo_key_for_url( iv_url ) ).
 
