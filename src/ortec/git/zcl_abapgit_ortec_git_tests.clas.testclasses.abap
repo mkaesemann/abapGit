@@ -1390,6 +1390,64 @@ CLASS ltcl_ref_delta IMPLEMENTATION.
 
 ENDCLASS.
 
+CLASS ltcl_filtered_fetch DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+  PRIVATE SECTION.
+    CONSTANTS mc_repo TYPE c LENGTH 12 VALUE 'ZAOGT_FLTFCH'.
+    METHODS setup. METHODS teardown.
+    "! Blank inputs must short-circuit before any network attempt - proven
+    "! implicitly: a real HTTP call would fail/hang in this test
+    "! environment, so a clean abap_false return proves the early guard
+    "! fired instead.
+    METHODS blank_inputs_no_network FOR TESTING RAISING cx_static_check.
+    "! A commit already present locally must short-circuit to TRUE without
+    "! attempting any network call - same implicit proof as above.
+    METHODS already_local_short_circuits FOR TESTING RAISING cx_static_check.
+ENDCLASS.
+CLASS ltcl_filtered_fetch IMPLEMENTATION.
+  METHOD setup. DELETE FROM zaog_obj_store WHERE repo_key = mc_repo. ENDMETHOD.
+  METHOD teardown.
+    DELETE FROM zaog_obj_store WHERE repo_key = mc_repo.
+    ROLLBACK WORK.
+  ENDMETHOD.
+
+  METHOD blank_inputs_no_network.
+    DATA lv_applicable TYPE abap_bool.
+
+    lv_applicable = zcl_abapgit_ortec_fastpath=>try_filtered_commit_fetch(
+      iv_url         = ''
+      iv_branch_name = 'refs/heads/main'
+      iv_commit      = ''
+      iv_repo_key    = mc_repo ).
+
+    cl_abap_unit_assert=>assert_equals( act = lv_applicable exp = abap_false
+      msg = 'Blank URL/commit must never attempt a network call' ).
+  ENDMETHOD.
+
+  METHOD already_local_short_circuits.
+    DATA lv_commit_data TYPE xstring.
+    DATA lv_commit_sha  TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_applicable  TYPE abap_bool.
+
+    lv_commit_data = '48656C6C6F'.
+    lv_commit_sha = zcl_abapgit_hash=>sha1_commit( lv_commit_data ).
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_commit_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-commit
+      iv_data     = lv_commit_data ).
+
+    lv_applicable = zcl_abapgit_ortec_fastpath=>try_filtered_commit_fetch(
+      iv_url         = 'https://filtered-fetch-test.example.com/repo.git'
+      iv_branch_name = 'refs/heads/main'
+      iv_commit      = lv_commit_sha
+      iv_repo_key    = mc_repo ).
+
+    cl_abap_unit_assert=>assert_equals( act = lv_applicable exp = abap_true
+      msg = 'An already-locally-present commit must short-circuit to TRUE without any network attempt' ).
+  ENDMETHOD.
+ENDCLASS.
+
 CLASS ltcl_switch DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
   PRIVATE SECTION.
     METHODS no_dump FOR TESTING.

@@ -99,6 +99,41 @@ CLASS zcl_abapgit_ortec_fastpath DEFINITION
       RAISING   zcx_abapgit_exception
                 zcx_abapgit_ortec_git.
 
+    "! Attempt to make iv_commit's commit + tree structure available in the
+    "! persistent object store via a `filter blob:none` negotiated fetch -
+    "! commit and every reachable tree object (proportional to directory
+    "! structure), but deliberately NO blob content. Intended for a filtered
+    "! Stage/Diff resolution (zcl_abapgit_ortec_filter_walk) on a commit that
+    "! has no usable warm index yet: once commit+trees are locally available,
+    "! zcl_abapgit_ortec_obj_index=>get_files_for_filter can build its index
+    "! and resolve the caller's actual filtered file set via its own
+    "! existing best-effort blob top-up (zcl_abapgit_ortec_missing_obj=>
+    "! ensure_available) - which is a no-op whenever those specific blobs
+    "! are already known from another buffered branch (blobs are
+    "! content-addressed and commonly shared across sibling branches/
+    "! commits) - instead of this caller ever decoding/persisting every
+    "! object reachable from iv_commit.
+    "! Never raises: returns abap_false whenever the server does not
+    "! advertise `filter`, the commit is already available locally, or
+    "! anything else prevents the attempt, so the caller can unconditionally
+    "! fall through to its existing safe path (a normal full/deepen fetch).
+    "! @parameter iv_url |
+    "! Remote URL
+    "! @parameter iv_branch_name |
+    "! Any branch name, used only to initialise the v1 connection
+    "! @parameter iv_commit |
+    "! Target commit SHA1 (already resolved by the caller)
+    "! @parameter iv_repo_key |
+    "! ORTEC repository key
+    "! @parameter rv_applicable |
+    "! ABAP_TRUE if the commit + its trees are now available locally
+    CLASS-METHODS try_filtered_commit_fetch
+      IMPORTING iv_url             TYPE string
+                iv_branch_name     TYPE string
+                iv_commit          TYPE zif_abapgit_git_definitions=>ty_sha1
+                iv_repo_key        TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
+      RETURNING VALUE(rv_applicable) TYPE abap_bool.
+
   PRIVATE SECTION.
     "! Resolve repo key from URL. Creates new key if none found.
     "! @parameter iv_url |
@@ -236,6 +271,106 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
     ENDIF.
 
     et_objects = zcl_abapgit_ortec_pack_dec=>decode_commits_only( lv_pack ).
+
+  ENDMETHOD.
+
+  METHOD try_filtered_commit_fetch.
+
+    DATA lo_client     TYPE REF TO zcl_abapgit_http_client.
+    DATA lv_buffer     TYPE string.
+    DATA lv_line       TYPE string.
+    DATA lv_capa       TYPE string.
+    DATA lv_xstring    TYPE xstring.
+    DATA lv_pack       TYPE xstring.
+    DATA lv_ref_data   TYPE string.
+    DATA lv_null       TYPE c LENGTH 1.
+    DATA lv_has_filter TYPE abap_bool.
+    DATA lv_null_pos   TYPE i.
+    DATA lv_nl_pos     TYPE i.
+    DATA lv_caps       TYPE string.
+    DATA lv_offset     TYPE i.
+    DATA lt_objects    TYPE zif_abapgit_definitions=>ty_objects_tt.
+
+    IF iv_url IS INITIAL OR iv_commit IS INITIAL OR iv_repo_key IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    IF zcl_abapgit_ortec_obj_store=>exists( iv_repo_key = iv_repo_key iv_sha1 = iv_commit ) = abap_true.
+      " Commit already present locally (e.g. reachable from an already
+      " buffered branch) - nothing to fetch.
+      rv_applicable = abap_true.
+      RETURN.
+    ENDIF.
+
+    TRY.
+        " Open a standard v1 upload-pack connection - same pattern as
+        " fetch_tip_commits, no ORTEC fastpath routing needed for this
+        " one-shot structural fetch.
+        zcl_abapgit_git_transport=>find_branch_ortec(
+          EXPORTING
+            iv_url         = iv_url
+            iv_service     = 'upload'
+            iv_branch_name = iv_branch_name
+          IMPORTING
+            eo_client = lo_client ).
+
+        " Check server capabilities for 'filter' (BEFORE set_headers to
+        " preserve the response) - identical pattern to fetch_tip_commits.
+        lv_ref_data = lo_client->get_cdata( ).
+        lv_null = zcl_abapgit_git_utils=>get_null( ).
+        FIND FIRST OCCURRENCE OF lv_null IN lv_ref_data MATCH OFFSET lv_null_pos.
+        IF sy-subrc = 0.
+          lv_offset = lv_null_pos + 1.
+          lv_caps = lv_ref_data+lv_offset.
+          FIND FIRST OCCURRENCE OF cl_abap_char_utilities=>newline IN lv_caps
+            MATCH OFFSET lv_nl_pos.
+          IF sy-subrc = 0 AND lv_nl_pos > 0.
+            lv_caps = lv_caps(lv_nl_pos).
+            lv_has_filter = xsdbool( lv_caps CS 'filter' ).
+          ENDIF.
+        ENDIF.
+
+        IF lv_has_filter = abap_false.
+          RETURN.
+        ENDIF.
+
+        lo_client->set_headers( iv_url     = iv_url
+                                iv_service = 'upload' ).
+
+        " want <commit> + deepen 1 + filter blob:none: commit + every
+        " reachable tree, but never blob content.
+        lv_capa = 'side-band-64k no-progress multi_ack filter'.
+        lv_line = |want { iv_commit } { lv_capa }{ cl_abap_char_utilities=>newline }|.
+        lv_buffer = zcl_abapgit_git_utils=>pkt_string( lv_line )
+          && zcl_abapgit_git_utils=>pkt_string( |deepen 1{ cl_abap_char_utilities=>newline }| )
+          && zcl_abapgit_git_utils=>pkt_string( |filter blob:none{ cl_abap_char_utilities=>newline }| )
+          && '0000'
+          && '0009done' && cl_abap_char_utilities=>newline.
+
+        lv_xstring = lo_client->send_receive_close(
+          zcl_abapgit_convert=>string_to_xstring_utf8( lv_buffer ) ).
+
+        parse( IMPORTING ev_pack = lv_pack
+               CHANGING  cv_data = lv_xstring ).
+
+        IF lv_pack IS INITIAL.
+          RETURN.
+        ENDIF.
+
+        lt_objects = zcl_abapgit_ortec_pack_dec=>decode_and_persist(
+          iv_data     = lv_pack
+          iv_repo_key = iv_repo_key ).
+
+        IF lt_objects IS NOT INITIAL.
+          rv_applicable = abap_true.
+        ENDIF.
+      CATCH zcx_abapgit_exception zcx_abapgit_ortec_git.
+        " No fast-path benefit available for this commit - caller falls
+        " back to its existing full-fetch path. Never a correctness risk:
+        " decode_and_persist's own failure handling already leaves no
+        " partial state behind.
+        CLEAR rv_applicable.
+    ENDTRY.
 
   ENDMETHOD.
 

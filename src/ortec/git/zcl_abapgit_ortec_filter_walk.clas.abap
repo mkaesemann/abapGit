@@ -123,11 +123,11 @@ CLASS zcl_abapgit_ortec_filter_walk IMPLEMENTATION.
             iv_branch_name = lv_branch ).
           lv_commit = ls_state-fetch_commit.
 
-          IF lv_commit IS INITIAL.
-            rt_files = ii_repo_online->get_files_remote( ii_obj_filter ).
-            RETURN.
-          ENDIF.
-
+          " Resolve the branch's CURRENT remote tip up front - needed both
+          " for the staleness check below and as the target for a filtered
+          " cold-fetch attempt when there is no usable cached state for
+          " this branch yet (never-before-accessed branch) or the remote
+          " has since moved.
           TRY.
               li_branches = zcl_abapgit_git_transport=>branches( lv_url ).
               ls_branch = li_branches->find_by_name( lv_branch ).
@@ -135,9 +135,29 @@ CLASS zcl_abapgit_ortec_filter_walk IMPLEMENTATION.
               CLEAR ls_branch.
           ENDTRY.
 
-          IF ls_branch-sha1 IS INITIAL OR ls_branch-sha1 <> lv_commit.
-            rt_files = ii_repo_online->get_files_remote( ii_obj_filter ).
-            RETURN.
+          IF lv_commit IS INITIAL OR ls_branch-sha1 IS INITIAL OR ls_branch-sha1 <> lv_commit.
+            " No usable warm index for this branch/commit. Before paying for
+            " a full fetch+decode of every object reachable from the remote
+            " tip, try to make just the commit+tree structure available
+            " locally (a `filter blob:none` negotiated fetch - proportional
+            " to directory structure, never blob content), so
+            " get_files_for_filter's own index build + best-effort blob
+            " top-up can resolve the caller's actual filtered file set
+            " directly - the top-up is a no-op whenever the needed blobs
+            " are already known from another buffered branch (blobs are
+            " content-addressed and commonly shared across sibling
+            " branches), and otherwise falls back safely.
+            IF ls_branch-sha1 IS NOT INITIAL
+                AND zcl_abapgit_ortec_fastpath=>try_filtered_commit_fetch(
+                      iv_url         = lv_url
+                      iv_branch_name = lv_branch
+                      iv_commit      = ls_branch-sha1
+                      iv_repo_key    = lv_repo_key ) = abap_true.
+              lv_commit = ls_branch-sha1.
+            ELSE.
+              rt_files = ii_repo_online->get_files_remote( ii_obj_filter ).
+              RETURN.
+            ENDIF.
           ENDIF.
         ENDIF.
 
