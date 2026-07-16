@@ -14,6 +14,22 @@ CLASS zcx_abapgit_ortec_git DEFINITION
     "! If set, the caller MUST NOT silently fall back to standard behavior.
     DATA mv_is_corruption TYPE abap_bool READ-ONLY.
 
+    "! Filtered call stack captured at RAISE time (this class's own
+    "! constructor/raise* frames removed), so the real caller is still
+    "! inspectable after the stack has unwound - see get_source_position.
+    DATA mt_callstack TYPE abap_callstack READ-ONLY.
+
+    "! Convenience snapshot of the real raise call site (program/include/
+    "! line), captured at construction time from mt_callstack. By the time
+    "! an exception reaches a CATCH block or a debugger breakpoint there,
+    "! the original call stack that led to RAISE EXCEPTION has already
+    "! unwound - RAISE EXCEPTION TYPE zcx_abapgit_ortec_git always happens
+    "! inside the class's own static raise( ) method, so without this the
+    "! only "source position" left to inspect points at raise( )'s own line,
+    "! never the actual calling code that decided to raise. Inspect
+    "! ms_src_info directly in the debugger, or call get_source_position( ).
+    DATA ms_src_info TYPE zcx_abapgit_exception=>ty_scr_info READ-ONLY.
+
     "! @parameter iv_text |
     "! Exception text
     "! @parameter iv_is_corruption |
@@ -60,8 +76,14 @@ CLASS zcx_abapgit_ortec_git DEFINITION
     "! producing blank text without this override.
     METHODS get_text REDEFINITION.
 
+    "! Returns the real RAISE call site (see ms_src_info) instead of the
+    "! inherited cx_root default, which would otherwise point inside this
+    "! class's own static raise( ) method.
+    METHODS get_source_position REDEFINITION.
+
   PROTECTED SECTION.
   PRIVATE SECTION.
+    METHODS save_callstack.
 ENDCLASS.
 
 
@@ -72,6 +94,57 @@ CLASS zcx_abapgit_ortec_git IMPLEMENTATION.
     super->constructor( previous = previous ).
     mv_text = iv_text.
     mv_is_corruption = iv_is_corruption.
+    save_callstack( ).
+    get_source_position(
+      IMPORTING
+        program_name = ms_src_info-program
+        include_name = ms_src_info-include
+        source_line  = ms_src_info-line ).
+  ENDMETHOD.
+
+
+  METHOD save_callstack.
+
+    FIELD-SYMBOLS <ls_callstack> LIKE LINE OF mt_callstack.
+
+    CALL FUNCTION 'SYSTEM_CALLSTACK'
+      IMPORTING
+        callstack = mt_callstack.
+
+    " Remove this class's own frames (constructor, save_callstack, raise*)
+    " so the highest remaining entry is the actual calling code that
+    " decided to raise - mirrors zcx_abapgit_exception=>save_callstack.
+    LOOP AT mt_callstack ASSIGNING <ls_callstack>.
+      IF <ls_callstack>-mainprogram CP |ZCX_ABAPGIT_ORTEC_GIT*|
+        OR <ls_callstack>-blockname = `SAVE_CALLSTACK`
+        OR <ls_callstack>-blockname = `CONSTRUCTOR`
+        OR <ls_callstack>-blockname CP `RAISE*`.
+        DELETE TABLE mt_callstack FROM <ls_callstack>.
+      ELSE.
+        EXIT.
+      ENDIF.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+
+  METHOD get_source_position.
+
+    FIELD-SYMBOLS <ls_callstack> LIKE LINE OF mt_callstack.
+
+    READ TABLE mt_callstack ASSIGNING <ls_callstack> INDEX 1.
+    IF sy-subrc = 0.
+      program_name = <ls_callstack>-mainprogram.
+      include_name = <ls_callstack>-include.
+      source_line  = <ls_callstack>-line.
+    ELSE.
+      super->get_source_position(
+        IMPORTING
+          program_name = program_name
+          include_name = include_name
+          source_line  = source_line ).
+    ENDIF.
+
   ENDMETHOD.
 
 

@@ -956,13 +956,23 @@ METHOD upload_pack.
             rt_objects = lt_cached.
             RETURN.
           ENDIF.
-        CATCH zcx_abapgit_ortec_git.
+        CATCH zcx_abapgit_ortec_git INTO DATA(lx_cache_reason).
+          " Preserve the specific reason (multi-want / incomplete tree) for
+          " the final raise below instead of silently discarding it - a
+          " generic "not available" message with no detail was hiding the
+          " actual cause of every prior incident in this method.
       ENDTRY.
     ENDIF.
 
     " Cached objects are unavailable or unsafe; caller must use the standard fetch path.
-    zcx_abapgit_ortec_git=>raise(
-      'Cached objects not available for nothing-new response - falling back to standard fetch' ).
+    IF lx_cache_reason IS BOUND.
+      zcx_abapgit_ortec_git=>raise(
+        |Cached objects not available for nothing-new response - falling back to standard fetch: | &&
+        lx_cache_reason->get_text( ) ).
+    ELSE.
+      zcx_abapgit_ortec_git=>raise(
+        'Cached objects not available for nothing-new response - falling back to standard fetch' ).
+    ENDIF.
 
   ENDMETHOD.
 

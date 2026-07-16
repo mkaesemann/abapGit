@@ -2192,6 +2192,15 @@ CLASS ltcl_ortec_git_exception DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATI
     "! "thin: , non-thin: " cascade-failure message reaching Michael despite
     "! both underlying exceptions having real text set via raise( iv_text ).
     METHODS get_text_returns_mv_text FOR TESTING RAISING cx_static_check.
+    "! Regression: by the time an exception reaches a CATCH block or a
+    "! debugger breakpoint, the call stack that led to RAISE EXCEPTION
+    "! (always inside this class's own static raise( ) method) has already
+    "! unwound - without capturing it at construction time, the only
+    "! inspectable "source position" points inside raise( ) itself, never
+    "! the actual calling code that decided to raise. Asserts the filtered
+    "! call stack's top frame is THIS test method (not RAISE or
+    "! CONSTRUCTOR), proving the class's own frames were correctly removed.
+    METHODS source_position_points_to_caller FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 CLASS ltcl_ortec_git_exception IMPLEMENTATION.
   METHOD get_text_returns_mv_text.
@@ -2204,6 +2213,41 @@ CLASS ltcl_ortec_git_exception IMPLEMENTATION.
       act = lx_direct->get_text( )
       exp = 'a specific, non-generic failure detail'
       msg = 'get_text( ) must return mv_text, not a generic/blank cx_root default' ).
+  ENDMETHOD.
+  METHOD source_position_points_to_caller.
+    DATA lx_direct TYPE REF TO zcx_abapgit_ortec_git.
+    DATA lv_program_name TYPE progname.
+    DATA lv_include_name TYPE progname.
+    DATA lv_source_line  TYPE i.
+
+    TRY.
+        zcx_abapgit_ortec_git=>raise( 'source position regression check' ).
+      CATCH zcx_abapgit_ortec_git INTO lx_direct.
+    ENDTRY.
+
+    cl_abap_unit_assert=>assert_not_initial(
+      act = lx_direct->mt_callstack
+      msg = 'mt_callstack must be captured at raise time' ).
+    cl_abap_unit_assert=>assert_equals(
+      act = lx_direct->mt_callstack[ 1 ]-blockname
+      exp = 'SOURCE_POSITION_POINTS_TO_CALLER'
+      msg = 'The top of the filtered call stack must be the actual caller, ' &&
+            'not RAISE or CONSTRUCTOR from inside zcx_abapgit_ortec_git itself' ).
+
+    cl_abap_unit_assert=>assert_not_initial(
+      act = lx_direct->ms_src_info-line
+      msg = 'ms_src_info must be populated at construction time so it ' &&
+            'survives a debugger breakpoint after the stack has unwound' ).
+
+    lx_direct->get_source_position(
+      IMPORTING
+        program_name = lv_program_name
+        include_name = lv_include_name
+        source_line  = lv_source_line ).
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_source_line
+      exp = lx_direct->ms_src_info-line
+      msg = 'get_source_position( ) must be consistent with ms_src_info' ).
   ENDMETHOD.
 ENDCLASS.
 
