@@ -1022,7 +1022,10 @@ CLASS ltcl_ofs_delta IMPLEMENTATION.
 
     lv_data = 'FF7FAA'.
     lv_offset = zcl_abapgit_ortec_delta=>get_offset( CHANGING cv_data = lv_data ).
-    cl_abap_unit_assert=>assert_equals( act = lv_offset exp = 16383 ).
+    " Git's OFS_DELTA varint adds 1 before each shift (offset = (offset+1)<<7 | byte),
+    " NOT a naive base-128 concatenation - this makes the encoding canonical/unique.
+    " 127 -> (127+1)*128 + 127 = 16511, not the naive-concat value 16383.
+    cl_abap_unit_assert=>assert_equals( act = lv_offset exp = 16511 ).
 
     lv_data = '808000AA'.
     lv_offset = zcl_abapgit_ortec_delta=>get_offset( CHANGING cv_data = lv_data ).
@@ -2087,9 +2090,13 @@ CLASS ltcl_pack_decoder IMPLEMENTATION.
     lv_trailer_raw = lv_trailer_hex.
     CONCATENATE lv_pack lv_trailer_raw INTO lv_pack IN BYTE MODE.
 
-    lt_res = zcl_abapgit_ortec_pack_dec=>decode_and_persist(
-      iv_data     = lv_pack
-      iv_repo_key = mc_repo ).
+    TRY.
+        lt_res = zcl_abapgit_ortec_pack_dec=>decode_and_persist(
+          iv_data     = lv_pack
+          iv_repo_key = mc_repo ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_diag).
+        cl_abap_unit_assert=>fail( |DIAG: { lx_diag->get_text( ) }| ).
+    ENDTRY.
 
     lv_expect1_sha = zcl_abapgit_hash=>sha1_blob( '4141414121' ). " "AAAA!"
     lv_expect2_sha = zcl_abapgit_hash=>sha1_blob( '4242424221' ). " "BBBB!"
@@ -2606,7 +2613,11 @@ CLASS ltcl_cache_admin IMPLEMENTATION.
 
     COMMIT WORK AND WAIT.
 
-    DATA(lt_overview) = zcl_abapgit_ortec_cache_admin=>get_overview( ).
+    TRY.
+        DATA(lt_overview) = zcl_abapgit_ortec_cache_admin=>get_overview( ).
+      CATCH cx_sy_open_sql_db INTO DATA(lx_diag_sql).
+        cl_abap_unit_assert=>fail( |DIAG SQL: { lx_diag_sql->get_text( ) }| ).
+    ENDTRY.
     READ TABLE lt_overview INTO DATA(ls_overview) WITH KEY repo_key = mc_repo.
     cl_abap_unit_assert=>assert_subrc( msg = 'Overview must contain the seeded test repo' ).
 
