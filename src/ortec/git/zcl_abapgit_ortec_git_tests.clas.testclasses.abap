@@ -1625,8 +1625,8 @@ CLASS ltcl_repo_state IMPLEMENTATION.
 
     " ZAOG_COMMIT_HIST is what actually marks a commit as fully materialised
     " for get_complete_commits/have-negotiation purposes.
-    INSERT zaog_commit_hist FROM VALUE #(
-      repo_key = lv_key commit_sha1 = lc_commit branch_name = 'refs/heads/main' ).
+    INSERT zaog_commit_hist FROM @( VALUE #(
+      repo_key = lv_key commit_sha1 = lc_commit branch_name = 'refs/heads/main' ) ).
     COMMIT WORK.
 
     lt_commits = zcl_abapgit_ortec_repo_state=>get_complete_commits( lv_key ).
@@ -1670,10 +1670,10 @@ CLASS ltcl_repo_state IMPLEMENTATION.
     zcl_abapgit_ortec_repo_state=>update_after_fetch(
       iv_repo_key = lv_key iv_branch_name = 'refs/heads/dev'
       iv_url = mc_url iv_commit = lc_commit_dev ).
-    INSERT zaog_commit_hist FROM VALUE #(
-      repo_key = lv_key commit_sha1 = lc_commit_main branch_name = 'refs/heads/main' ).
-    INSERT zaog_commit_hist FROM VALUE #(
-      repo_key = lv_key commit_sha1 = lc_commit_dev branch_name = 'refs/heads/dev' ).
+    INSERT zaog_commit_hist FROM @( VALUE #(
+      repo_key = lv_key commit_sha1 = lc_commit_main branch_name = 'refs/heads/main' ) ).
+    INSERT zaog_commit_hist FROM @( VALUE #(
+      repo_key = lv_key commit_sha1 = lc_commit_dev branch_name = 'refs/heads/dev' ) ).
     COMMIT WORK.
 
     lt_commits = zcl_abapgit_ortec_repo_state=>get_complete_commits( lv_key ).
@@ -1720,8 +1720,8 @@ CLASS ltcl_repo_state IMPLEMENTATION.
     zcl_abapgit_ortec_repo_state=>update_after_fetch(
       iv_repo_key = lv_key iv_branch_name = 'refs/heads/state-only-branch'
       iv_url = mc_url iv_commit = lc_commit_state_only ).
-    INSERT zaog_commit_hist FROM VALUE #(
-      repo_key = lv_key commit_sha1 = lc_commit_hist_only branch_name = 'refs/heads/history-branch' ).
+    INSERT zaog_commit_hist FROM @( VALUE #(
+      repo_key = lv_key commit_sha1 = lc_commit_hist_only branch_name = 'refs/heads/history-branch' ) ).
     COMMIT WORK.
 
     lt_commits = zcl_abapgit_ortec_repo_state=>get_complete_commits( lv_key ).
@@ -2267,10 +2267,9 @@ CLASS ltcl_fastpath_protocol IMPLEMENTATION.
     lv_data = lv_data && zcl_abapgit_convert=>string_to_xstring_utf8( lv_pkt ).
 
     zcl_abapgit_ortec_fastpath=>parse(
-      EXPORTING
+      IMPORTING
         et_shallow = lt_shallow
         et_unshallow = lt_unshallow
-      IMPORTING
         ev_pack = lv_pack
       CHANGING
         cv_data = lv_data ).
@@ -2303,10 +2302,9 @@ CLASS ltcl_fastpath_protocol IMPLEMENTATION.
 
     TRY.
         zcl_abapgit_ortec_fastpath=>parse(
-          EXPORTING
+          IMPORTING
             et_shallow = lt_shallow
             et_unshallow = lt_unshallow
-          IMPORTING
             ev_pack = lv_pack
           CHANGING
             cv_data = lv_data ).
