@@ -2077,8 +2077,8 @@ CLASS ltcl_pack_decoder IMPLEMENTATION.
     cl_abap_gzip=>compress_binary( EXPORTING raw_in = lv_delta IMPORTING gzip_out = lv_compressed ).
     lv_adler = zcl_abapgit_hash=>adler32( lv_delta ).
 
-    lv_base1_raw = lv_base1_sha.
-    lv_base2_raw = lv_base2_sha.
+    lv_base1_raw = to_upper( lv_base1_sha ).
+    lv_base2_raw = to_upper( lv_base2_sha ).
 
     CONCATENATE lv_pack_magic lv_version lv_obj_count INTO lv_pack IN BYTE MODE.
     CONCATENATE lv_pack lv_type_len lv_base1_raw lv_zlib_hdr lv_compressed lv_adler
@@ -2087,27 +2087,12 @@ CLASS ltcl_pack_decoder IMPLEMENTATION.
       INTO lv_pack IN BYTE MODE.
 
     lv_trailer_hex = zcl_abapgit_hash=>sha1_raw( lv_pack ).
-    lv_trailer_raw = lv_trailer_hex.
+    lv_trailer_raw = to_upper( lv_trailer_hex ).
     CONCATENATE lv_pack lv_trailer_raw INTO lv_pack IN BYTE MODE.
 
-    " DIAG: self-check the test's own construction against the exact formula
-    " resumable_decode uses (sha1 of everything except the trailing 20 bytes),
-    " BEFORE calling decode_and_persist - isolates a test-construction bug
-    " from a real decode-loop byte-miscount.
-    DATA(lv_diag_len) = xstrlen( lv_pack ) - 20.
-    DATA(lv_diag_body) = lv_pack(lv_diag_len).
-    DATA(lv_diag_sha1) = to_upper( zcl_abapgit_hash=>sha1_raw( lv_diag_body ) ).
-    DATA(lv_diag_trailer) = lv_pack+lv_diag_len(20).
-    cl_abap_unit_assert=>assert_equals( act = lv_diag_sha1 exp = lv_diag_trailer
-      msg = |DIAG SELFCHECK: pack_len={ xstrlen( lv_pack ) } computed={ lv_diag_sha1 } trailer={ lv_diag_trailer }| ).
-
-    TRY.
-        lt_res = zcl_abapgit_ortec_pack_dec=>decode_and_persist(
-          iv_data     = lv_pack
-          iv_repo_key = mc_repo ).
-      CATCH zcx_abapgit_exception INTO DATA(lx_diag).
-        cl_abap_unit_assert=>fail( |DIAG: { lx_diag->get_text( ) }| ).
-    ENDTRY.
+    lt_res = zcl_abapgit_ortec_pack_dec=>decode_and_persist(
+      iv_data     = lv_pack
+      iv_repo_key = mc_repo ).
 
     lv_expect1_sha = zcl_abapgit_hash=>sha1_blob( '4141414121' ). " "AAAA!"
     lv_expect2_sha = zcl_abapgit_hash=>sha1_blob( '4242424221' ). " "BBBB!"
