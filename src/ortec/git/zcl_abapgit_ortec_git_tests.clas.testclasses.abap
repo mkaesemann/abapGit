@@ -2611,16 +2611,14 @@ CLASS ltcl_cache_admin IMPLEMENTATION.
 
         COMMIT WORK AND WAIT.
 
-      CATCH cx_sy_open_sql_db INTO DATA(lx_diag_sql1).
-        cl_abap_unit_assert=>fail( |DIAG SQL SEED: { lx_diag_sql1->get_text( ) }| ).
-      CATCH zcx_abapgit_exception INTO DATA(lx_diag_seed).
-        cl_abap_unit_assert=>fail( |DIAG SEED: { lx_diag_seed->get_text( ) }| ).
+      CATCH cx_root INTO DATA(lx_diag_seed).
+        cl_abap_unit_assert=>fail( |DIAG SEED { cl_abap_classdescr=>get_class_name( lx_diag_seed ) }: { lx_diag_seed->get_text( ) }| ).
     ENDTRY.
 
     TRY.
         DATA(lt_overview) = zcl_abapgit_ortec_cache_admin=>get_overview( ).
-      CATCH cx_sy_open_sql_db INTO DATA(lx_diag_sql).
-        cl_abap_unit_assert=>fail( |DIAG SQL: { lx_diag_sql->get_text( ) }| ).
+      CATCH cx_root INTO DATA(lx_diag_sql).
+        cl_abap_unit_assert=>fail( |DIAG { cl_abap_classdescr=>get_class_name( lx_diag_sql ) }: { lx_diag_sql->get_text( ) }| ).
     ENDTRY.
     READ TABLE lt_overview INTO DATA(ls_overview) WITH KEY repo_key = mc_repo.
     cl_abap_unit_assert=>assert_subrc( msg = 'Overview must contain the seeded test repo' ).
