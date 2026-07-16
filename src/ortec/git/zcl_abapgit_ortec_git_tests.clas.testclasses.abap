@@ -2574,55 +2574,63 @@ CLASS ltcl_cache_admin IMPLEMENTATION.
     DATA lv_ts     TYPE timestampl.
     DATA lv_data   TYPE xstring.
 
-    GET TIME STAMP FIELD lv_ts.
+    TRY.
 
-    ls_state-repo_key    = mc_repo.
-    ls_state-branch_name = 'refs/heads/main'.
-    ls_state-remote_url  = 'https://test-cache-admin.example.com/repo.git'.
-    ls_state-curr_commit = 'aaaa000000000000000000000000000000000001'.
-    ls_state-is_shallow  = abap_false.
-    MODIFY zaog_repo_state FROM ls_state.
+        GET TIME STAMP FIELD lv_ts.
 
-    lv_data = '48656C6C6F'.
-    zcl_abapgit_ortec_obj_store=>store_object(
-      iv_repo_key = mc_repo iv_sha1 = 'bbbb000000000000000000000000000000000001'
-      iv_type = zif_abapgit_git_definitions=>c_type-blob iv_data = lv_data ).
-    zcl_abapgit_ortec_obj_store=>store_object(
-      iv_repo_key = mc_repo iv_sha1 = 'bbbb000000000000000000000000000000000002'
-      iv_type = zif_abapgit_git_definitions=>c_type-blob iv_data = lv_data ).
+        ls_state-repo_key    = mc_repo.
+        ls_state-branch_name = 'refs/heads/main'.
+        ls_state-remote_url  = 'https://test-cache-admin.example.com/repo.git'.
+        ls_state-curr_commit = 'aaaa000000000000000000000000000000000001'.
+        ls_state-is_shallow  = abap_false.
+        MODIFY zaog_repo_state FROM ls_state.
 
-    ls_idx-repo_key    = mc_repo.
-    ls_idx-commit_sha1 = 'aaaa000000000000000000000000000000000001'.
-    ls_idx-obj_type    = 'PROG'.
-    ls_idx-obj_name    = 'ZTEST'.
-    ls_idx-path_hash   = zcl_abapgit_hash=>sha1_string( '/' ).
-    ls_idx-file_path   = '/'.
-    MODIFY zaog_obj_index FROM ls_idx.
+        lv_data = '48656C6C6F'.
+        zcl_abapgit_ortec_obj_store=>store_object(
+          iv_repo_key = mc_repo iv_sha1 = 'bbbb000000000000000000000000000000000001'
+          iv_type = zif_abapgit_git_definitions=>c_type-blob iv_data = lv_data ).
+        zcl_abapgit_ortec_obj_store=>store_object(
+          iv_repo_key = mc_repo iv_sha1 = 'bbbb000000000000000000000000000000000002'
+          iv_type = zif_abapgit_git_definitions=>c_type-blob iv_data = lv_data ).
 
-    ls_pack-repo_key   = mc_repo.
-    ls_pack-pack_id    = 'TESTPACK00000000000000000000CADM'.
-    ls_pack-total_size = 2097152. " exactly 2 MB, so pack_mb_disk asserts cleanly
-    ls_pack-status     = 'C'.
-    ls_pack-raw_stored = abap_true.
-    ls_pack-received_at = lv_ts.
-    MODIFY zaog_pack_meta FROM ls_pack.
+        ls_idx-repo_key    = mc_repo.
+        ls_idx-commit_sha1 = 'aaaa000000000000000000000000000000000001'.
+        ls_idx-obj_type    = 'PROG'.
+        ls_idx-obj_name    = 'ZTEST'.
+        ls_idx-path_hash   = zcl_abapgit_hash=>sha1_string( '/' ).
+        ls_idx-file_path   = '/'.
+        MODIFY zaog_obj_index FROM ls_idx.
 
-    ls_commit-repo_key    = mc_repo.
-    ls_commit-commit_sha1 = 'aaaa000000000000000000000000000000000001'.
-    ls_commit-branch_name = 'refs/heads/main'.
-    ls_commit-fetched_at  = lv_ts.
-    MODIFY zaog_commit_hist FROM ls_commit.
+        ls_pack-repo_key   = mc_repo.
+        ls_pack-pack_id    = 'TESTPACK00000000000000000000CADM'.
+        ls_pack-total_size = 2097152. " exactly 2 MB, so pack_mb_disk asserts cleanly
+        ls_pack-status     = 'C'.
+        ls_pack-raw_stored = abap_true.
+        ls_pack-received_at = lv_ts.
+        MODIFY zaog_pack_meta FROM ls_pack.
 
-    ls_sess-session_id = 'CADMINTEST000000000000000000001A'.
-    ls_sess-repo_key   = mc_repo.
-    ls_sess-branch_name = 'refs/heads/main'.
-    ls_sess-phase      = 'D'.
-    ls_sess-status     = 'A'.
-    ls_sess-created_at = lv_ts.
-    ls_sess-updated_at = lv_ts.
-    MODIFY zaog_fetch_sess FROM ls_sess.
+        ls_commit-repo_key    = mc_repo.
+        ls_commit-commit_sha1 = 'aaaa000000000000000000000000000000000001'.
+        ls_commit-branch_name = 'refs/heads/main'.
+        ls_commit-fetched_at  = lv_ts.
+        MODIFY zaog_commit_hist FROM ls_commit.
 
-    COMMIT WORK AND WAIT.
+        ls_sess-session_id = 'CADMINTEST000000000000000000001A'.
+        ls_sess-repo_key   = mc_repo.
+        ls_sess-branch_name = 'refs/heads/main'.
+        ls_sess-phase      = 'D'.
+        ls_sess-status     = 'A'.
+        ls_sess-created_at = lv_ts.
+        ls_sess-updated_at = lv_ts.
+        MODIFY zaog_fetch_sess FROM ls_sess.
+
+        COMMIT WORK AND WAIT.
+
+      CATCH cx_sy_open_sql_db INTO DATA(lx_diag_sql1).
+        cl_abap_unit_assert=>fail( |DIAG SQL SEED: { lx_diag_sql1->get_text( ) }| ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_diag_seed).
+        cl_abap_unit_assert=>fail( |DIAG SEED: { lx_diag_seed->get_text( ) }| ).
+    ENDTRY.
 
     TRY.
         DATA(lt_overview) = zcl_abapgit_ortec_cache_admin=>get_overview( ).
