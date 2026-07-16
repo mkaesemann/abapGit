@@ -1160,7 +1160,7 @@ CLASS ltcl_ref_delta DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
     CONSTANTS mc_repo TYPE c LENGTH 12 VALUE 'ZAOGT_REFDLT'.
     METHODS setup.
     METHODS teardown.
-    METHODS base_positioned_after_dependent FOR TESTING RAISING cx_static_check.
+    METHODS base_after_dependent FOR TESTING RAISING cx_static_check.
     METHODS resolve_after_prior_resolution_in_same_pass FOR TESTING RAISING cx_static_check.
     METHODS two_thin_bases_do_not_collide FOR TESTING RAISING cx_static_check.
     METHODS chain_onto_later_unresolved_delta FOR TESTING RAISING cx_static_check.
@@ -1176,7 +1176,7 @@ CLASS ltcl_ref_delta IMPLEMENTATION.
     ROLLBACK WORK.
   ENDMETHOD.
 
-  METHOD base_positioned_after_dependent.
+  METHOD base_after_dependent.
     " REF_DELTA carries no ordering guarantee (unlike OFS_DELTA, which is
     " always positioned strictly backwards in the pack byte stream): the
     " base object CAN legitimately appear AFTER the delta that depends on
