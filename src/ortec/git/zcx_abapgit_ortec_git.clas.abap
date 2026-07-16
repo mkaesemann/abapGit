@@ -50,6 +50,16 @@ CLASS zcx_abapgit_ortec_git DEFINITION
       RAISING
         zcx_abapgit_exception.
 
+    "! Returns mv_text - this class never populates the T100 message
+    "! infrastructure (if_t100_message~t100key is deliberately left blank),
+    "! so the inherited cx_root default would otherwise return a generic/
+    "! empty string instead of the actual failure detail. Confirmed live:
+    "! every ->get_text( ) call on a zcx_abapgit_ortec_git instance anywhere
+    "! in the codebase (including cascade-combining messages such as
+    "! zcl_abapgit_ortec_fastpath's "thin: X, non-thin: Y") was silently
+    "! producing blank text without this override.
+    METHODS get_text REDEFINITION.
+
   PROTECTED SECTION.
   PRIVATE SECTION.
 ENDCLASS.
@@ -74,6 +84,14 @@ CLASS zcx_abapgit_ortec_git IMPLEMENTATION.
 
   METHOD raise_corruption.
     zcx_abapgit_exception=>raise( |ORTEC Git corruption: { iv_text }| ).
+  ENDMETHOD.
+
+  METHOD get_text.
+    IF mv_text IS NOT INITIAL.
+      result = mv_text.
+    ELSE.
+      result = super->get_text( ).
+    ENDIF.
   ENDMETHOD.
 
 ENDCLASS.

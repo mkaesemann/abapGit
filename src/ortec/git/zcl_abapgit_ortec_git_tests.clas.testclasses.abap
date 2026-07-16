@@ -2144,6 +2144,30 @@ CLASS ltcl_fetch_neg IMPLEMENTATION.
   ENDMETHOD.
 ENDCLASS.
 
+CLASS ltcl_ortec_git_exception DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+  PRIVATE SECTION.
+    "! Regression: zcx_abapgit_ortec_git never populates the T100 message
+    "! infrastructure (if_t100_message~t100key is left blank), so without a
+    "! get_text( ) override the inherited cx_root default returns generic/
+    "! empty text instead of mv_text - confirmed live via a blank
+    "! "thin: , non-thin: " cascade-failure message reaching Michael despite
+    "! both underlying exceptions having real text set via raise( iv_text ).
+    METHODS get_text_returns_mv_text FOR TESTING RAISING cx_static_check.
+ENDCLASS.
+CLASS ltcl_ortec_git_exception IMPLEMENTATION.
+  METHOD get_text_returns_mv_text.
+    DATA lx_direct TYPE REF TO zcx_abapgit_ortec_git.
+    TRY.
+        zcx_abapgit_ortec_git=>raise( 'a specific, non-generic failure detail' ).
+      CATCH zcx_abapgit_ortec_git INTO lx_direct.
+    ENDTRY.
+    cl_abap_unit_assert=>assert_equals(
+      act = lx_direct->get_text( )
+      exp = 'a specific, non-generic failure detail'
+      msg = 'get_text( ) must return mv_text, not a generic/blank cx_root default' ).
+  ENDMETHOD.
+ENDCLASS.
+
 CLASS ltcl_git_roundtrip DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
   PRIVATE SECTION. METHODS encode_decode FOR TESTING RAISING cx_static_check.
 ENDCLASS.
