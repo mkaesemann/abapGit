@@ -1852,6 +1852,12 @@ CLASS ltcl_pack_decoder DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHOR
     "! ("Delta base identity mismatch"). Forces two distinct external bases
     "! to be bulk-prefetched in one decode_and_persist call.
     METHODS prefetch_bases_do_not_collide FOR TESTING RAISING cx_static_check.
+    "! peek_object_count must read the pack-header object count without
+    "! decompressing anything, return 0 for a real zero-object pack (the
+    "! "you already have everything" server response), and return -1
+    "! (never 0) for data too short/malformed to contain a header, so
+    "! callers cannot mistake "can't tell yet" for "confirmed empty".
+    METHODS peek_object_count_cases FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 CLASS ltcl_pack_decoder IMPLEMENTATION.
   METHOD setup.
@@ -2097,6 +2103,39 @@ CLASS ltcl_pack_decoder IMPLEMENTATION.
       WITH KEY type COMPONENTS type = zif_abapgit_git_definitions=>c_type-blob sha1 = lv_expect2_sha.
     cl_abap_unit_assert=>assert_subrc(
       msg = 'The delta declaring base2 must resolve against base2 ("BBBB!"), not collide with base1' ).
+  ENDMETHOD.
+
+  METHOD peek_object_count_cases.
+    DATA lv_data TYPE xstring.
+
+    " Too short to contain a full 12-byte header.
+    lv_data = '5041434B0000'.
+    cl_abap_unit_assert=>assert_equals(
+      act = zcl_abapgit_ortec_pack_dec=>peek_object_count( lv_data )
+      exp = -1
+      msg = 'Data shorter than the header must return -1, never 0' ).
+
+    " Well-formed PACK header (magic + version 2) declaring zero objects -
+    " the real "you already have everything" server response shape.
+    lv_data = '5041434B0000000200000000'.
+    cl_abap_unit_assert=>assert_equals(
+      act = zcl_abapgit_ortec_pack_dec=>peek_object_count( lv_data )
+      exp = 0
+      msg = 'A well-formed zero-object pack header must be recognized as 0' ).
+
+    " Well-formed PACK header declaring 3 objects.
+    lv_data = '5041434B0000000200000003'.
+    cl_abap_unit_assert=>assert_equals(
+      act = zcl_abapgit_ortec_pack_dec=>peek_object_count( lv_data )
+      exp = 3
+      msg = 'A non-zero declared object count must be read correctly' ).
+
+    " Long enough but missing the PACK magic entirely.
+    lv_data = '000000000000000000000000'.
+    cl_abap_unit_assert=>assert_equals(
+      act = zcl_abapgit_ortec_pack_dec=>peek_object_count( lv_data )
+      exp = -1
+      msg = 'Data without the PACK magic must return -1, never 0' ).
   ENDMETHOD.
 ENDCLASS.
 

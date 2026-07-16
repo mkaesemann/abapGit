@@ -15,6 +15,21 @@ CLASS zcl_abapgit_ortec_pack_dec DEFINITION
     TYPES ty_session_id TYPE c LENGTH 32.
     TYPES ty_pack_id    TYPE c LENGTH 32.
 
+    "! Peek the declared object count from a pack's header without
+    "! decompressing anything (bytes 8-11, big-endian, per the git
+    "! pack-file format: 4-byte 'PACK' magic + 4-byte version + 4-byte
+    "! object count). A well-formed pack that declares zero objects is a
+    "! valid server response meaning "you already have everything" - the
+    "! same meaning as an entirely empty response, just framed differently.
+    "! @parameter iv_data |
+    "! Raw packfile bytes (or any prefix of at least 12 bytes)
+    "! @parameter rv_count |
+    "! Declared object count, or -1 if iv_data is too short to contain a
+    "! header (callers must not treat -1 as "confirmed zero")
+    CLASS-METHODS peek_object_count
+      IMPORTING iv_data          TYPE xstring
+      RETURNING VALUE(rv_count)  TYPE i.
+
     "! Decode a raw packfile and persist all results for crash-safe resume.
     "! <p>If <em>it_objects</em> is supplied the decode step is skipped and the
     "! pre-decoded objects are persisted directly (the raw packfile is still
@@ -207,6 +222,18 @@ ENDCLASS.
 
 
 CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
+  METHOD peek_object_count.
+    DATA lv_count_x TYPE xstring.
+
+    IF xstrlen( iv_data ) < 12 OR iv_data(4) <> c_pack_start.
+      rv_count = -1.
+      RETURN.
+    ENDIF.
+
+    lv_count_x = iv_data+8(4).
+    rv_count = zcl_abapgit_convert=>xstring_to_int( lv_count_x ).
+  ENDMETHOD.
+
   METHOD decode_commits_only.
     " Decode a pack and return only commit objects, using stream_decompress.
     " Designed for filter tree:0 responses: small pack, commits only.
