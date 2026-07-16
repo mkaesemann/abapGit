@@ -230,22 +230,41 @@ CLASS zcl_abapgit_ortec_repo_state IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD get_complete_commits.
-    DATA lv_fc TYPE zaog_repo_state-fetch_commit.
-    DATA lt_fc TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
-    " Primary: fully-materialised commits from history table
+    DATA lv_fc      TYPE zaog_repo_state-fetch_commit.
+    DATA lt_fc      TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_hist    TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_seen    TYPE HASHED TABLE OF zif_abapgit_git_definitions=>ty_sha1
+                         WITH UNIQUE KEY table_line.
+    DATA lv_commit  TYPE zif_abapgit_git_definitions=>ty_sha1.
+
+    " Every branch's own recorded fetch_commit is an equally valid "have"
+    " candidate as anything in the history table - each is independently
+    " verified (is_commit_complete) before ever being trusted, so offering
+    " more candidates only helps have-negotiation find a useful shared
+    " ancestor, never hurts. Previously this was "history table OR (if
+    " empty) repo_state", which meant a single stale/incomplete history-
+    " table row could permanently hide every other branch's fetch_commit
+    " from negotiation, even though those branches were fully fetched and
+    " typically share most of their object graph as common ancestry.
     SELECT DISTINCT commit_sha1 FROM zaog_commit_hist
-      INTO TABLE rt_commits
+      INTO TABLE lt_hist
       WHERE repo_key = iv_repo_key.
-    IF rt_commits IS NOT INITIAL.
-      RETURN.
-    ENDIF.
-    " Fallback: use fetch_commit entries from repo state table
+    LOOP AT lt_hist INTO lv_commit.
+      IF NOT line_exists( lt_seen[ table_line = lv_commit ] ).
+        INSERT lv_commit INTO TABLE lt_seen.
+        APPEND lv_commit TO rt_commits.
+      ENDIF.
+    ENDLOOP.
+
     SELECT DISTINCT fetch_commit FROM zaog_repo_state
       INTO TABLE @lt_fc
       WHERE repo_key    = @iv_repo_key
         AND fetch_commit <> ''.
     LOOP AT lt_fc INTO lv_fc.
-      APPEND lv_fc TO rt_commits.
+      IF NOT line_exists( lt_seen[ table_line = lv_fc ] ).
+        INSERT lv_fc INTO TABLE lt_seen.
+        APPEND lv_fc TO rt_commits.
+      ENDIF.
     ENDLOOP.
   ENDMETHOD.
 

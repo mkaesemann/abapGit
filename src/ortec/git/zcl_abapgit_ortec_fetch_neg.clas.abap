@@ -45,9 +45,12 @@ CLASS zcl_abapgit_ortec_fetch_neg DEFINITION
       RAISING   zcx_abapgit_ortec_git.
 
     "! Check whether a single commit's full object graph is verified-complete:
-    "! index-ready, every reachable object present, and no dangling delta
-    "! base among them. This is the completeness gate a commit must pass
-    "! before it may be offered as a thin-pack base source.
+    "! every reachable commit/tree/blob is present in the local store and no
+    "! dangling delta base remains among them. This is the completeness gate
+    "! a commit must pass before it may be offered as a thin-pack base
+    "! source. Deliberately independent of the stage-filter index
+    "! (zcl_abapgit_ortec_obj_index) - that index is only built by filtered
+    "! Stage/Diff resolution and has no bearing on git-object completeness.
     "! @parameter iv_repo_key |
     "! Repository key
     "! @parameter iv_commit |
@@ -160,14 +163,19 @@ CLASS zcl_abapgit_ortec_fetch_neg IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    " Cheapest check first: the filtered path index must be fully built
-    " (STRICT marker - see zcl_abapgit_ortec_obj_index=>is_index_ready).
-    IF zcl_abapgit_ortec_obj_index=>is_index_ready(
-        iv_repo_key = iv_repo_key
-        iv_commit   = iv_commit ) = abap_false.
-      RETURN.
-    ENDIF.
-
+    " No is_index_ready pre-check here (removed): that index is a STAGE
+    " FILTER concern (zcl_abapgit_ortec_obj_index, built only when a
+    " filtered Stage/Diff resolution touches this exact commit) - it has
+    " nothing to do with whether this commit's actual git object graph is
+    " complete. Gating "have" eligibility on it meant a branch reached via
+    " a plain pull/switch (which never builds that index) could NEVER be
+    " offered as a have, even when fully fetched - confirmed live: the one
+    " commit recorded for a repo had zero rows in the stage-filter index,
+    " so every subsequent branch switch fell back to an unconditional
+    " `deepen` (full snapshot, ignoring haves entirely), regardless of how
+    " much object history it actually shared with that commit. The checks
+    " below are the actual, sufficient proof of completeness.
+    "
     " get_reachable_sha1s already raises if any commit/tree/blob reachable
     " from this commit is missing from the store - a clean success here is
     " itself proof every reachable object is present. Uses the SHA1-only

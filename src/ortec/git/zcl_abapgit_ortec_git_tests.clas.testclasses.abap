@@ -602,8 +602,16 @@ CLASS ltcl_completeness_gate DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION
     METHODS setup. METHODS teardown.
     METHODS has_dangling_delta_base_none  FOR TESTING RAISING cx_static_check.
     METHODS has_dangling_delta_base_found FOR TESTING RAISING cx_static_check.
-    METHODS complete_false_no_index  FOR TESTING RAISING cx_static_check.
+    METHODS complete_false_missing_object FOR TESTING RAISING cx_static_check.
     METHODS complete_true_when_ready FOR TESTING RAISING cx_static_check.
+    "! Regression: completeness must NOT require the stage-filter index
+    "! (zcl_abapgit_ortec_obj_index) to have ever been built for this
+    "! commit - that index is only built by a filtered Stage/Diff
+    "! resolution, so gating "have" eligibility on it meant a commit
+    "! reached via a plain pull/branch-switch could never be offered as a
+    "! have even when fully fetched, silently disabling incremental fetch
+    "! for every branch that was never filter-staged.
+    METHODS complete_true_without_index FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 CLASS ltcl_completeness_gate IMPLEMENTATION.
   METHOD setup.
@@ -720,7 +728,78 @@ CLASS ltcl_completeness_gate IMPLEMENTATION.
       msg = 'Missing recorded delta base must be detected as dangling' ).
   ENDMETHOD.
 
-  METHOD complete_false_no_index.
+  METHOD complete_false_missing_object.
+    DATA lt_nodes TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+    DATA ls_node LIKE LINE OF lt_nodes.
+    DATA ls_commit TYPE zcl_abapgit_git_pack=>ty_commit.
+    DATA lv_blob_data TYPE xstring.
+    DATA lv_blob_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_src_tree_data TYPE xstring.
+    DATA lv_src_tree_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_root_tree_data TYPE xstring.
+    DATA lv_root_tree_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_commit_data TYPE xstring.
+    DATA lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_complete TYPE abap_bool.
+
+    lv_blob_data = '48656C6C6F'.
+    lv_blob_sha = zcl_abapgit_hash=>sha1_blob( lv_blob_data ).
+
+    CLEAR ls_node.
+    ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-file.
+    ls_node-name  = 'zprogram.prog.abap'.
+    ls_node-sha1  = lv_blob_sha.
+    CLEAR lt_nodes.
+    APPEND ls_node TO lt_nodes.
+    lv_src_tree_data = zcl_abapgit_git_pack=>encode_tree( lt_nodes ).
+    lv_src_tree_sha = zcl_abapgit_hash=>sha1_tree( lv_src_tree_data ).
+
+    CLEAR ls_node.
+    ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-dir.
+    ls_node-name  = 'src'.
+    ls_node-sha1  = lv_src_tree_sha.
+    CLEAR lt_nodes.
+    APPEND ls_node TO lt_nodes.
+    lv_root_tree_data = zcl_abapgit_git_pack=>encode_tree( lt_nodes ).
+    lv_root_tree_sha = zcl_abapgit_hash=>sha1_tree( lv_root_tree_data ).
+
+    ls_commit-tree = lv_root_tree_sha.
+    ls_commit-author = 'Test <test@example.com> 0 +0000'.
+    ls_commit-committer = 'Test <test@example.com> 0 +0000'.
+    ls_commit-body = 'test'.
+    lv_commit_data = zcl_abapgit_git_pack=>encode_commit( ls_commit ).
+    lv_commit_sha = zcl_abapgit_hash=>sha1_commit( lv_commit_data ).
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_commit_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-commit
+      iv_data     = lv_commit_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_root_tree_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-tree
+      iv_data     = lv_root_tree_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_src_tree_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-tree
+      iv_data     = lv_src_tree_data ).
+    " Deliberately do NOT store the blob - the commit's object graph is
+    " genuinely incomplete, which is what completeness must actually catch
+    " now that it no longer depends on the unrelated stage-filter index.
+
+    lv_complete = zcl_abapgit_ortec_fetch_neg=>is_commit_complete(
+      iv_repo_key = mc_repo
+      iv_commit   = lv_commit_sha ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_complete
+      exp = abap_false
+      msg = 'A commit missing a reachable blob must not be considered complete' ).
+  ENDMETHOD.
+
+  METHOD complete_true_without_index.
     DATA lt_nodes TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
     DATA ls_node LIKE LINE OF lt_nodes.
     DATA ls_commit TYPE zcl_abapgit_git_pack=>ty_commit.
@@ -783,14 +862,19 @@ CLASS ltcl_completeness_gate IMPLEMENTATION.
       iv_type     = zif_abapgit_git_definitions=>c_type-blob
       iv_data     = lv_blob_data ).
 
+    " Deliberately never call zcl_abapgit_ortec_obj_index=>get_files_for_filter
+    " for this commit - the stage-filter index is never built, exactly like
+    " a plain pull/branch-switch that never went through filtered Stage/Diff.
+
     lv_complete = zcl_abapgit_ortec_fetch_neg=>is_commit_complete(
       iv_repo_key = mc_repo
       iv_commit   = lv_commit_sha ).
 
     cl_abap_unit_assert=>assert_equals(
       act = lv_complete
-      exp = abap_false
-      msg = 'Without index-ready marker, commit completeness must be false' ).
+      exp = abap_true
+      msg = 'A fully fetched commit must be eligible as a have even when its ' &&
+            'stage-filter index was never built (e.g. reached via a plain pull)' ).
   ENDMETHOD.
 
   METHOD complete_true_when_ready.
@@ -1473,6 +1557,10 @@ CLASS ltcl_repo_state DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
     METHODS state_roundtrip          FOR TESTING RAISING cx_static_check.
     METHODS stale_tip_invalidated_from_cache FOR TESTING RAISING cx_static_check.
     METHODS invalidate_all_history_repo_wide FOR TESTING RAISING cx_static_check.
+    "! Regression: get_complete_commits must union commit_hist and
+    "! repo_state fetch_commit entries, not treat commit_hist as the sole
+    "! source whenever it has any row at all.
+    METHODS complete_commits_union_repo_state FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 CLASS ltcl_repo_state IMPLEMENTATION.
   METHOD setup.
@@ -1607,6 +1695,45 @@ CLASS ltcl_repo_state IMPLEMENTATION.
       msg = 'fetch_commit must be blanked for EVERY branch, not just the one that failed its walk' ).
     cl_abap_unit_assert=>assert_initial( act = ls_dev-fetch_commit
       msg = 'fetch_commit must be blanked for EVERY branch, not just the one that failed its walk' ).
+  ENDMETHOD.
+  METHOD complete_commits_union_repo_state.
+    " Regression: get_complete_commits previously used zaog_commit_hist as
+    " the ONLY source whenever it had ANY row at all for the repo, silently
+    " hiding every OTHER branch's own recorded fetch_commit in
+    " zaog_repo_state from have-negotiation - even though those branches
+    " were fully fetched and typically share most of their object graph as
+    " common ancestry with the branch being switched to. Reproduces exactly
+    " that: one branch tracked only in commit_hist, a second tracked only
+    " via its own repo_state fetch_commit (never added to commit_hist) -
+    " both must be offered as candidates.
+    DATA lv_key TYPE c LENGTH 12.
+    DATA lt_commits TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    CONSTANTS lc_commit_hist_only TYPE zif_abapgit_git_definitions=>ty_sha1
+      VALUE 'eeee000000000000000000000000000000000001'.
+    CONSTANTS lc_commit_state_only TYPE zif_abapgit_git_definitions=>ty_sha1
+      VALUE 'eeee000000000000000000000000000000000002'.
+
+    lv_key = zcl_abapgit_ortec_repo_state=>get_or_create_repo_key_for_url( mc_url ).
+    zcl_abapgit_ortec_repo_state=>update_after_fetch(
+      iv_repo_key = lv_key iv_branch_name = 'refs/heads/history-branch'
+      iv_url = mc_url iv_commit = lc_commit_hist_only ).
+    zcl_abapgit_ortec_repo_state=>update_after_fetch(
+      iv_repo_key = lv_key iv_branch_name = 'refs/heads/state-only-branch'
+      iv_url = mc_url iv_commit = lc_commit_state_only ).
+    INSERT zaog_commit_hist FROM VALUE #(
+      repo_key = lv_key commit_sha1 = lc_commit_hist_only branch_name = 'refs/heads/history-branch' ).
+    COMMIT WORK.
+
+    lt_commits = zcl_abapgit_ortec_repo_state=>get_complete_commits( lv_key ).
+
+    READ TABLE lt_commits WITH KEY table_line = lc_commit_hist_only TRANSPORTING NO FIELDS.
+    cl_abap_unit_assert=>assert_subrc(
+      msg = 'The commit_hist-tracked commit must be a candidate' ).
+    READ TABLE lt_commits WITH KEY table_line = lc_commit_state_only TRANSPORTING NO FIELDS.
+    cl_abap_unit_assert=>assert_subrc(
+      msg = 'A second branch tracked ONLY via its own repo_state fetch_commit ' &&
+            '(never added to commit_hist) must ALSO be a candidate, not hidden ' &&
+            'just because commit_hist happens to have an unrelated row' ).
   ENDMETHOD.
 ENDCLASS.
 
