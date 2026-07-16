@@ -2419,6 +2419,93 @@ CLASS ltcl_ortec_git_exception IMPLEMENTATION.
   ENDMETHOD.
 ENDCLASS.
 
+CLASS ltcl_spike_a_db_base_parity DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+  PRIVATE SECTION.
+    CONSTANTS mc_repo TYPE c LENGTH 12 VALUE 'ZAOGT_SPIKEA'.
+    METHODS setup.
+    METHODS teardown.
+    "! Streaming-decoder design Spike A (see .memory/state.md "Live crash
+    "! confirms..." entry / streaming decoder open question 8): proves that
+    "! zcl_abapgit_ortec_delta=>apply's result is identical whether its base
+    "! object's bytes come from an in-memory literal or are freshly read
+    "! back from zaog_obj_store via zcl_abapgit_ortec_obj_store=>get_object -
+    "! the exact substitution the streaming resolver design depends on
+    "! (DB-backed bases instead of a shared in-memory ct_objects table).
+    "! apply() is a pure function (IMPORTING iv_base/iv_delta TYPE xstring,
+    "! no shared-state dependency), so this also incidentally proves the
+    "! store/get_object round-trip preserves bytes exactly - if it didn't,
+    "! this would be the first place to notice.
+    METHODS db_sourced_base_matches_in_memory FOR TESTING RAISING cx_static_check.
+ENDCLASS.
+CLASS ltcl_spike_a_db_base_parity IMPLEMENTATION.
+  METHOD setup.
+    DELETE FROM zaog_obj_store WHERE repo_key = mc_repo.
+  ENDMETHOD.
+  METHOD teardown.
+    DELETE FROM zaog_obj_store WHERE repo_key = mc_repo.
+    ROLLBACK WORK.
+  ENDMETHOD.
+
+  METHOD db_sourced_base_matches_in_memory.
+    " Same hand-verified vector already used elsewhere in this test file
+    " (ltcl_ref_delta): base "Hello!" (6 bytes) + delta 060790060121
+    " (copy 6 bytes from offset 0, then insert literal '!') must produce
+    " "Hello!!" (7 bytes).
+    DATA lv_base_in_memory TYPE xstring VALUE '48656C6C6F21'.
+    DATA lv_base_from_db   TYPE xstring.
+    DATA lv_delta          TYPE xstring VALUE '060790060121'.
+    DATA lv_result_memory  TYPE xstring.
+    DATA lv_result_db      TYPE xstring.
+    DATA lv_base_sha       TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA ls_object         TYPE zif_abapgit_definitions=>ty_object.
+
+    lv_base_sha = zcl_abapgit_hash=>sha1_blob( lv_base_in_memory ).
+
+    " Persist the SAME base bytes for real, through the actual production
+    " persistence path (store_object), then read them back through the
+    " actual production read path (get_object) - not a shortcut/mock.
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_base_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-blob
+      iv_data     = lv_base_in_memory ).
+
+    ls_object = zcl_abapgit_ortec_obj_store=>get_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_base_sha ).
+    lv_base_from_db = ls_object-data.
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_base_from_db
+      exp = lv_base_in_memory
+      msg = 'store_object/get_object round-trip must preserve base bytes exactly - ' &&
+            'the streaming resolver design depends on this' ).
+
+    lv_result_memory = zcl_abapgit_ortec_delta=>apply(
+      iv_base  = lv_base_in_memory
+      iv_delta = lv_delta ).
+
+    lv_result_db = zcl_abapgit_ortec_delta=>apply(
+      iv_base  = lv_base_from_db
+      iv_delta = lv_delta ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_result_memory
+      exp = '48656C6C6F2121'
+      msg = 'Sanity check: applying the known-good vector against the in-memory ' &&
+            'base must produce the expected "Hello!!" result' ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_result_db
+      exp = lv_result_memory
+      msg = 'SPIKE A: apply() must produce an IDENTICAL result whether its base ' &&
+            'came from an in-memory literal or was freshly read back from ' &&
+            'zaog_obj_store via get_object - this is the core assumption the ' &&
+            'streaming delta-resolver redesign depends on (DB-backed bases ' &&
+            'instead of a shared in-memory ct_objects table)' ).
+  ENDMETHOD.
+ENDCLASS.
+
 CLASS ltcl_git_roundtrip DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
   PRIVATE SECTION. METHODS encode_decode FOR TESTING RAISING cx_static_check.
 ENDCLASS.
