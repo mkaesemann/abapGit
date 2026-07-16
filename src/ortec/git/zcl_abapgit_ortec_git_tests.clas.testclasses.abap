@@ -2090,6 +2090,16 @@ CLASS ltcl_pack_decoder IMPLEMENTATION.
     lv_trailer_raw = lv_trailer_hex.
     CONCATENATE lv_pack lv_trailer_raw INTO lv_pack IN BYTE MODE.
 
+    " DIAG: self-check the test's own construction against the exact formula
+    " resumable_decode uses (sha1 of everything except the trailing 20 bytes),
+    " BEFORE calling decode_and_persist - isolates a test-construction bug
+    " from a real decode-loop byte-miscount.
+    DATA(lv_diag_len) = xstrlen( lv_pack ) - 20.
+    DATA(lv_diag_sha1) = to_upper( zcl_abapgit_hash=>sha1_raw( lv_pack(lv_diag_len) ) ).
+    DATA(lv_diag_trailer) = lv_pack+lv_diag_len(20).
+    cl_abap_unit_assert=>assert_equals( act = lv_diag_sha1 exp = lv_diag_trailer
+      msg = |DIAG SELFCHECK: pack_len={ xstrlen( lv_pack ) } computed={ lv_diag_sha1 } trailer={ lv_diag_trailer }| ).
+
     TRY.
         lt_res = zcl_abapgit_ortec_pack_dec=>decode_and_persist(
           iv_data     = lv_pack
