@@ -14,6 +14,14 @@ CLASS zcx_abapgit_ortec_git DEFINITION
     "! If set, the caller MUST NOT silently fall back to standard behavior.
     DATA mv_is_corruption TYPE abap_bool READ-ONLY.
 
+    "! Flag indicating a fresh fetch with NO haves offered (forcing the
+    "! server to send a complete, self-contained pack) might succeed where
+    "! this attempt failed - set when the failure means "the server said
+    "! nothing new, but our own verification shows that is not actually
+    "! true", as opposed to a failure that a haves-free retry cannot help
+    "! with (e.g. a genuine network error).
+    DATA mv_retry_without_haves TYPE abap_bool READ-ONLY.
+
     "! Filtered call stack captured at RAISE time (this class's own
     "! constructor/raise* frames removed), so the real caller is still
     "! inspectable after the stack has unwound - see get_source_position.
@@ -38,19 +46,24 @@ CLASS zcx_abapgit_ortec_git DEFINITION
     "! Previous exception
     METHODS constructor
       IMPORTING
-        iv_text          TYPE clike DEFAULT ''
-        iv_is_corruption TYPE abap_bool DEFAULT abap_false
-        previous         TYPE REF TO cx_root OPTIONAL.
+        iv_text               TYPE clike DEFAULT ''
+        iv_is_corruption      TYPE abap_bool DEFAULT abap_false
+        iv_retry_without_haves TYPE abap_bool DEFAULT abap_false
+        previous              TYPE REF TO cx_root OPTIONAL.
 
     "! Raise a non-corruption ORTEC exception.
     "! Callers should catch and fall back to standard abapGit behavior.
     "! @parameter iv_text |
     "! Exception text
+    "! @parameter iv_retry_without_haves |
+    "! Set when a fresh, haves-free retry might succeed - see
+    "! mv_retry_without_haves
     "! @raising zcx_abapgit_ortec_git |
     "! Exception
     CLASS-METHODS raise
       IMPORTING
-        iv_text TYPE clike
+        iv_text                TYPE clike
+        iv_retry_without_haves TYPE abap_bool DEFAULT abap_false
       RAISING
         zcx_abapgit_ortec_git.
 
@@ -94,6 +107,7 @@ CLASS zcx_abapgit_ortec_git IMPLEMENTATION.
     super->constructor( previous = previous ).
     mv_text = iv_text.
     mv_is_corruption = iv_is_corruption.
+    mv_retry_without_haves = iv_retry_without_haves.
     save_callstack( ).
     get_source_position(
       IMPORTING
@@ -151,7 +165,8 @@ CLASS zcx_abapgit_ortec_git IMPLEMENTATION.
   METHOD raise.
     RAISE EXCEPTION TYPE zcx_abapgit_ortec_git
       EXPORTING
-        iv_text = iv_text.
+        iv_text                = iv_text
+        iv_retry_without_haves = iv_retry_without_haves.
   ENDMETHOD.
 
 

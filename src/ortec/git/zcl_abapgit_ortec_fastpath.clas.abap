@@ -151,6 +151,7 @@ CLASS zcl_abapgit_ortec_fastpath DEFINITION
         iv_deepen_level TYPE i DEFAULT 0
         it_hashes       TYPE zif_abapgit_git_definitions=>ty_sha1_tt
         iv_allow_thin   TYPE abap_bool DEFAULT abap_false
+        iv_force_full   TYPE abap_bool DEFAULT abap_false
       RETURNING
         VALUE(rt_objects) TYPE zif_abapgit_definitions=>ty_objects_tt
       RAISING
@@ -184,6 +185,15 @@ CLASS zcl_abapgit_ortec_fastpath DEFINITION
         VALUE(rt_objects) TYPE zif_abapgit_definitions=>ty_objects_tt
       RAISING
         zcx_abapgit_ortec_git.
+
+    "! Returns ABAP_TRUE if ix_exception is a zcx_abapgit_ortec_git with
+    "! mv_retry_without_haves set - a small helper to avoid duplicating the
+    "! INSTANCE OF check at every cascade catch site.
+    CLASS-METHODS is_retry_without_haves
+      IMPORTING
+        ix_exception  TYPE REF TO cx_root
+      RETURNING
+        VALUE(rv_yes) TYPE abap_bool.
 
 ENDCLASS.
 
@@ -672,11 +682,45 @@ METHOD pull_by_branch.
               it_hashes       = lt_hashes
               iv_allow_thin   = abap_false ).
           CATCH zcx_abapgit_ortec_git zcx_abapgit_exception INTO DATA(lx_nonthin_branch).
-            " Non-thin Ortec retry also failed - convert to
+            " Non-thin Ortec retry also failed. If either failure indicates
+            " a fresh haves-free fetch might succeed (the server claimed
+            " "nothing new" but our own cache verification disagreed), make
+            " one last attempt forcing iv_force_full - offering the same
+            " haves again would likely reproduce the identical false
+            " "nothing new" outcome. Otherwise convert to
             " zcx_abapgit_ortec_git (this method's own declared type) so
             " the existing standard CATCH zcx_abapgit_ortec_git in
             " zcl_abapgit_git_transport falls through to the fully
             " standard fetch path.
+            IF is_retry_without_haves( lx_thin_branch ) = abap_true
+              OR is_retry_without_haves( lx_nonthin_branch ) = abap_true.
+              zcl_abapgit_git_transport=>find_branch_ortec(
+                EXPORTING
+                  iv_url         = iv_url
+                  iv_service     = 'upload'
+                  iv_branch_name = iv_branch_name
+                IMPORTING
+                  eo_client      = lo_client
+                  ev_branch      = ev_branch ).
+              IF it_branches IS INITIAL.
+                CLEAR lt_hashes.
+                APPEND ev_branch TO lt_hashes.
+              ENDIF.
+              TRY.
+                  et_objects = upload_pack(
+                    io_client       = lo_client
+                    iv_url          = iv_url
+                    iv_deepen_level = iv_deepen_level
+                    it_hashes       = lt_hashes
+                    iv_allow_thin   = abap_false
+                    iv_force_full   = abap_true ).
+                  RETURN.
+                CATCH zcx_abapgit_ortec_git zcx_abapgit_exception INTO DATA(lx_full_branch).
+                  zcx_abapgit_ortec_git=>raise(
+                    |Ortec fastpath failed after thin+non-thin+full retry - thin: { lx_thin_branch->get_text( ) }, | &&
+                    |non-thin: { lx_nonthin_branch->get_text( ) }, full: { lx_full_branch->get_text( ) }| ).
+              ENDTRY.
+            ENDIF.
             zcx_abapgit_ortec_git=>raise(
               |Ortec fastpath failed after thin+non-thin retry - thin: { lx_thin_branch->get_text( ) }, | &&
               |non-thin: { lx_nonthin_branch->get_text( ) }| ).
@@ -732,6 +776,30 @@ METHOD pull_by_branch.
               it_hashes       = lt_hashes
               iv_allow_thin   = abap_false ).
           CATCH zcx_abapgit_ortec_git zcx_abapgit_exception INTO DATA(lx_nonthin_commit).
+            " Non-thin Ortec retry also failed. See the matching comment in
+            " upload_pack_by_branch: if either failure indicates a fresh
+            " haves-free fetch might succeed, make one last attempt forcing
+            " iv_force_full before giving up entirely.
+            IF is_retry_without_haves( lx_thin_commit ) = abap_true
+              OR is_retry_without_haves( lx_nonthin_commit ) = abap_true.
+              lo_client = zcl_abapgit_http=>create_by_url(
+                iv_url     = iv_url
+                it_headers = lt_headers ).
+              TRY.
+                  et_objects = upload_pack(
+                    io_client       = lo_client
+                    iv_url          = iv_url
+                    iv_deepen_level = iv_deepen_level
+                    it_hashes       = lt_hashes
+                    iv_allow_thin   = abap_false
+                    iv_force_full   = abap_true ).
+                  RETURN.
+                CATCH zcx_abapgit_ortec_git zcx_abapgit_exception INTO DATA(lx_full_commit).
+                  zcx_abapgit_ortec_git=>raise(
+                    |Ortec fastpath failed after thin+non-thin+full retry - thin: { lx_thin_commit->get_text( ) }, | &&
+                    |non-thin: { lx_nonthin_commit->get_text( ) }, full: { lx_full_commit->get_text( ) }| ).
+              ENDTRY.
+            ENDIF.
             zcx_abapgit_ortec_git=>raise(
               |Ortec fastpath failed after thin+non-thin retry - thin: { lx_thin_commit->get_text( ) }, | &&
               |non-thin: { lx_nonthin_commit->get_text( ) }| ).
@@ -750,6 +818,7 @@ METHOD upload_pack.
     DATA lv_pack    TYPE xstring.
     DATA lt_ortec_haves TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
     DATA lv_advertise_thin TYPE abap_bool.
+    DATA lv_effective_deepen TYPE i.
 
     DATA lo_fetch_timer   TYPE REF TO zcl_abapgit_timer.
     DATA lv_fetch_duration TYPE string.
@@ -771,18 +840,25 @@ METHOD upload_pack.
     " advertising thin-pack against an unverified have would let the server
     " send back an unresolvable delta. When thin is not requested, the
     " existing unfiltered have-set is used exactly as before.
-    TRY.
-        IF iv_allow_thin = abap_true.
-          lt_ortec_haves = zcl_abapgit_ortec_fetch_neg=>get_verified_have_commits(
-            iv_url         = iv_url
-            it_want_hashes = it_hashes ).
-        ELSE.
-          lt_ortec_haves = zcl_abapgit_ortec_fetch_neg=>get_have_commits(
-            iv_url         = iv_url
-            it_want_hashes = it_hashes ).
-        ENDIF.
-      CATCH zcx_abapgit_ortec_git.
-    ENDTRY.
+    " iv_force_full skips this entirely (leaving lt_ortec_haves empty): used
+    " by the thin+non-thin cascade's last-resort retry when a prior attempt
+    " discovered the server's "nothing new" response could not actually be
+    " trusted against the local cache - offering the same haves again would
+    " likely reproduce the identical false "nothing new" outcome.
+    IF iv_force_full = abap_false.
+      TRY.
+          IF iv_allow_thin = abap_true.
+            lt_ortec_haves = zcl_abapgit_ortec_fetch_neg=>get_verified_have_commits(
+              iv_url         = iv_url
+              it_want_hashes = it_hashes ).
+          ELSE.
+            lt_ortec_haves = zcl_abapgit_ortec_fetch_neg=>get_have_commits(
+              iv_url         = iv_url
+              it_want_hashes = it_hashes ).
+          ENDIF.
+        CATCH zcx_abapgit_ortec_git.
+      ENDTRY.
+    ENDIF.
 
     " Only advertise thin-pack/ofs-delta when the caller allowed it AND at
     " least one verified-complete have exists to delta against - otherwise
@@ -809,8 +885,20 @@ METHOD upload_pack.
     " Only send deepen when we have NO cached objects (first fetch).
     " With deepen, the server ignores have lines and sends a full shallow pack.
     " Without deepen (but with haves), the server sends only the delta.
-    IF lt_ortec_haves IS INITIAL AND iv_deepen_level > 0.
-      lv_buffer = lv_buffer && zcl_abapgit_git_utils=>pkt_string( |deepen { iv_deepen_level }| &&
+    " Whenever there are NO haves at all, ALWAYS send at least deepen 1 -
+    " confirmed live that an empty have-set combined with iv_deepen_level=0
+    " sends neither a deepen line nor any have lines, which is standard git
+    " wire-protocol shorthand for "send the complete history from the
+    " beginning of the repo" (the same class of bug fixed for
+    " zcl_abapgit_ortec_missing_obj=>ensure_available's own call site
+    " earlier - this closes the same gap for every caller of this method,
+    " not just that one).
+    IF lt_ortec_haves IS INITIAL.
+      lv_effective_deepen = iv_deepen_level.
+      IF lv_effective_deepen <= 0.
+        lv_effective_deepen = 1.
+      ENDIF.
+      lv_buffer = lv_buffer && zcl_abapgit_git_utils=>pkt_string( |deepen { lv_effective_deepen }| &&
         cl_abap_char_utilities=>newline ).
     ENDIF.
 
@@ -921,7 +1009,9 @@ METHOD upload_pack.
     IF lv_repo_key IS NOT INITIAL.
       TRY.
           IF lines( it_hashes ) > 1.
-            zcx_abapgit_ortec_git=>raise( 'Cached multi-want nothing-new response requires standard fetch' ).
+            zcx_abapgit_ortec_git=>raise(
+              iv_text                = 'Cached multi-want nothing-new response requires standard fetch'
+              iv_retry_without_haves = abap_true ).
           ENDIF.
 
           LOOP AT it_hashes ASSIGNING <lv_hash>.
@@ -940,7 +1030,8 @@ METHOD upload_pack.
                   iv_repo_key = lv_repo_key
                   iv_commit   = <lv_hash> ).
                 zcx_abapgit_ortec_git=>raise(
-                  'Cached objects have incomplete tree - falling back to standard fetch' ).
+                  iv_text                = 'Cached objects have incomplete tree - falling back to standard fetch'
+                  iv_retry_without_haves = abap_true ).
             ENDTRY.
 
             LOOP AT lt_reachable ASSIGNING <ls_reachable>.
@@ -965,15 +1056,30 @@ METHOD upload_pack.
     ENDIF.
 
     " Cached objects are unavailable or unsafe; caller must use the standard fetch path.
+    " Every failure above means the same thing: the local cache cannot
+    " safely stand in for the server's "nothing new" claim - a fresh
+    " haves-free retry (see upload_pack's iv_force_full) is always worth
+    " attempting regardless of which specific reason fired.
     IF lx_cache_reason IS BOUND.
       zcx_abapgit_ortec_git=>raise(
-        |Cached objects not available for nothing-new response - falling back to standard fetch: | &&
-        lx_cache_reason->get_text( ) ).
+        iv_text                = |Cached objects not available for nothing-new response - | &&
+                                  |falling back to standard fetch: { lx_cache_reason->get_text( ) }|
+        iv_retry_without_haves = abap_true ).
     ELSE.
       zcx_abapgit_ortec_git=>raise(
-        'Cached objects not available for nothing-new response - falling back to standard fetch' ).
+        iv_text                = 'Cached objects not available for nothing-new response - falling back to standard fetch'
+        iv_retry_without_haves = abap_true ).
     ENDIF.
 
+  ENDMETHOD.
+
+
+  METHOD is_retry_without_haves.
+    DATA lx_ortec TYPE REF TO zcx_abapgit_ortec_git.
+    IF ix_exception IS INSTANCE OF zcx_abapgit_ortec_git.
+      lx_ortec ?= ix_exception.
+      rv_yes = lx_ortec->mv_retry_without_haves.
+    ENDIF.
   ENDMETHOD.
 
 

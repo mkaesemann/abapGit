@@ -2201,6 +2201,13 @@ CLASS ltcl_ortec_git_exception DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATI
     "! call stack's top frame is THIS test method (not RAISE or
     "! CONSTRUCTOR), proving the class's own frames were correctly removed.
     METHODS source_position_points_to_caller FOR TESTING RAISING cx_static_check.
+    "! Regression: serve_cached_when_nothing_new's failures previously gave
+    "! upload_pack_by_branch/_by_commit no way to know a fresh, haves-free
+    "! retry might succeed where the server's "nothing new" claim disagreed
+    "! with the local cache - confirmed live across multiple objects/call
+    "! paths. Asserts raise( iv_retry_without_haves = abap_true ) is
+    "! correctly readable back off the caught exception instance.
+    METHODS retry_without_haves_flag_set FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 CLASS ltcl_ortec_git_exception IMPLEMENTATION.
   METHOD get_text_returns_mv_text.
@@ -2248,6 +2255,30 @@ CLASS ltcl_ortec_git_exception IMPLEMENTATION.
       act = lv_source_line
       exp = lx_direct->ms_src_info-line
       msg = 'get_source_position( ) must be consistent with ms_src_info' ).
+  ENDMETHOD.
+  METHOD retry_without_haves_flag_set.
+    DATA lx_default TYPE REF TO zcx_abapgit_ortec_git.
+    DATA lx_retryable TYPE REF TO zcx_abapgit_ortec_git.
+
+    TRY.
+        zcx_abapgit_ortec_git=>raise( 'not retryable by default' ).
+      CATCH zcx_abapgit_ortec_git INTO lx_default.
+    ENDTRY.
+    cl_abap_unit_assert=>assert_equals(
+      act = lx_default->mv_retry_without_haves
+      exp = abap_false
+      msg = 'mv_retry_without_haves must default to false when not passed' ).
+
+    TRY.
+        zcx_abapgit_ortec_git=>raise(
+          iv_text                = 'retryable failure'
+          iv_retry_without_haves = abap_true ).
+      CATCH zcx_abapgit_ortec_git INTO lx_retryable.
+    ENDTRY.
+    cl_abap_unit_assert=>assert_equals(
+      act = lx_retryable->mv_retry_without_haves
+      exp = abap_true
+      msg = 'mv_retry_without_haves must be readable back off the caught exception' ).
   ENDMETHOD.
 ENDCLASS.
 
