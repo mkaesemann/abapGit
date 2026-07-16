@@ -76,11 +76,28 @@ CLASS zcl_abapgit_ortec_missing_obj IMPLEMENTATION.
     " write/protocol opt-in is active this routes through the ORTEC fastpath
     " transport, which negotiates have/want incrementally
     " (zcl_abapgit_ortec_fetch_neg) instead of a full non-thin pack.
+    " iv_deepen_level is deliberately forced to 1 (this commit only, no
+    " ancestry) rather than relying on upload_pack_by_commit's own default
+    " of 0: confirmed live (SYSTEM_NO_ROLL, CL_ABAP_GZIP=>DECOMPRESS_BINARY
+    " requesting 1.5+GB) that deepen=0 combined with an empty have-set
+    " (e.g. a repo/commit with no prior verified-complete local history)
+    " sends NEITHER a deepen line NOR any have lines - which is standard
+    " git wire-protocol shorthand for "send the full reachable history from
+    " the beginning of the repo", not merely "this commit's own objects".
+    " This caller only ever needs iv_commit's own reachable graph to
+    " resolve it_sha1s, so bounding to depth 1 caps the worst case at one
+    " commit's full tree/blob set instead of the entire repo history -
+    " mirroring the same deepen-1 convention already used by
+    " zcl_abapgit_ortec_fastpath=>try_filtered_commit_fetch. When haves ARE
+    " available (see zcl_abapgit_ortec_fetch_neg), upload_pack still prefers
+    " them over deepen and sends only the actual delta, so this is a safety
+    " bound for the empty-haves case, not a regression for the common one.
     TRY.
         zcl_abapgit_git_transport=>upload_pack_by_commit(
           EXPORTING
-            iv_url     = iv_url
-            iv_hash    = iv_commit
+            iv_url          = iv_url
+            iv_hash         = iv_commit
+            iv_deepen_level = 1
           IMPORTING
             et_objects = lt_objects
             ev_commit  = lv_fetched_head ).
