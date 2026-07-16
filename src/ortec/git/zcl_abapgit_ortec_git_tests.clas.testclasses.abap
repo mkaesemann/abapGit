@@ -1161,9 +1161,9 @@ CLASS ltcl_ref_delta DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
     METHODS setup.
     METHODS teardown.
     METHODS base_after_dependent FOR TESTING RAISING cx_static_check.
-    METHODS resolve_after_prior_resolution_in_same_pass FOR TESTING RAISING cx_static_check.
+    METHODS resolve_after_prior_in_pass FOR TESTING RAISING cx_static_check.
     METHODS two_thin_bases_do_not_collide FOR TESTING RAISING cx_static_check.
-    METHODS chain_onto_later_unresolved_delta FOR TESTING RAISING cx_static_check.
+    METHODS chain_onto_later_unresolved FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 CLASS ltcl_ref_delta IMPLEMENTATION.
 
@@ -1244,7 +1244,7 @@ CLASS ltcl_ref_delta IMPLEMENTATION.
       msg = 'Resolved object must carry its real recomputed content SHA1' ).
   ENDMETHOD.
 
-  METHOD resolve_after_prior_resolution_in_same_pass.
+  METHOD resolve_after_prior_in_pass.
     " Regression for the MODIFY fix: resolve_one previously promoted a
     " resolved delta via direct field-symbol writes to <ls_object>-sha1, a
     " component of the "sha" secondary sorted key. That does not update the
@@ -1387,7 +1387,7 @@ CLASS ltcl_ref_delta IMPLEMENTATION.
       msg = 'The second delta must resolve against its own thin base "BBBB", not the first' ).
   ENDMETHOD.
 
-  METHOD chain_onto_later_unresolved_delta.
+  METHOD chain_onto_later_unresolved.
     " Regression for the multi-pass fixpoint fix: A (index 1) is a REF_DELTA
     " declaring a dependency on B's REAL identity, but B (index 2, positioned
     " AFTER A) is ITSELF still an unresolved REF_DELTA at pack-scan time - its
@@ -1555,12 +1555,12 @@ CLASS ltcl_repo_state DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
     METHODS get_or_create_key        FOR TESTING RAISING cx_static_check.
     METHODS get_or_create_idempotent FOR TESTING RAISING cx_static_check.
     METHODS state_roundtrip          FOR TESTING RAISING cx_static_check.
-    METHODS stale_tip_invalidated_from_cache FOR TESTING RAISING cx_static_check.
-    METHODS invalidate_all_history_repo_wide FOR TESTING RAISING cx_static_check.
+    METHODS stale_tip_invalidated FOR TESTING RAISING cx_static_check.
+    METHODS invalidate_all_history_wide FOR TESTING RAISING cx_static_check.
     "! Regression: get_complete_commits must union commit_hist and
     "! repo_state fetch_commit entries, not treat commit_hist as the sole
     "! source whenever it has any row at all.
-    METHODS complete_commits_union_repo_state FOR TESTING RAISING cx_static_check.
+    METHODS commits_union_repo_state FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 CLASS ltcl_repo_state IMPLEMENTATION.
   METHOD setup.
@@ -1604,7 +1604,7 @@ CLASS ltcl_repo_state IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = ls_state-fetch_commit
       exp = 'aabbccddee00112233445566778899aabbccddee' msg = 'Commit must match' ).
   ENDMETHOD.
-  METHOD stale_tip_invalidated_from_cache.
+  METHOD stale_tip_invalidated.
     " Phase 7 coverage: the "stale-tip fallback" behavior relied on by
     " zcl_abapgit_ortec_filter_walk (and the walk/walk_tree repair path) is
     " driven by invalidate_tip_commit removing the "fully materialised"
@@ -1649,7 +1649,7 @@ CLASS ltcl_repo_state IMPLEMENTATION.
     cl_abap_unit_assert=>assert_initial( act = ls_state-fetch_commit
       msg = 'fetch_commit must be blanked so a stale tip cannot be reused for Phase 3 reconstitution' ).
   ENDMETHOD.
-  METHOD invalidate_all_history_repo_wide.
+  METHOD invalidate_all_history_wide.
     " ES6 incident coverage: pull_by_branch's self-heal must guarantee an
     " empty have-set on retry (forcing a full/deepen pack), not just clear
     " the ONE commit/branch that happened to fail its walk. Reproduces two
@@ -1696,7 +1696,7 @@ CLASS ltcl_repo_state IMPLEMENTATION.
     cl_abap_unit_assert=>assert_initial( act = ls_dev-fetch_commit
       msg = 'fetch_commit must be blanked for EVERY branch, not just the one that failed its walk' ).
   ENDMETHOD.
-  METHOD complete_commits_union_repo_state.
+  METHOD commits_union_repo_state.
     " Regression: get_complete_commits previously used zaog_commit_hist as
     " the ONLY source whenever it had ANY row at all for the repo, silently
     " hiding every OTHER branch's own recorded fetch_commit in
@@ -2185,13 +2185,13 @@ ENDCLASS.
 
 CLASS ltcl_fastpath_protocol DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
   PRIVATE SECTION.
-    METHODS upload_pack_buffer_emits_shallow_lines FOR TESTING RAISING cx_static_check.
-    METHODS upload_pack_buffer_skips_shallow_when_full_forced FOR TESTING RAISING cx_static_check.
-    METHODS parse_collects_shallow_and_unshallow FOR TESTING RAISING cx_static_check.
-    METHODS parse_ignores_malformed_shallow_update FOR TESTING RAISING cx_static_check.
+    METHODS buffer_emits_shallow_lines FOR TESTING RAISING cx_static_check.
+    METHODS buffer_skips_shallow_forced FOR TESTING RAISING cx_static_check.
+    METHODS parse_collects_shallow FOR TESTING RAISING cx_static_check.
+    METHODS parse_ignores_bad_shallow FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 CLASS ltcl_fastpath_protocol IMPLEMENTATION.
-  METHOD upload_pack_buffer_emits_shallow_lines.
+  METHOD buffer_emits_shallow_lines.
     DATA lt_hashes TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
     DATA lt_haves  TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
     DATA lv_buffer TYPE string.
@@ -2218,7 +2218,7 @@ CLASS ltcl_fastpath_protocol IMPLEMENTATION.
     cl_abap_unit_assert=>assert_true( act = xsdbool( lv_shallow_pos < lv_flush_pos ) msg = 'Shallow lines must be emitted before the flush pkt' ).
   ENDMETHOD.
 
-  METHOD upload_pack_buffer_skips_shallow_when_full_forced.
+  METHOD buffer_skips_shallow_forced.
     DATA lt_hashes TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
     DATA lt_haves  TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
     DATA lv_buffer TYPE string.
@@ -2246,7 +2246,7 @@ CLASS ltcl_fastpath_protocol IMPLEMENTATION.
     cl_abap_unit_assert=>assert_subrc( exp = 4 msg = 'Shallow lines must be skipped when iv_force_full is true' ).
   ENDMETHOD.
 
-  METHOD parse_collects_shallow_and_unshallow.
+  METHOD parse_collects_shallow.
     DATA lv_data TYPE xstring.
     DATA lv_pack TYPE xstring.
     DATA lt_shallow TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
@@ -2282,7 +2282,7 @@ CLASS ltcl_fastpath_protocol IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = lv_pack exp = '' msg = 'No pack data should be parsed from a plain text pkt-line stream' ).
   ENDMETHOD.
 
-  METHOD parse_ignores_malformed_shallow_update.
+  METHOD parse_ignores_bad_shallow.
     DATA lv_data TYPE xstring.
     DATA lv_pack TYPE xstring.
     DATA lt_shallow TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
@@ -2337,7 +2337,7 @@ CLASS ltcl_ortec_git_exception DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATI
     "! the actual calling code that decided to raise. Asserts the filtered
     "! call stack's top frame is THIS test method (not RAISE or
     "! CONSTRUCTOR), proving the class's own frames were correctly removed.
-    METHODS source_position_points_to_caller FOR TESTING RAISING cx_static_check.
+    METHODS source_position_to_caller FOR TESTING RAISING cx_static_check.
     "! Regression: serve_cached_when_nothing_new's failures previously gave
     "! upload_pack_by_branch/_by_commit no way to know a fresh, haves-free
     "! retry might succeed where the server's "nothing new" claim disagreed
@@ -2358,7 +2358,7 @@ CLASS ltcl_ortec_git_exception IMPLEMENTATION.
       exp = 'a specific, non-generic failure detail'
       msg = 'get_text( ) must return mv_text, not a generic/blank cx_root default' ).
   ENDMETHOD.
-  METHOD source_position_points_to_caller.
+  METHOD source_position_to_caller.
     DATA lx_direct TYPE REF TO zcx_abapgit_ortec_git.
     DATA lv_program_name TYPE progname.
     DATA lv_include_name TYPE progname.
@@ -2374,7 +2374,7 @@ CLASS ltcl_ortec_git_exception IMPLEMENTATION.
       msg = 'mt_callstack must be captured at raise time' ).
     cl_abap_unit_assert=>assert_equals(
       act = lx_direct->mt_callstack[ 1 ]-blockname
-      exp = 'SOURCE_POSITION_POINTS_TO_CALLER'
+      exp = 'SOURCE_POSITION_TO_CALLER'
       msg = 'The top of the filtered call stack must be the actual caller, ' &&
             'not RAISE or CONSTRUCTOR from inside zcx_abapgit_ortec_git itself' ).
 
@@ -2435,7 +2435,7 @@ CLASS ltcl_spike_a_db_base_parity DEFINITION FOR TESTING RISK LEVEL HARMLESS DUR
     "! no shared-state dependency), so this also incidentally proves the
     "! store/get_object round-trip preserves bytes exactly - if it didn't,
     "! this would be the first place to notice.
-    METHODS db_sourced_base_matches_in_memory FOR TESTING RAISING cx_static_check.
+    METHODS db_base_matches_in_memory FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 CLASS ltcl_spike_a_db_base_parity IMPLEMENTATION.
   METHOD setup.
@@ -2446,7 +2446,7 @@ CLASS ltcl_spike_a_db_base_parity IMPLEMENTATION.
     ROLLBACK WORK.
   ENDMETHOD.
 
-  METHOD db_sourced_base_matches_in_memory.
+  METHOD db_base_matches_in_memory.
     " Same hand-verified vector already used elsewhere in this test file
     " (ltcl_ref_delta): base "Hello!" (6 bytes) + delta 060790060121
     " (copy 6 bytes from offset 0, then insert literal '!') must produce
