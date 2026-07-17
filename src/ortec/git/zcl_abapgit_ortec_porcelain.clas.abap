@@ -247,6 +247,27 @@ CLASS zcl_abapgit_ortec_porcelain IMPLEMENTATION.
         ENDIF.
         RAISE EXCEPTION lx_pull.
     ENDTRY.
+
+    " ORTEC: persist objects in persistent store after successful pull - this
+    " mirrors the standard zcl_abapgit_git_porcelain=>pull_by_branch's own
+    " post-pull persistence hook exactly. Without this call, the persistent
+    " object store/index (ZAOG_OBJ_STORE/ZAOG_OBJ_INDEX/ZAOG_REPO_STATE) never
+    " learns about files pulled through this mirror, leaving the Stage/Diff/
+    " status overview's filtered read path comparing against a STALE snapshot
+    " that predates this pull - the exact cause of a live bug (2026-07-17)
+    " where freshly-pulled, unchanged classes were wrongly shown with a
+    " "deleted in remote" status badge, even though a direct diff correctly
+    " reported no differences.
+    TRY.
+        zcl_abapgit_ortec_fastpath=>persist_pull_result(
+          iv_url         = iv_url
+          iv_branch_name = iv_branch_name
+          iv_commit      = rs_result-commit
+          it_objects     = rs_result-objects
+          iv_repo_key    = lv_ortec_repo_key ).
+      CATCH zcx_abapgit_ortec_git.
+        " ORTEC: persistence failure is non-critical, continue normally
+    ENDTRY.
   ENDMETHOD.
 
   METHOD pull_by_commit.
