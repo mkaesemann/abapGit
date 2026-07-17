@@ -80,15 +80,19 @@ CLASS zcl_abapgit_ortec_porcelain IMPLEMENTATION.
     ls_commit = zcl_abapgit_git_pack=>decode_commit( ls_object-data ).
     lv_root_tree = ls_commit-tree.
 
-    lt_blob_sha1s = zcl_abapgit_ortec_walk_prep=>prewarm(
-                      EXPORTING
-                        iv_repo_key  = iv_repo_key
-                        iv_commit    = iv_commit
-                        iv_url       = iv_url
-                        iv_root_tree = lv_root_tree
-                        it_objects   = it_objects
-                      CHANGING
-                        ct_objects   = lt_objects ).
+    TRY.
+        lt_blob_sha1s = zcl_abapgit_ortec_walk_prep=>prewarm(
+                          EXPORTING
+                            iv_repo_key  = iv_repo_key
+                            iv_commit    = iv_commit
+                            iv_url       = iv_url
+                            iv_root_tree = lv_root_tree
+                            it_objects   = it_objects
+                          CHANGING
+                            ct_objects   = lt_objects ).
+      CATCH zcx_abapgit_ortec_git INTO DATA(lx_prewarm).
+        zcx_abapgit_exception=>raise_with_text( lx_prewarm ).
+    ENDTRY.
 
     APPEND LINES OF lt_objects TO it_objects.
 
@@ -135,12 +139,16 @@ CLASS zcl_abapgit_ortec_porcelain IMPLEMENTATION.
       WHILE lt_remaining_sha1s IS NOT INITIAL.
         CLEAR lt_batch_objects.
         CLEAR lt_batch_manifest.
-        lt_batch_objects = zcl_abapgit_ortec_walk_prep=>fetch_blobs_bulk(
-                             EXPORTING
-                               iv_repo_key        = iv_repo_key
-                               it_sha1s           = lt_remaining_sha1s
-                             CHANGING
-                               ct_remaining_sha1s = lt_remaining_sha1s ).
+        TRY.
+            lt_batch_objects = zcl_abapgit_ortec_walk_prep=>fetch_blobs_bulk(
+                                 EXPORTING
+                                   iv_repo_key        = iv_repo_key
+                                   it_sha1s           = lt_remaining_sha1s
+                                 CHANGING
+                                   ct_remaining_sha1s = lt_remaining_sha1s ).
+          CATCH zcx_abapgit_ortec_git INTO DATA(lx_fetch_blobs).
+            zcx_abapgit_exception=>raise_with_text( lx_fetch_blobs ).
+        ENDTRY.
 
         LOOP AT lt_batch_objects INTO ls_object.
           READ TABLE lt_blob_manifest INTO ls_blob_manifest

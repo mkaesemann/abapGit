@@ -1824,9 +1824,9 @@ CLASS ltcl_walk_prep DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
     METHODS setup.
     METHODS teardown.
     METHODS complete_graph_is_noop FOR TESTING RAISING cx_static_check.
-    METHODS fetch_blobs_bulk_consumes_remaining FOR TESTING RAISING cx_static_check.
-    METHODS fetch_blobs_bulk_drains_across_batches FOR TESTING RAISING cx_static_check.
-    METHODS oversized_blob_returns_single_batch FOR TESTING RAISING cx_static_check.
+    METHODS fetch_blobs_bulk_consumes FOR TESTING RAISING cx_static_check.
+    METHODS bulk_drains_across_batches FOR TESTING RAISING cx_static_check.
+    METHODS oversized_blob_single_batch FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 CLASS ltcl_walk_prep IMPLEMENTATION.
   METHOD setup.
@@ -1893,7 +1893,7 @@ CLASS ltcl_walk_prep IMPLEMENTATION.
     cl_abap_unit_assert=>assert_initial( act = lt_ct_objects msg = 'Complete graph leaves warm object buffer empty' ).
   ENDMETHOD.
 
-  METHOD fetch_blobs_bulk_consumes_remaining.
+  METHOD fetch_blobs_bulk_consumes.
     DATA lt_sha1s TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
     DATA lt_remaining TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
     DATA lt_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
@@ -1930,7 +1930,7 @@ CLASS ltcl_walk_prep IMPLEMENTATION.
     cl_abap_unit_assert=>assert_initial( act = lt_remaining msg = 'Bulk fetch drains the remaining SHA1 list' ).
   ENDMETHOD.
 
-  METHOD fetch_blobs_bulk_drains_across_batches.
+  METHOD bulk_drains_across_batches.
     DATA lt_sha1s TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
     DATA lt_remaining TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
     DATA lt_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
@@ -1978,7 +1978,7 @@ CLASS ltcl_walk_prep IMPLEMENTATION.
     cl_abap_unit_assert=>assert_initial( act = lt_remaining msg = 'The remaining SHA1 list is fully drained after the second batch' ).
   ENDMETHOD.
 
-  METHOD oversized_blob_returns_single_batch.
+  METHOD oversized_blob_single_batch.
     DATA lt_sha1s TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
     DATA lt_remaining TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
     DATA lt_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
