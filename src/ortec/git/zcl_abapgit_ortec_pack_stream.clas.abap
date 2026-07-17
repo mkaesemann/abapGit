@@ -61,11 +61,68 @@ CLASS zcl_abapgit_ortec_pack_stream DEFINITION
       RETURNING VALUE(rt_meta) TYPE ty_meta_tt
       RAISING   zcx_abapgit_ortec_git.
 
+    "! Resolves every REF_DELTA/OFS_DELTA row left unresolved by
+    "! decode_and_persist_streaming, mutating ct_meta in place (is_resolved,
+    "! sha1, obj_type). Ports zcl_abapgit_ortec_delta=>resolve_all/resolve_one's
+    "! proven multi-pass/chain/thin-fetch algorithm onto the metadata-only
+    "! contract: instead of keeping every object's bytes resident in one big
+    "! ct_objects table, a delta's raw bytes are read from zaog_obj_store
+    "! (via its temp_key) only for the duration of ONE apply() call, and the
+    "! resolved result is persisted + freed immediately afterwards - never
+    "! more than one resolved delta's bytes held in memory at a time.
+    "! <p>Pass 1: repeated ascending sweeps, resolving only bases already
+    "! reconstructable purely from OTHER rows in this same ct_meta (no object-
+    "! store round-trip for genuinely external bases yet), converging on any
+    "! delta-onto-later-delta chain regardless of topological/SHA1/pack order,
+    "! exactly like resolve_all's own phase 1.</p>
+    "! <p>Pass 2: one final ascending pass allowing genuinely external/thin
+    "! bases to be fetched from zaog_obj_store (via the Phase 1 LRU base
+    "! cache, zcl_abapgit_ortec_base_cache, to avoid re-reading a base shared
+    "! by multiple deltas) and raising on a truly missing base.</p>
+    "! @raising zcx_abapgit_ortec_git |
+    "! On an unresolvable base, a chain deeper than
+    "! zcl_abapgit_ortec_delta=>c_max_chain_depth, an invalid OFS base_offset,
+    "! or a delta stream that fails to apply. Callers must treat this as "the
+    "! whole resolve failed" - ct_meta may be partially mutated and any
+    "! already-resolved rows already persisted, but this call has not
+    "! committed, so a caller that wants a clean rollback should issue
+    "! ROLLBACK WORK on catch.
+    CLASS-METHODS resolve_streaming
+      IMPORTING iv_repo_key TYPE ty_repo_key
+                iv_pack_id  TYPE ty_pack_id
+      CHANGING  ct_meta     TYPE ty_meta_tt
+      RAISING   zcx_abapgit_ortec_git.
+
   PRIVATE SECTION.
     CONSTANTS c_pack_start TYPE x LENGTH 4 VALUE '5041434B' ##NO_TEXT.
     CONSTANTS c_version    TYPE x LENGTH 4 VALUE '00000002' ##NO_TEXT.
     CONSTANTS c_zlib       TYPE x LENGTH 2 VALUE '789C' ##NO_TEXT.
     CONSTANTS c_zlib_hmm   TYPE x LENGTH 2 VALUE '7801' ##NO_TEXT.
+
+    "! Maps an OFS_DELTA row's base_offset (an absolute byte offset into the
+    "! ORIGINAL pack, computed at decode time) to the ct_meta tabix of the
+    "! object that started at that offset. OFS bases are always earlier in
+    "! the SAME pack byte stream (the format guarantees offsets point
+    "! strictly backwards), so - unlike REF_DELTA - this map is static: built
+    "! once from every row's own pack_offset, never mutated during resolve.
+    TYPES: BEGIN OF ty_tabix_by_offset,
+             pack_offset TYPE i,
+             tabix       TYPE i,
+           END OF ty_tabix_by_offset.
+    TYPES ty_tabix_by_offset_tt TYPE HASHED TABLE OF ty_tabix_by_offset WITH UNIQUE KEY pack_offset.
+
+    "! Maps a row's FINAL (real) sha1 to its ct_meta tabix, populated only for
+    "! rows with is_resolved = abap_true. Unlike zcl_abapgit_ortec_delta's
+    "! ct_objects (where an unresolved delta's -sha1 is OVERLOADED to hold its
+    "! own declared base as a placeholder, forcing an explicit "skip self /
+    "! skip other unresolved rows" workaround), ty_meta's sha1 field is BLANK
+    "! for every unresolved row - so this index can never ambiguously match an
+    "! unresolved sibling, and needs no such workaround.
+    TYPES: BEGIN OF ty_sha_idx,
+             sha1  TYPE zif_abapgit_git_definitions=>ty_sha1,
+             tabix TYPE i,
+           END OF ty_sha_idx.
+    TYPES ty_sha_idx_tt TYPE HASHED TABLE OF ty_sha_idx WITH UNIQUE KEY sha1.
 
     CLASS-METHODS build_pack_id
       IMPORTING iv_repo_key       TYPE ty_repo_key
@@ -79,6 +136,29 @@ CLASS zcl_abapgit_ortec_pack_stream DEFINITION
     CLASS-METHODS cleanup_incomplete
       IMPORTING iv_repo_key TYPE ty_repo_key
                 iv_pack_id  TYPE ty_pack_id.
+
+    "! Reads one base object's bytes, transparently using the Phase 1 LRU
+    "! base cache (zcl_abapgit_ortec_base_cache) to avoid a repeat DB read
+    "! when several deltas in the same resolve pass share the same base.
+    CLASS-METHODS get_base_bytes
+      IMPORTING iv_repo_key    TYPE ty_repo_key
+                iv_sha1        TYPE zif_abapgit_git_definitions=>ty_sha1
+      RETURNING VALUE(rv_data) TYPE xstring
+      RAISING   zcx_abapgit_ortec_git.
+
+    "! Resolves exactly one ct_meta row (recursing onto its base first if the
+    "! base is itself an unresolved delta - a chain). See resolve_streaming's
+    "! doc for the overall two-pass strategy this is called from.
+    CLASS-METHODS resolve_one_meta
+      IMPORTING iv_tabix            TYPE i
+                iv_depth            TYPE i
+                iv_allow_thin_fetch TYPE abap_bool DEFAULT abap_true
+                iv_repo_key         TYPE ty_repo_key
+                iv_pack_id          TYPE ty_pack_id
+      CHANGING  ct_meta             TYPE ty_meta_tt
+                ct_tabix_by_offset  TYPE ty_tabix_by_offset_tt
+                ct_sha_idx          TYPE ty_sha_idx_tt
+      RAISING   zcx_abapgit_ortec_git.
 ENDCLASS.
 
 
@@ -98,8 +178,264 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
         AND status   = zcl_abapgit_ortec_pack_stream=>c_status_incomplete.
   ENDMETHOD.
 
+  METHOD get_base_bytes.
+    DATA ls_object TYPE zif_abapgit_definitions=>ty_object.
+
+    rv_data = zcl_abapgit_ortec_base_cache=>get_instance( )->get( iv_sha1 ).
+    IF rv_data IS NOT INITIAL.
+      RETURN.
+    ENDIF.
+
+    TRY.
+        ls_object = zcl_abapgit_ortec_obj_store=>get_object(
+          iv_repo_key = iv_repo_key
+          iv_sha1     = iv_sha1 ).
+      CATCH zcx_abapgit_ortec_git.
+        zcx_abapgit_ortec_git=>raise( |Delta base not found, { iv_sha1 }| ).
+    ENDTRY.
+
+    rv_data = ls_object-data.
+    zcl_abapgit_ortec_base_cache=>get_instance( )->put(
+      iv_sha1 = iv_sha1
+      iv_data = rv_data ).
+  ENDMETHOD.
+
+  METHOD resolve_one_meta.
+    DATA ls_delta_obj  TYPE zif_abapgit_definitions=>ty_object.
+    DATA ls_base_obj   TYPE zif_abapgit_definitions=>ty_object.
+    DATA lv_base_tabix TYPE i.
+    DATA lv_base_type  TYPE zif_abapgit_git_definitions=>ty_type.
+    DATA lv_base_data  TYPE xstring.
+    DATA lv_external   TYPE abap_bool.
+    DATA lv_result     TYPE xstring.
+    DATA lv_final_sha1 TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA ls_off        TYPE ty_tabix_by_offset.
+    DATA ls_sha        TYPE ty_sha_idx.
+    DATA lx_apply      TYPE REF TO zcx_abapgit_exception.
+    DATA lx_missing    TYPE REF TO zcx_abapgit_ortec_git.
+
+    FIELD-SYMBOLS <ls_row>  TYPE ty_meta.
+    FIELD-SYMBOLS <ls_base> TYPE ty_meta.
+
+    READ TABLE ct_meta ASSIGNING <ls_row> INDEX iv_tabix.
+    IF sy-subrc <> 0.
+      zcx_abapgit_ortec_git=>raise( |Delta resolve: internal index { iv_tabix } out of range| ).
+    ENDIF.
+
+    IF <ls_row>-is_resolved = abap_true.
+      RETURN. " Already resolved (memoized base case, mirrors resolve_one).
+    ENDIF.
+
+    IF iv_depth > zcl_abapgit_ortec_delta=>c_max_chain_depth.
+      zcx_abapgit_ortec_git=>raise(
+        |Delta chain exceeds maximum depth { zcl_abapgit_ortec_delta=>c_max_chain_depth } (possible cycle)| ).
+    ENDIF.
+
+    CLEAR lv_external.
+    IF <ls_row>-delta_base IS NOT INITIAL.
+      " REF_DELTA: base identified by declared content SHA1. Only rows already
+      " resolved THIS pass are indexed in ct_sha_idx (see its type doc) - a
+      " miss here genuinely means "not resolved yet", never a false match.
+      READ TABLE ct_sha_idx INTO ls_sha WITH TABLE KEY sha1 = <ls_row>-delta_base.
+      IF sy-subrc = 0.
+        lv_base_tabix = ls_sha-tabix.
+      ELSE.
+        IF iv_allow_thin_fetch = abap_false.
+          RETURN. " Not yet resolvable in-pack; resolve_streaming's next sweep retries.
+        ENDIF.
+        " Genuinely external base (from a prior pack/pull) - or truly missing.
+        TRY.
+            ls_base_obj = zcl_abapgit_ortec_obj_store=>get_object(
+              iv_repo_key = iv_repo_key
+              iv_sha1     = <ls_row>-delta_base ).
+          CATCH zcx_abapgit_ortec_git.
+            zcx_abapgit_ortec_git=>raise( |Delta base not found, { <ls_row>-delta_base }| ).
+        ENDTRY.
+        lv_base_type = ls_base_obj-type.
+        lv_base_data = get_base_bytes( iv_repo_key = iv_repo_key iv_sha1 = <ls_row>-delta_base ).
+        lv_external  = abap_true.
+      ENDIF.
+    ELSE.
+      " OFS_DELTA: base is always earlier in the SAME pack (format guarantee),
+      " so it must already be a row in ct_meta - locate it via its byte offset.
+      READ TABLE ct_tabix_by_offset INTO ls_off WITH TABLE KEY pack_offset = <ls_row>-base_offset.
+      IF sy-subrc <> 0.
+        zcx_abapgit_ortec_git=>raise( |OFS delta: no object at base offset { <ls_row>-base_offset }| ).
+      ENDIF.
+      lv_base_tabix = ls_off-tabix.
+    ENDIF.
+
+    IF lv_external = abap_false.
+      READ TABLE ct_meta ASSIGNING <ls_base> INDEX lv_base_tabix.
+      IF sy-subrc <> 0.
+        zcx_abapgit_ortec_git=>raise( |Delta resolve: internal index { lv_base_tabix } out of range| ).
+      ENDIF.
+
+      IF <ls_base>-is_resolved = abap_false.
+        resolve_one_meta(
+          EXPORTING
+            iv_tabix            = lv_base_tabix
+            iv_depth            = iv_depth + 1
+            iv_allow_thin_fetch = iv_allow_thin_fetch
+            iv_repo_key         = iv_repo_key
+            iv_pack_id          = iv_pack_id
+          CHANGING
+            ct_meta            = ct_meta
+            ct_tabix_by_offset = ct_tabix_by_offset
+            ct_sha_idx         = ct_sha_idx ).
+        READ TABLE ct_meta ASSIGNING <ls_base> INDEX lv_base_tabix.
+        IF sy-subrc <> 0.
+          zcx_abapgit_ortec_git=>raise( |Delta resolve: internal index { lv_base_tabix } out of range| ).
+        ENDIF.
+        IF <ls_base>-is_resolved = abap_false.
+          IF iv_allow_thin_fetch = abap_false.
+            RETURN. " Base itself not yet resolvable this sweep; retry next sweep.
+          ENDIF.
+          zcx_abapgit_ortec_git=>raise( |Delta, base still unresolved| ).
+        ENDIF.
+      ENDIF.
+
+      " Defensive sanity check, mirroring the proven pattern in
+      " zcl_abapgit_ortec_delta=>resolve_one: catch a wrong-base match
+      " immediately and unambiguously here rather than as a generic apply()
+      " failure later.
+      IF <ls_row>-delta_base IS NOT INITIAL AND <ls_base>-sha1 <> <ls_row>-delta_base.
+        zcx_abapgit_ortec_git=>raise(
+          |Delta base identity mismatch: declared { <ls_row>-delta_base }, | &&
+          |resolved { <ls_base>-sha1 }| ).
+      ENDIF.
+
+      lv_base_type = <ls_base>-obj_type.
+      lv_base_data = get_base_bytes( iv_repo_key = iv_repo_key iv_sha1 = <ls_base>-sha1 ).
+    ENDIF.
+
+    " Read the delta's own raw (pre-application) bytes, persisted under its
+    " temp key by decode_and_persist_streaming.
+    TRY.
+        ls_delta_obj = zcl_abapgit_ortec_obj_store=>get_object(
+          iv_repo_key = iv_repo_key
+          iv_sha1     = <ls_row>-temp_key ).
+      CATCH zcx_abapgit_ortec_git INTO lx_missing.
+        zcx_abapgit_ortec_git=>raise( |Delta temp data missing: { lx_missing->get_text( ) }| ).
+    ENDTRY.
+
+    TRY.
+        lv_result = zcl_abapgit_ortec_delta=>apply(
+          iv_base  = lv_base_data
+          iv_delta = ls_delta_obj-data ).
+      CATCH zcx_abapgit_exception INTO lx_apply.
+        zcx_abapgit_ortec_git=>raise(
+          |{ lx_apply->get_text( ) } - base type { lv_base_type }, { xstrlen( lv_base_data ) } bytes, | &&
+          |delta { xstrlen( ls_delta_obj-data ) } bytes, depth { iv_depth }| ).
+    ENDTRY.
+
+    lv_final_sha1 = zcl_abapgit_hash=>sha1( iv_type = lv_base_type iv_data = lv_result ).
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = iv_repo_key
+      iv_sha1     = lv_final_sha1
+      iv_type     = lv_base_type
+      iv_data     = lv_result
+      iv_pack_id  = iv_pack_id
+      iv_status   = 'R' ).
+    CLEAR lv_result.
+
+    " The temp-keyed raw-delta row is now superseded by the real, resolved
+    " object above - remove it (uncommitted; resolve_streaming issues one
+    " COMMIT WORK at the very end, so this rolls back together with
+    " everything else if a LATER object in the same pass fails).
+    DELETE FROM zaog_obj_store
+      WHERE repo_key = iv_repo_key
+        AND obj_sha1 = <ls_row>-temp_key.
+
+    <ls_row>-sha1        = lv_final_sha1.
+    <ls_row>-obj_type    = lv_base_type.
+    <ls_row>-is_resolved = abap_true.
+
+    ls_sha-sha1  = lv_final_sha1.
+    ls_sha-tabix = iv_tabix.
+    INSERT ls_sha INTO TABLE ct_sha_idx.
+  ENDMETHOD.
+
+  METHOD resolve_streaming.
+    DATA lv_tabix    TYPE i.
+    DATA lv_progress TYPE abap_bool.
+    DATA ls_sha      TYPE ty_sha_idx.
+    DATA ls_off      TYPE ty_tabix_by_offset.
+    DATA lt_tabix_by_offset TYPE ty_tabix_by_offset_tt.
+    DATA lt_sha_idx         TYPE ty_sha_idx_tt.
+
+    FIELD-SYMBOLS <ls_row> TYPE ty_meta.
+
+    LOOP AT ct_meta ASSIGNING <ls_row>.
+      lv_tabix = sy-tabix.
+
+      ls_off-pack_offset = <ls_row>-pack_offset.
+      ls_off-tabix       = lv_tabix.
+      INSERT ls_off INTO TABLE lt_tabix_by_offset.
+
+      IF <ls_row>-is_resolved = abap_true.
+        ls_sha-sha1  = <ls_row>-sha1.
+        ls_sha-tabix = lv_tabix.
+        INSERT ls_sha INTO TABLE lt_sha_idx.
+      ENDIF.
+    ENDLOOP.
+
+    " Pass 1: repeated ascending sweeps, in-pack only (no object-store round-
+    " trip, no raise on "not found yet") - converges on any delta-onto-later-
+    " delta chain regardless of topological/SHA1/pack order. Bounded by the
+    " pack's actual maximum delta-chain depth, not by object count.
+    DO.
+      lv_progress = abap_false.
+      LOOP AT ct_meta ASSIGNING <ls_row>.
+        lv_tabix = sy-tabix.
+        IF <ls_row>-is_resolved = abap_true.
+          CONTINUE.
+        ENDIF.
+        resolve_one_meta(
+          EXPORTING
+            iv_tabix            = lv_tabix
+            iv_depth            = 1
+            iv_allow_thin_fetch = abap_false
+            iv_repo_key         = iv_repo_key
+            iv_pack_id          = iv_pack_id
+          CHANGING
+            ct_meta            = ct_meta
+            ct_tabix_by_offset = lt_tabix_by_offset
+            ct_sha_idx         = lt_sha_idx ).
+        READ TABLE ct_meta ASSIGNING <ls_row> INDEX lv_tabix.
+        IF sy-subrc = 0 AND <ls_row>-is_resolved = abap_true.
+          lv_progress = abap_true.
+        ENDIF.
+      ENDLOOP.
+      IF lv_progress = abap_false.
+        EXIT.
+      ENDIF.
+    ENDDO.
+
+    " Pass 2: one final ascending pass, now allowing the object-store fetch
+    " and the precise "Delta base not found" raise.
+    LOOP AT ct_meta ASSIGNING <ls_row>.
+      lv_tabix = sy-tabix.
+      IF <ls_row>-is_resolved = abap_true.
+        CONTINUE.
+      ENDIF.
+      resolve_one_meta(
+        EXPORTING
+          iv_tabix    = lv_tabix
+          iv_depth    = 1
+          iv_repo_key = iv_repo_key
+          iv_pack_id  = iv_pack_id
+        CHANGING
+          ct_meta            = ct_meta
+          ct_tabix_by_offset = lt_tabix_by_offset
+          ct_sha_idx         = lt_sha_idx ).
+    ENDLOOP.
+
+    COMMIT WORK.
+  ENDMETHOD.
+
   METHOD decode_and_persist_streaming.
-    DATA lv_data           TYPE xstring.
     DATA lv_xstring        TYPE xstring.
     DATA lv_objects        TYPE i.
     DATA lv_x              TYPE x LENGTH 1.

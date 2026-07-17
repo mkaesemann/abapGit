@@ -2621,6 +2621,282 @@ CLASS ltcl_pack_stream IMPLEMENTATION.
   ENDMETHOD.
 ENDCLASS.
 
+CLASS ltcl_stream_resolve DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+  PRIVATE SECTION.
+    CONSTANTS mc_repo TYPE c LENGTH 12 VALUE 'ZAOGT_RESOLV'.
+    METHODS setup.
+    METHODS teardown.
+    METHODS ref_chain_resolves FOR TESTING RAISING cx_static_check.
+    METHODS ofs_chain_resolves FOR TESTING RAISING cx_static_check.
+    METHODS external_thin_base_resolves FOR TESTING RAISING cx_static_check.
+    METHODS two_thin_bases_do_not_collide FOR TESTING RAISING cx_static_check.
+    METHODS missing_base_raises FOR TESTING RAISING cx_static_check.
+ENDCLASS.
+CLASS ltcl_stream_resolve IMPLEMENTATION.
+  METHOD setup.
+    ROLLBACK WORK.
+    DELETE FROM zaog_obj_store WHERE repo_key = mc_repo.
+    COMMIT WORK.
+  ENDMETHOD.
+  METHOD teardown.
+    ROLLBACK WORK.
+    DELETE FROM zaog_obj_store WHERE repo_key = mc_repo.
+    COMMIT WORK.
+  ENDMETHOD.
+
+  METHOD ref_chain_resolves.
+    " Ports ltcl_ref_delta=>chain_onto_later_unresolved onto the metadata-only
+    " streaming contract: A (a REF_DELTA) declares a dependency on B's REAL
+    " identity, but B is ITSELF still an unresolved REF_DELTA (positioned
+    " after A) depending on a real, already-resolved blob C. A single
+    " ascending sweep cannot resolve A on its first visit - resolve_streaming's
+    " multi-pass fixpoint must resolve B first, then revisit A.
+    DATA lt_meta  TYPE zcl_abapgit_ortec_pack_stream=>ty_meta_tt.
+    DATA ls_meta  LIKE LINE OF lt_meta.
+    DATA lv_pack_id TYPE zcl_abapgit_ortec_pack_stream=>ty_pack_id.
+    DATA lv_b_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_c_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_a_delta TYPE xstring.
+    DATA lv_b_delta TYPE xstring.
+    DATA lv_c_data  TYPE xstring.
+
+    lv_pack_id = mc_repo && '_CHAIN'.
+    lv_c_data  = '4869'.   " "Hi"
+    lv_c_sha   = zcl_abapgit_hash=>sha1_blob( lv_c_data ).
+    lv_b_sha   = zcl_abapgit_hash=>sha1_blob( '486921' ). " "Hi!"
+    lv_a_delta = '030490030121'. " applies to "Hi!" -> "Hi!!"
+    lv_b_delta = '020390020121'. " applies to "Hi" -> "Hi!"
+
+    " C: already-resolved plain blob.
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_c_sha iv_type = 'blob' iv_data = lv_c_data ).
+
+    " A: unresolved REF_DELTA depending on B's real (not-yet-known) identity.
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = mc_repo && 'A' iv_type = 'ref_d' iv_data = lv_a_delta ).
+    CLEAR ls_meta.
+    ls_meta-obj_index = 1.
+    ls_meta-pack_offset = 0.
+    ls_meta-obj_type  = 'ref_d'.
+    ls_meta-temp_key  = mc_repo && 'A'.
+    ls_meta-delta_base = lv_b_sha.
+    APPEND ls_meta TO lt_meta.
+
+    " B: unresolved REF_DELTA depending on C's real identity, positioned AFTER A.
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = mc_repo && 'B' iv_type = 'ref_d' iv_data = lv_b_delta ).
+    CLEAR ls_meta.
+    ls_meta-obj_index = 2.
+    ls_meta-pack_offset = 10.
+    ls_meta-obj_type  = 'ref_d'.
+    ls_meta-temp_key  = mc_repo && 'B'.
+    ls_meta-delta_base = lv_c_sha.
+    APPEND ls_meta TO lt_meta.
+
+    zcl_abapgit_ortec_pack_stream=>resolve_streaming(
+      EXPORTING iv_repo_key = mc_repo
+                iv_pack_id  = lv_pack_id
+      CHANGING  ct_meta     = lt_meta ).
+
+    READ TABLE lt_meta INTO ls_meta WITH KEY obj_index = 1.
+    cl_abap_unit_assert=>assert_equals( act = ls_meta-is_resolved exp = abap_true
+      msg = 'A must resolve once B (its declared base) has itself been resolved' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_meta-sha1 exp = zcl_abapgit_hash=>sha1_blob( '486921' && '21' )
+      msg = 'A must resolve to "Hi!!"' ).
+
+    READ TABLE lt_meta INTO ls_meta WITH KEY obj_index = 2.
+    cl_abap_unit_assert=>assert_equals( act = ls_meta-is_resolved exp = abap_true
+      msg = 'B must resolve against C' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_meta-sha1 exp = lv_b_sha
+      msg = 'B must resolve to exactly its declared, pre-computed identity "Hi!"' ).
+
+    cl_abap_unit_assert=>assert_true(
+      act = zcl_abapgit_ortec_obj_store=>exists( iv_repo_key = mc_repo iv_sha1 = lv_b_sha )
+      msg = 'B''s resolved bytes must be persisted under its real sha1' ).
+  ENDMETHOD.
+
+  METHOD ofs_chain_resolves.
+    " Ports ltcl_ofs_delta=>resolve_ofs_chain: obj1 "Hello" -> obj2 "Hello!"
+    " -> obj3 "Hello!!", proving base_offset-based lookups resolve a chain in
+    " dependency order even though obj3's base (obj2) is unresolved when
+    " obj3 is first visited.
+    DATA lt_meta    TYPE zcl_abapgit_ortec_pack_stream=>ty_meta_tt.
+    DATA ls_meta    LIKE LINE OF lt_meta.
+    DATA lv_pack_id TYPE zcl_abapgit_ortec_pack_stream=>ty_pack_id.
+    DATA lv_hello_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+
+    lv_pack_id  = mc_repo && '_OFSCH'.
+    lv_hello_sha = zcl_abapgit_hash=>sha1_blob( '48656C6C6F' ).
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_hello_sha iv_type = 'blob' iv_data = '48656C6C6F' ).
+    CLEAR ls_meta.
+    ls_meta-obj_index   = 1.
+    ls_meta-pack_offset = 0.
+    ls_meta-obj_type    = 'blob'.
+    ls_meta-sha1        = lv_hello_sha.
+    ls_meta-is_resolved = abap_true.
+    APPEND ls_meta TO lt_meta.
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = mc_repo && 'OFS2' iv_type = 'ofs_d' iv_data = '050690050121' ).
+    CLEAR ls_meta.
+    ls_meta-obj_index   = 2.
+    ls_meta-pack_offset = 20.
+    ls_meta-obj_type    = 'ofs_d'.
+    ls_meta-temp_key    = mc_repo && 'OFS2'.
+    ls_meta-base_offset = 0.
+    APPEND ls_meta TO lt_meta.
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = mc_repo && 'OFS3' iv_type = 'ofs_d' iv_data = '060790060121' ).
+    CLEAR ls_meta.
+    ls_meta-obj_index   = 3.
+    ls_meta-pack_offset = 40.
+    ls_meta-obj_type    = 'ofs_d'.
+    ls_meta-temp_key    = mc_repo && 'OFS3'.
+    ls_meta-base_offset = 20.
+    APPEND ls_meta TO lt_meta.
+
+    zcl_abapgit_ortec_pack_stream=>resolve_streaming(
+      EXPORTING iv_repo_key = mc_repo
+                iv_pack_id  = lv_pack_id
+      CHANGING  ct_meta     = lt_meta ).
+
+    READ TABLE lt_meta INTO ls_meta WITH KEY obj_index = 2.
+    cl_abap_unit_assert=>assert_equals( act = ls_meta-is_resolved exp = abap_true ).
+    cl_abap_unit_assert=>assert_equals( act = ls_meta-sha1 exp = zcl_abapgit_hash=>sha1_blob( '48656C6C6F21' )
+      msg = 'First OFS hop must resolve to "Hello!"' ).
+
+    READ TABLE lt_meta INTO ls_meta WITH KEY obj_index = 3.
+    cl_abap_unit_assert=>assert_equals( act = ls_meta-is_resolved exp = abap_true ).
+    cl_abap_unit_assert=>assert_equals( act = ls_meta-sha1 exp = zcl_abapgit_hash=>sha1_blob( '48656C6C6F2121' )
+      msg = 'Second OFS hop must resolve to "Hello!!", proving obj2 was resolved before obj3 applied' ).
+  ENDMETHOD.
+
+  METHOD external_thin_base_resolves.
+    " A REF_DELTA whose declared base is not represented by any ct_meta row
+    " at all - genuinely external, already-resolved data from a prior
+    " pull/pack, fetched directly from zaog_obj_store (and warmed into the
+    " Phase 1 LRU base cache) rather than found in-pack.
+    DATA lt_meta    TYPE zcl_abapgit_ortec_pack_stream=>ty_meta_tt.
+    DATA ls_meta    LIKE LINE OF lt_meta.
+    DATA lv_pack_id TYPE zcl_abapgit_ortec_pack_stream=>ty_pack_id.
+    DATA lv_base_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+
+    lv_pack_id  = mc_repo && '_THIN1'.
+    lv_base_sha = zcl_abapgit_hash=>sha1_blob( '41414141' ). " "AAAA", external
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_base_sha iv_type = 'blob' iv_data = '41414141' ).
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = mc_repo && 'EXT1' iv_type = 'ref_d' iv_data = '040590040121' ).
+    CLEAR ls_meta.
+    ls_meta-obj_index   = 1.
+    ls_meta-pack_offset = 0.
+    ls_meta-obj_type    = 'ref_d'.
+    ls_meta-temp_key    = mc_repo && 'EXT1'.
+    ls_meta-delta_base  = lv_base_sha.
+    APPEND ls_meta TO lt_meta.
+
+    zcl_abapgit_ortec_pack_stream=>resolve_streaming(
+      EXPORTING iv_repo_key = mc_repo
+                iv_pack_id  = lv_pack_id
+      CHANGING  ct_meta     = lt_meta ).
+
+    READ TABLE lt_meta INTO ls_meta WITH KEY obj_index = 1.
+    cl_abap_unit_assert=>assert_equals( act = ls_meta-is_resolved exp = abap_true ).
+    cl_abap_unit_assert=>assert_equals( act = ls_meta-sha1 exp = zcl_abapgit_hash=>sha1_blob( '4141414121' )
+      msg = 'The delta must resolve against its genuinely external base "AAAA"' ).
+  ENDMETHOD.
+
+  METHOD two_thin_bases_do_not_collide.
+    " Ports ltcl_ref_delta=>two_thin_bases_do_not_collide: two separate
+    " REF_DELTA rows, each depending on a DIFFERENT external base fetched
+    " from the object store (and the Phase 1 LRU cache) in the same resolve
+    " pass - guards against any accidental key collision between the two
+    " independent get_base_bytes calls.
+    DATA lt_meta     TYPE zcl_abapgit_ortec_pack_stream=>ty_meta_tt.
+    DATA ls_meta     LIKE LINE OF lt_meta.
+    DATA lv_pack_id  TYPE zcl_abapgit_ortec_pack_stream=>ty_pack_id.
+    DATA lv_base1_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_base2_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+
+    lv_pack_id   = mc_repo && '_THIN2'.
+    lv_base1_sha = zcl_abapgit_hash=>sha1_blob( '41414141' ). " "AAAA"
+    lv_base2_sha = zcl_abapgit_hash=>sha1_blob( '42424242' ). " "BBBB"
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_base1_sha iv_type = 'blob' iv_data = '41414141' ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_base2_sha iv_type = 'blob' iv_data = '42424242' ).
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = mc_repo && 'TW1' iv_type = 'ref_d' iv_data = '040590040121' ).
+    CLEAR ls_meta.
+    ls_meta-obj_index   = 1.
+    ls_meta-pack_offset = 0.
+    ls_meta-obj_type    = 'ref_d'.
+    ls_meta-temp_key    = mc_repo && 'TW1'.
+    ls_meta-delta_base  = lv_base1_sha.
+    APPEND ls_meta TO lt_meta.
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = mc_repo && 'TW2' iv_type = 'ref_d' iv_data = '040590040121' ).
+    CLEAR ls_meta.
+    ls_meta-obj_index   = 2.
+    ls_meta-pack_offset = 10.
+    ls_meta-obj_type    = 'ref_d'.
+    ls_meta-temp_key    = mc_repo && 'TW2'.
+    ls_meta-delta_base  = lv_base2_sha.
+    APPEND ls_meta TO lt_meta.
+
+    zcl_abapgit_ortec_pack_stream=>resolve_streaming(
+      EXPORTING iv_repo_key = mc_repo
+                iv_pack_id  = lv_pack_id
+      CHANGING  ct_meta     = lt_meta ).
+
+    READ TABLE lt_meta INTO ls_meta WITH KEY obj_index = 1.
+    cl_abap_unit_assert=>assert_equals( act = ls_meta-sha1 exp = zcl_abapgit_hash=>sha1_blob( '4141414121' )
+      msg = 'The first delta must resolve against its own thin base "AAAA", not the second' ).
+
+    READ TABLE lt_meta INTO ls_meta WITH KEY obj_index = 2.
+    cl_abap_unit_assert=>assert_equals( act = ls_meta-sha1 exp = zcl_abapgit_hash=>sha1_blob( '4242424221' )
+      msg = 'The second delta must resolve against its own thin base "BBBB", not the first' ).
+  ENDMETHOD.
+
+  METHOD missing_base_raises.
+    DATA lt_meta    TYPE zcl_abapgit_ortec_pack_stream=>ty_meta_tt.
+    DATA ls_meta    LIKE LINE OF lt_meta.
+    DATA lv_pack_id TYPE zcl_abapgit_ortec_pack_stream=>ty_pack_id.
+    DATA lv_caught  TYPE abap_bool.
+
+    lv_pack_id = mc_repo && '_MISS'.
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = mc_repo && 'MISS1' iv_type = 'ref_d' iv_data = '040590040121' ).
+    CLEAR ls_meta.
+    ls_meta-obj_index   = 1.
+    ls_meta-pack_offset = 0.
+    ls_meta-obj_type    = 'ref_d'.
+    ls_meta-temp_key    = mc_repo && 'MISS1'.
+    ls_meta-delta_base  = 'ffffffffffffffffffffffffffffffffffffffff'.
+    APPEND ls_meta TO lt_meta.
+
+    lv_caught = abap_false.
+    TRY.
+        zcl_abapgit_ortec_pack_stream=>resolve_streaming(
+          EXPORTING iv_repo_key = mc_repo
+                    iv_pack_id  = lv_pack_id
+          CHANGING  ct_meta     = lt_meta ).
+      CATCH zcx_abapgit_ortec_git.
+        lv_caught = abap_true.
+    ENDTRY.
+    cl_abap_unit_assert=>assert_true( act = lv_caught msg = 'A genuinely missing base must raise zcx_abapgit_ortec_git' ).
+  ENDMETHOD.
+ENDCLASS.
+
 CLASS ltcl_fetch_neg DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
   PRIVATE SECTION.
     CONSTANTS mc_url TYPE string VALUE 'https://test-neg.example.com/repo.git'.
