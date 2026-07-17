@@ -2667,9 +2667,22 @@ CLASS ltcl_stream_resolve IMPLEMENTATION.
     lv_a_delta = '030490030121'. " applies to "Hi!" -> "Hi!!"
     lv_b_delta = '020390020121'. " applies to "Hi" -> "Hi!"
 
-    " C: already-resolved plain blob.
+    " C: already-resolved plain blob, part of the SAME pack (a ct_meta row) -
+    " this is what lets B find it via the in-pack sha1 index during Pass 1,
+    " exactly like ltcl_ref_delta=>chain_onto_later_unresolved. (Making C
+    " purely external/thin instead would combine two distinct scenarios -
+    " an in-pack chain AND a thin base - that the ported algorithm does not
+    " claim to solve together in one single-pass Pass 2; that combination
+    " is out of scope here, matching the original resolve_all's own scope.)
     zcl_abapgit_ortec_obj_store=>store_object(
       iv_repo_key = mc_repo iv_sha1 = lv_c_sha iv_type = 'blob' iv_data = lv_c_data ).
+    CLEAR ls_meta.
+    ls_meta-obj_index   = 3.
+    ls_meta-pack_offset = 20.
+    ls_meta-obj_type    = 'blob'.
+    ls_meta-sha1        = lv_c_sha.
+    ls_meta-is_resolved = abap_true.
+    APPEND ls_meta TO lt_meta.
 
     " A: unresolved REF_DELTA depending on B's real (not-yet-known) identity.
     zcl_abapgit_ortec_obj_store=>store_object(

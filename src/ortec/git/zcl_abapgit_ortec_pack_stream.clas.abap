@@ -323,13 +323,12 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
         lv_result = zcl_abapgit_ortec_delta=>apply(
           iv_base  = lv_base_data
           iv_delta = ls_delta_obj-data ).
+        lv_final_sha1 = zcl_abapgit_hash=>sha1( iv_type = lv_base_type iv_data = lv_result ).
       CATCH zcx_abapgit_exception INTO lx_apply.
         zcx_abapgit_ortec_git=>raise(
           |{ lx_apply->get_text( ) } - base type { lv_base_type }, { xstrlen( lv_base_data ) } bytes, | &&
           |delta { xstrlen( ls_delta_obj-data ) } bytes, depth { iv_depth }| ).
     ENDTRY.
-
-    lv_final_sha1 = zcl_abapgit_hash=>sha1( iv_type = lv_base_type iv_data = lv_result ).
 
     zcl_abapgit_ortec_obj_store=>store_object(
       iv_repo_key = iv_repo_key
