@@ -41,7 +41,7 @@ CLASS zcl_abapgit_ortec_obj_store DEFINITION
                 iv_type     TYPE zif_abapgit_git_definitions=>ty_type
                 iv_data     TYPE xstring
                 iv_pack_id  TYPE c OPTIONAL
-                iv_status   TYPE c DEFAULT 'R'
+                iv_status   TYPE zaog_obj_store-status DEFAULT 'R'
       RAISING   zcx_abapgit_ortec_git.
 
     CLASS-METHODS store_objects
