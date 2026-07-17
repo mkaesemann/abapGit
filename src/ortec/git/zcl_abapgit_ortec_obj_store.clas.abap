@@ -240,7 +240,7 @@ CLASS ZCL_ABAPGIT_ORTEC_OBJ_STORE IMPLEMENTATION.
     ls_row-obj_size   = xstrlen( iv_data ).
     ls_row-pack_id    = iv_pack_id.
     ls_row-created_at = get_timestamp( ).
-    ls_row-status     = 'R'.
+    ls_row-status     = iv_status.
     MODIFY zaog_obj_store FROM ls_row.
     IF sy-subrc <> 0.
       zcx_abapgit_ortec_git=>raise( |Failed to store object { iv_sha1 }| ).
