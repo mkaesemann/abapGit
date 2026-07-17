@@ -1882,6 +1882,7 @@ CLASS ltcl_walk_prep IMPLEMENTATION.
       iv_data     = lv_tree_data ).
 
     lt_blob_sha1s = zcl_abapgit_ortec_walk_prep=>prewarm(
+      EXPORTING
       iv_repo_key  = mc_repo
       iv_commit    = '0000000000000000000000000000000000000000'
       iv_url       = 'https://example.test/repo.git'
@@ -1922,6 +1923,7 @@ CLASS ltcl_walk_prep IMPLEMENTATION.
     lt_remaining = lt_sha1s.
 
     lt_objects = zcl_abapgit_ortec_walk_prep=>fetch_blobs_bulk(
+      EXPORTING
       iv_repo_key         = mc_repo
       it_sha1s            = lt_sha1s
       CHANGING ct_remaining_sha1s = lt_remaining ).
@@ -1959,6 +1961,7 @@ CLASS ltcl_walk_prep IMPLEMENTATION.
     lt_remaining = lt_sha1s.
 
     lt_objects = zcl_abapgit_ortec_walk_prep=>fetch_blobs_bulk(
+      EXPORTING
       iv_repo_key         = mc_repo
       it_sha1s            = lt_sha1s
       CHANGING ct_remaining_sha1s = lt_remaining ).
@@ -1970,6 +1973,7 @@ CLASS ltcl_walk_prep IMPLEMENTATION.
 
     CLEAR lt_objects.
     lt_objects = zcl_abapgit_ortec_walk_prep=>fetch_blobs_bulk(
+      EXPORTING
       iv_repo_key         = mc_repo
       it_sha1s            = lt_remaining
       CHANGING ct_remaining_sha1s = lt_remaining ).
@@ -1997,6 +2001,7 @@ CLASS ltcl_walk_prep IMPLEMENTATION.
     lt_remaining = lt_sha1s.
 
     lt_objects = zcl_abapgit_ortec_walk_prep=>fetch_blobs_bulk(
+      EXPORTING
       iv_repo_key         = mc_repo
       it_sha1s            = lt_sha1s
       CHANGING ct_remaining_sha1s = lt_remaining ).
