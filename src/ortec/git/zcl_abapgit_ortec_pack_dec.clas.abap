@@ -80,6 +80,38 @@ CLASS zcl_abapgit_ortec_pack_dec DEFINITION
       RETURNING VALUE(rt_objects) TYPE zif_abapgit_definitions=>ty_objects_tt
       RAISING   zcx_abapgit_exception.
 
+  PUBLIC SECTION.
+    CLASS-METHODS get_type
+      IMPORTING iv_x           TYPE x
+      RETURNING VALUE(rv_type) TYPE zif_abapgit_git_definitions=>ty_type
+      RAISING   zcx_abapgit_exception.
+
+    CLASS-METHODS get_length
+      EXPORTING ev_length TYPE i
+      CHANGING  cv_data   TYPE xstring.
+
+    CLASS-METHODS zlib_decompress
+      CHANGING cv_data           TYPE xstring
+               cv_decompressed   TYPE xstring
+               cv_compressed_len TYPE i OPTIONAL
+      RAISING  zcx_abapgit_exception.
+
+    "! Kernel-based streaming decompression using CL_ABAP_UNGZIP_BINARY_STREAM.
+    "! Returns both decompressed data and exact consumed compressed byte count.
+    "! Works for any DEFLATE stream (789C / 7801) without header-specific tricks.
+    "!
+    "! @parameter iv_data |
+    "! @parameter iv_expected_len |
+    "! @parameter ev_decompressed |
+    "! @parameter ev_compressed_len |
+    "! @raising zcx_abapgit_exception |
+    CLASS-METHODS stream_decompress
+      IMPORTING iv_data           TYPE xstring
+                iv_expected_len   TYPE i
+      EXPORTING ev_decompressed   TYPE xstring
+                ev_compressed_len TYPE i
+      RAISING   zcx_abapgit_exception.
+
   PROTECTED SECTION.
     CONSTANTS c_pack_start             TYPE x LENGTH 4 VALUE '5041434B' ##NO_TEXT.
     CONSTANTS c_zlib                   TYPE x LENGTH 2 VALUE '789C' ##NO_TEXT.
@@ -147,37 +179,6 @@ CLASS zcl_abapgit_ortec_pack_dec DEFINITION
 
     CLASS-METHODS release_repo_lock
       IMPORTING iv_lock_id TYPE ty_session_id.
-
-    CLASS-METHODS get_type
-      IMPORTING iv_x           TYPE x
-      RETURNING VALUE(rv_type) TYPE zif_abapgit_git_definitions=>ty_type
-      RAISING   zcx_abapgit_exception.
-
-    CLASS-METHODS get_length
-      EXPORTING ev_length TYPE i
-      CHANGING  cv_data   TYPE xstring.
-
-    CLASS-METHODS zlib_decompress
-      CHANGING cv_data           TYPE xstring
-               cv_decompressed   TYPE xstring
-               cv_compressed_len TYPE i OPTIONAL
-      RAISING  zcx_abapgit_exception.
-
-    "! Kernel-based streaming decompression using CL_ABAP_UNGZIP_BINARY_STREAM.
-    "! Returns both decompressed data and exact consumed compressed byte count.
-    "! Works for any DEFLATE stream (789C / 7801) without header-specific tricks.
-    "!
-    "! @parameter iv_data |
-    "! @parameter iv_expected_len |
-    "! @parameter ev_decompressed |
-    "! @parameter ev_compressed_len |
-    "! @raising zcx_abapgit_exception |
-    CLASS-METHODS stream_decompress
-      IMPORTING iv_data           TYPE xstring
-                iv_expected_len   TYPE i
-      EXPORTING ev_decompressed   TYPE xstring
-                ev_compressed_len TYPE i
-      RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS create_session
       IMPORTING iv_repo_key          TYPE ty_repo_key
