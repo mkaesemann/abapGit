@@ -436,6 +436,7 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD decode_and_persist_streaming.
+    DATA lv_data           TYPE xstring.
     DATA lv_xstring        TYPE xstring.
     DATA lv_objects        TYPE i.
     DATA lv_x              TYPE x LENGTH 1.

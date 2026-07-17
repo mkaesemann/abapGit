@@ -2701,7 +2701,7 @@ CLASS ltcl_stream_resolve IMPLEMENTATION.
     READ TABLE lt_meta INTO ls_meta WITH KEY obj_index = 1.
     cl_abap_unit_assert=>assert_equals( act = ls_meta-is_resolved exp = abap_true
       msg = 'A must resolve once B (its declared base) has itself been resolved' ).
-    cl_abap_unit_assert=>assert_equals( act = ls_meta-sha1 exp = zcl_abapgit_hash=>sha1_blob( '486921' && '21' )
+    cl_abap_unit_assert=>assert_equals( act = ls_meta-sha1 exp = zcl_abapgit_hash=>sha1_blob( '48692121' )
       msg = 'A must resolve to "Hi!!"' ).
 
     READ TABLE lt_meta INTO ls_meta WITH KEY obj_index = 2.
