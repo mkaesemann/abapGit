@@ -528,6 +528,15 @@ CLASS ZCL_ABAPGIT_GIT_PORCELAIN IMPLEMENTATION.
     DATA lx_pull TYPE REF TO zcx_abapgit_exception.
     DATA lv_pull_error TYPE string.
 
+    IF zcl_abapgit_ortec_git_switch=>is_active_for_repo( iv_url ) = abap_true.
+      rs_result = zcl_abapgit_ortec_porcelain=>pull_by_branch(
+        iv_url          = iv_url
+        iv_branch_name  = iv_branch_name
+        iv_deepen_level = iv_deepen_level
+        iv_pull_url     = iv_url ).
+      RETURN.
+    ENDIF.
+
     " ORTEC: Try fast-path reconstitution from persistent object store
     TRY.
         rs_result = zcl_abapgit_ortec_fastpath=>pull_by_branch(
@@ -656,6 +665,15 @@ CLASS ZCL_ABAPGIT_GIT_PORCELAIN IMPLEMENTATION.
   METHOD pull_by_commit.
 
     DATA lv_ortec_repo_key TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key.
+
+    IF zcl_abapgit_ortec_git_switch=>is_active_for_repo( iv_url ) = abap_true.
+      rs_result = zcl_abapgit_ortec_porcelain=>pull_by_commit(
+        iv_url          = iv_url
+        iv_commit_hash  = iv_commit_hash
+        iv_deepen_level = iv_deepen_level
+        iv_pull_url     = iv_url ).
+      RETURN.
+    ENDIF.
 
     zcl_abapgit_git_transport=>upload_pack_by_commit(
       EXPORTING
