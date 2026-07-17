@@ -27,8 +27,8 @@ CLASS zcl_abapgit_ortec_pack_dec DEFINITION
     "! Declared object count, or -1 if iv_data is too short to contain a
     "! header (callers must not treat -1 as "confirmed zero")
     CLASS-METHODS peek_object_count
-      IMPORTING iv_data          TYPE xstring
-      RETURNING VALUE(rv_count)  TYPE i.
+      IMPORTING iv_data         TYPE xstring
+      RETURNING VALUE(rv_count) TYPE i.
 
     "! Decode a raw packfile and persist all results for crash-safe resume.
     "! <p>If <em>it_objects</em> is supplied the decode step is skipped and the
@@ -80,7 +80,6 @@ CLASS zcl_abapgit_ortec_pack_dec DEFINITION
       RETURNING VALUE(rt_objects) TYPE zif_abapgit_definitions=>ty_objects_tt
       RAISING   zcx_abapgit_exception.
 
-  PUBLIC SECTION.
     CLASS-METHODS get_type
       IMPORTING iv_x           TYPE x
       RETURNING VALUE(rv_type) TYPE zif_abapgit_git_definitions=>ty_type
@@ -239,14 +238,10 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
     " Decode a pack and return only commit objects, using stream_decompress.
     " Designed for filter tree:0 responses: small pack, commits only.
 
-    IF c_opt6_stream_decompress = abap_false.
-      zcx_abapgit_exception=>raise(
-        'decode_commits_only requires kernel streaming support (opt6)' ).
-    ENDIF.
-
     DATA lv_data           TYPE xstring.
     DATA lv_xstring        TYPE xstring.
     DATA lv_objects        TYPE i.
+    DATA lv_uindex         TYPE sy-index.
     DATA lv_x              TYPE x LENGTH 1.
     DATA lv_type           TYPE zif_abapgit_git_definitions=>ty_type.
     DATA lv_expected       TYPE i.
@@ -255,7 +250,10 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
     DATA lv_decompressed   TYPE xstring.
     DATA lv_compressed_len TYPE i.
     DATA ls_object         TYPE zif_abapgit_definitions=>ty_object.
-    DATA lv_uindex         TYPE sy-index.
+
+    IF c_opt6_stream_decompress = abap_false.
+      zcx_abapgit_exception=>raise( 'decode_commits_only requires kernel streaming support (opt6)' ).
+    ENDIF.
 
     lv_data = iv_data.
 
@@ -263,14 +261,12 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
       zcx_abapgit_exception=>raise( 'decode_commits_only: pack too short' ).
     ENDIF.
     IF lv_data(4) <> c_pack_start.
-      zcx_abapgit_exception=>raise(
-        |decode_commits_only: bad PACK header { lv_data(4) }| ).
+      zcx_abapgit_exception=>raise( |decode_commits_only: bad PACK header { lv_data(4) }| ).
     ENDIF.
     lv_data = lv_data+4.
 
     IF lv_data(4) <> c_version.
-      zcx_abapgit_exception=>raise(
-        |decode_commits_only: unsupported pack version { lv_data(4) }| ).
+      zcx_abapgit_exception=>raise( |decode_commits_only: unsupported pack version { lv_data(4) }| ).
     ENDIF.
     lv_data = lv_data+4.
 
@@ -284,8 +280,10 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
       lv_type = get_type( lv_x ).
 
       get_length(
-        IMPORTING ev_length = lv_expected
-        CHANGING  cv_data   = lv_data ).
+        IMPORTING
+          ev_length = lv_expected
+        CHANGING
+          cv_data   = lv_data ).
 
       IF lv_type = zif_abapgit_git_definitions=>c_type-ref_d.
         lv_ref_delta = lv_data(20).
@@ -298,17 +296,18 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
       " Strip 2-byte zlib header (CMF + FLG)
       lv_zlib = lv_data(2).
       IF lv_zlib <> c_zlib AND lv_zlib <> c_zlib_hmm.
-        zcx_abapgit_exception=>raise(
-          |decode_commits_only: unexpected zlib header { lv_zlib }| ).
+        zcx_abapgit_exception=>raise( |decode_commits_only: unexpected zlib header { lv_zlib }| ).
       ENDIF.
       lv_data = lv_data+2.
 
       " Kernel streaming decompress; ev_compressed_len = DEFLATE bytes only
       stream_decompress(
-        EXPORTING iv_data         = lv_data
-                  iv_expected_len = lv_expected
-        IMPORTING ev_decompressed   = lv_decompressed
-                  ev_compressed_len = lv_compressed_len ).
+        EXPORTING
+          iv_data           = lv_data
+          iv_expected_len   = lv_expected
+        IMPORTING
+          ev_decompressed   = lv_decompressed
+          ev_compressed_len = lv_compressed_len ).
 
       lv_data = lv_data+lv_compressed_len.  " advance past DEFLATE
       lv_data = lv_data+4.                  " skip 4-byte Adler32
@@ -322,8 +321,8 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
         ls_object-sha1 = lv_ref_delta.  " already lowercased
       ELSE.
         ls_object-sha1 = zcl_abapgit_hash=>sha1(
-          iv_type = lv_type
-          iv_data = lv_decompressed ).
+                             iv_type = lv_type
+                             iv_data = lv_decompressed ).
       ENDIF.
       APPEND ls_object TO rt_objects.
     ENDDO.
@@ -749,6 +748,12 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD resumable_decode.
+    TYPES: BEGIN OF ty_base_row,
+             obj_sha1 TYPE zaog_obj_store-obj_sha1,
+             obj_type TYPE zaog_obj_store-obj_type,
+             obj_data TYPE zaog_obj_store-obj_data,
+           END OF ty_base_row.
+
     DATA lv_commit_interval TYPE i.
     DATA lv_obj_done        TYPE i.
     DATA lv_start_offset    TYPE i.
@@ -756,9 +761,15 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
     DATA lv_xstring         TYPE xstring.
     DATA lv_objects         TYPE i.
     DATA lt_done_idx        TYPE STANDARD TABLE OF zaog_pack_idx.
-    DATA ls_done_idx        TYPE zaog_pack_idx.
-    DATA ls_tmp_obj         TYPE zaog_obj_store.
     DATA lt_done_objs       TYPE HASHED TABLE OF zaog_obj_store WITH UNIQUE KEY obj_sha1.
+    DATA ls_tmp_obj         TYPE zaog_obj_store.
+    DATA ls_done_idx        TYPE zaog_pack_idx.
+    DATA lv_base_offset     TYPE i.
+    " OFS_DELTA support (Phase 5a): pack-offset -> object-index map for every
+    " object, and the resolved base_offset for every OFS_DELTA entry. Fed to
+    " zcl_abapgit_ortec_delta=>resolve_all, which replaces decode_deltas below.
+    DATA lt_offset_map      TYPE zcl_abapgit_ortec_delta=>ty_offset_map_tt.
+    DATA lt_ofs_meta        TYPE zcl_abapgit_ortec_delta=>ty_ofs_meta_tt.
     DATA lv_last_redispatch TYPE timestampl.
     DATA lv_uindex          TYPE sy-index.
     DATA lv_curr_offset     TYPE i.
@@ -786,30 +797,18 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
     DATA lv_elapsed         TYPE decfloat34.
     DATA lv_len             TYPE i.
     DATA lv_sha1            TYPE zif_abapgit_git_definitions=>ty_sha1.
-    DATA lt_final_rows      TYPE STANDARD TABLE OF zaog_obj_store.
-    DATA ls_object          LIKE LINE OF rt_objects.
-    DATA lt_pack_shas       TYPE HASHED TABLE OF zif_abapgit_git_definitions=>ty_sha1
-                                  WITH UNIQUE KEY table_line.
-    DATA lt_db_delta_bases  TYPE STANDARD TABLE OF zif_abapgit_git_definitions=>ty_sha1
-                    WITH EMPTY KEY.
-    TYPES: BEGIN OF ty_base_row,
-             obj_sha1 TYPE zaog_obj_store-obj_sha1,
-             obj_type TYPE zaog_obj_store-obj_type,
-             obj_data TYPE zaog_obj_store-obj_data,
-           END OF ty_base_row.
-    DATA lt_base_fetch       TYPE STANDARD TABLE OF ty_base_row WITH EMPTY KEY.
-    DATA ls_base_row         TYPE ty_base_row.
+    DATA lt_delta_bases     TYPE SORTED TABLE OF zif_abapgit_git_definitions=>ty_sha1 WITH UNIQUE KEY table_line.
+    DATA lt_pack_shas       TYPE HASHED TABLE OF zif_abapgit_git_definitions=>ty_sha1 WITH UNIQUE KEY table_line.
+    DATA lt_db_delta_bases  TYPE STANDARD TABLE OF zif_abapgit_git_definitions=>ty_sha1 WITH EMPTY KEY.
+    DATA lt_base_fetch      TYPE STANDARD TABLE OF ty_base_row WITH EMPTY KEY.
+    DATA ls_base_row        TYPE ty_base_row.
     " SHA1 set of base objects to suppress re-persisting them in the final promote step.
-    DATA lt_base_shas       TYPE HASHED TABLE OF zif_abapgit_git_definitions=>ty_sha1
-                                  WITH UNIQUE KEY table_line.
-    DATA lt_delta_bases     TYPE SORTED TABLE OF zif_abapgit_git_definitions=>ty_sha1
-                                  WITH UNIQUE KEY table_line.
-    " OFS_DELTA support (Phase 5a): pack-offset -> object-index map for every
-    " object, and the resolved base_offset for every OFS_DELTA entry. Fed to
-    " zcl_abapgit_ortec_delta=>resolve_all, which replaces decode_deltas below.
-    DATA lt_offset_map      TYPE zcl_abapgit_ortec_delta=>ty_offset_map_tt.
-    DATA lt_ofs_meta        TYPE zcl_abapgit_ortec_delta=>ty_ofs_meta_tt.
-    DATA lv_base_offset     TYPE i.
+    DATA lt_base_shas       TYPE HASHED TABLE OF zif_abapgit_git_definitions=>ty_sha1 WITH UNIQUE KEY table_line.
+    DATA lt_final_rows      TYPE STANDARD TABLE OF zaog_obj_store.
+    DATA ls_idx_upd         TYPE zcl_abapgit_ortec_pack_index=>ty_index_entries_upd.
+    DATA lt_idx_upd         TYPE zcl_abapgit_ortec_pack_index=>tty_index_entries_upd.
+    DATA lv_final_count     TYPE i.
+    DATA ls_object          LIKE LINE OF rt_objects.
 
     lv_commit_interval = iv_commit_interval.
     IF lv_commit_interval <= 0.
@@ -896,8 +895,11 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
           " to include an OFS_DELTA entry.
           DATA(lv_peek) = iv_data+ls_done_idx-pack_offset.
           get_length(
-            IMPORTING ev_length = DATA(lv_peek_len)
-            CHANGING  cv_data   = lv_peek ).
+            " TODO: variable is assigned but never used (ABAP cleaner)
+            IMPORTING
+              ev_length = DATA(lv_peek_len)
+            CHANGING
+              cv_data   = lv_peek ).
           lv_base_offset = ls_done_idx-pack_offset
                             - zcl_abapgit_ortec_delta=>get_offset( CHANGING cv_data = lv_peek ).
         ELSE.
@@ -909,11 +911,11 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
 
         INSERT VALUE #( pack_offset = ls_done_idx-pack_offset
                         obj_index   = ls_done_idx-obj_index )
-          INTO TABLE lt_offset_map.
+               INTO TABLE lt_offset_map.
         IF ls_object-type = zcl_abapgit_ortec_delta=>c_type_ofs_d.
           INSERT VALUE #( obj_index   = ls_done_idx-obj_index
                           base_offset = lv_base_offset )
-            INTO TABLE lt_ofs_meta.
+                 INTO TABLE lt_ofs_meta.
         ENDIF.
       ENDLOOP.
     ENDIF.
@@ -945,7 +947,7 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
 
       INSERT VALUE #( pack_offset = lv_curr_offset
                       obj_index   = lv_uindex )
-        INTO TABLE lt_offset_map.
+             INTO TABLE lt_offset_map.
 
       IF lv_type = zif_abapgit_git_definitions=>c_type-ref_d.
         lv_ref_delta = lv_data(20).
@@ -956,7 +958,7 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
                           - zcl_abapgit_ortec_delta=>get_offset( CHANGING cv_data = lv_data ).
         INSERT VALUE #( obj_index   = lv_uindex
                         base_offset = lv_base_offset )
-          INTO TABLE lt_ofs_meta.
+               INTO TABLE lt_ofs_meta.
       ELSE.
         CLEAR lv_ref_delta.
       ENDIF.
@@ -1228,15 +1230,13 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
       " Bases already materialized in this pack do not require any DB read.
       " (REF_DELTA bases can point to objects included in the same pack.)
       LOOP AT rt_objects INTO ls_object
-          WHERE type <> zif_abapgit_git_definitions=>c_type-ref_d
-            AND type <> zcl_abapgit_ortec_delta=>c_type_ofs_d.
+           WHERE type <> zif_abapgit_git_definitions=>c_type-ref_d
+             AND type <> zcl_abapgit_ortec_delta=>c_type_ofs_d.
         INSERT ls_object-sha1 INTO TABLE lt_pack_shas.
       ENDLOOP.
 
       LOOP AT lt_delta_bases INTO DATA(lv_delta_base).
-        READ TABLE lt_pack_shas WITH TABLE KEY table_line = lv_delta_base
-          TRANSPORTING NO FIELDS.
-        IF sy-subrc <> 0.
+        IF NOT line_exists( lt_pack_shas[ table_line = lv_delta_base ] ).
           APPEND lv_delta_base TO lt_db_delta_bases.
         ENDIF.
       ENDLOOP.
@@ -1305,16 +1305,13 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
     " to SYSTEM_NO_ROLL crashes on large packs. Skip base objects
     " (lt_base_shas): they already exist in DB with status 'R' and have no
     " entry in this pack's index.
-    DATA lt_idx_upd      TYPE zcl_abapgit_ortec_pack_index=>tty_index_entries_upd.
-    DATA ls_idx_upd      TYPE zcl_abapgit_ortec_pack_index=>ty_index_entries_upd.
-    DATA lv_final_count  TYPE i.
     GET TIME STAMP FIELD lv_ts.
     LOOP AT rt_objects INTO ls_object.
       " Skip base objects that were merged for delta resolution only.
       IF lt_base_shas IS NOT INITIAL.
-        READ TABLE lt_base_shas WITH TABLE KEY table_line = ls_object-sha1
-          TRANSPORTING NO FIELDS.
-        IF sy-subrc = 0. CONTINUE. ENDIF.
+        IF line_exists( lt_base_shas[ table_line = ls_object-sha1 ] ).
+          CONTINUE.
+        ENDIF.
       ENDIF.
 
       CLEAR ls_row.
@@ -1329,13 +1326,13 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
       APPEND ls_row TO lt_final_rows.
 
       CLEAR ls_idx_upd.
-      ls_idx_upd-dec_status          = 'D'.
-      ls_idx_upd-obj_sha1            = ls_object-sha1.
+      ls_idx_upd-dec_status = 'D'.
+      ls_idx_upd-obj_sha1   = ls_object-sha1.
       ls_idx_upd-_control-dec_status = if_abap_behv=>mk-on.
       ls_idx_upd-_control-obj_sha1   = if_abap_behv=>mk-on.
       APPEND ls_idx_upd TO lt_idx_upd.
 
-      lv_final_count = lv_final_count + 1.
+      lv_final_count += 1.
       IF lv_final_count MOD lv_commit_interval = 0.
         MODIFY zaog_obj_store FROM TABLE lt_final_rows.
         CLEAR lt_final_rows.

@@ -41,7 +41,7 @@ CLASS zcl_abapgit_ortec_obj_store DEFINITION
                 iv_type     TYPE zif_abapgit_git_definitions=>ty_type
                 iv_data     TYPE xstring
                 iv_pack_id  TYPE c OPTIONAL
-                iv_status   TYPE c LENGTH 1 DEFAULT 'R'
+                iv_status   TYPE c DEFAULT 'R'
       RAISING   zcx_abapgit_ortec_git.
 
     CLASS-METHODS store_objects
@@ -227,7 +227,7 @@ ENDCLASS.
 
 
 
-CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
+CLASS ZCL_ABAPGIT_ORTEC_OBJ_STORE IMPLEMENTATION.
 
 
   METHOD store_object.
@@ -240,7 +240,7 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
     ls_row-obj_size   = xstrlen( iv_data ).
     ls_row-pack_id    = iv_pack_id.
     ls_row-created_at = get_timestamp( ).
-    ls_row-status     = iv_status.
+    ls_row-status     = 'R'.
     MODIFY zaog_obj_store FROM ls_row.
     IF sy-subrc <> 0.
       zcx_abapgit_ortec_git=>raise( |Failed to store object { iv_sha1 }| ).
@@ -857,6 +857,7 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
       ENDIF.
     ENDLOOP.
   ENDMETHOD.
+
 
   METHOD has_dangling_delta_base.
     DATA lt_package TYPE ty_sha1_rows.
