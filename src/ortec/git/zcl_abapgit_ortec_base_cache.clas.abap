@@ -1,8 +1,8 @@
-! <p class="shorttext synchronized">ORTEC byte-budgeted LRU base-cache</p>
-! Standalone cache for recently-used delta-base object bytes.
-! Intended lifecycle: one instance per decode pass, reused for the duration of
-! that pass and then cleared/discarded. A fresh instance is also acceptable if
-! the caller wants a shorter-lived cache.
+"! <p class="shorttext synchronized">ORTEC byte-budgeted LRU base-cache</p>
+"! Standalone cache for recently-used delta-base object bytes.
+"! Intended lifecycle: one instance per decode pass, reused for the duration of
+"! that pass and then cleared/discarded. A fresh instance is also acceptable if
+"! the caller wants a shorter-lived cache.
 CLASS zcl_abapgit_ortec_base_cache DEFINITION
   PUBLIC FINAL
   CREATE PRIVATE.
