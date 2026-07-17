@@ -2451,11 +2451,27 @@ CLASS ltcl_pack_stream DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT
 ENDCLASS.
 CLASS ltcl_pack_stream IMPLEMENTATION.
   METHOD setup.
+    " Unlike most SUT methods in this test file, decode_and_persist_streaming
+    " issues its own real COMMIT WORK (by design - the promote/cleanup step
+    " must be durable). A bare DELETE here would still be sitting uncommitted
+    " when that COMMIT WORK fires, but that's fine since it commits together;
+    " the real risk is teardown's ROLLBACK (see below) undoing a delete that
+    " was never itself committed - so this delete commits explicitly too, to
+    " never depend on ordering relative to the SUT's own commit.
     DELETE FROM zaog_obj_store WHERE repo_key = mc_repo.
+    COMMIT WORK.
   ENDMETHOD.
   METHOD teardown.
-    DELETE FROM zaog_obj_store WHERE repo_key = mc_repo.
+    " ROLLBACK WORK FIRST to discard anything this test left uncommitted,
+    " THEN delete+commit any rows the SUT's own COMMIT WORK already made
+    " durable. The previous DELETE-then-ROLLBACK ordering silently undid its
+    " own delete whenever the SUT had already committed (exactly what
+    " decode_and_persist_streaming does), leaking real 'R'-status rows into
+    " later tests - confirmed live via a stray promoted row surviving an
+    " entire test run.
     ROLLBACK WORK.
+    DELETE FROM zaog_obj_store WHERE repo_key = mc_repo.
+    COMMIT WORK.
   ENDMETHOD.
 
   METHOD delta_free_pack_decodes.
