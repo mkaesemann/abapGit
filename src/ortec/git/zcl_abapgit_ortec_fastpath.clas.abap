@@ -948,14 +948,20 @@ METHOD upload_pack.
                   iv_repo_key = lv_ortec_rk ).
                 lv_via_streaming = abap_true.
               CATCH zcx_abapgit_ortec_git INTO DATA(lx_streaming).
-                " decode_and_persist issues a targeted bulk SELECT for delta bases
-                " (only SHA1s referenced as OBJ_REF_DELTA in this pack).
-                " Full packs trigger no SELECT; the fallback full-store SELECT fires
-                " only when a delta base is missing (edge case).
-                rt_objects = zcl_abapgit_ortec_pack_dec=>decode_and_persist(
-                  iv_data     = lv_pack
-                  iv_repo_key = lv_ortec_rk ).
-                CLEAR lv_via_streaming.
+                " TEMPORARY DIAGNOSTIC (2026-07-17): a live repo is hitting
+                " SYSTEM_NO_ROLL via the fallback tier below, meaning
+                " decode_streaming itself is failing for this repo/pack and
+                " the OLD decoder then predictably crashes on the same huge
+                " pack - exactly the crash this whole effort exists to
+                " remove. Re-raising here INSTEAD OF falling back, so the
+                " real, specific streaming failure reason surfaces as a
+                " clean, catchable error (visible in the abapGit UI) rather
+                " than being silently masked by a fallback that only trades
+                " one crash for the exact same crash. TODO: once the real
+                " root cause is understood and fixed (or confirmed to be a
+                " genuine, unfixable-in-v1 edge case), restore the
+                " decode_and_persist fallback call that used to be here.
+                RAISE EXCEPTION lx_streaming.
             ENDTRY.
             IF rt_objects IS NOT INITIAL.
               " decode_and_persist/decode_streaming already called
