@@ -243,6 +243,8 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
     DATA ls_sha        TYPE ty_sha_idx.
     DATA lx_apply      TYPE REF TO zcx_abapgit_exception.
     DATA lx_missing    TYPE REF TO zcx_abapgit_ortec_git.
+    DATA lv_base_sha_diag         TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_base_pack_offset_diag TYPE i.
 
     FIELD-SYMBOLS <ls_row>  TYPE ty_meta.
     FIELD-SYMBOLS <ls_base> TYPE ty_meta.
@@ -284,13 +286,22 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
         lv_base_type = ls_base_obj-type.
         lv_base_data = get_base_bytes( iv_repo_key = iv_repo_key iv_sha1 = <ls_row>-delta_base ).
         lv_external  = abap_true.
+        lv_base_sha_diag         = <ls_row>-delta_base.
+        lv_base_pack_offset_diag = -1. " external - no in-pack offset
       ENDIF.
     ELSE.
       " OFS_DELTA: base is always earlier in the SAME pack (format guarantee),
       " so it must already be a row in ct_meta - locate it via its byte offset.
+      IF <ls_row>-base_offset < 0.
+        zcx_abapgit_ortec_git=>raise(
+          |OFS delta: base offset { <ls_row>-base_offset } is negative (obj_index | &&
+          |{ <ls_row>-obj_index }, pack_offset { <ls_row>-pack_offset })| ).
+      ENDIF.
       READ TABLE ct_tabix_by_offset INTO ls_off WITH TABLE KEY pack_offset = <ls_row>-base_offset.
       IF sy-subrc <> 0.
-        zcx_abapgit_ortec_git=>raise( |OFS delta: no object at base offset { <ls_row>-base_offset }| ).
+        zcx_abapgit_ortec_git=>raise(
+          |OFS delta: no object at base offset { <ls_row>-base_offset } (obj_index | &&
+          |{ <ls_row>-obj_index }, pack_offset { <ls_row>-pack_offset })| ).
       ENDIF.
       lv_base_tabix = ls_off-tabix.
     ENDIF.
@@ -337,6 +348,8 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
 
       lv_base_type = <ls_base>-obj_type.
       lv_base_data = get_base_bytes( iv_repo_key = iv_repo_key iv_sha1 = <ls_base>-sha1 ).
+      lv_base_sha_diag         = <ls_base>-sha1.
+      lv_base_pack_offset_diag = <ls_base>-pack_offset.
     ENDIF.
 
     " Read the delta's own raw (pre-application) bytes, persisted under its
@@ -355,9 +368,19 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
           iv_delta = ls_delta_obj-data ).
         lv_final_sha1 = zcl_abapgit_hash=>sha1( iv_type = lv_base_type iv_data = lv_result ).
       CATCH zcx_abapgit_exception INTO lx_apply.
+        " Diagnostic detail deliberately includes BOTH sides' identifying
+        " info (not just byte counts) - obj_index/pack_offset pin down
+        " EXACTLY which delta and which resolved base were involved, so a
+        " wrong-base-picked-for-this-delta bug (as opposed to a genuinely
+        " corrupt/unexpected delta stream) can be told apart on sight instead
+        " of requiring another live round-trip to re-diagnose.
         zcx_abapgit_ortec_git=>raise(
-          |{ lx_apply->get_text( ) } - base type { lv_base_type }, { xstrlen( lv_base_data ) } bytes, | &&
-          |delta { xstrlen( ls_delta_obj-data ) } bytes, depth { iv_depth }| ).
+          |{ lx_apply->get_text( ) } - delta obj_index { <ls_row>-obj_index } | &&
+          |pack_offset { <ls_row>-pack_offset } declared_base_sha1 '{ <ls_row>-delta_base }' | &&
+          |declared_base_offset { <ls_row>-base_offset } || resolved base obj_type | &&
+          |{ lv_base_type } sha1 '{ lv_base_sha_diag }' pack_offset { lv_base_pack_offset_diag } | &&
+          |{ xstrlen( lv_base_data ) } bytes || delta { xstrlen( ls_delta_obj-data ) } bytes, | &&
+          |depth { iv_depth }| ).
     ENDTRY.
 
     zcl_abapgit_ortec_obj_store=>store_object(
