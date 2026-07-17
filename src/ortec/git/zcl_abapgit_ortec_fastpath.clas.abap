@@ -410,9 +410,22 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
           RETURN.
         ENDIF.
 
-        lt_objects = zcl_abapgit_ortec_pack_dec=>decode_and_persist(
-          iv_data     = lv_pack
-          iv_repo_key = iv_repo_key ).
+        " Phase 4 routing: try the streaming decoder first (default for any
+        " Ortec-active repo per the design's decision 6); fall back to the
+        " proven non-streaming decoder on the SAME pack bytes on failure
+        " (DR-001 fallback cascade, tier 2). This caller only checks
+        " "did anything decode" (lt_objects IS NOT INITIAL) - it never reads
+        " object content - so decode_streaming's sparse (commit-only)
+        " result is already exactly what is needed here.
+        TRY.
+            lt_objects = zcl_abapgit_ortec_pack_stream=>decode_streaming(
+              iv_data     = lv_pack
+              iv_repo_key = iv_repo_key ).
+          CATCH zcx_abapgit_ortec_git.
+            lt_objects = zcl_abapgit_ortec_pack_dec=>decode_and_persist(
+              iv_data     = lv_pack
+              iv_repo_key = iv_repo_key ).
+        ENDTRY.
 
         IF lt_objects IS NOT INITIAL.
           rv_applicable = abap_true.
@@ -916,23 +929,52 @@ METHOD upload_pack.
     TRY.
         IF zcl_abapgit_ortec_git_switch=>is_active_for_repo( iv_url ) = abap_true.
           DATA lv_ortec_rk TYPE zcl_abapgit_ortec_pack_dec=>ty_repo_key.
+          DATA lv_via_streaming TYPE abap_bool.
           lv_ortec_rk = zcl_abapgit_ortec_repo_state=>get_or_create_repo_key_for_url( iv_url ).
           IF lv_ortec_rk IS NOT INITIAL.
-            " decode_and_persist issues a targeted bulk SELECT for delta bases
-            " (only SHA1s referenced as OBJ_REF_DELTA in this pack).
-            " Full packs trigger no SELECT; the fallback full-store SELECT fires
-            " only when a delta base is missing (edge case).
-            rt_objects = zcl_abapgit_ortec_pack_dec=>decode_and_persist(
-              iv_data     = lv_pack
-              iv_repo_key = lv_ortec_rk ).
+            " Phase 4 routing: the streaming decoder is the DEFAULT engine for
+            " any Ortec-active repo (design decision 6) - it never risks the
+            " rt_objects-class SYSTEM_NO_ROLL ceiling since decoded objects
+            " are persisted and freed one at a time, and it returns only the
+            " sparse commit-object set standard pull()/H4 actually need. On
+            " any streaming failure, fall back to the proven non-streaming
+            " decoder on the SAME pack bytes (DR-001 fallback cascade, tier
+            " 2) - both understand the full OFS/thin pack format, so this
+            " re-decode is safe (unlike the standard abapGit decoder, which
+            " the comment below this TRY still correctly refuses to use).
+            TRY.
+                rt_objects = zcl_abapgit_ortec_pack_stream=>decode_streaming(
+                  iv_data     = lv_pack
+                  iv_repo_key = lv_ortec_rk ).
+                lv_via_streaming = abap_true.
+              CATCH zcx_abapgit_ortec_git INTO DATA(lx_streaming).
+                " decode_and_persist issues a targeted bulk SELECT for delta bases
+                " (only SHA1s referenced as OBJ_REF_DELTA in this pack).
+                " Full packs trigger no SELECT; the fallback full-store SELECT fires
+                " only when a delta base is missing (edge case).
+                rt_objects = zcl_abapgit_ortec_pack_dec=>decode_and_persist(
+                  iv_data     = lv_pack
+                  iv_repo_key = lv_ortec_rk ).
+                CLEAR lv_via_streaming.
+            ENDTRY.
             IF rt_objects IS NOT INITIAL.
-              " rt_objects = full merged set (base + new objects).
-              " decode_and_persist already called invalidate_cache() internally.
+              " decode_and_persist/decode_streaming already called
+              " invalidate_cache() internally. rt_objects is either the full
+              " merged set (fallback tier) or the sparse commit-only set
+              " (streaming, the default) - the object count in the progress
+              " message below reflects whichever actually ran, made visible
+              " so a streaming->fallback event is never silently normalized.
               lv_fetch_duration = lo_fetch_timer->end( ).
               li_progress = zcl_abapgit_progress=>get_instance( 1 ).
-              li_progress->show(
-                iv_current = 1
-                iv_text    = |Fetch: { lines( rt_objects ) } git objects, { lv_fetch_duration }| ).
+              IF lv_via_streaming = abap_true.
+                li_progress->show(
+                  iv_current = 1
+                  iv_text    = |Fetch (streaming): { lines( rt_objects ) } commit(s), { lv_fetch_duration }| ).
+              ELSE.
+                li_progress->show(
+                  iv_current = 1
+                  iv_text    = |Fetch (fallback decoder): { lines( rt_objects ) } git objects, { lv_fetch_duration }| ).
+              ENDIF.
               RETURN.
             ENDIF.
           ENDIF.

@@ -2448,6 +2448,7 @@ CLASS ltcl_pack_stream DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT
     METHODS delta_free_pack_decodes FOR TESTING RAISING cx_static_check.
     METHODS ref_delta_stays_unresolved FOR TESTING RAISING cx_static_check.
     METHODS corrupt_trailer_no_rows FOR TESTING RAISING cx_static_check.
+    METHODS decode_streaming_is_sparse FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 CLASS ltcl_pack_stream IMPLEMENTATION.
   METHOD setup.
@@ -2618,6 +2619,85 @@ CLASS ltcl_pack_stream IMPLEMENTATION.
     SELECT COUNT(*) FROM zaog_obj_store INTO lv_count WHERE repo_key = mc_repo.
     cl_abap_unit_assert=>assert_equals( act = lv_count exp = 0
       msg = 'No rows of any status may remain for this repo after a failed streaming pass' ).
+  ENDMETHOD.
+
+  METHOD decode_streaming_is_sparse.
+    " End-to-end Phase 4 check: a pack containing a commit + its tree + a
+    " blob decodes and resolves fully, but decode_streaming's returned
+    " rt_objects contains ONLY the commit - the sparse contract standard
+    " abapGit's pull()/H4 depend on. The tree and blob must still be fully
+    " available, just via the object store rather than in-memory.
+    DATA lt_nodes       TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+    DATA ls_node        LIKE LINE OF lt_nodes.
+    DATA ls_commit      TYPE zcl_abapgit_git_pack=>ty_commit.
+    DATA lt_obj         TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA ls_obj         LIKE LINE OF lt_obj.
+    DATA lt_objects     TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lv_pack        TYPE xstring.
+    DATA lv_blob_data   TYPE xstring.
+    DATA lv_blob_sha    TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_tree_data   TYPE xstring.
+    DATA lv_tree_sha    TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_commit_data TYPE xstring.
+    DATA lv_commit_sha  TYPE zif_abapgit_git_definitions=>ty_sha1.
+
+    lv_blob_data = '48656C6C6F'. " "Hello"
+    lv_blob_sha  = zcl_abapgit_hash=>sha1_blob( lv_blob_data ).
+
+    ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-file.
+    ls_node-name  = 'hello.txt'.
+    ls_node-sha1  = lv_blob_sha.
+    APPEND ls_node TO lt_nodes.
+    lv_tree_data = zcl_abapgit_git_pack=>encode_tree( lt_nodes ).
+    lv_tree_sha  = zcl_abapgit_hash=>sha1_tree( lv_tree_data ).
+
+    ls_commit-tree      = lv_tree_sha.
+    ls_commit-author    = 'Test <test@example.com> 0 +0000'.
+    ls_commit-committer = 'Test <test@example.com> 0 +0000'.
+    ls_commit-body      = 'test'.
+    lv_commit_data = zcl_abapgit_git_pack=>encode_commit( ls_commit ).
+    lv_commit_sha  = zcl_abapgit_hash=>sha1_commit( lv_commit_data ).
+
+    CLEAR ls_obj.
+    ls_obj-type  = zif_abapgit_git_definitions=>c_type-blob.
+    ls_obj-data  = lv_blob_data.
+    ls_obj-sha1  = lv_blob_sha.
+    ls_obj-index = 1.
+    APPEND ls_obj TO lt_obj.
+
+    CLEAR ls_obj.
+    ls_obj-type  = zif_abapgit_git_definitions=>c_type-tree.
+    ls_obj-data  = lv_tree_data.
+    ls_obj-sha1  = lv_tree_sha.
+    ls_obj-index = 2.
+    APPEND ls_obj TO lt_obj.
+
+    CLEAR ls_obj.
+    ls_obj-type  = zif_abapgit_git_definitions=>c_type-commit.
+    ls_obj-data  = lv_commit_data.
+    ls_obj-sha1  = lv_commit_sha.
+    ls_obj-index = 3.
+    APPEND ls_obj TO lt_obj.
+
+    lv_pack = zcl_abapgit_git_pack=>encode( lt_obj ).
+
+    lt_objects = zcl_abapgit_ortec_pack_stream=>decode_streaming(
+      iv_data     = lv_pack
+      iv_repo_key = mc_repo ).
+
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_objects ) exp = 1
+      msg = 'decode_streaming must return ONLY the commit object - the sparse contract' ).
+    READ TABLE lt_objects INTO ls_obj INDEX 1.
+    cl_abap_unit_assert=>assert_equals( act = ls_obj-sha1 exp = lv_commit_sha ).
+    cl_abap_unit_assert=>assert_equals( act = ls_obj-type exp = zif_abapgit_git_definitions=>c_type-commit ).
+    cl_abap_unit_assert=>assert_equals( act = ls_obj-data exp = lv_commit_data ).
+
+    cl_abap_unit_assert=>assert_true(
+      act = zcl_abapgit_ortec_obj_store=>exists( iv_repo_key = mc_repo iv_sha1 = lv_tree_sha )
+      msg = 'The tree must still be fully available via the object store' ).
+    cl_abap_unit_assert=>assert_true(
+      act = zcl_abapgit_ortec_obj_store=>exists( iv_repo_key = mc_repo iv_sha1 = lv_blob_sha )
+      msg = 'The blob must still be fully available via the object store' ).
   ENDMETHOD.
 ENDCLASS.
 

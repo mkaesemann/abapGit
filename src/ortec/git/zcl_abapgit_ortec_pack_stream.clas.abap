@@ -58,6 +58,7 @@ CLASS zcl_abapgit_ortec_pack_stream DEFINITION
     CLASS-METHODS decode_and_persist_streaming
       IMPORTING iv_data        TYPE xstring
                 iv_repo_key    TYPE ty_repo_key
+      EXPORTING ev_pack_id     TYPE ty_pack_id
       RETURNING VALUE(rt_meta) TYPE ty_meta_tt
       RAISING   zcx_abapgit_ortec_git.
 
@@ -91,6 +92,35 @@ CLASS zcl_abapgit_ortec_pack_stream DEFINITION
       IMPORTING iv_repo_key TYPE ty_repo_key
                 iv_pack_id  TYPE ty_pack_id
       CHANGING  ct_meta     TYPE ty_meta_tt
+      RAISING   zcx_abapgit_ortec_git.
+
+    "! Phase 4 routing entry point: decodes and fully resolves a packfile via
+    "! the streaming path, then returns the SPARSE object set that standard
+    "! abapGit's pull()/walk() actually need resident in memory - the commit
+    "! object(s) only (pull()'s one hard requirement:
+    "! `READ TABLE it_objects WITH KEY type = commit`). Trees and blobs
+    "! deliberately stay OUT of the returned table: every decoded/resolved
+    "! object (commits, trees, AND blobs) is already durably persisted in
+    "! zaog_obj_store under its real SHA1 by the time this returns, and H4
+    "! (zcl_abapgit_ortec_walk_prep/zcl_abapgit_ortec_porcelain) already knows
+    "! how to pull trees on demand and serve blobs in bounded batches straight
+    "! from the store - merging them into rt_objects here would reintroduce
+    "! the exact rt_objects-class memory ceiling this whole effort exists to
+    "! remove. See target_design's "sparse rt_objects contract" note.
+    "! @raising zcx_abapgit_ortec_git |
+    "! On any decode or resolve failure - propagated as-is from
+    "! decode_and_persist_streaming (which has already cleaned up its own
+    "! partial 'I'-status rows and committed) or from resolve_streaming
+    "! (rolled back here first, so no partially-resolved delta work from
+    "! THIS call survives - any already-fully-decoded/resolved objects from
+    "! an EARLIER, independent call remain, which is safe: they are real,
+    "! valid, content-addressed rows). Callers implementing the DR-001
+    "! fallback cascade should catch this and retry via the old
+    "! zcl_abapgit_ortec_pack_dec=>decode_and_persist on the SAME pack bytes.
+    CLASS-METHODS decode_streaming
+      IMPORTING iv_data          TYPE xstring
+                iv_repo_key      TYPE ty_repo_key
+      RETURNING VALUE(rt_objects) TYPE zif_abapgit_definitions=>ty_objects_tt
       RAISING   zcx_abapgit_ortec_git.
 
   PRIVATE SECTION.
@@ -434,6 +464,48 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
     COMMIT WORK.
   ENDMETHOD.
 
+  METHOD decode_streaming.
+    DATA lt_meta       TYPE ty_meta_tt.
+    DATA lv_pack_id    TYPE ty_pack_id.
+    DATA ls_meta       LIKE LINE OF lt_meta.
+    DATA ls_commit_obj TYPE zif_abapgit_definitions=>ty_object.
+    DATA lx_resolve    TYPE REF TO zcx_abapgit_ortec_git.
+    DATA lx_missing    TYPE REF TO zcx_abapgit_ortec_git.
+
+    lt_meta = decode_and_persist_streaming(
+      EXPORTING iv_data     = iv_data
+                iv_repo_key = iv_repo_key
+      IMPORTING ev_pack_id  = lv_pack_id ).
+
+    TRY.
+        resolve_streaming(
+          EXPORTING iv_repo_key = iv_repo_key
+                    iv_pack_id  = lv_pack_id
+          CHANGING  ct_meta     = lt_meta ).
+      CATCH zcx_abapgit_ortec_git INTO lx_resolve.
+        " resolve_streaming does not commit on failure (see its own doc) -
+        " roll back any of THIS call's own uncommitted resolve work so a
+        " retry (or the DR-001 fallback to the old decoder) starts clean.
+        " Phase 2's own objects (already committed as status 'R' before
+        " resolve_streaming ever ran) are unaffected either way - they are
+        " real, valid, content-addressed rows regardless of this outcome.
+        ROLLBACK WORK.
+        RAISE EXCEPTION lx_resolve.
+    ENDTRY.
+
+    LOOP AT lt_meta INTO ls_meta WHERE obj_type = zif_abapgit_git_definitions=>c_type-commit.
+      TRY.
+          ls_commit_obj = zcl_abapgit_ortec_obj_store=>get_object(
+            iv_repo_key = iv_repo_key
+            iv_sha1     = ls_meta-sha1 ).
+        CATCH zcx_abapgit_ortec_git INTO lx_missing.
+          zcx_abapgit_ortec_git=>raise(
+            |Streaming decode: commit object missing after resolve: { lx_missing->get_text( ) }| ).
+      ENDTRY.
+      APPEND ls_commit_obj TO rt_objects.
+    ENDLOOP.
+  ENDMETHOD.
+
   METHOD decode_and_persist_streaming.
     DATA lv_data           TYPE xstring.
     DATA lv_xstring        TYPE xstring.
@@ -457,6 +529,7 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
     DATA lx_ortec          TYPE REF TO zcx_abapgit_ortec_git.
 
     lv_pack_id = build_pack_id( iv_repo_key ).
+    ev_pack_id = lv_pack_id.
 
     TRY.
         lv_data = iv_data.
