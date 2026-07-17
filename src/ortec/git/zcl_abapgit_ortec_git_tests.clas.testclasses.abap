@@ -1940,7 +1940,7 @@ CLASS ltcl_walk_prep IMPLEMENTATION.
     DATA lv_large_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
     DATA lv_small_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
 
-    lv_blob_data = repeat( val = 'A' occ = 268435457 ).
+    lv_blob_data = zcl_abapgit_convert=>string_to_xstring_utf8( iv_string = repeat( val = 'A' occ = 268435457 ) ).
     lv_large_sha = zcl_abapgit_hash=>sha1_blob( lv_blob_data ).
     zcl_abapgit_ortec_obj_store=>store_object(
       iv_repo_key = mc_repo
@@ -1989,7 +1989,7 @@ CLASS ltcl_walk_prep IMPLEMENTATION.
     DATA lv_blob_data TYPE xstring.
     DATA lv_blob_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
 
-    lv_blob_data = repeat( val = 'A' occ = 268435457 ).
+    lv_blob_data = zcl_abapgit_convert=>string_to_xstring_utf8( iv_string = repeat( val = 'A' occ = 268435457 ) ).
     lv_blob_sha = zcl_abapgit_hash=>sha1_blob( lv_blob_data ).
     zcl_abapgit_ortec_obj_store=>store_object(
       iv_repo_key = mc_repo
