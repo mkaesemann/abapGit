@@ -377,9 +377,9 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
         zcx_abapgit_ortec_git=>raise(
           |{ lx_apply->get_text( ) } - delta obj_index { <ls_row>-obj_index } | &&
           |pack_offset { <ls_row>-pack_offset } declared_base_sha1 '{ <ls_row>-delta_base }' | &&
-          |declared_base_offset { <ls_row>-base_offset } || resolved base obj_type | &&
+          |declared_base_offset { <ls_row>-base_offset }  resolved base obj_type | &&
           |{ lv_base_type } sha1 '{ lv_base_sha_diag }' pack_offset { lv_base_pack_offset_diag } | &&
-          |{ xstrlen( lv_base_data ) } bytes || delta { xstrlen( ls_delta_obj-data ) } bytes, | &&
+          |{ xstrlen( lv_base_data ) } bytes  delta { xstrlen( ls_delta_obj-data ) } bytes, | &&
           |depth { iv_depth }| ).
     ENDTRY.
 
