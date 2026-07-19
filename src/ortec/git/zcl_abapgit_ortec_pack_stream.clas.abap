@@ -542,6 +542,7 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
     DATA lv_compressed_len TYPE i.
     DATA lv_pack_id        TYPE ty_pack_id.
     DATA lv_temp_sha1      TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_idx8           TYPE c LENGTH 8.
     DATA lv_uindex         TYPE sy-index.
     DATA lv_curr_offset    TYPE i.
     DATA lv_sha1           TYPE zif_abapgit_git_definitions=>ty_sha1.
@@ -626,7 +627,18 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
             " its base (a later phase's job) - persist the raw delta bytes
             " under a temporary key, matching the existing non-streaming
             " decoder's own temp-key convention for in-progress delta rows.
-            lv_temp_sha1 = |{ lv_pack_id }{ lv_uindex WIDTH = 8 PAD = '0' }|.
+            " UNPACK (not a WIDTH/PAD string template) guarantees RIGHT-aligned,
+            " LEADING-zero padding. The previous string-template form used here
+            " (lv_uindex WIDTH = 8 PAD = '0') actually pads on the RIGHT with
+            " trailing zeros instead - e.g. index 1, 10, and 100 all produced
+            " the IDENTICAL 8-character suffix, causing catastrophic temp-key
+            " collisions between unrelated delta objects that share a common
+            " leading digit. A later object's MODIFY silently overwrote an
+            " earlier, different object's delta bytes under the same colliding
+            " key, corrupting that earlier delta - the real root cause of the
+            " live "Delta copy instruction exceeds base length" failures.
+            UNPACK lv_uindex TO lv_idx8.
+            lv_temp_sha1 = lv_pack_id && lv_idx8.
             zcl_abapgit_ortec_obj_store=>store_object(
               iv_repo_key = iv_repo_key
               iv_sha1     = lv_temp_sha1
