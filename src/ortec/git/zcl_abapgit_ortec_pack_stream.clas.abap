@@ -243,9 +243,17 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
 
   METHOD get_base_bytes.
     DATA ls_object TYPE zif_abapgit_definitions=>ty_object.
+    DATA lo_cache  TYPE REF TO zcl_abapgit_ortec_base_cache.
 
-    rv_data = zcl_abapgit_ortec_base_cache=>get_instance( )->get( iv_sha1 ).
-    IF rv_data IS NOT INITIAL.
+    lo_cache = zcl_abapgit_ortec_base_cache=>get_instance( ).
+
+    " has( ) - not "get( ) IS NOT INITIAL" - a genuinely cached 0-byte object
+    " (a valid Git object, e.g. an empty blob) also returns an initial
+    " xstring from get( ). Checking IS NOT INITIAL would treat that as a
+    " permanent cache miss, causing a redundant DB fetch AND a redundant
+    " put( ) on every single call for that sha1.
+    IF lo_cache->has( iv_sha1 ) = abap_true.
+      rv_data = lo_cache->get( iv_sha1 ).
       RETURN.
     ENDIF.
 
@@ -258,7 +266,7 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
     ENDTRY.
 
     rv_data = ls_object-data.
-    zcl_abapgit_ortec_base_cache=>get_instance( )->put(
+    lo_cache->put(
       iv_sha1 = iv_sha1
       iv_data = rv_data ).
   ENDMETHOD.

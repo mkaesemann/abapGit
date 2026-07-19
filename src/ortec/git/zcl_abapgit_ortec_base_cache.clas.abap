@@ -19,6 +19,16 @@ CLASS zcl_abapgit_ortec_base_cache DEFINITION
       IMPORTING iv_sha1 TYPE ty_sha1
       RETURNING VALUE(rv_data) TYPE xstring.
 
+    "! Returns whether iv_sha1 is currently cached - distinct from get( )'s
+    "! result being initial, since a genuinely cached 0-byte object (a valid,
+    "! real Git object - e.g. an empty blob) also returns an initial xstring
+    "! from get( ). Callers that need to tell "cached but empty" apart from
+    "! "not cached" (e.g. to avoid a redundant DB fetch + re-cache) must use
+    "! this instead of checking get( )'s result for IS NOT INITIAL.
+    METHODS has
+      IMPORTING iv_sha1 TYPE ty_sha1
+      RETURNING VALUE(rv_found) TYPE abap_bool.
+
     METHODS put
       IMPORTING iv_sha1 TYPE ty_sha1
                 iv_data TYPE xstring.
@@ -79,6 +89,10 @@ CLASS zcl_abapgit_ortec_base_cache IMPLEMENTATION.
     ENDIF.
   ENDMETHOD.
 
+  METHOD has.
+    rv_found = xsdbool( find_entry( iv_sha1 ) > 0 ).
+  ENDMETHOD.
+
   METHOD put.
     DATA lv_index TYPE i.
     DATA lv_size TYPE i.
@@ -105,8 +119,19 @@ CLASS zcl_abapgit_ortec_base_cache IMPLEMENTATION.
     ls_entry-sha1 = iv_sha1.
     ls_entry-data = iv_data.
     ls_entry-bytes = lv_size.
-    APPEND ls_entry TO mt_entries.
-    mv_total_bytes = mv_total_bytes + lv_size.
+    " INSERT INTO TABLE (not APPEND): for a table with a UNIQUE secondary
+    " key, APPEND raises the uncatchable runtime error ITAB_DUPLICATE_KEY if
+    " a row with the same key is already present, whereas INSERT INTO TABLE
+    " degrades gracefully to sy-subrc <> 0. The find_entry+DELETE above
+    " should already have removed any pre-existing row for iv_sha1, but this
+    " is the difference between a graceful no-op and a hard dump if that
+    " invariant is ever violated. For a STANDARD table with EMPTY primary
+    " key, INSERT INTO TABLE appends at the end exactly like APPEND, so LRU
+    " ordering (index 1 = oldest) is unaffected.
+    INSERT ls_entry INTO TABLE mt_entries.
+    IF sy-subrc = 0.
+      mv_total_bytes = mv_total_bytes + lv_size.
+    ENDIF.
   ENDMETHOD.
 
   METHOD clear.
@@ -136,7 +161,8 @@ CLASS zcl_abapgit_ortec_base_cache IMPLEMENTATION.
       READ TABLE mt_entries INDEX lv_index INTO ls_entry.
       IF sy-subrc = 0.
         DELETE mt_entries INDEX lv_index.
-        APPEND ls_entry TO mt_entries.
+        " See put( ) for why INSERT INTO TABLE is used instead of APPEND.
+        INSERT ls_entry INTO TABLE mt_entries.
       ENDIF.
     ENDIF.
   ENDMETHOD.
