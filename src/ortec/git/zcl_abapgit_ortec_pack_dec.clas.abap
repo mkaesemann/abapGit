@@ -788,7 +788,6 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
     DATA lv_scan_limit      TYPE i.
     DATA lv_scan_offset     TYPE i.
     DATA lv_temp_sha1       TYPE zif_abapgit_git_definitions=>ty_sha1.
-    DATA lv_idx8            TYPE c LENGTH 8.
     DATA lv_ts              TYPE timestampl.
     DATA ls_row             TYPE zaog_obj_store.
     DATA lt_obj_batch       TYPE STANDARD TABLE OF zaog_obj_store.
@@ -1116,17 +1115,18 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
       APPEND ls_object TO rt_objects.
 
       " Persist parsed object payload with a temporary key for resume.
-      " UNPACK guarantees RIGHT-aligned, LEADING-zero padding - the previous
-      " string-template form here (lv_uindex WIDTH = 8 PAD = '0') actually
-      " pads on the RIGHT with trailing zeros instead, so e.g. index 1, 10,
-      " and 100 all produced the IDENTICAL 8-character suffix. For THIS
-      " status='P' resume checkpoint that collision only risked a confused/
-      " incomplete crash-resume (the authoritative in-memory rt_objects table
-      " built via APPEND above is unaffected), but it is the same defect that
-      " causes real data corruption in the newer streaming decoder's own
-      " equivalent temp-key usage - fixed here too for consistency.
-      UNPACK lv_uindex TO lv_idx8.
-      lv_temp_sha1 = iv_pack_id && lv_idx8.
+      " Explicit ALIGN = RIGHT is required: without it, WIDTH/PAD string-
+      " template formatting pads on the RIGHT with trailing zeros instead
+      " (e.g. index 1, 10, and 100 all produced the IDENTICAL 8-character
+      " suffix "10000000"). For THIS status='P' resume checkpoint that
+      " collision only risked a confused/incomplete crash-resume (the
+      " authoritative in-memory rt_objects table built via APPEND above is
+      " unaffected), but it is the same defect that causes real data
+      " corruption in the newer streaming decoder's own equivalent temp-key
+      " usage - fixed here too for consistency. (UNPACK is NOT the right
+      " tool here - it targets BCD/packed decimal source fields, not a
+      " generic numeric-to-char pad.)
+      lv_temp_sha1 = |{ iv_pack_id }{ lv_uindex WIDTH = 8 ALIGN = RIGHT PAD = '0' }|.
       GET TIME STAMP FIELD lv_ts.
 
       CLEAR ls_row.

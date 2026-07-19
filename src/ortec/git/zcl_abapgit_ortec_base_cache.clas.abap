@@ -31,7 +31,15 @@ CLASS zcl_abapgit_ortec_base_cache DEFINITION
              data  TYPE xstring,
              bytes TYPE i,
            END OF ty_entry.
-    TYPES ty_entries_tt TYPE STANDARD TABLE OF ty_entry WITH EMPTY KEY.
+    "! Secondary hashed key on sha1 gives find_entry O(1) lookup while the
+    "! primary STANDARD-table index order is still used for LRU eviction
+    "! (index 1 = oldest, APPEND = newest, move-to-end = DELETE + APPEND).
+    "! Without this, find_entry was an O(n) linear scan called on every
+    "! get/put/touch - fine for a handful of test entries, but a genuine
+    "! O(n^2) bottleneck once thousands of distinct bases are resolved in a
+    "! single pass at real repo scale.
+    TYPES ty_entries_tt TYPE STANDARD TABLE OF ty_entry WITH EMPTY KEY
+      WITH UNIQUE HASHED KEY by_sha1 COMPONENTS sha1.
 
     CLASS-DATA go_instance TYPE REF TO zcl_abapgit_ortec_base_cache.
 
@@ -107,10 +115,16 @@ CLASS zcl_abapgit_ortec_base_cache IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD find_entry.
-    LOOP AT mt_entries INTO DATA(ls_entry) WHERE sha1 = iv_sha1.
+    " O(1) via the by_sha1 secondary hashed key - SY-TABIX is reliably set to
+    " the PRIMARY table index even when the row is found through a secondary
+    " key (documented ABAP behavior), so callers can still use the returned
+    " index for INDEX-based READ/DELETE against the primary (order-preserving)
+    " table.
+    READ TABLE mt_entries WITH TABLE KEY by_sha1 COMPONENTS sha1 = iv_sha1
+      TRANSPORTING NO FIELDS.
+    IF sy-subrc = 0.
       rv_index = sy-tabix.
-      EXIT.
-    ENDLOOP.
+    ENDIF.
   ENDMETHOD.
 
   METHOD touch.

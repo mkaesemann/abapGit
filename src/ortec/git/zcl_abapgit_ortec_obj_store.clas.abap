@@ -48,6 +48,7 @@ CLASS zcl_abapgit_ortec_obj_store DEFINITION
       IMPORTING iv_repo_key TYPE ty_repo_key
                 it_objects  TYPE zif_abapgit_definitions=>ty_objects_tt
                 iv_pack_id  TYPE c OPTIONAL
+                iv_status   TYPE zaog_obj_store-status DEFAULT 'R'
       RAISING   zcx_abapgit_ortec_git.
 
     CLASS-METHODS get_object
@@ -265,7 +266,7 @@ CLASS ZCL_ABAPGIT_ORTEC_OBJ_STORE IMPLEMENTATION.
       ls_row-obj_size   = xstrlen( <ls_obj>-data ).
       ls_row-pack_id    = iv_pack_id.
       ls_row-created_at = lv_ts.
-      ls_row-status     = 'R'.
+      ls_row-status     = iv_status.
       APPEND ls_row TO lt_rows.
     ENDLOOP.
     IF lt_rows IS NOT INITIAL.
