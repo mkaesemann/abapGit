@@ -262,7 +262,11 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
           iv_repo_key = iv_repo_key
           iv_sha1     = iv_sha1 ).
       CATCH zcx_abapgit_ortec_git.
-        zcx_abapgit_ortec_git=>raise( |Delta base not found, { iv_sha1 }| ).
+        " See the matching comment in resolve_one_meta's REF_DELTA branch -
+        " same "our verified haves lied" recovery signal.
+        zcx_abapgit_ortec_git=>raise(
+          iv_text                = |Delta base not found, { iv_sha1 }|
+          iv_retry_without_haves = abap_true ).
     ENDTRY.
 
     rv_data = ls_object-data.
@@ -356,7 +360,17 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
               iv_repo_key = iv_repo_key
               iv_sha1     = <ls_row>-delta_base ).
           CATCH zcx_abapgit_ortec_git.
-            zcx_abapgit_ortec_git=>raise( |Delta base not found, { <ls_row>-delta_base }| ).
+            " retry_without_haves = true: a REF_DELTA declaring an external
+            " base that is neither in THIS pack nor in our own object store
+            " means our locally-tracked "verified have commits" claimed we
+            " already hold an object we actually don't - the server was
+            " therefore never asked to (re-)send it. A full/no-haves retry
+            " (see is_retry_without_haves/iv_force_full in
+            " zcl_abapgit_ortec_fastpath) is the correct recovery, not a
+            " hard failure.
+            zcx_abapgit_ortec_git=>raise(
+              iv_text                = |Delta base not found, { <ls_row>-delta_base }|
+              iv_retry_without_haves = abap_true ).
         ENDTRY.
         lv_base_type = ls_base_obj-type.
         lv_base_data = get_base_bytes( iv_repo_key = iv_repo_key iv_sha1 = <ls_row>-delta_base ).
