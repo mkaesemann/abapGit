@@ -40,21 +40,22 @@ CLASS zcl_abapgit_ortec_base_cache DEFINITION
              sha1  TYPE ty_sha1,
              data  TYPE xstring,
              bytes TYPE i,
+             seq   TYPE i,
            END OF ty_entry.
-    "! Secondary hashed key on sha1 gives find_entry O(1) lookup while the
-    "! primary STANDARD-table index order is still used for LRU eviction
-    "! (index 1 = oldest, APPEND = newest, move-to-end = DELETE + APPEND).
-    "! Without this, find_entry was an O(n) linear scan called on every
-    "! get/put/touch - fine for a handful of test entries, but a genuine
-    "! O(n^2) bottleneck once thousands of distinct bases are resolved in a
-    "! single pass at real repo scale.
+    "! Secondary hashed key on sha1 gives find_entry O(1) lookup. Secondary
+    "! sorted key on seq gives O(1) access to the least-recently-used entry
+    "! (lowest seq = oldest) for eviction, WITHOUT needing LRU order to be
+    "! reflected in the table's own physical/primary position - see the
+    "! class-level doc comment for why that matters.
     TYPES ty_entries_tt TYPE STANDARD TABLE OF ty_entry WITH EMPTY KEY
-      WITH UNIQUE HASHED KEY by_sha1 COMPONENTS sha1.
+      WITH UNIQUE HASHED KEY by_sha1 COMPONENTS sha1
+      WITH UNIQUE SORTED KEY by_seq COMPONENTS seq.
 
     CLASS-DATA go_instance TYPE REF TO zcl_abapgit_ortec_base_cache.
 
     DATA mt_entries TYPE ty_entries_tt.
     DATA mv_total_bytes TYPE i.
+    DATA mv_next_seq TYPE i.
 
     METHODS find_entry
       IMPORTING iv_sha1 TYPE ty_sha1
@@ -103,48 +104,66 @@ CLASS zcl_abapgit_ortec_base_cache IMPLEMENTATION.
       RETURN.
     ENDIF.
 
+    mv_next_seq = mv_next_seq + 1.
+
     lv_index = find_entry( iv_sha1 ).
     IF lv_index > 0.
+      " Already cached (e.g. re-resolved, or re-requested as a shared base
+      " by another delta) - update the EXISTING row in place via MODIFY
+      " INDEX and bump its seq, instead of DELETE + re-INSERT/APPEND. This
+      " is the actual fix for a live ITAB_DUPLICATE_KEY dump (2026-07-19,
+      " recurring across several real pulls, including for ordinary
+      " non-empty tree/blob objects, not just an edge case): under the full
+      " churn of a real ~100k-object pack, this table's UNIQUE by_sha1
+      " secondary key was repeatedly deleted-from and re-inserted-into for
+      " the SAME hot/shared SHA1s (every LRU "touch" and every re-put moved
+      " the row via DELETE+APPEND) - MODIFY INDEX never removes or
+      " re-adds the row at all, so it can never trip the unique-key
+      " insert-time check that DELETE+APPEND/INSERT eventually did. LRU
+      " order no longer depends on physical table position at all (see
+      " mv_next_seq / by_seq / remove_oldest).
       READ TABLE mt_entries INDEX lv_index INTO ls_entry.
-      IF sy-subrc = 0.
-        mv_total_bytes = mv_total_bytes - ls_entry-bytes.
-        DELETE mt_entries INDEX lv_index.
-      ENDIF.
+      mv_total_bytes = mv_total_bytes - ls_entry-bytes + lv_size.
+      ls_entry-data  = iv_data.
+      ls_entry-bytes = lv_size.
+      ls_entry-seq   = mv_next_seq.
+      MODIFY mt_entries INDEX lv_index FROM ls_entry.
+      RETURN.
     ENDIF.
 
     WHILE mv_total_bytes + lv_size > c_budget_bytes AND mt_entries IS NOT INITIAL.
       remove_oldest( ).
     ENDWHILE.
 
-    ls_entry-sha1 = iv_sha1.
-    ls_entry-data = iv_data.
+    ls_entry-sha1  = iv_sha1.
+    ls_entry-data  = iv_data.
     ls_entry-bytes = lv_size.
-    " INSERT INTO TABLE (not APPEND): for a table with a UNIQUE secondary
-    " key, APPEND raises the uncatchable runtime error ITAB_DUPLICATE_KEY if
-    " a row with the same key is already present, whereas INSERT INTO TABLE
-    " degrades gracefully to sy-subrc <> 0. The find_entry+DELETE above
-    " should already have removed any pre-existing row for iv_sha1, but this
-    " is the difference between a graceful no-op and a hard dump if that
-    " invariant is ever violated. For a STANDARD table with EMPTY primary
-    " key, INSERT INTO TABLE appends at the end exactly like APPEND, so LRU
-    " ordering (index 1 = oldest) is unaffected.
-    INSERT ls_entry INTO TABLE mt_entries.
-    IF sy-subrc = 0.
-      mv_total_bytes = mv_total_bytes + lv_size.
-    ENDIF.
+    ls_entry-seq   = mv_next_seq.
+    TRY.
+        " INSERT INTO TABLE (not APPEND), inside TRY/CATCH, as a last-resort
+        " safety net: find_entry( ) above already established iv_sha1 is
+        " genuinely new, so this should never actually raise - but content
+        " is addressed by SHA1 (the same key always means the same bytes),
+        " so silently keeping whichever copy is already present on the
+        " extremely unlikely chance this DOES fire is always safe, and
+        " infinitely preferable to a dump.
+        INSERT ls_entry INTO TABLE mt_entries.
+        mv_total_bytes = mv_total_bytes + lv_size.
+      CATCH cx_sy_itab_duplicate_key.
+    ENDTRY.
   ENDMETHOD.
 
   METHOD clear.
     CLEAR mt_entries.
     CLEAR mv_total_bytes.
+    CLEAR mv_next_seq.
   ENDMETHOD.
 
   METHOD find_entry.
     " O(1) via the by_sha1 secondary hashed key - SY-TABIX is reliably set to
     " the PRIMARY table index even when the row is found through a secondary
     " key (documented ABAP behavior), so callers can still use the returned
-    " index for INDEX-based READ/DELETE against the primary (order-preserving)
-    " table.
+    " index for INDEX-based READ/MODIFY against the primary table.
     READ TABLE mt_entries WITH TABLE KEY by_sha1 COMPONENTS sha1 = iv_sha1
       TRANSPORTING NO FIELDS.
     IF sy-subrc = 0.
@@ -158,22 +177,25 @@ CLASS zcl_abapgit_ortec_base_cache IMPLEMENTATION.
 
     lv_index = find_entry( iv_sha1 ).
     IF lv_index > 0.
-      READ TABLE mt_entries INDEX lv_index INTO ls_entry.
-      IF sy-subrc = 0.
-        DELETE mt_entries INDEX lv_index.
-        " See put( ) for why INSERT INTO TABLE is used instead of APPEND.
-        INSERT ls_entry INTO TABLE mt_entries.
-      ENDIF.
+      " MODIFY INDEX in place - see put( ) for why this replaced
+      " DELETE + re-APPEND/INSERT (the actual fix for a live
+      " ITAB_DUPLICATE_KEY dump, 2026-07-19).
+      mv_next_seq = mv_next_seq + 1.
+      ls_entry-seq = mv_next_seq.
+      MODIFY mt_entries INDEX lv_index FROM ls_entry TRANSPORTING seq.
     ENDIF.
   ENDMETHOD.
 
   METHOD remove_oldest.
     DATA ls_entry TYPE ty_entry.
 
-    READ TABLE mt_entries INDEX 1 INTO ls_entry.
+    " Lowest seq = least-recently-used, found in O(1) via the by_seq
+    " secondary sorted key's own index ordering - independent of the
+    " primary table's physical row order/position.
+    READ TABLE mt_entries INDEX 1 USING KEY by_seq INTO ls_entry.
     IF sy-subrc = 0.
       mv_total_bytes = mv_total_bytes - ls_entry-bytes.
-      DELETE mt_entries INDEX 1.
+      DELETE mt_entries INDEX 1 USING KEY by_seq.
     ENDIF.
   ENDMETHOD.
 ENDCLASS.
