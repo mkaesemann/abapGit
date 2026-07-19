@@ -276,19 +276,23 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD flush_resolve_batch.
+    DATA lt_obj_store TYPE SORTED TABLE OF zaog_obj_store
+           WITH UNIQUE KEY repo_key obj_sha1.
+
     IF ct_write_batch IS NOT INITIAL.
       zcl_abapgit_ortec_obj_store=>store_objects(
-        iv_repo_key = iv_repo_key
-        it_objects  = ct_write_batch
-        iv_pack_id  = iv_pack_id
-        iv_status   = 'R' ).
+          iv_repo_key = iv_repo_key
+          it_objects  = ct_write_batch
+          iv_pack_id  = iv_pack_id
+          iv_status   = 'R' ).
       CLEAR ct_write_batch.
     ENDIF.
 
     IF ct_delete_batch IS NOT INITIAL.
-      DELETE FROM zaog_obj_store
-        WHERE repo_key = iv_repo_key
-          AND obj_sha1 IN @ct_delete_batch.
+      lt_obj_store = VALUE #( FOR lv_sha1 IN ct_delete_batch
+                              ( repo_key = iv_repo_key
+                                obj_sha1 = lv_sha1 ) ).
+      DELETE zaog_obj_store FROM TABLE @lt_obj_store.
       CLEAR ct_delete_batch.
     ENDIF.
   ENDMETHOD.
