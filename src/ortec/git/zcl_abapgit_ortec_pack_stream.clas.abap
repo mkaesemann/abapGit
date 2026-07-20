@@ -91,8 +91,19 @@ CLASS zcl_abapgit_ortec_pack_stream DEFINITION
     CLASS-METHODS resolve_streaming
       IMPORTING iv_repo_key TYPE ty_repo_key
                 iv_pack_id  TYPE ty_pack_id
+                iv_url      TYPE string OPTIONAL
       CHANGING  ct_meta     TYPE ty_meta_tt
       RAISING   zcx_abapgit_ortec_git.
+
+    "! Resets the thin-pack completion budget (see complete_missing_base)
+    "! to 0. Callers that own a TRUE top-level fetch attempt - currently
+    "! zcl_abapgit_ortec_fastpath=>upload_pack_by_branch/upload_pack_by_commit
+    "! only - must call this ONCE before their own retry cascade begins, so
+    "! the budget is shared across every tier/progressive step of that ONE
+    "! user-initiated fetch. decode_streaming deliberately does NOT reset
+    "! this itself, since it is also called re-entrantly for a completion
+    "! fetch's own (possibly further-incomplete) small pack.
+    CLASS-METHODS reset_completion_budget.
 
     "! Phase 4 routing entry point: decodes and fully resolves a packfile via
     "! the streaming path, then returns the SPARSE object set that standard
@@ -120,6 +131,7 @@ CLASS zcl_abapgit_ortec_pack_stream DEFINITION
     CLASS-METHODS decode_streaming
       IMPORTING iv_data          TYPE xstring
                 iv_repo_key      TYPE ty_repo_key
+                iv_url           TYPE string OPTIONAL
       RETURNING VALUE(rt_objects) TYPE zif_abapgit_definitions=>ty_objects_tt
       RAISING   zcx_abapgit_ortec_git.
 
@@ -163,6 +175,15 @@ CLASS zcl_abapgit_ortec_pack_stream DEFINITION
            END OF ty_sha_idx.
     TYPES ty_sha_idx_tt TYPE HASHED TABLE OF ty_sha_idx WITH UNIQUE KEY sha1.
 
+    "! Caps the total number of thin-pack completion fetches (see
+    "! complete_missing_base) attempted per decode_streaming( ) call - reset
+    "! to 0 at the start of every decode_streaming( ) call. Bounds worst-case
+    "! extra network/DB cost for a pathological pack (many distinct missing
+    "! bases, or a flaky network causing repeated failed attempts) instead of
+    "! allowing unbounded nested completion fetches.
+    CONSTANTS c_max_completion_attempts TYPE i VALUE 20.
+    CLASS-DATA gv_completion_attempts TYPE i.
+
     CLASS-METHODS build_pack_id
       IMPORTING iv_repo_key       TYPE ty_repo_key
       RETURNING VALUE(rv_pack_id) TYPE ty_pack_id.
@@ -179,11 +200,57 @@ CLASS zcl_abapgit_ortec_pack_stream DEFINITION
     "! Reads one base object's bytes, transparently using the Phase 1 LRU
     "! base cache (zcl_abapgit_ortec_base_cache) to avoid a repeat DB read
     "! when several deltas in the same resolve pass share the same base.
+    "! When iv_url is supplied and the base is not found locally, attempts
+    "! thin-pack completion (see complete_missing_base) before giving up.
     CLASS-METHODS get_base_bytes
       IMPORTING iv_repo_key    TYPE ty_repo_key
                 iv_sha1        TYPE zif_abapgit_git_definitions=>ty_sha1
+                iv_url         TYPE string OPTIONAL
       RETURNING VALUE(rv_data) TYPE xstring
       RAISING   zcx_abapgit_ortec_git.
+
+    "! Thin-pack completion: fetches exactly one missing object by SHA1 via
+    "! a targeted, minimal "want <sha1>" request (zcl_abapgit_ortec_fastpath
+    "! =>complete_missing_object), so a larger pack's own delta resolution
+    "! can succeed on retry without needing to fetch/decode much more
+    "! history. See .memory/state.md's "Architecture hardening plan" /
+    "! Phase 1 incident log (2026-07-20): shallow/deepen negotiation with a
+    "! real, large, actively-developed repo is not always guaranteed to
+    "! produce a self-contained pack, even non-thin and even at very large
+    "! deepen values - GitHub's shallow pack generation can still reference
+    "! a stable, rarely-touched historical object as a delta base without
+    "! including it. Widening "deepen" further is not a reliable fix (see
+    "! incident evidence); fetching exactly the missing piece is.
+    "! Bounded by c_max_completion_attempts (a CLASS-DATA counter shared
+    "! across an entire top-level fetch attempt, including any nested
+    "! completion fetches - reset via reset_completion_budget( ), NOT here,
+    "! since a completion fetch's own decode goes through this same method)
+    "! so a pathological/network-flaky case cannot spiral into unbounded
+    "! nested network calls. A no-op (returns abap_false) if iv_url is
+    "! blank (e.g. unit tests that don't exercise the network path) or the
+    "! attempt budget is exhausted - callers must fall through to their
+    "! original "not found" handling in either case, never loop
+    "! indefinitely.
+    "! Known limitation: a successful nested completion fetch commits its
+    "! OWN resolve work (resolve_streaming's normal end-of-run COMMIT WORK)
+    "! in the SAME LUW as the outer, still-in-progress resolve pass, which
+    "! can force an early commit of the outer's not-yet-flushed batches.
+    "! This is not a correctness risk (early-committed rows are genuinely
+    "! valid, correctly-resolved, content-addressed objects either way) but
+    "! does mean the outer's own "ROLLBACK WORK on failure" guarantee is
+    "! weaker in the rare case where a nested completion succeeds and the
+    "! outer pass fails later regardless - tracked for the transaction-
+    "! ownership rework in a later architecture-hardening-plan phase
+    "! (.memory/state.md, P-07).
+    "! @parameter rv_attempted |
+    "! ABAP_TRUE if a completion fetch was actually attempted (regardless of
+    "! whether it ultimately supplied the missing object) - callers use this
+    "! to decide whether re-trying the original lookup is worthwhile.
+    CLASS-METHODS complete_missing_base
+      IMPORTING iv_repo_key       TYPE ty_repo_key
+                iv_sha1           TYPE zif_abapgit_git_definitions=>ty_sha1
+                iv_url            TYPE string
+      RETURNING VALUE(rv_attempted) TYPE abap_bool.
 
     "! Bulk-persists ct_batch (status = c_status_incomplete) in ONE DB call
     "! and clears it - the decode-side counterpart of resolve_one_meta's
@@ -216,6 +283,7 @@ CLASS zcl_abapgit_ortec_pack_stream DEFINITION
                 iv_allow_thin_fetch TYPE abap_bool DEFAULT abap_true
                 iv_repo_key         TYPE ty_repo_key
                 iv_pack_id          TYPE ty_pack_id
+                iv_url              TYPE string OPTIONAL
       CHANGING  ct_meta             TYPE ty_meta_tt
                 ct_tabix_by_offset  TYPE ty_tabix_by_offset_tt
                 ct_sha_idx          TYPE ty_sha_idx_tt
@@ -241,6 +309,10 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
     GET TIME STAMP FIELD lv_ts.
     rv_pack_id = |{ iv_repo_key }{ lv_ts }|.
     rv_pack_id = rv_pack_id(32).
+  ENDMETHOD.
+
+  METHOD reset_completion_budget.
+    gv_completion_attempts = 0.
   ENDMETHOD.
 
   METHOD cleanup_incomplete.
@@ -271,17 +343,60 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
           iv_repo_key = iv_repo_key
           iv_sha1     = iv_sha1 ).
       CATCH zcx_abapgit_ortec_git.
-        " See the matching comment in resolve_one_meta's REF_DELTA branch -
-        " same "our verified haves lied" recovery signal.
-        zcx_abapgit_ortec_git=>raise(
-          iv_text                = |Delta base not found, { iv_sha1 }|
-          iv_retry_without_haves = abap_true ).
+        " Thin-pack completion: try fetching exactly this missing object
+        " before giving up - see complete_missing_base's doc for why this
+        " is often the correct recovery, not stale haves.
+        IF complete_missing_base( iv_repo_key = iv_repo_key iv_sha1 = iv_sha1 iv_url = iv_url ) = abap_true.
+          TRY.
+              ls_object = zcl_abapgit_ortec_obj_store=>get_object(
+                iv_repo_key = iv_repo_key
+                iv_sha1     = iv_sha1 ).
+            CATCH zcx_abapgit_ortec_git.
+              " Completion was attempted but still didn't supply the object -
+              " fall through to the same raise as if completion had never
+              " been attempted at all.
+              zcx_abapgit_ortec_git=>raise(
+                iv_text                = |Delta base not found, { iv_sha1 }|
+                iv_retry_without_haves = abap_true ).
+          ENDTRY.
+        ELSE.
+          " See the matching comment in resolve_one_meta's REF_DELTA branch -
+          " same "our verified haves lied" recovery signal.
+          zcx_abapgit_ortec_git=>raise(
+            iv_text                = |Delta base not found, { iv_sha1 }|
+            iv_retry_without_haves = abap_true ).
+        ENDIF.
     ENDTRY.
 
     rv_data = ls_object-data.
     lo_cache->put(
       iv_sha1 = iv_sha1
       iv_data = rv_data ).
+  ENDMETHOD.
+
+  METHOD complete_missing_base.
+    IF iv_url IS INITIAL.
+      RETURN. " No network context (e.g. a unit test) - nothing we can do.
+    ENDIF.
+    IF gv_completion_attempts >= c_max_completion_attempts.
+      RETURN. " Budget exhausted - stop trying, let the caller's normal
+              " "not found" handling take over.
+    ENDIF.
+    gv_completion_attempts = gv_completion_attempts + 1.
+    rv_attempted = abap_true.
+
+    TRY.
+        zcl_abapgit_ortec_fastpath=>complete_missing_object(
+          iv_url      = iv_url
+          iv_repo_key = iv_repo_key
+          iv_sha1     = iv_sha1 ).
+      CATCH zcx_abapgit_ortec_git.
+        " Completion genuinely failed (network error, server doesn't support
+        " want-by-SHA1 for this object, or the follow-up pack still didn't
+        " resolve it) - the caller's retried lookup will simply miss again
+        " and fall through to the original "not found" error, exactly as if
+        " completion had never been attempted.
+    ENDTRY.
   ENDMETHOD.
 
   METHOD count_unresolved.
@@ -375,29 +490,50 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
               iv_repo_key = iv_repo_key
               iv_sha1     = <ls_row>-delta_base ).
           CATCH zcx_abapgit_ortec_git.
-            " retry_without_haves = true: a REF_DELTA declaring an external
-            " base that is neither in THIS pack nor in our own object store
-            " means our locally-tracked "verified have commits" claimed we
-            " already hold an object we actually don't - the server was
-            " therefore never asked to (re-)send it. A full/no-haves retry
-            " (see is_retry_without_haves/iv_force_full in
-            " zcl_abapgit_ortec_fastpath) is the correct recovery, not a
-            " hard failure.
-            " Diagnostic detail (obj_index/pack_offset/total pack size/still-
-            " unresolved count) added 2026-07-20: this same failure recurred
-            " even after the force_full (no haves, non-thin) retry tier, which
-            " should make external bases impossible in a correctly-behaving
-            " pack - so the remaining hypothesis is a genuine in-pack
-            " resolution bug, not a stale-haves issue. This detail is what
-            " the NEXT live failure needs to tell the two apart.
-            zcx_abapgit_ortec_git=>raise(
-              iv_text                = |Delta base not found, { <ls_row>-delta_base } - | &&
-                |declaring obj_index { <ls_row>-obj_index } pack_offset { <ls_row>-pack_offset }, | &&
-                |pack has { lines( ct_meta ) } objects, { count_unresolved( ct_meta ) } still unresolved|
-              iv_retry_without_haves = abap_true ).
+            " Thin-pack completion: try fetching exactly this missing object
+            " before treating it as a hard failure - see
+            " complete_missing_base's doc (2026-07-20 incident): even a
+            " non-thin, deeply-widened fetch is not always guaranteed
+            " self-contained against a large, real repo's history.
+            IF complete_missing_base( iv_repo_key = iv_repo_key
+                                       iv_sha1     = <ls_row>-delta_base
+                                       iv_url      = iv_url ) = abap_true.
+              TRY.
+                  ls_base_obj = zcl_abapgit_ortec_obj_store=>get_object(
+                    iv_repo_key = iv_repo_key
+                    iv_sha1     = <ls_row>-delta_base ).
+                CATCH zcx_abapgit_ortec_git.
+                  zcx_abapgit_ortec_git=>raise(
+                    iv_text                = |Delta base not found, { <ls_row>-delta_base } - | &&
+                      |declaring obj_index { <ls_row>-obj_index } pack_offset { <ls_row>-pack_offset }, | &&
+                      |pack has { lines( ct_meta ) } objects, { count_unresolved( ct_meta ) } still unresolved|
+                    iv_retry_without_haves = abap_true ).
+              ENDTRY.
+            ELSE.
+              " retry_without_haves = true: a REF_DELTA declaring an external
+              " base that is neither in THIS pack nor in our own object store
+              " means our locally-tracked "verified have commits" claimed we
+              " already hold an object we actually don't - the server was
+              " therefore never asked to (re-)send it. A full/no-haves retry
+              " (see is_retry_without_haves/iv_force_full in
+              " zcl_abapgit_ortec_fastpath) is the correct recovery, not a
+              " hard failure.
+              " Diagnostic detail (obj_index/pack_offset/total pack size/still-
+              " unresolved count) added 2026-07-20: this same failure recurred
+              " even after the force_full (no haves, non-thin) retry tier, which
+              " should make external bases impossible in a correctly-behaving
+              " pack - so the remaining hypothesis is a genuine in-pack
+              " resolution bug, not a stale-haves issue. This detail is what
+              " the NEXT live failure needs to tell the two apart.
+              zcx_abapgit_ortec_git=>raise(
+                iv_text                = |Delta base not found, { <ls_row>-delta_base } - | &&
+                  |declaring obj_index { <ls_row>-obj_index } pack_offset { <ls_row>-pack_offset }, | &&
+                  |pack has { lines( ct_meta ) } objects, { count_unresolved( ct_meta ) } still unresolved|
+                iv_retry_without_haves = abap_true ).
+            ENDIF.
         ENDTRY.
         lv_base_type = ls_base_obj-type.
-        lv_base_data = get_base_bytes( iv_repo_key = iv_repo_key iv_sha1 = <ls_row>-delta_base ).
+        lv_base_data = get_base_bytes( iv_repo_key = iv_repo_key iv_sha1 = <ls_row>-delta_base iv_url = iv_url ).
         lv_external  = abap_true.
         lv_base_sha_diag         = <ls_row>-delta_base.
         lv_base_pack_offset_diag = -1. " external - no in-pack offset
@@ -433,6 +569,7 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
             iv_allow_thin_fetch = iv_allow_thin_fetch
             iv_repo_key         = iv_repo_key
             iv_pack_id          = iv_pack_id
+            iv_url              = iv_url
           CHANGING
             ct_meta            = ct_meta
             ct_tabix_by_offset = ct_tabix_by_offset
@@ -462,7 +599,7 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
       ENDIF.
 
       lv_base_type = <ls_base>-obj_type.
-      lv_base_data = get_base_bytes( iv_repo_key = iv_repo_key iv_sha1 = <ls_base>-sha1 ).
+      lv_base_data = get_base_bytes( iv_repo_key = iv_repo_key iv_sha1 = <ls_base>-sha1 iv_url = iv_url ).
       lv_base_sha_diag         = <ls_base>-sha1.
       lv_base_pack_offset_diag = <ls_base>-pack_offset.
     ENDIF.
@@ -603,6 +740,7 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
           iv_depth    = 1
           iv_repo_key = iv_repo_key
           iv_pack_id  = iv_pack_id
+          iv_url      = iv_url
         CHANGING
           ct_meta            = ct_meta
           ct_tabix_by_offset = lt_tabix_by_offset
@@ -628,6 +766,17 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
     DATA lx_resolve    TYPE REF TO zcx_abapgit_ortec_git.
     DATA lx_missing    TYPE REF TO zcx_abapgit_ortec_git.
 
+    " NOTE: the thin-pack completion budget (gv_completion_attempts) is
+    " deliberately NOT reset here - decode_streaming is also called
+    " re-entrantly by zcl_abapgit_ortec_fastpath=>complete_missing_object
+    " itself (a completion fetch's own small pack goes through the exact
+    " same decode/resolve pipeline, and may itself need a NESTED
+    " completion). Resetting the counter here would let each nesting level
+    " restart its own fresh budget, defeating the whole point of a shared
+    " cap. The budget is reset once per TRUE top-level fetch attempt, in
+    " zcl_abapgit_ortec_fastpath=>upload_pack_by_branch/upload_pack_by_commit
+    " via reset_completion_budget( ) - see that method's doc.
+
     lt_meta = decode_and_persist_streaming(
       EXPORTING iv_data     = iv_data
                 iv_repo_key = iv_repo_key
@@ -637,6 +786,7 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
         resolve_streaming(
           EXPORTING iv_repo_key = iv_repo_key
                     iv_pack_id  = lv_pack_id
+                    iv_url      = iv_url
           CHANGING  ct_meta     = lt_meta ).
       CATCH zcx_abapgit_ortec_git INTO lx_resolve.
         " resolve_streaming does not commit on failure (see its own doc) -

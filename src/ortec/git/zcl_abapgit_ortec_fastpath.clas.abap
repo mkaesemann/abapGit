@@ -108,6 +108,37 @@ CLASS zcl_abapgit_ortec_fastpath DEFINITION
       RAISING   zcx_abapgit_exception
                 zcx_abapgit_ortec_git.
 
+    "! Thin-pack completion: fetches exactly ONE object (commit, tree, OR
+    "! blob - not necessarily a commit) by SHA1 via a minimal want-only
+    "! request (no haves, no shallow, deepen 1) and persists it (and
+    "! whatever the server bundles to resolve its own delta chain) into
+    "! zaog_obj_store via the normal streaming decode/resolve pipeline.
+    "! Called by zcl_abapgit_ortec_pack_stream=>complete_missing_base when a
+    "! larger pack's own delta resolution finds a base referenced but not
+    "! included - see that method's doc and the "Architecture hardening
+    "! plan" Phase-1-followup incident (.memory/state.md, 2026-07-20): even
+    "! a non-thin, deeply-widened fetch is not always guaranteed
+    "! self-contained against a large, real repository's history (GitHub's
+    "! shallow pack generation can reference a stable, rarely-touched
+    "! historical object as a delta base without including it, regardless
+    "! of the requested depth) - fetching exactly the missing piece is the
+    "! standard git-client remedy ("thin pack completion"/"fix-thin"),
+    "! rather than requesting ever more history.
+    "! Relies on the server supporting "want <any-reachable-sha1>", not just
+    "! ref tips (GitHub and most modern smart-HTTP servers advertise
+    "! `allow-reachable-sha1-in-want`/`allow-tip-sha1-in-want` for exactly
+    "! this use case).
+    "! @raising zcx_abapgit_ortec_git |
+    "! On any network/protocol/decode failure - callers must treat this as
+    "! "completion not possible right now", not retry indefinitely
+    "! themselves (zcl_abapgit_ortec_pack_stream=>complete_missing_base
+    "! already bounds its own retry budget).
+    CLASS-METHODS complete_missing_object
+      IMPORTING iv_url      TYPE string
+                iv_repo_key TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
+                iv_sha1     TYPE zif_abapgit_git_definitions=>ty_sha1
+      RAISING   zcx_abapgit_ortec_git.
+
     "! Attempt to make iv_commit's commit + tree structure available in the
     "! persistent object store via a `filter blob:none` negotiated fetch -
     "! commit and every reachable tree object (proportional to directory
@@ -366,6 +397,47 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
 
   ENDMETHOD.
 
+  METHOD complete_missing_object.
+    DATA lt_headers TYPE zcl_abapgit_http=>ty_headers.
+    DATA ls_header  LIKE LINE OF lt_headers.
+    DATA lo_client  TYPE REF TO zcl_abapgit_http_client.
+    DATA lt_hashes  TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+
+    APPEND iv_sha1 TO lt_hashes.
+
+    ls_header-key   = '~request_uri'.
+    ls_header-value = zcl_abapgit_url=>path_name( iv_url ) && |/info/refs?service=git-upload-pack|.
+    APPEND ls_header TO lt_headers.
+
+    lo_client = zcl_abapgit_http=>create_by_url(
+      iv_url     = iv_url
+      it_headers = lt_headers ).
+
+    " iv_force_full = abap_true: no haves, no shallow line - this is a
+    " targeted, self-contained fetch for exactly iv_sha1 (plus whatever the
+    " server needs to bundle to resolve its own delta chain), not a
+    " haves-based negotiation. iv_deepen_level = 1 keeps the request minimal
+    " (mirrors try_filtered_commit_fetch's own "deepen 1" single-object
+    " pattern) - we are not trying to fetch history, just one object.
+    " upload_pack persists every decoded/resolved object as a side effect
+    " (via decode_streaming's underlying decode_and_persist_streaming +
+    " resolve_streaming) regardless of iv_sha1's own type or of what
+    " decode_streaming's own commit-only return filter discards - the
+    " RETURNING value here is deliberately discarded, only the persistence
+    " side effect matters to the caller.
+    TRY.
+        upload_pack(
+          io_client       = lo_client
+          iv_url          = iv_url
+          iv_deepen_level = 1
+          it_hashes       = lt_hashes
+          iv_allow_thin   = abap_false
+          iv_force_full   = abap_true ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_std).
+        zcx_abapgit_ortec_git=>raise( |Thin-pack completion failed: { lx_std->get_text( ) }| ).
+    ENDTRY.
+  ENDMETHOD.
+
   METHOD try_filtered_commit_fetch.
 
     DATA lo_client     TYPE REF TO zcl_abapgit_http_client.
@@ -459,7 +531,8 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
         TRY.
             lt_objects = zcl_abapgit_ortec_pack_stream=>decode_streaming(
               iv_data     = lv_pack
-              iv_repo_key = iv_repo_key ).
+              iv_repo_key = iv_repo_key
+              iv_url      = iv_url ).
           CATCH zcx_abapgit_ortec_git.
             lt_objects = zcl_abapgit_ortec_pack_dec=>decode_and_persist(
               iv_data     = lv_pack
@@ -693,6 +766,11 @@ METHOD pull_by_branch.
            ev_branch,
            ev_deepen_used.
 
+    " Reset the thin-pack completion budget once for this WHOLE fetch
+    " attempt (shared across the thin/non-thin/progressive tiers below) -
+    " see zcl_abapgit_ortec_pack_stream=>reset_completion_budget's doc.
+    zcl_abapgit_ortec_pack_stream=>reset_completion_budget( ).
+
     data(li_progress) = zcl_abapgit_progress=>get_instance( 1 ).
 
     li_progress->show( iv_current = 2
@@ -860,6 +938,9 @@ METHOD pull_by_branch.
     CLEAR: et_objects,
            ev_commit,
            ev_deepen_used.
+
+    " See the matching comment in upload_pack_by_branch.
+    zcl_abapgit_ortec_pack_stream=>reset_completion_budget( ).
 
     APPEND iv_hash TO lt_hashes.
     ev_commit = iv_hash.
@@ -1040,7 +1121,8 @@ METHOD upload_pack.
             TRY.
                 rt_objects = zcl_abapgit_ortec_pack_stream=>decode_streaming(
                   iv_data     = lv_pack
-                  iv_repo_key = lv_ortec_rk ).
+                  iv_repo_key = lv_ortec_rk
+                  iv_url      = iv_url ).
                 lv_via_streaming = abap_true.
               CATCH zcx_abapgit_ortec_git INTO DATA(lx_streaming).
                 " TEMPORARY DIAGNOSTIC (2026-07-17): a live repo is hitting
