@@ -1155,7 +1155,21 @@ METHOD upload_pack.
     " zcl_abapgit_ortec_missing_obj=>ensure_available's own call site
     " earlier - this closes the same gap for every caller of this method,
     " not just that one).
-    IF it_ortec_haves IS INITIAL.
+    " EXCEPT for iv_force_full: "deepen N" is a SHALLOW-clone request (only
+    " the last N commits of history) - reusing the SAME (typically small,
+    " e.g. 1) iv_deepen_level here would still leave the fetch shallow, so a
+    " commit/tree/blob delta-compressed against something just outside that
+    " narrow window can still come back with a dangling base, defeating the
+    " whole point of "force_full" (recovering from our own possibly-stale
+    " haves/history tracking). Live evidence (2026-07-20): "Delta base not
+    " found" recurred identically even after the thin+non-thin+full retry
+    " cascade, on both a large repo and a plain branch switch on a SMALL
+    " repo - i.e. not a corrupt-pack/decoder issue, since the same missing
+    " base survived a "no haves, non-thin" attempt that should have made
+    " every base self-contained. Omitting the deepen line entirely when
+    " force_full is set requests the COMPLETE, unbounded history for the
+    " wanted ref(s), matching what "force_full" is actually supposed to mean.
+    IF it_ortec_haves IS INITIAL AND iv_force_full = abap_false.
       lv_effective_deepen = iv_deepen_level.
       IF lv_effective_deepen <= 0.
         lv_effective_deepen = 1.

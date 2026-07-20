@@ -3074,6 +3074,7 @@ CLASS ltcl_fastpath_protocol DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION
   PRIVATE SECTION.
     METHODS buffer_emits_shallow_lines FOR TESTING RAISING cx_static_check.
     METHODS buffer_skips_shallow_forced FOR TESTING RAISING cx_static_check.
+    METHODS buffer_skips_deepen_forced FOR TESTING RAISING cx_static_check.
     METHODS parse_collects_shallow FOR TESTING RAISING cx_static_check.
     METHODS parse_ignores_bad_shallow FOR TESTING RAISING cx_static_check.
 ENDCLASS.
@@ -3131,6 +3132,43 @@ CLASS ltcl_fastpath_protocol IMPLEMENTATION.
 
     FIND FIRST OCCURRENCE OF 'shallow ' IN lv_buffer.
     cl_abap_unit_assert=>assert_subrc( exp = 4 msg = 'Shallow lines must be skipped when iv_force_full is true' ).
+  ENDMETHOD.
+
+  METHOD buffer_skips_deepen_forced.
+    " A "deepen N" line is a SHALLOW-clone request (only N commits of
+    " history) - reusing it during a force_full recovery fetch (no haves,
+    " triggered when our own history-tracking may be wrong) would still
+    " leave the fetch bounded to the SAME shallow window, defeating the
+    " point of "force_full". Live incident (2026-07-20): "Delta base not
+    " found" recurred even after the full thin+non-thin+full retry cascade,
+    " traced to this exact "deepen" line still being emitted with
+    " iv_force_full = abap_true. No "deepen" line at all means "send the
+    " complete, unbounded history" per the git wire protocol.
+    DATA lt_hashes TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lv_buffer TYPE string.
+
+    APPEND '1111111111111111111111111111111111111111' TO lt_hashes.
+
+    " No haves + NOT forced -> deepen line IS expected (existing behavior,
+    " e.g. a genuine first-ever fetch of a brand new repo).
+    lv_buffer = zcl_abapgit_ortec_fastpath=>build_upload_pack_buffer(
+      iv_deepen_level = 1
+      it_hashes       = lt_hashes
+      iv_allow_thin   = abap_false
+      iv_force_full   = abap_false ).
+
+    FIND FIRST OCCURRENCE OF 'deepen ' IN lv_buffer.
+    cl_abap_unit_assert=>assert_subrc( exp = 0 msg = 'A deepen line is expected for a normal no-haves fetch' ).
+
+    " No haves + FORCED -> no deepen line at all (unbounded/complete fetch).
+    lv_buffer = zcl_abapgit_ortec_fastpath=>build_upload_pack_buffer(
+      iv_deepen_level = 1
+      it_hashes       = lt_hashes
+      iv_allow_thin   = abap_false
+      iv_force_full   = abap_true ).
+
+    FIND FIRST OCCURRENCE OF 'deepen ' IN lv_buffer.
+    cl_abap_unit_assert=>assert_subrc( exp = 4 msg = 'A deepen line must be skipped when iv_force_full is true' ).
   ENDMETHOD.
 
   METHOD parse_collects_shallow.

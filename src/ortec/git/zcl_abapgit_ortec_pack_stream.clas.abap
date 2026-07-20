@@ -222,6 +222,15 @@ CLASS zcl_abapgit_ortec_pack_stream DEFINITION
                 ct_write_batch      TYPE zif_abapgit_definitions=>ty_objects_tt
                 ct_delete_batch     TYPE zif_abapgit_git_definitions=>ty_sha1_tt
       RAISING   zcx_abapgit_ortec_git.
+
+    "! Diagnostic-only helper (not on any hot path - only called right before
+    "! raising a "Delta base not found" error): counts how many rows in
+    "! ct_meta are still unresolved at that moment, to help tell "a genuinely
+    "! external/missing base" apart from "a broader in-pack resolution bug
+    "! that left many other rows stuck too".
+    CLASS-METHODS count_unresolved
+      IMPORTING it_meta         TYPE ty_meta_tt
+      RETURNING VALUE(rv_count) TYPE i.
 ENDCLASS.
 
 
@@ -273,6 +282,12 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
     lo_cache->put(
       iv_sha1 = iv_sha1
       iv_data = rv_data ).
+  ENDMETHOD.
+
+  METHOD count_unresolved.
+    rv_count = REDUCE i( INIT n = 0
+                         FOR ls_row IN it_meta
+                         NEXT n = n + COND i( WHEN ls_row-is_resolved = abap_false THEN 1 ELSE 0 ) ).
   ENDMETHOD.
 
   METHOD flush_batch.
@@ -368,8 +383,17 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
             " (see is_retry_without_haves/iv_force_full in
             " zcl_abapgit_ortec_fastpath) is the correct recovery, not a
             " hard failure.
+            " Diagnostic detail (obj_index/pack_offset/total pack size/still-
+            " unresolved count) added 2026-07-20: this same failure recurred
+            " even after the force_full (no haves, non-thin) retry tier, which
+            " should make external bases impossible in a correctly-behaving
+            " pack - so the remaining hypothesis is a genuine in-pack
+            " resolution bug, not a stale-haves issue. This detail is what
+            " the NEXT live failure needs to tell the two apart.
             zcx_abapgit_ortec_git=>raise(
-              iv_text                = |Delta base not found, { <ls_row>-delta_base }|
+              iv_text                = |Delta base not found, { <ls_row>-delta_base } - | &&
+                |declaring obj_index { <ls_row>-obj_index } pack_offset { <ls_row>-pack_offset }, | &&
+                |pack has { lines( ct_meta ) } objects, { count_unresolved( ct_meta ) } still unresolved|
               iv_retry_without_haves = abap_true ).
         ENDTRY.
         lv_base_type = ls_base_obj-type.
