@@ -1,0 +1,10 @@
+{
+  "agents": 11,
+  "skills": 13,
+  "prompts": 2,
+  "memory_files": 42,
+  "state_bytes": 5632,
+  "archive_bytes": 238677,
+  "errors": [],
+  "warnings": []
+}

@@ -1,0 +1,100 @@
+%% Target architecture — Ortec abapGit opt-rework (DESIGN, not yet implemented)
+%% Author: ortec-abapgit-design (Claude Opus 4.8), 2026-07-10
+%% Goal: separate a SAFE read-only sparse lookup path (governed by data validity)
+%%       from the MUTATING / protocol-altering persistent-cache opt-in.
+%% Non-negotiable: NOT_BUFFERED (missing local data) is NEVER remote deletion.
+%%
+%% Companion state model: see stateDiagram in .memory/logs/target_design.md
+%% Regression being fixed: e61fcb11 / 64d4e9e1 gated the read path on the write-side
+%%   is_active_for_repo opt-in (default OFF). See .memory/logs/archaeology.md.
+
+flowchart TD
+
+  subgraph STD["Standard abapGit (tiny hooks only)"]
+    direction TB
+    H1["zcl_abapgit_stage_logic~get\n(filter present -> ONE facade call)"]
+    H2["zcl_abapgit_gui_page_diff_base~get_files_and_status\n(filter present -> ONE facade call)"]
+    H3["zcl_abapgit_git_porcelain=>pull_by_branch\n(fastpath try + persist hook)"]
+    H4["zcl_abapgit_git_porcelain=>walk / walk_tree\n(missing node -> delegate to collector)"]
+    H5["zcl_abapgit_git_transport=>upload_pack_by_branch/commit\n(route to fetch negotiator)"]
+    H6["zcl_abapgit_repo_status=>calculate\n(NEW optional param: pre-resolved filtered remote)"]
+  end
+
+  subgraph FACADE["Ortec facade + policy (zcl_abapgit_ortec_*)"]
+    direction TB
+    F["zcl_abapgit_ortec_git_facade\nresolve_filtered_remote(repo, filter)\nno set/refresh ping-pong"]
+    SW["zcl_abapgit_ortec_git_switch\nSPLIT: read_cache (data-driven, effectively always safe)\nvs persist/protocol opt-in (default OFF)"]
+    SE["zcl_abapgit_ortec_status_engine\nunified stage/diff/patch classification\nemits explicit per-file STATE"]
+  end
+
+  subgraph READ["Layer 1 — Local persistent store (READ, self-validating)"]
+    direction TB
+    FW["zcl_abapgit_ortec_filter_walk\n(remove inner is_active guard;\nkeep data-validity fallback chain)"]
+    RS["zcl_abapgit_ortec_repo_state\nrepo_key / fetch_commit / tip match\nZAOG_REPO_STATE, ZAOG_COMMIT_HIST"]
+    OI["zcl_abapgit_ortec_obj_index\nsparse path index + $IDX/__READY__ completeness marker\nZAOG_OBJ_INDEX"]
+    OS["zcl_abapgit_ortec_obj_store\nSHA -> decoded object, bulk get\nZAOG_OBJ_STORE (+ delta-base edges)"]
+  end
+
+  subgraph FETCH["Layer 2 — Remote fetch fallback (WRITE / protocol)"]
+    direction TB
+    MO["zcl_abapgit_ortec_missing_obj\ncollect missing set -> ONE bulk fetch\n-> persist -> retry ONCE"]
+    NEG["zcl_abapgit_ortec_fetch_neg\nhave/want; advertise only VERIFIED-complete commits;\nthin pack only if delta bases complete"]
+    PK["zcl_abapgit_ortec_pack_dec / pack_index / pack_raw\ndecode + delta resolution\nZAOG_PACK_IDX, ZAOG_PACK_META, ZAOG_RAW_PACK"]
+    STDGET["ii_repo_online->get_files_remote(filter)\nfull correct fallback (unchanged)"]
+  end
+
+  %% ---- Read flow ----
+  H1 --> F
+  H2 --> F
+  F --> SW
+  F --> FW
+  FW --> RS
+  RS -->|repo_key found + fetch_commit + tip matches| OI
+  RS -->|state missing / stale / tip moved| STDGET
+  OI -->|index READY for commit| OS
+  OI -->|index not ready| BUILD["rebuild index from store (set-based tree/path walk)"]
+  BUILD --> OS
+  OS -->|all filtered objects LOADED/INDEXED| SE
+  OS -->|some NOT_BUFFERED| MO
+
+  %% ---- Missing-object bulk repair ----
+  MO --> NEG
+  NEG --> H5
+  H5 --> PK
+  PK --> OS
+  OS -->|persisted| RETRY["retry filtered resolution ONCE from local store"]
+  RETRY --> SE
+  MO -->|residual truly unresolvable| STDGET
+
+  %% ---- Status classification ----
+  SE --> H6
+  STDGET --> H6
+  H6 --> RESULT["Added / Modified / Deleted / Unchanged\n(Deleted ONLY on CONFIRMED_ABSENT)"]
+
+  %% ---- Pull / persist / self-heal ----
+  H3 --> FP["zcl_abapgit_ortec_fastpath\npull_by_branch / persist_pull_result"]
+  FP --> NEG
+  FP --> OS
+  H3 -->|Walk error = CORRUPT_OR_INCOMPLETE| REPAIR["repair: reset_fetch_commit / invalidate_tip_commit\n-> non-thin refetch -> retry"]
+  REPAIR --> NEG
+  H4 --> MO
+
+  classDef std fill:#e7f5ff,stroke:#1971c2;
+  classDef ortec fill:#ebfbee,stroke:#2f9e44;
+  classDef fetch fill:#fff9db,stroke:#f08c00;
+  classDef danger fill:#ffe3e3,stroke:#c92a2a;
+  class H1,H2,H3,H4,H5,H6 std
+  class F,SW,SE,FW,RS,OI,OS,BUILD,RETRY,FP ortec
+  class MO,NEG,PK,STDGET,REPAIR fetch
+  class RESULT danger
+
+  %% Key invariants encoded above (not assumptions — see archaeology.md evidence):
+  %% 1. Read path (H1/H2 -> F -> FW) is reached whenever a filter is present,
+  %%    regardless of the write/protocol opt-in. Fast vs. fallback is decided ONLY by
+  %%    data validity (repo_key, fetch_commit, tip match, index READY), never by policy.
+  %% 2. A missing tree/blob (NOT_BUFFERED) routes to the bulk collector (MO), never to a
+  %%    hard "tree not found" raise and never to a Deleted classification.
+  %% 3. CONFIRMED_ABSENT (-> Deleted) requires positively resolved remote tip + commit +
+  %%    parent tree + path. Otherwise the state is UNKNOWN_NEEDS_FETCH or NOT_BUFFERED.
+  %% 4. Thin packs / have-line suppression stay in Layer 2 behind the protocol opt-in and
+  %%    the delta-base completeness guard.

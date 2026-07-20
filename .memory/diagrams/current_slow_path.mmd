@@ -1,0 +1,55 @@
+%% Current path — HEAD of ortec/abapgit_1_133-opt-rework and
+%% ortec/abapgit_1_133-optimized, both at commit b4f41e38 (2026-06-23 17:04 UTC).
+%% b4f41e38 itself only touches client-side rendering (Ortec Patch page JS lazy-load).
+%% The behavior change that removed the performance gain is commit e61fcb11
+%% "Attach Filtered Tree Walk Optimization to Fastpath Switch" (2026-06-23 08:31 UTC),
+%% an ANCESTOR of b4f41e38 already baked into current HEAD.
+flowchart TD
+  A[User opens Stage / Diff / Patch with an object filter] --> B[ZCL_ABAPGIT_STAGE_LOGIC / ZCL_ABAPGIT_GUI_PAGE_DIFF_BASE.get_files_and_status]
+  B --> C{Object filter present?}
+  C -->|No| D[Full ii_repo_online->get_files_remote]
+  C -->|Yes| N{"lv_use_ortec = ZCL_ABAPGIT_ORTEC_GIT_SWITCH=>IS_ACTIVE_FOR_REPO(url)"}
+
+  N -->|"CATCH cx_root -> false"| D
+  N -->|"false (default: no ZAOG user-config row for this repo/user)"| D
+  N -->|true, explicit opt-in via Repo Settings| E[CALL METHOD ZCL_ABAPGIT_ORTEC_FILTER_WALK=>GET_REMOTE_FILES_FOR_STAGE / DIFF]
+
+  E --> F2["Inner guard (added in same commit e61fcb11): IS_ACTIVE_FOR_REPO(url) = false? -> return get_files_remote immediately"]
+  F2 -->|redundant re-check, already true here| F[Resolve repo_key via SHA1 hash of URL against ZAOG_REPO_STATE]
+  F --> G{repo_key found?}
+  G -->|No| D
+  G -->|Yes| H[Read ZAOG_REPO_STATE fetch_commit for selected branch]
+  H --> I{fetch_commit cached AND branch tip still matches remote HEAD}
+  I -->|No / stale| D
+  I -->|Yes| J[ZCL_ABAPGIT_ORTEC_OBJ_INDEX.get_files_for_filter sparse lookup]
+  J --> K[Return small filtered remote file set]
+
+  D --> L[zcl_abapgit_repo_status=>calculate over full remote+local sets]
+  K --> L
+  L --> M[Render Stage / Diff / Patch page]
+
+  classDef fast fill:#dfffe0,stroke:#2f9e44;
+  classDef slow fill:#ffe3e3,stroke:#c92a2a;
+  classDef gate fill:#fff3bf,stroke:#f08c00;
+  class E,F,G,H,I,J,K fast
+  class D,B,L slow
+  class N,F2 gate
+
+  %% Regression mechanism, confirmed by source + git blame (not an assumption):
+  %% - IS_ACTIVE_FOR_REPO(url) = get_repo_use_cache(url), a PER-USER/PER-REPO row in
+  %%   ORTEC user persistence (ZCL_ABAPGIT_PERSISTENCE_ORTEC). READ TABLE against an
+  %%   internal table keyed by url; missing row -> initial structure -> use_cache = false.
+  %%   Any read exception is also silently mapped to false (CATCH cx_root).
+  %% - Default is OFF for every repo/user that has not explicitly opened Repository
+  %%   Settings and toggled "Use Persistent Object Cache"
+  %%   (zcl_abapgit_gui_page_sett_repo.clas.abap calling set_use_repo_cache).
+  %% - Result: the sparse/cached filtered walk (branch labelled "fast" above) is only
+  %%   reached for repos where a user has explicitly opted in. Everyone else silently
+  %%   gets the exact same "full get_files_remote()" cost as before any Ortec
+  %%   optimization existed -- with no error, warning, or visible indicator.
+  %% - This switch pre-existed (since 3e964850 / 81345469) ONLY for the WRITE-side
+  %%   ZCL_ABAPGIT_ORTEC_FASTPATH pull/persist logic, where opt-in is a reasonable
+  %%   safety gate for mutating ZAOG_* tables. e61fcb11 additionally attached the
+  %%   READ-ONLY, non-mutating filter-walk optimization to that SAME switch, so
+  %%   disabling (or never enabling) the write-side cache also silently disables the
+  %%   always-safe read-side rendering speed-up.

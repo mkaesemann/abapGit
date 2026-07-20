@@ -1,0 +1,38 @@
+%% Historical fast(-but-wrong) path — behavior BEFORE commit e61fcb11
+%% "Attach Filtered Tree Walk Optimization to Fastpath Switch" (2026-06-23 08:31 UTC).
+%% This is the read-only Stage/Diff/Patch filtered-retrieval flow as it behaved while
+%% ZCL_ABAPGIT_ORTEC_FILTER_WALK was called UNCONDITIONALLY (no feature-switch gate),
+%% relying only on cached-state validity to decide fast vs. fallback.
+flowchart TD
+  A[User opens Stage / Diff / Patch with an object filter] --> B[ZCL_ABAPGIT_STAGE_LOGIC / ZCL_ABAPGIT_GUI_PAGE_DIFF_BASE.get_files_and_status]
+  B --> C{Object filter present?}
+  C -->|No| D[Full ii_repo_online->get_files_remote]
+  C -->|Yes, historical code| E["CALL METHOD ZCL_ABAPGIT_ORTEC_FILTER_WALK=>GET_REMOTE_FILES_FOR_STAGE / DIFF (always attempted, no switch check)"]
+
+  E --> F[Resolve repo_key via SHA1 hash of URL against ZAOG_REPO_STATE]
+  F --> G{repo_key found?}
+  G -->|No| D
+  G -->|Yes| H[Read ZAOG_REPO_STATE fetch_commit for selected branch]
+  H --> I{fetch_commit cached AND branch tip still matches remote HEAD}
+  I -->|No / stale| D
+  I -->|Yes, valid cache| J[ZCL_ABAPGIT_ORTEC_OBJ_INDEX.get_files_for_filter: sparse lookup against ZAOG_OBJ_INDEX / ZAOG_OBJ_STORE, only touches filtered obj_type/obj_name rows]
+  J --> K[Return small filtered remote file set fast, independent of repo size]
+
+  D --> L[zcl_abapgit_repo_status=>calculate over full remote+local sets]
+  K --> L
+  L --> M[Render Stage / Diff / Patch page]
+
+  classDef fast fill:#dfffe0,stroke:#2f9e44;
+  classDef slow fill:#ffe3e3,stroke:#c92a2a;
+  class E,F,G,H,I,J,K fast
+  class D,B slow
+
+  %% Key property (confirmed by source + git blame, not an assumption):
+  %% - Fast path was reachable for ANY filtered request as long as valid state existed,
+  %%   with no per-user/per-repo opt-in toggle in front of it.
+  %% - The only gates were data-validity gates (repo_key exists, fetch_commit exists,
+  %%   branch tip unchanged) -- never a policy/feature-switch gate.
+  %% - The mutating pull path (ZCL_ABAPGIT_ORTEC_FASTPATH, writes to ZAOG_*) was ALREADY
+  %%   opt-in gated by ZCL_ABAPGIT_ORTEC_GIT_SWITCH=>IS_ACTIVE_FOR_REPO since commit
+  %%   3e964850 (2026-05-13) / 81345469 (2026-05-28). That gating is unrelated to this
+  %%   diagram and is classified separately as "required, must be preserved".

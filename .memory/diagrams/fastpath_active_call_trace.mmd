@@ -1,0 +1,81 @@
+%% Fastpath-ACTIVE call trace (current, as-is). Read-only discovery, no productive ABAP changed.
+%% Orchestrator-verified 2026-07-14 against source (line numbers as of this date):
+%% src/ortec/git/zcl_abapgit_ortec_fastpath.clas.abap  upload_pack_by_branch  L438-524
+%%                                                      upload_pack_by_commit L535-583
+%%                                                      upload_pack           L590-779
+%% Two traced entry points: (1) pull/fetch, (2) filtered Stage/Diff read.
+
+flowchart TD
+
+  subgraph ENTRY["Standard abapGit entry points"]
+    direction TB
+    R1["zcl_abapgit_repo_online=>fetch_remote"]
+    R2["zcl_abapgit_stage_logic~get /\nzcl_abapgit_gui_page_diff_base~get_files_and_status\n(filter present)"]
+  end
+
+  R1 --> PORC["zcl_abapgit_git_porcelain=>pull_by_branch / pull_by_commit"]
+  R2 --> FACADE["zcl_abapgit_ortec_git_facade=>resolve_filtered_remote"]
+
+  %% ---- Filtered read path ----
+  FACADE --> FW["zcl_abapgit_ortec_filter_walk=>get_remote_files_for_stage"]
+  FW -->|"repo_key / fetch_commit / tip all valid"| OIDX["zcl_abapgit_ortec_obj_index=>get_files_for_filter\n(ORTEC-owned: DB read + decode)"]
+  FW -->|"CROSSOVER (by-design fallback):\nany data-validity check fails"| STDGET["ii_repo_online->get_files_remote(...)\n(standard)"]
+
+  %% ---- Pull / fetch path ----
+  PORC -->|"try fastpath first"| FP_PULL["zcl_abapgit_ortec_fastpath=>pull_by_branch"]
+  FP_PULL -->|"rs_result initial"| TRANSPORT["zcl_abapgit_git_transport=>upload_pack_by_branch/commit\n(standard entry)"]
+  TRANSPORT -->|"CROSSOVER (by-design cascade):\nis_active_for_repo=true, TRY"| FP_UPB["zcl_abapgit_ortec_fastpath=>upload_pack_by_branch/commit"]
+  TRANSPORT -->|"is_active_for_repo=false,\nor CATCH zcx_abapgit_ortec_git"| STD_UP["zcl_abapgit_git_transport standard upload_pack\n-> zcl_abapgit_git_pack=>decode (standard, always)"]
+
+  FP_UPB -->|"attempt 1: iv_allow_thin=TRUE"| UP1["zcl_abapgit_ortec_fastpath=>upload_pack"]
+  UP1 -->|"CATCH zcx_abapgit_ortec_git / zcx_abapgit_exception"| FP_UPB2["retry attempt 2:\niv_allow_thin=FALSE, fresh HTTP client"]
+  FP_UPB2 --> UP2["zcl_abapgit_ortec_fastpath=>upload_pack"]
+  UP2 -->|"CATCH both exception types again"| RAISE["raise zcx_abapgit_ortec_git\n(combines both failure texts)"]
+  RAISE --> TRANSPORT
+
+  subgraph UPLOAD_PACK["Inside EACH upload_pack() attempt (L590-779) - identical logic for thin AND non-thin"]
+    direction TB
+    U1["HTTP send/receive pack bytes (io_client)\n-- low-level transport, OK per assumption (a)"]
+    U2{"is_active_for_repo(url)\nAND repo_key resolvable?"}
+    U3["zcl_abapgit_ortec_pack_dec=>decode_and_persist\n(ORTEC: kernel stream_decompress,\nOFS/REF delta resolve, ZAOG_* persist)"]
+    U4{"TRY around U3:\nreturned objects non-initial?"}
+    U5["RETURN - Ortec path complete"]
+    U6["CATCH zcx_abapgit_exception\n*** SILENTLY SWALLOWED, NO LOG ***"]
+    U7["FALLTHROUGH (unconditional, no guard):\nset_active_repo_key(...)\nrt_objects = zcl_abapgit_git_pack=>decode(lv_pack)\n*** STANDARD DECODER, SAME PACK BYTES ***"]
+    U1 --> U2
+    U2 -->|"yes"| U3
+    U2 -->|"no (switch off / blank repo key)"| U7
+    U3 --> U4
+    U4 -->|"yes"| U5
+    U4 -->|"no / raised"| U6
+    U6 --> U7
+  end
+
+  UP1 -.-> UPLOAD_PACK
+  UP2 -.-> UPLOAD_PACK
+  U7 -->|"decode succeeds (pack was self-contained)\n-> returns normally, NO exception,\nfastpath tier reports 'success'"| U5b["objects returned to caller\n(silently used standard slow decode)"]
+  U7 -->|"decode fails (e.g. ofs-delta byte pattern\nstandard decoder can't parse:\n'Todo, unknown git pack type')\n-> raises zcx_abapgit_exception"| UP1CATCH["propagates out of upload_pack()\n-> caught by upload_pack_by_branch/commit\n-> triggers non-thin retry / final raise"]
+
+  %% ---- Walk / repair ----
+  U5 --> WALK["zcl_abapgit_git_porcelain=>walk / walk_tree"]
+  U5b --> WALK
+  STD_UP --> WALK
+  WALK -->|"tree/blob missing from in-memory objects"| OBJSTORE["CROSSOVER (reverse direction):\nzcl_abapgit_ortec_obj_store=>get_object\n(standard porcelain calling INTO Ortec for DB read)"]
+  OBJSTORE -->|"still missing"| WALKFAIL["raise 'Walk, tree/blob not found'"]
+
+  classDef ortec fill:#dfffe0,stroke:#2f9e44,color:#1b4332;
+  classDef standard fill:#ffe3e3,stroke:#c92a2a,color:#7f1d1d;
+  classDef bydesign fill:#fff3bf,stroke:#f08c00,color:#7f4d00;
+  classDef violation fill:#ff8787,stroke:#c92a2a,color:#3f0d0d,stroke-width:3px;
+
+  class R1,PORC,FACADE,WALK standard
+  class FW,OIDX,FP_PULL,FP_UPB,FP_UPB2,UP1,UP2,U1,U2,U3,U4,U5,OBJSTORE ortec
+  class STDGET,TRANSPORT,STD_UP,RAISE,WALKFAIL bydesign
+  class U6,U7,U5b,UP1CATCH violation
+
+  %% Legend:
+  %% GREEN  = ORTEC-owned node (protocol/DB/decode stays in zcl_abapgit_ortec_*)
+  %% YELLOW = by-design, documented crossover / fallback (correctness guardrail)
+  %% RED    = confirmed isolation VIOLATION - standard decode used silently
+  %%          while the fastpath switch is active, with no visible error/log.
+  %%          This is the root cause of the live-observed standard ZLIB decode.

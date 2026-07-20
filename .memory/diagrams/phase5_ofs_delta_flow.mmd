@@ -1,0 +1,62 @@
+%% Phase 5 — OFS_DELTA decode + thin-pack negotiation (DESIGN, not implemented)
+%% Author: ortec-abapgit-design, 2026-07-11
+%% Companion: .memory/logs/target_design_phase5.md
+%% Scope: Ortec-guarded protocol path ONLY (D1 Option B). Standard path untouched.
+
+flowchart TD
+
+  subgraph NEG["1. Capability negotiation (Ortec fastpath upload_pack ONLY)"]
+    direction TB
+    N0["build want lines"]
+    N1["get_verified_have_commits(url)\n= complete-commit haves filtered by\n$IDX/__READY__ marker + no dangling DELTA_BASE"]
+    N2{"any verified-complete\nhaves?"}
+    N3["capa = 'side-band-64k no-progress multi_ack\nthin-pack ofs-delta'\n+ send verified haves"]
+    N4["capa = 'side-band-64k no-progress multi_ack'\n(non-thin, standard capa)"]
+    N0 --> N1 --> N2
+    N2 -- yes --> N3
+    N2 -- no --> N4
+  end
+
+  N3 --> DEC
+  N4 --> DEC
+
+  subgraph DEC["2. Ortec decode (zcl_abapgit_ortec_pack_dec.resumable_decode)"]
+    direction TB
+    D0["parse pack entries in offset order"]
+    D1{"get_type(byte)"}
+    D2["full obj -> real content sha\nrecord offset->entry"]
+    D3["REF_DELTA (112) -> sha=base ref\nrecord offset->entry, DELTA_BASE=ref"]
+    D4["OFS_DELTA (96) -> get_offset() varint\nbase_offset = curr_offset - neg_offset\nrecord offset->entry + base_offset"]
+    D0 --> D1
+    D1 -- commit/tree/blob/tag --> D2
+    D1 -- 112 --> D3
+    D1 -- 96 --> D4
+  end
+
+  DEC --> RES
+
+  subgraph RES["3. Unified resolve (zcl_abapgit_ortec_delta.resolve_all)"]
+    direction TB
+    R0["for each unresolved delta\n(depth-bounded recursion)"]
+    R1{"base kind?"}
+    R2["ofs: base := offset_map[base_offset]"]
+    R3["ref: base := sha in-pack\nelse obj_store (thin base)"]
+    R4["resolve(base) recursively\napply(base_data, delta_bytes)\n-> real sha + real type"]
+    R0 --> R1
+    R1 -- ofs --> R2 --> R4
+    R1 -- ref --> R3 --> R4
+    R4 --> R5{"base resolvable within\ndepth cap?"}
+    R5 -- yes --> ROK["all deltas resolved\npromote temp->'R'\npersist DELTA_BASE=base sha"]
+    R5 -- no --> RFAIL["raise zcx_abapgit_ortec_git"]
+  end
+
+  ROK --> DONE["return objects to caller"]
+
+  subgraph FB["4. Fail-safe cascade (never corrupt store)"]
+    direction TB
+    RFAIL --> FB1["discard temp 'P' rows for this pack_id\n(no promotion to 'R')"]
+    FB1 --> FB2["retry SAME fetch NON-THIN\n(no thin-pack/ofs-delta capa, no thin haves)"]
+    FB2 --> FB3{"non-thin Ortec\ndecode ok?"}
+    FB3 -- yes --> DONE
+    FB3 -- no --> FB4["raise zcx_abapgit_ortec_git\n-> standard transport CATCH\n-> full standard upload_pack + decode"]
+  end

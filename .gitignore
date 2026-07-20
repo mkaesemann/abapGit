@@ -14,3 +14,6 @@ list.txt
 /blob-report/
 /playwright/.cache/
 .DS_Store
+.git_commit_msg.txt
+abapGit-harness-backup-202607201802.zip
+.vscode/
