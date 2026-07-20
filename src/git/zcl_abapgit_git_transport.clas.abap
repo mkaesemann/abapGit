@@ -17,6 +17,7 @@ CLASS zcl_abapgit_git_transport DEFINITION
       EXPORTING
         !et_objects      TYPE zif_abapgit_definitions=>ty_objects_tt
         !ev_branch       TYPE zif_abapgit_git_definitions=>ty_sha1
+        !ev_deepen_used  TYPE i
       RAISING
         zcx_abapgit_exception .
     CLASS-METHODS upload_pack_by_commit
@@ -417,7 +418,8 @@ CLASS ZCL_ABAPGIT_GIT_TRANSPORT IMPLEMENTATION.
 
 
     CLEAR: et_objects,
-           ev_branch.
+           ev_branch,
+           ev_deepen_used.
 
     IF zcl_abapgit_ortec_git_switch=>is_active_for_repo( iv_url ) = abap_true.
       TRY.
@@ -429,7 +431,8 @@ CLASS ZCL_ABAPGIT_GIT_TRANSPORT IMPLEMENTATION.
               it_branches     = it_branches
             IMPORTING
               et_objects      = et_objects
-              ev_branch       = ev_branch ).
+              ev_branch       = ev_branch
+              ev_deepen_used  = ev_deepen_used ).
           RETURN.
         CATCH zcx_abapgit_ortec_git zcx_abapgit_exception INTO DATA(lx_ortec_branch).
           " Deliberately NOT falling through to the standard upload_pack/

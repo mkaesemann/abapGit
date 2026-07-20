@@ -178,6 +178,7 @@ CLASS zcl_abapgit_ortec_porcelain IMPLEMENTATION.
     DATA lv_ortec_repo_key TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key.
     DATA lx_pull           TYPE REF TO zcx_abapgit_exception.
     DATA lv_pull_error     TYPE string.
+    DATA lv_deepen_used    TYPE i.
 
     zcl_abapgit_git_transport=>upload_pack_by_branch(
       EXPORTING
@@ -186,7 +187,8 @@ CLASS zcl_abapgit_ortec_porcelain IMPLEMENTATION.
         iv_deepen_level = iv_deepen_level
       IMPORTING
         et_objects      = rs_result-objects
-        ev_branch       = rs_result-commit ).
+        ev_branch       = rs_result-commit
+        ev_deepen_used  = lv_deepen_used ).
 
     IF zcl_abapgit_ortec_git_switch=>is_active_for_repo( iv_url ) = abap_true.
       lv_ortec_repo_key = zcl_abapgit_ortec_repo_state=>get_or_create_repo_key_for_url( iv_url ).
@@ -232,7 +234,8 @@ CLASS zcl_abapgit_ortec_porcelain IMPLEMENTATION.
                   iv_deepen_level = iv_deepen_level
                 IMPORTING
                   et_objects      = rs_result-objects
-                  ev_branch       = rs_result-commit ).
+                  ev_branch       = rs_result-commit
+                  ev_deepen_used  = lv_deepen_used ).
 
               rs_result-files = pull(
                                     iv_commit   = rs_result-commit
@@ -264,7 +267,8 @@ CLASS zcl_abapgit_ortec_porcelain IMPLEMENTATION.
           iv_branch_name = iv_branch_name
           iv_commit      = rs_result-commit
           it_objects     = rs_result-objects
-          iv_repo_key    = lv_ortec_repo_key ).
+          iv_repo_key    = lv_ortec_repo_key
+          iv_deepen_used = lv_deepen_used ).
       CATCH zcx_abapgit_ortec_git.
         " ORTEC: persistence failure is non-critical, continue normally
     ENDTRY.
