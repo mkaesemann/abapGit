@@ -16,7 +16,7 @@ CLASS zcl_abapgit_ortec_base_cache DEFINITION
       RETURNING VALUE(ro_cache) TYPE REF TO zcl_abapgit_ortec_base_cache.
 
     METHODS get
-      IMPORTING iv_sha1 TYPE ty_sha1
+      IMPORTING iv_sha1        TYPE ty_sha1
       RETURNING VALUE(rv_data) TYPE xstring.
 
     "! Returns whether iv_sha1 is currently cached - distinct from get( )'s
@@ -25,8 +25,11 @@ CLASS zcl_abapgit_ortec_base_cache DEFINITION
     "! from get( ). Callers that need to tell "cached but empty" apart from
     "! "not cached" (e.g. to avoid a redundant DB fetch + re-cache) must use
     "! this instead of checking get( )'s result for IS NOT INITIAL.
+    "!
+    "! @parameter iv_sha1 |
+    "! @parameter rv_found |
     METHODS has
-      IMPORTING iv_sha1 TYPE ty_sha1
+      IMPORTING iv_sha1         TYPE ty_sha1
       RETURNING VALUE(rv_found) TYPE abap_bool.
 
     METHODS put
@@ -53,13 +56,9 @@ CLASS zcl_abapgit_ortec_base_cache DEFINITION
 
     CLASS-DATA go_instance TYPE REF TO zcl_abapgit_ortec_base_cache.
 
-    DATA mt_entries TYPE ty_entries_tt.
+    DATA mt_entries     TYPE ty_entries_tt.
     DATA mv_total_bytes TYPE i.
-    DATA mv_next_seq TYPE i.
-
-    METHODS find_entry
-      IMPORTING iv_sha1 TYPE ty_sha1
-      RETURNING VALUE(rv_index) TYPE i.
+    DATA mv_next_seq    TYPE i.
 
     METHODS touch
       IMPORTING iv_sha1 TYPE ty_sha1.
@@ -71,32 +70,32 @@ ENDCLASS.
 CLASS zcl_abapgit_ortec_base_cache IMPLEMENTATION.
   METHOD get_instance.
     IF go_instance IS INITIAL.
-      CREATE OBJECT go_instance.
+      go_instance = NEW #( ).
     ENDIF.
 
     ro_cache = go_instance.
   ENDMETHOD.
 
   METHOD get.
-    DATA lv_index TYPE i.
+    READ TABLE mt_entries
+         WITH TABLE KEY by_sha1
+         COMPONENTS sha1 = iv_sha1
+         INTO DATA(ls_entry).
 
-    lv_index = find_entry( iv_sha1 ).
-    IF lv_index > 0.
-      READ TABLE mt_entries INDEX lv_index INTO DATA(ls_entry).
-      IF sy-subrc = 0.
-        rv_data = ls_entry-data.
-        touch( iv_sha1 ).
-      ENDIF.
+    IF sy-subrc = 0.
+      rv_data = ls_entry-data.
+      touch( iv_sha1 ).
     ENDIF.
   ENDMETHOD.
 
   METHOD has.
-    rv_found = xsdbool( find_entry( iv_sha1 ) > 0 ).
+
+    rv_found = xsdbool( line_exists( mt_entries[ KEY by_sha1
+                                                 sha1 = iv_sha1 ] ) ).
   ENDMETHOD.
 
   METHOD put.
-    DATA lv_index TYPE i.
-    DATA lv_size TYPE i.
+    DATA lv_size  TYPE i.
     DATA ls_entry TYPE ty_entry.
 
     lv_size = xstrlen( iv_data ).
@@ -104,30 +103,25 @@ CLASS zcl_abapgit_ortec_base_cache IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    mv_next_seq = mv_next_seq + 1.
+    mv_next_seq += 1.
 
-    lv_index = find_entry( iv_sha1 ).
-    IF lv_index > 0.
-      " Already cached (e.g. re-resolved, or re-requested as a shared base
-      " by another delta) - update the EXISTING row in place via MODIFY
-      " INDEX and bump its seq, instead of DELETE + re-INSERT/APPEND. This
-      " is the actual fix for a live ITAB_DUPLICATE_KEY dump (2026-07-19,
-      " recurring across several real pulls, including for ordinary
-      " non-empty tree/blob objects, not just an edge case): under the full
-      " churn of a real ~100k-object pack, this table's UNIQUE by_sha1
-      " secondary key was repeatedly deleted-from and re-inserted-into for
-      " the SAME hot/shared SHA1s (every LRU "touch" and every re-put moved
-      " the row via DELETE+APPEND) - MODIFY INDEX never removes or
-      " re-adds the row at all, so it can never trip the unique-key
-      " insert-time check that DELETE+APPEND/INSERT eventually did. LRU
-      " order no longer depends on physical table position at all (see
-      " mv_next_seq / by_seq / remove_oldest).
-      READ TABLE mt_entries INDEX lv_index INTO ls_entry.
+    READ TABLE mt_entries
+         WITH TABLE KEY by_sha1
+         COMPONENTS sha1 = iv_sha1
+         INTO ls_entry.
+
+    IF sy-subrc = 0.
       mv_total_bytes = mv_total_bytes - ls_entry-bytes + lv_size.
+
       ls_entry-data  = iv_data.
       ls_entry-bytes = lv_size.
       ls_entry-seq   = mv_next_seq.
-      MODIFY mt_entries INDEX lv_index FROM ls_entry.
+
+      MODIFY TABLE mt_entries
+             FROM ls_entry
+             USING KEY by_sha1
+             TRANSPORTING data bytes seq.
+
       RETURN.
     ENDIF.
 
@@ -148,7 +142,7 @@ CLASS zcl_abapgit_ortec_base_cache IMPLEMENTATION.
         " extremely unlikely chance this DOES fire is always safe, and
         " infinitely preferable to a dump.
         INSERT ls_entry INTO TABLE mt_entries.
-        mv_total_bytes = mv_total_bytes + lv_size.
+        mv_total_bytes += lv_size.
       CATCH cx_sy_itab_duplicate_key.
     ENDTRY.
   ENDMETHOD.
@@ -159,31 +153,25 @@ CLASS zcl_abapgit_ortec_base_cache IMPLEMENTATION.
     CLEAR mv_next_seq.
   ENDMETHOD.
 
-  METHOD find_entry.
-    " O(1) via the by_sha1 secondary hashed key - SY-TABIX is reliably set to
-    " the PRIMARY table index even when the row is found through a secondary
-    " key (documented ABAP behavior), so callers can still use the returned
-    " index for INDEX-based READ/MODIFY against the primary table.
-    READ TABLE mt_entries WITH TABLE KEY by_sha1 COMPONENTS sha1 = iv_sha1
-      TRANSPORTING NO FIELDS.
-    IF sy-subrc = 0.
-      rv_index = sy-tabix.
-    ENDIF.
-  ENDMETHOD.
-
   METHOD touch.
-    DATA lv_index TYPE i.
     DATA ls_entry TYPE ty_entry.
 
-    lv_index = find_entry( iv_sha1 ).
-    IF lv_index > 0.
-      " MODIFY INDEX in place - see put( ) for why this replaced
-      " DELETE + re-APPEND/INSERT (the actual fix for a live
-      " ITAB_DUPLICATE_KEY dump, 2026-07-19).
-      mv_next_seq = mv_next_seq + 1.
-      ls_entry-seq = mv_next_seq.
-      MODIFY mt_entries INDEX lv_index FROM ls_entry TRANSPORTING seq.
+    READ TABLE mt_entries
+         WITH TABLE KEY by_sha1
+         COMPONENTS sha1 = iv_sha1
+         INTO ls_entry.
+
+    IF sy-subrc <> 0.
+      RETURN.
     ENDIF.
+
+    mv_next_seq += 1.
+    ls_entry-seq = mv_next_seq.
+
+    MODIFY TABLE mt_entries
+           FROM ls_entry
+           USING KEY by_sha1
+           TRANSPORTING seq.
   ENDMETHOD.
 
   METHOD remove_oldest.
@@ -194,7 +182,7 @@ CLASS zcl_abapgit_ortec_base_cache IMPLEMENTATION.
     " primary table's physical row order/position.
     READ TABLE mt_entries INDEX 1 USING KEY by_seq INTO ls_entry.
     IF sy-subrc = 0.
-      mv_total_bytes = mv_total_bytes - ls_entry-bytes.
+      mv_total_bytes -= ls_entry-bytes.
       DELETE mt_entries INDEX 1 USING KEY by_seq.
     ENDIF.
   ENDMETHOD.
