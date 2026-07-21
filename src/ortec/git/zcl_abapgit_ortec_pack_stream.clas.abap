@@ -571,7 +571,27 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
       ENDIF.
 
       lv_base_type = <ls_base>-obj_type.
-      lv_base_data = get_base_bytes( iv_repo_key = iv_repo_key iv_sha1 = <ls_base>-sha1 iv_url = iv_url ).
+
+      " The base may have been resolved just now (this pass, this call
+      " stack) and is therefore correct/authoritative in ct_write_batch
+      " even though it is not yet persisted to zaog_obj_store (batched
+      " flushing - see flush_resolve_batch). get_base_bytes's own
+      " cache-then-object-store lookup is NOT a substitute for this: the
+      " Phase 1 LRU base cache is a byte-budgeted PERFORMANCE optimization,
+      " not a correctness guarantee - relying on it alone to serve an
+      " unflushed base risks a false "Delta base not found" whenever the
+      " cache does not (or, under budget pressure in a large real pack,
+      " cannot) still hold that exact entry. Checking ct_write_batch first
+      " is the smallest, authoritative fix: it is the same in-memory table
+      " this row's bytes were appended to at the moment it was resolved,
+      " bounded by c_batch_size, so this lookup is O(batch_size) worst case,
+      " not O(repo size).
+      READ TABLE ct_write_batch WITH KEY sha1 = <ls_base>-sha1 INTO DATA(ls_base_batch).
+      IF sy-subrc = 0.
+        lv_base_data = ls_base_batch-data.
+      ELSE.
+        lv_base_data = get_base_bytes( iv_repo_key = iv_repo_key iv_sha1 = <ls_base>-sha1 iv_url = iv_url ).
+      ENDIF.
       lv_base_sha_diag         = <ls_base>-sha1.
       lv_base_pack_offset_diag = <ls_base>-pack_offset.
     ENDIF.
@@ -649,7 +669,15 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
     DATA lt_write_batch     TYPE zif_abapgit_definitions=>ty_objects_tt.
     DATA lt_delete_batch    TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
 
-    FIELD-SYMBOLS <ls_row> TYPE ty_meta.
+    FIELD-SYMBOLS <ls_row>       TYPE ty_meta.
+    "! Dedicated field symbol for the post-call progress check below - never
+    "! reused to reassign the active LOOP's own <ls_row> iterator (that
+    "! aliasing pattern is an ATC finding: reassigning a field symbol that
+    "! is currently driving a LOOP ... ASSIGNING is unsafe/confusing even
+    "! when provably harmless in one specific case, since resolve_one_meta
+    "! already mutates ct_meta in place at the same tabix via pass-by-
+    "! reference).
+    FIELD-SYMBOLS <ls_row_after> TYPE ty_meta.
 
     LOOP AT ct_meta ASSIGNING <ls_row>.
       lv_tabix = sy-tabix.
@@ -689,8 +717,8 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
             ct_sha_idx         = lt_sha_idx
             ct_write_batch     = lt_write_batch
             ct_delete_batch    = lt_delete_batch ).
-        READ TABLE ct_meta ASSIGNING <ls_row> INDEX lv_tabix.
-        IF sy-subrc = 0 AND <ls_row>-is_resolved = abap_true.
+        READ TABLE ct_meta ASSIGNING <ls_row_after> INDEX lv_tabix.
+        IF sy-subrc = 0 AND <ls_row_after>-is_resolved = abap_true.
           lv_progress = abap_true.
         ENDIF.
       ENDLOOP.

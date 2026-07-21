@@ -343,3 +343,91 @@ correct per-base HTTP completion and deepen/have-failure handling`
 ## Proposed functional commit subject
 
 `ortec: Slice 2C - migrate fastpath call sites to explicit fetch modes`
+
+## Post-IT8 correction pass (VB-A-2C-IT8-FIX, this session)
+
+Baseline: checkpoint `a2c4d155`, SAP syntax-fix `246bae77` (verified to
+contain only 2 xstring-literal test fixes + 2 over-30-char method renames,
+no adjacent unrelated fixture/SHA/resolver changes).
+
+### Fixes applied (all in `zcl_abapgit_ortec_pack_stream.clas.abap` /
+`zcl_abapgit_ortec_fastpath.clas.abap` only)
+
+- **REF/OFS resolver correctness (root cause)**: `resolve_one_meta`'s
+  in-pack base branch unconditionally called `get_base_bytes`, which
+  depends on the Phase 1 LRU base cache to serve a base resolved earlier in
+  the SAME resolve pass but not yet flushed to `zaog_obj_store` (flushing
+  is batched at `c_batch_size`). The cache is a byte-budgeted performance
+  optimization, not a correctness guarantee for this purpose. Fixed: check
+  `ct_write_batch` (the in-memory not-yet-flushed table, already a
+  `CHANGING` parameter) first; fall back to `get_base_bytes` only on a
+  miss. `zcl_abapgit_ortec_base_cache.clas.abap` untouched.
+- **ATC field-symbol finding**: `resolve_streaming` re-read
+  `ct_meta ASSIGNING <ls_row> INDEX lv_tabix` while `<ls_row>` was the
+  active `LOOP ... ASSIGNING` iterator. Replaced with a dedicated
+  `<ls_row_after>` field symbol for the post-call progress check.
+- **ATC exception contracts**: `complete_missing_object` widened its
+  existing `TRY` to also cover `zcl_abapgit_http=>create_by_url` (a
+  `zcx_abapgit_exception` source previously outside the TRY, undeclared at
+  this method's `RAISING zcx_abapgit_ortec_git`-only boundary); the catch
+  now uses `RAISE EXCEPTION TYPE zcx_abapgit_ortec_git ... previous =
+  lx_std` (mirrors `zcl_abapgit_ortec_fetch_req=>build_request`'s existing
+  pattern). `build_upload_pack_buffer` (legacy/dead, only called by
+  `ltcl_fastpath_protocol`, all `RAISING cx_static_check`) now declares
+  `RAISING zcx_abapgit_exception`, propagating `pkt_string`'s declared
+  exception unchanged - zero call-site changes needed.
+
+### Not fixed (classified, provenance-gated, out of scope this pass)
+
+- `ltcl_base_cache` failures (`PUT_GET_ROUND_TRIP`, `LRU_EVICTION`,
+  `OVERSIZE_BLOB_IS_NOT_CACHED`, `RE_PUT_SAME_SHA1_NO_DUMP`,
+  `ZERO_BYTE_BLOB_IS_A_HIT`): `zcl_abapgit_ortec_base_cache.clas.abap` last
+  changed at `19bdbe40`, well before `a2c4d155`/`246bae77`. Static review
+  of its current source (singleton LRU with a `by_sha1` unique hashed
+  secondary key and a `by_seq` sorted secondary key) found no logic defect
+  against any of the 5 failing scenarios. Classified
+  `PRE_EXISTING_CURRENT_BASELINE` (most likely: these tests never ran
+  before on the live system, since the whole testclasses include failed to
+  compile until `246bae77`'s xstring-literal fix) with a residual
+  `UNRESOLVED` component (live IT8 diagnostic access was not available
+  this session to confirm the deployed class body actually matches this
+  HEAD - see `.memory/repo/git-state-notes.md`'s partial-import pitfall).
+  Not fixed here per the "no unrelated cache/admin fix without provenance"
+  constraint; needs a live IT8 session (run `ltcl_base_cache` in isolation,
+  or diff active vs. HEAD source) before further action.
+- `ltcl_cache_admin=>OVERVIEW_AGGREGATES_COUNTS` (`CX_SY_OPEN_SQL_DB`):
+  `zcl_abapgit_ortec_cache_admin.clas.abap` last changed at `5afd40dd`,
+  also well before both baseline commits, and is explicitly off the active
+  fetch/decode path (its own class doc: "off-hot-path cache admin
+  report"). Classified `UNRESOLVED` - the exact live Open SQL exception
+  text/failing statement could not be obtained this session (no live IT8
+  diagnostic access); not fixed without that evidence per the workstream's
+  own requirement.
+
+### Validation this pass
+
+- `get_errors`: clean on both changed files.
+- `ortec-abapgit-regression` (delegated, MAI-Code-1-Flash): `PASS`, 0
+  blocking findings - see `.memory/logs/regression_variant_b_slice2_2c.md`
+  appendix.
+- `git status --short`/`git diff --stat`: confirmed only the two intended
+  files modified; no `.memory/*` file touched by the diff.
+- Live SAP re-import/activation/ABAP Unit/ATC: **PENDING** - not performed
+  this session (the connected diagnostic tooling this session pointed at
+  an unrelated system where none of these ORTEC classes exist at all, so
+  it could not be used to re-validate against IT8).
+
+### Required completion state - status
+
+- REF chain / OFS chain resolver bug: fixed at the source level (batch
+  lookup); **not yet re-verified live on IT8** pending re-import.
+- Missing external base still raises with `retry_without_haves =
+  abap_true`: unchanged, still true (untouched code path).
+- No per-object HTTP path reachable: unchanged, confirmed
+  (`complete_missing_object` still has zero live callers).
+- Unsafe `<ls_row>` reassignment: removed.
+- Exception contracts: completed for both flagged methods.
+- No unrelated cache/admin fix mixed in: confirmed (only the two files
+  above were touched; base_cache/cache_admin untouched).
+- Method names ≤30 chars: no new method names introduced by this pass.
+

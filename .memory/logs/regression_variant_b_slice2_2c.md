@@ -107,3 +107,24 @@ this local source (verify before relying on either assumption).
 - ABAP Unit execution (including the new/updated `ltcl_completeness_gate`
   tests).
 - ATC static check against the live system.
+
+## Appendix: post-IT8 correction pass (this session, VB-A-2C-IT8-FIX)
+
+Scope: `zcl_abapgit_ortec_pack_stream.clas.abap` (`resolve_streaming`,
+`resolve_one_meta`), `zcl_abapgit_ortec_fastpath.clas.abap`
+(`complete_missing_object`, `build_upload_pack_buffer` declaration). See
+`.memory/state.md`'s "Post-IT8 2C correction" section for the root-cause
+summary. No `.memory/` file or unrelated source file touched.
+
+Verdict: `PASS` (`ortec-abapgit-regression`, delegated to MAI-Code-1-Flash).
+0 blocking findings. Confirmed: `build_upload_pack_buffer` callers are all
+`FOR TESTING RAISING cx_static_check` (no call-site changes needed);
+`complete_missing_object` has zero live callers (still dormant);
+`resolve_one_meta`'s signature and `resolve_streaming`'s call to it are
+unchanged; both files `get_errors`-clean; only the two listed files are
+modified (`git status --short`/`git diff --stat` confirmed); the added
+`ct_write_batch` lookup is a pure in-memory `READ TABLE`, no new SQL/HTTP.
+
+Not performed this pass (unchanged from above): SAP import/activation/ABAP
+Unit/ATC re-validation on the live system.
+

@@ -190,6 +190,17 @@ CLASS zcl_abapgit_ortec_fastpath DEFINITION
     "! verify the wire-line shape and ordering directly without a live
     "! HTTP client - see zcl_abapgit_ortec_git_tests.clas.testclasses.abap
     "! ltcl_fastpath_protocol.
+    "! @raising zcx_abapgit_exception |
+    "! Propagated unchanged from ZCL_ABAPGIT_GIT_UTILS=>PKT_STRING (a pure
+    "! pkt-line length-encoding failure) - this method is a wire-format
+    "! formatter, not a network/protocol boundary, so it intentionally does
+    "! NOT translate into ZCX_ABAPGIT_ORTEC_GIT (matches the existing
+    "! legacy convention already used by PKT_STRING/LENGTH_UTF8_HEX
+    "! themselves). Legacy/unreachable-from-migrated-paths as of Slice 2C
+    "! (LEGACY_BUT_UNREACHABLE_AFTER_2C) - only called by
+    "! ltcl_fastpath_protocol today, which already declares
+    "! FOR TESTING RAISING cx_static_check (zcx_abapgit_exception's
+    "! superclass), so this addition requires no test call-site changes.
     CLASS-METHODS build_upload_pack_buffer
       IMPORTING
         iv_deepen_level TYPE i DEFAULT 0
@@ -198,7 +209,9 @@ CLASS zcl_abapgit_ortec_fastpath DEFINITION
         iv_allow_thin   TYPE abap_bool DEFAULT abap_false
         iv_force_full   TYPE abap_bool DEFAULT abap_false
       RETURNING
-        VALUE(rv_buffer) TYPE string.
+        VALUE(rv_buffer) TYPE string
+      RAISING
+        zcx_abapgit_exception.
 
     "! Parse a pkt-line response stream: extracts side-band channel 1
     "! (packfile) bytes into ev_pack, and best-effort collects any plain
@@ -422,13 +435,6 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
     ls_header-value = zcl_abapgit_url=>path_name( iv_url ) && |/info/refs?service=git-upload-pack|.
     APPEND ls_header TO lt_headers.
 
-    lo_client = zcl_abapgit_http=>create_by_url(
-      iv_url     = iv_url
-      it_headers = lt_headers ).
-
-    lv_ref_data = lo_client->get_cdata( ).
-    lv_server_caps = zcl_abapgit_ortec_fetch_req=>parse_capabilities( lv_ref_data ).
-
     " MATERIALIZE_BLOBS with a single-entry want list: no haves, no shallow
     " line - this is a targeted, self-contained fetch for exactly iv_sha1
     " (plus whatever the server needs to bundle to resolve its own delta
@@ -445,7 +451,23 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
     " decode_streaming's own commit-only return filter discards - the
     " RETURNING value here is deliberately discarded, only the persistence
     " side effect matters to the caller.
+    " This method's own declared contract is "RAISING zcx_abapgit_ortec_git"
+    " only, so CREATE_BY_URL (which raises zcx_abapgit_exception, e.g. on a
+    " network/connection failure) must be inside this same TRY, not just
+    " the final upload_pack( ) call - an earlier version left it outside,
+    " which let a plain zcx_abapgit_exception escape this method's boundary
+    " undeclared (a real ATC finding, not just a style issue: a checked
+    " exception can validly propagate without a RAISING declaration in
+    " ABAP, but every caller of this ORTEC-internal API expects only
+    " ZCX_ABAPGIT_ORTEC_GIT to ever cross it).
     TRY.
+        lo_client = zcl_abapgit_http=>create_by_url(
+          iv_url     = iv_url
+          it_headers = lt_headers ).
+
+        lv_ref_data = lo_client->get_cdata( ).
+        lv_server_caps = zcl_abapgit_ortec_fetch_req=>parse_capabilities( lv_ref_data ).
+
         upload_pack(
           io_client       = lo_client
           iv_url          = iv_url
@@ -453,7 +475,10 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
           iv_mode         = zcl_abapgit_ortec_fetch_req=>cs_fetch_mode-materialize_blobs
           iv_server_caps  = lv_server_caps ).
       CATCH zcx_abapgit_exception INTO DATA(lx_std).
-        zcx_abapgit_ortec_git=>raise( |Thin-pack completion failed: { lx_std->get_text( ) }| ).
+        RAISE EXCEPTION TYPE zcx_abapgit_ortec_git
+          EXPORTING
+            iv_text  = |Thin-pack completion failed: { lx_std->get_text( ) }|
+            previous = lx_std.
     ENDTRY.
   ENDMETHOD.
 
