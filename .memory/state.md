@@ -25,9 +25,10 @@
   "Gate Closure" section. See `.memory/logs/variant_b_slice2_design.md` for
   the full design plus all three "Review resolution" sections.
 - Sub-slices 2A+2B (`zcl_abapgit_ortec_fetch_req` + `.xml` new class;
-  `zcx_abapgit_ortec_git` extension) are implemented and have passed
-  performance `IMPLEMENTATION_AUDIT`: verdict `PASS`, AC1-AC4 all PASS, zero
-  SQL/HTTP, no new N-dependent cost. See
+  `zcx_abapgit_ortec_git` extension) are implemented, performance-audited,
+  and SAP-validated on IT8: import/activation succeeded, and ABAP Unit
+  execution passed. See
+  `.memory/logs/regression_variant_b_slice2_2a2b.md` and
   `.memory/logs/performance_audit_variant-b-partial-clone_slice2.md`. No
   productive call site invokes this class yet (by design, sub-slice 2C
   scope).
@@ -58,9 +59,9 @@
     `zaog_obj_store` commit-object read (performance `DESIGN_GATE` finding,
     Slice 2).
 - Blocking condition: none currently known.
-- SAP validation status: `PENDING_SAP_IMPORT` (no live import/activation/ABAP
-  Unit/ATC execution was performed in this session; only static/structural
-  regression evidence is available).
+- SAP validation status: `SAP_VALIDATED_IT8` (import/activation succeeded, ABAP
+  Unit execution passed for 2A/2B; regression evidence is recorded in
+  `.memory/logs/regression_variant_b_slice2_2a2b.md`).
 - Productive changes: Slice 1 is live on IT8. Slice 2 is design-approved but
   not implemented; implementation must follow the exact §8 file list.
 - Supersedes as standalone topic: H4 walk delegation.

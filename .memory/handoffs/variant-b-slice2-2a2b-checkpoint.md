@@ -60,6 +60,18 @@ productive call site (`zcl_abapgit_ortec_fastpath`, `zcl_abapgit_ortec_fetch_neg
   `collect_ancestor_haves` unbounded read) remain recorded in
   `.memory/state.md` and untouched by this checkpoint.
 
+## SAP validation evidence (IT8)
+
+- Import and activation of the 2A/2B checkpoint artifacts completed successfully.
+- Activation of the new fetch-request class, exception class, and test-class
+  include completed successfully.
+- ABAP Unit execution for `zcl_abapgit_ortec_fetch_req` completed successfully.
+- The follow-up fix commit `96536177393e7d6650fdfe4487e8fa7f17ad4044`
+  corrected the ABAP Unit method names so that all test methods are within the
+  ABAP 30-character limit; the current source contains no over-length method
+  names.
+- Regression validation report: `.memory/logs/regression_variant_b_slice2_2a2b.md`.
+
 ## Binding Slice 2C scope (not yet started)
 
 - Reroute `zcl_abapgit_ortec_fastpath`'s `upload_pack`/`upload_pack_by_branch`/
