@@ -116,7 +116,7 @@ CLASS ltcl_base_cache IMPLEMENTATION.
     cl_abap_unit_assert=>assert_false( act = lo_cache->has( iv_sha1 = lc_sha1 )
       msg = 'A never-put SHA1 must not be reported as cached' ).
 
-    lo_cache->put( iv_sha1 = lc_sha1 iv_data = '' ).
+    lo_cache->put( iv_sha1 = lc_sha1 iv_data = value xstring( ) ).
     cl_abap_unit_assert=>assert_true( act = lo_cache->has( iv_sha1 = lc_sha1 )
       msg = 'A 0-byte object that was put( ) must be reported as cached' ).
     cl_abap_unit_assert=>assert_initial( act = lo_cache->get( iv_sha1 = lc_sha1 )
@@ -131,8 +131,8 @@ CLASS ltcl_base_cache IMPLEMENTATION.
     CONSTANTS lc_sha1 TYPE c LENGTH 40 VALUE 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'.
 
     lo_cache = zcl_abapgit_ortec_base_cache=>get_instance( ).
-    lo_cache->put( iv_sha1 = lc_sha1 iv_data = '' ).
-    lo_cache->put( iv_sha1 = lc_sha1 iv_data = '' ).
+    lo_cache->put( iv_sha1 = lc_sha1 iv_data = value xstring( ) ).
+    lo_cache->put( iv_sha1 = lc_sha1 iv_data = value xstring( ) ).
     lo_cache->put( iv_sha1 = lc_sha1 iv_data = '48656C6C6F' ).
     cl_abap_unit_assert=>assert_equals( act = lo_cache->get( iv_sha1 = lc_sha1 ) exp = '48656C6C6F'
       msg = 'Repeated put( ) for the same SHA1 must overwrite, not dump or duplicate' ).
@@ -3258,10 +3258,10 @@ CLASS ltcl_fastpath_protocol DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION
   PRIVATE SECTION.
     METHODS buffer_emits_shallow_lines FOR TESTING RAISING cx_static_check.
     METHODS buffer_skips_shallow_forced FOR TESTING RAISING cx_static_check.
-    METHODS buffer_sends_deepen_even_forced FOR TESTING RAISING cx_static_check.
+    METHODS buffer_send_deepen_even_forced FOR TESTING RAISING cx_static_check.
     METHODS parse_collects_shallow FOR TESTING RAISING cx_static_check.
     METHODS parse_ignores_bad_shallow FOR TESTING RAISING cx_static_check.
-    METHODS progressive_deepen_widens_and_caps FOR TESTING RAISING cx_static_check.
+    METHODS progress_deepen_widens_n_caps FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 CLASS ltcl_fastpath_protocol IMPLEMENTATION.
   METHOD buffer_emits_shallow_lines.
@@ -3319,7 +3319,7 @@ CLASS ltcl_fastpath_protocol IMPLEMENTATION.
     cl_abap_unit_assert=>assert_subrc( exp = 4 msg = 'Shallow lines must be skipped when iv_force_full is true' ).
   ENDMETHOD.
 
-  METHOD buffer_sends_deepen_even_forced.
+  METHOD buffer_send_deepen_even_forced.
     " Phase 1 of the architecture hardening plan (.memory/state.md,
     " 2026-07-20) REVERTED the earlier "omit deepen entirely when
     " iv_force_full = abap_true" behavior: that meant requesting a repo's
@@ -3431,7 +3431,7 @@ CLASS ltcl_fastpath_protocol IMPLEMENTATION.
     cl_abap_unit_assert=>assert_initial( act = lv_pack msg = 'Plain text pkt-lines should not be treated as pack data' ).
   ENDMETHOD.
 
-  METHOD progressive_deepen_widens_and_caps.
+  METHOD progress_deepen_widens_n_caps.
     " Phase 1 of the architecture hardening plan (.memory/state.md,
     " 2026-07-20): the progressive recovery loop must start at a sensible
     " minimum, widen by the configured factor on each failure, and never
