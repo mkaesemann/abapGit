@@ -108,13 +108,17 @@ CLASS zcl_abapgit_ortec_fetch_req DEFINITION
         it_want_hashes  TYPE zif_abapgit_git_definitions=>ty_sha1_tt
         iv_first_capa   TYPE string
       RETURNING
-        VALUE(rv_lines) TYPE string.
+        VALUE(rv_lines) TYPE string
+      RAISING
+        zcx_abapgit_exception.
 
     CLASS-METHODS build_have_lines
       IMPORTING
         it_certified_haves TYPE zif_abapgit_git_definitions=>ty_sha1_tt
       RETURNING
-        VALUE(rv_lines)    TYPE string.
+        VALUE(rv_lines)    TYPE string
+      RAISING
+        zcx_abapgit_exception.
 
 ENDCLASS.
 
@@ -126,108 +130,122 @@ CLASS zcl_abapgit_ortec_fetch_req IMPLEMENTATION.
     DATA lv_want_capa          TYPE string.
     DATA lv_matched_capability TYPE string.
 
-    CASE iv_mode.
+    TRY.
+        CASE iv_mode.
 
-      WHEN cs_fetch_mode-initial_branch_blobless.
+          WHEN cs_fetch_mode-initial_branch_blobless.
 
-        validate_single_want( iv_mode = iv_mode it_want_hashes = it_want_hashes ).
+            validate_single_want( iv_mode = iv_mode it_want_hashes = it_want_hashes ).
 
-        IF NOT ( iv_server_caps CS c_cap_filter ).
-          zcx_abapgit_ortec_git=>raise_unsupported_capability(
-            iv_mode       = iv_mode
-            iv_capability = c_cap_filter ).
-        ENDIF.
+            IF NOT ( iv_server_caps CS c_cap_filter ).
+              zcx_abapgit_ortec_git=>raise_unsupported_capability(
+                iv_mode       = iv_mode
+                iv_capability = c_cap_filter ).
+            ENDIF.
 
-        lv_want_capa = c_capa_base && ` ` && c_cap_filter.
+            lv_want_capa = c_capa_base && ` ` && c_cap_filter.
 
-        rs_request-buffer = build_want_lines( it_want_hashes = it_want_hashes
-                                               iv_first_capa  = lv_want_capa ).
-        rs_request-buffer = rs_request-buffer &&
-          zcl_abapgit_git_utils=>pkt_string( |filter blob:none{ cl_abap_char_utilities=>newline }| ).
-        rs_request-buffer = rs_request-buffer && '0000'.
-        rs_request-buffer = rs_request-buffer && '0009done' && cl_abap_char_utilities=>newline.
+            rs_request-buffer = build_want_lines( it_want_hashes = it_want_hashes
+                                                   iv_first_capa  = lv_want_capa ).
+            rs_request-buffer = rs_request-buffer &&
+              zcl_abapgit_git_utils=>pkt_string( |filter blob:none{ cl_abap_char_utilities=>newline }| ).
+            rs_request-buffer = rs_request-buffer && '0000'.
+            rs_request-buffer = rs_request-buffer && '0009done' && cl_abap_char_utilities=>newline.
 
-        rs_request-used_filter = 'blob:none'.
-        rs_request-have_count  = 0.
+            rs_request-used_filter = 'blob:none'.
+            rs_request-have_count  = 0.
 
-      WHEN cs_fetch_mode-incremental_thin.
+          WHEN cs_fetch_mode-incremental_thin.
 
-        validate_single_want( iv_mode = iv_mode it_want_hashes = it_want_hashes ).
+            validate_single_want( iv_mode = iv_mode it_want_hashes = it_want_hashes ).
 
-        rs_request-used_thin = xsdbool( it_certified_haves IS NOT INITIAL
-          AND iv_server_caps CS c_cap_thin
-          AND iv_server_caps CS c_cap_ofs_delta ).
+            rs_request-used_thin = xsdbool( it_certified_haves IS NOT INITIAL
+              AND iv_server_caps CS c_cap_thin
+              AND iv_server_caps CS c_cap_ofs_delta ).
 
-        IF rs_request-used_thin = abap_true.
-          lv_want_capa = c_capa_base && ` ` && c_cap_thin && ` ` && c_cap_ofs_delta.
-        ELSE.
-          lv_want_capa = c_capa_base.
-        ENDIF.
+            IF rs_request-used_thin = abap_true.
+              lv_want_capa = c_capa_base && ` ` && c_cap_thin && ` ` && c_cap_ofs_delta.
+            ELSE.
+              lv_want_capa = c_capa_base.
+            ENDIF.
 
-        rs_request-buffer = build_want_lines( it_want_hashes = it_want_hashes
-                                               iv_first_capa  = lv_want_capa ).
-        rs_request-buffer = rs_request-buffer && '0000'.
-        rs_request-buffer = rs_request-buffer && build_have_lines( it_certified_haves ).
-        rs_request-buffer = rs_request-buffer && '0009done' && cl_abap_char_utilities=>newline.
+            rs_request-buffer = build_want_lines( it_want_hashes = it_want_hashes
+                                                   iv_first_capa  = lv_want_capa ).
+            rs_request-buffer = rs_request-buffer && '0000'.
+            rs_request-buffer = rs_request-buffer && build_have_lines( it_certified_haves ).
+            rs_request-buffer = rs_request-buffer && '0009done' && cl_abap_char_utilities=>newline.
 
-        rs_request-have_count = lines( it_certified_haves ).
+            rs_request-have_count = lines( it_certified_haves ).
 
-      WHEN cs_fetch_mode-incremental_self_contained.
+          WHEN cs_fetch_mode-incremental_self_contained.
 
-        validate_single_want( iv_mode = iv_mode it_want_hashes = it_want_hashes ).
+            validate_single_want( iv_mode = iv_mode it_want_hashes = it_want_hashes ).
 
-        rs_request-buffer = build_want_lines( it_want_hashes = it_want_hashes
-                                               iv_first_capa  = c_capa_base ).
-        rs_request-buffer = rs_request-buffer && '0000'.
-        rs_request-buffer = rs_request-buffer && build_have_lines( it_certified_haves ).
-        rs_request-buffer = rs_request-buffer && '0009done' && cl_abap_char_utilities=>newline.
+            rs_request-buffer = build_want_lines( it_want_hashes = it_want_hashes
+                                                   iv_first_capa  = c_capa_base ).
+            rs_request-buffer = rs_request-buffer && '0000'.
+            rs_request-buffer = rs_request-buffer && build_have_lines( it_certified_haves ).
+            rs_request-buffer = rs_request-buffer && '0009done' && cl_abap_char_utilities=>newline.
 
-        rs_request-have_count = lines( it_certified_haves ).
+            rs_request-have_count = lines( it_certified_haves ).
 
-      WHEN cs_fetch_mode-materialize_blobs.
+          WHEN cs_fetch_mode-materialize_blobs.
 
-        IF it_want_hashes IS INITIAL.
-          zcx_abapgit_ortec_git=>raise( |MATERIALIZE_BLOBS requires at least one blob SHA1| ).
-        ENDIF.
-        IF lines( it_want_hashes ) > c_materialize_batch_max.
-          zcx_abapgit_ortec_git=>raise(
-            |MATERIALIZE_BLOBS batch size { lines( it_want_hashes ) } exceeds maximum { c_materialize_batch_max }| ).
-        ENDIF.
+            IF it_want_hashes IS INITIAL.
+              zcx_abapgit_ortec_git=>raise( |MATERIALIZE_BLOBS requires at least one blob SHA1| ).
+            ENDIF.
+            IF lines( it_want_hashes ) > c_materialize_batch_max.
+              zcx_abapgit_ortec_git=>raise(
+                |MATERIALIZE_BLOBS batch size { lines( it_want_hashes ) } exceeds maximum { c_materialize_batch_max }| ).
+            ENDIF.
 
-        IF iv_server_caps CS c_cap_reachable_want.
-          lv_matched_capability = c_cap_reachable_want.
-        ELSEIF iv_server_caps CS c_cap_tip_want.
-          lv_matched_capability = c_cap_tip_want.
-        ELSE.
-          zcx_abapgit_ortec_git=>raise_unsupported_capability(
-            iv_mode       = iv_mode
-            iv_capability = c_cap_reachable_want ).
-        ENDIF.
+            IF iv_server_caps CS c_cap_reachable_want.
+              lv_matched_capability = c_cap_reachable_want.
+            ELSEIF iv_server_caps CS c_cap_tip_want.
+              lv_matched_capability = c_cap_tip_want.
+            ELSE.
+              zcx_abapgit_ortec_git=>raise_unsupported_capability(
+                iv_mode       = iv_mode
+                iv_capability = c_cap_reachable_want ).
+            ENDIF.
 
-        lv_want_capa = c_capa_base && ` ` && lv_matched_capability.
+            lv_want_capa = c_capa_base && ` ` && lv_matched_capability.
 
-        rs_request-buffer = build_want_lines( it_want_hashes = it_want_hashes
-                                               iv_first_capa  = lv_want_capa ).
-        rs_request-buffer = rs_request-buffer && '0000'.
-        rs_request-buffer = rs_request-buffer && '0009done' && cl_abap_char_utilities=>newline.
+            rs_request-buffer = build_want_lines( it_want_hashes = it_want_hashes
+                                                   iv_first_capa  = lv_want_capa ).
+            rs_request-buffer = rs_request-buffer && '0000'.
+            rs_request-buffer = rs_request-buffer && '0009done' && cl_abap_char_utilities=>newline.
 
-        rs_request-have_count = 0.
+            rs_request-have_count = 0.
 
-      WHEN cs_fetch_mode-recovery_branch_full.
+          WHEN cs_fetch_mode-recovery_branch_full.
 
-        validate_single_want( iv_mode = iv_mode it_want_hashes = it_want_hashes ).
+            validate_single_want( iv_mode = iv_mode it_want_hashes = it_want_hashes ).
 
-        rs_request-buffer = build_want_lines( it_want_hashes = it_want_hashes
-                                               iv_first_capa  = c_capa_base ).
-        rs_request-buffer = rs_request-buffer && '0000'.
-        rs_request-buffer = rs_request-buffer && '0009done' && cl_abap_char_utilities=>newline.
+            rs_request-buffer = build_want_lines( it_want_hashes = it_want_hashes
+                                                   iv_first_capa  = c_capa_base ).
+            rs_request-buffer = rs_request-buffer && '0000'.
+            rs_request-buffer = rs_request-buffer && '0009done' && cl_abap_char_utilities=>newline.
 
-        rs_request-have_count = 0.
+            rs_request-have_count = 0.
 
-      WHEN OTHERS.
-        zcx_abapgit_ortec_git=>raise( |Unknown ORTEC fetch mode: { iv_mode }| ).
+          WHEN OTHERS.
+            zcx_abapgit_ortec_git=>raise( |Unknown ORTEC fetch mode: { iv_mode }| ).
 
-    ENDCASE.
+        ENDCASE.
+
+      CATCH zcx_abapgit_exception INTO DATA(lx_pkt_error).
+        " BUILD_REQUEST's approved public contract raises only
+        " ZCX_ABAPGIT_ORTEC_GIT (Slice 2 design §2.2) - translate the
+        " underlying pkt-line encoding failure (ZCL_ABAPGIT_GIT_UTILS=>
+        " PKT_STRING, called directly and via BUILD_WANT_LINES/
+        " BUILD_HAVE_LINES) rather than exposing the base exception,
+        " preserving it as the previous cause.
+        RAISE EXCEPTION TYPE zcx_abapgit_ortec_git
+          EXPORTING
+            iv_text  = |ORTEC fetch request serialization failed: { lx_pkt_error->get_text( ) }|
+            previous = lx_pkt_error.
+    ENDTRY.
 
     rs_request-mode = iv_mode.
 

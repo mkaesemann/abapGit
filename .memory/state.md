@@ -32,7 +32,10 @@
   `.memory/logs/performance_audit_variant-b-partial-clone_slice2.md`. No
   productive call site invokes this class yet (by design, sub-slice 2C
   scope).
-- Next action: sub-slice 2C - `zcl_abapgit_ortec_fastpath` call-site
+- Next action: re-import/re-activate `zcl_abapgit_ortec_fetch_req.clas.abap`
+  on IT8, re-run ATC (expect the 3 `ZCX_ABAPGIT_EXCEPTION` findings
+  resolved), and re-run `ltcl_fetch_req` ABAP Unit (expect all 18 tests
+  still PASS); then sub-slice 2C - `zcl_abapgit_ortec_fastpath` call-site
   rewiring incl. the DR-004 decode-local cache reset, and
   `zcl_abapgit_ortec_fetch_neg=>is_commit_complete` body swap (AC5/AC6),
   then that sub-slice's own performance scan + `IMPLEMENTATION_AUDIT`, then
@@ -59,8 +62,12 @@
     `zaog_obj_store` commit-object read (performance `DESIGN_GATE` finding,
     Slice 2).
 - Blocking condition: none currently known.
-- SAP validation status: `SAP_VALIDATED_IT8` (import/activation succeeded, ABAP
-  Unit execution passed for 2A/2B; regression evidence is recorded in
+- SAP validation status: `SAP_VALIDATED_IT8_WITH_LOCAL_ATC_FIX_PENDING_REIMPORT`
+  (2A/2B import/activation/ABAP Unit passed on IT8; IT8 ATC then found
+  undeclared/unhandled `ZCX_ABAPGIT_EXCEPTION` in `BUILD_REQUEST`,
+  `BUILD_WANT_LINES`, `BUILD_HAVE_LINES` - fixed locally in
+  `zcl_abapgit_ortec_fetch_req.clas.abap` only; not yet re-imported/
+  re-ATC'd on IT8. See "ATC finding fix" in
   `.memory/logs/regression_variant_b_slice2_2a2b.md`).
 - Productive changes: Slice 1 is live on IT8. Slice 2 is design-approved but
   not implemented; implementation must follow the exact §8 file list.

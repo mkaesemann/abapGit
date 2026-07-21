@@ -71,6 +71,15 @@ productive call site (`zcl_abapgit_ortec_fastpath`, `zcl_abapgit_ortec_fetch_neg
   ABAP 30-character limit; the current source contains no over-length method
   names.
 - Regression validation report: `.memory/logs/regression_variant_b_slice2_2a2b.md`.
+- IT8 ATC subsequently reported undeclared/unhandled `ZCX_ABAPGIT_EXCEPTION`
+  in `BUILD_REQUEST`, `BUILD_WANT_LINES`, `BUILD_HAVE_LINES`. Fixed locally
+  (see `.memory/logs/regression_variant_b_slice2_2a2b.md` "ATC finding fix"
+  section) - `BUILD_WANT_LINES`/`BUILD_HAVE_LINES` now declare `RAISING
+  zcx_abapgit_exception` and propagate it; `BUILD_REQUEST` translates it to
+  `zcx_abapgit_ortec_git` at its public boundary, preserving the original as
+  `previous`. `BUILD_REQUEST`'s public `RAISING zcx_abapgit_ortec_git`
+  contract, wire output, and validation behavior are unchanged. This fix is
+  NOT yet re-imported/re-activated/re-ATC'd on IT8.
 
 ## Binding Slice 2C scope (not yet started)
 
