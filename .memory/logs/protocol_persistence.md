@@ -326,3 +326,255 @@ blank for a brand-new branch. Neither blocks proceeding to performance
 - None requiring owner escalation — both findings above are documentation
   clarifications the design author can add directly, not disagreements with
   the owner spec.
+
+# Protocol/persistence review: Variant B Slice 2 (explicit fetch modes and request serializer)
+
+Status: **REVIEW, read-only, no files edited.** Topic `variant-b-partial-clone`,
+Slice 2 only. Reviewed `.memory/logs/variant_b_slice2_design.md` (including
+its "Review resolution" section) against
+`.memory/logs/variant_b_slice2_reconciliation.md`, the already-resolved
+correctness review (`.memory/reviews/variant_b_slice2_design_review.md`,
+verdict `APPROVE_WITH_MINOR_REVISIONS`), and live-read source:
+`zcl_abapgit_ortec_mat_state.clas.abap` (full), `zcx_abapgit_ortec_git.clas.abap`
+(header/constructor), `zcl_abapgit_ortec_pack_stream.clas.abap`
+(`reset_completion_budget` + its doc), and a repo-wide grep for `ENQUEUE`
+usage under `src/ortec/git`.
+
+## 1. §8 file-list / no-new-DDIC claim
+
+**Confirmed true.** The two new exception attributes
+(`mv_unsupported_capability TYPE abap_bool`, `mv_missing_capability TYPE
+string`) use only built-in ABAP types — no new data element, domain, or
+structure is required to add them to the existing global class
+`zcx_abapgit_ortec_git`, exactly mirroring how the pre-existing
+`mv_retry_without_haves TYPE abap_bool`/`mv_text TYPE string` attributes on
+the same class needed none. The new `zcl_abapgit_ortec_fetch_req` class's own
+types (`ty_fetch_mode TYPE c LENGTH 1`, `ty_request` structure) are both
+class-local `TYPES` declarations, not DDIC objects, matching the precedent
+`zcl_abapgit_ortec_mat_state=>ty_hist_level`/`ty_snap_state` already set in
+Slice 1. §8's file list is exactly: one new class+xml, one existing-class
+attribute/method addition, two existing-class body-only changes. No
+`zaog_*` table, structure, or table type is touched or needed by Slice 2.
+
+## 2. Git wire-protocol correctness (§2.3)
+
+**`INCREMENTAL_THIN`'s haves-gated thin/ofs-delta suppression is correct,
+not just defensible.** A real git client never requests `thin-pack`
+capability when it has no `have`s to offer: thin-pack only has meaning as
+"the server may omit objects reachable from a base the client already has
+and delta against it instead" — with zero certified haves there is no base
+to delta against, so advertising the capability would be inert at best. The
+design's soft-gate (§2.3: "advertised only... and only if
+`it_certified_haves` non-empty") reproduces this real client behavior
+exactly, and correctly keeps it a *soft* requirement (a missing
+`thin-pack`/`ofs-delta` server capability degrades the request, it does not
+fail it) — this matches the protocol's own soft/hard capability split (thin
+is a response-shape optimization; filter and sha1-in-want are eligibility
+gates without which the mode's whole purpose cannot be honored at all).
+There is no scenario in the table where a "haves-free thin request" is ever
+actually sent — the have-line loop and the capability-token decision share
+the same `it_certified_haves` emptiness check, so they cannot disagree.
+
+**`MATERIALIZE_BLOBS`'s "want N blob SHAs directly" pattern is protocol-legal
+exactly as scoped, but has a real interop caveat worth flagging even with
+correct capability gating.** `allow-reachable-sha1-in-want` is specified
+(Documentation/technical/protocol-capabilities.txt) to permit a `want` for
+any object reachable from an advertised ref, which by definition includes
+blob objects, not only commits/tags — so the design's gating (raise
+`mv_unsupported_capability` when the server hasn't advertised this token) is
+the structurally correct and sufficient check *for protocol legality*. What
+source review cannot settle is *server-implementation* behavior once the
+capability is advertised: several widely used git server implementations
+have historically scoped their practical support for arbitrary-SHA1 wants
+more narrowly than the spec allows (e.g. treating it as "commit reachable
+from a ref" rather than "any object reachable from a ref", for reachability-
+proof cost and information-disclosure reasons), and reachability
+verification for a single deep blob can be considerably more expensive
+server-side than for a commit. This cannot be resolved by reading ORTEC's
+own source — it depends on which git hosting product(s) the repositories
+`zcl_abapgit_ortec_fastpath` talks to actually run, and their current
+`upload-pack` behavior. Recorded under Risks below.
+
+**`shallow`/`deepen` removal (DR-005, already resolved in the design) is
+independently reconfirmed protocol-correct**: once haves are sourced only
+from `is_graph_have_eligible`-certified commits (§4), telling the server
+"my history is boundary-truncated at commit X" via `shallow` no longer
+describes anything true about the client's local state in the sense the
+protocol intends (shallow boundaries model an intentionally truncated clone,
+not an as-yet-uncertified one) — collapsing both `shallow` and `deepen` out
+of every mode's decision branches is the correct simplification once
+certified-have negotiation is the sole trust mechanism.
+
+## 3. Exception-type design: `mv_unsupported_capability` alongside `mv_retry_without_haves`
+
+**Safe as designed, but the class already tolerates an un-enforced
+ambiguous state, and Slice 2 adds a third flag to that same pattern rather
+than introducing a new risk category.** `zcx_abapgit_ortec_git` already
+carries two independently-settable boolean signals today
+(`mv_is_corruption`, set only via a direct `constructor` call with
+`iv_is_corruption = abap_true` — never via the `raise()` factory;
+`mv_retry_without_haves`, set only via `raise()`) with nothing in the class
+structurally preventing a future caller from constructing an instance with
+both true. In current source, this never happens because `raise_corruption`
+routes to a *different* exception class (`zcx_abapgit_exception`) entirely,
+and `raise()` never receives `iv_is_corruption`. Adding
+`mv_unsupported_capability` via a third, equally dedicated static factory
+(`raise_unsupported_capability`, per the design's proposed signature —
+taking `iv_mode`/`iv_capability`, not `iv_retry_without_haves`) preserves
+the same one-flag-per-factory discipline: as long as every raise path goes
+through exactly one of `raise` / `raise_corruption` / the new
+`raise_unsupported_capability`, no live call site can produce an instance
+with two decision flags simultaneously true, matching the finding
+`variant_b_slice2_design_review.md`'s own optional-improvement note already
+made about `is_retry_without_haves`-style symmetry. This is not a
+regression Slice 2 introduces — the class's own `constructor` signature
+already permits the ambiguous combination for `mv_is_corruption`/
+`mv_retry_without_haves` and always has. If both flags were ever
+simultaneously true on one instance, the only place that would matter is a
+catch site that checks one flag without checking whether the other implies
+a stronger, correctness-relevant condition; today's fastpath catch sites
+(`is_retry_without_haves`) only inspect the one flag they care about and
+otherwise fall back to a generic swallow, so no live code path would
+mis-prioritize between the two even in the hypothetical case. **Minor,
+optional, matches the existing design review's own optional-tier item**:
+adding a doc-comment note on `zcx_abapgit_ortec_git` stating that its
+decision flags are mutually exclusive by convention (one per dedicated
+`raise*` factory), not by structural enforcement, would make this
+convention visible rather than merely true-by-accident-of-discipline — not
+a blocker for Slice 2.
+
+## 4. `is_commit_complete` behavior swap: concurrent-reader safety against `zcl_abapgit_ortec_mat_state`
+
+**Confirmed against the actual method bodies: `zcl_abapgit_ortec_mat_state`
+holds no ENQUEUE lock anywhere** (repo-wide grep for `ENQUEUE` under
+`src/ortec/git` finds it only in `zcl_abapgit_ortec_cache_admin` and
+`zcl_abapgit_ortec_pack_dec`'s `acquire_repo_lock`/`release_repo_lock` —
+`EZAOG_REPO_LOCK`, scoped to the pack-decode/persist phase, not to any
+`zcl_abapgit_ortec_mat_state` method). `get_state`/`is_graph_have_eligible`
+are plain `SELECT SINGLE`; `begin_attempt`/`mark_graph_complete`/
+`invalidate_commit`/`publish_snapshot_complete` are plain read-then-`MODIFY`
+sequences with no explicit lock object and no optimistic-concurrency token
+beyond the `attempt_id` string comparison. This means:
+
+- **Not a real race in the corruption sense.** Every writer method already
+  fails safe under concurrent writers without needing a lock: two
+  overlapping `begin_attempt` calls for the same `(repo_key, commit)` simply
+  last-writer-wins the `attempt_id` column (both today's Slice 1 review, §2,
+  and this review reach the same conclusion) — the losing attempt's later
+  `mark_graph_complete`/`publish_snapshot_complete` correctly raises "stale
+  attempt ID" rather than silently corrupting `hist_level`/`snap_state`.
+  `hist_level` is also structurally never downgraded by any writer.
+  Standard DB read-committed isolation additionally guarantees
+  `is_graph_have_eligible`'s single-column, single-row `SELECT SINGLE` can
+  only ever observe a *fully pre-* or *fully post-*commit value for a
+  concurrent `invalidate_commit`/`mark_graph_complete` — never a torn read
+  — since each writer is exactly one `MODIFY` statement touching that row.
+- **It is, however, a genuine stale-read (TOCTOU) window with a real,
+  bounded, self-correcting side effect that is worth naming explicitly,
+  which the design does not currently do.** If `is_graph_have_eligible`
+  reads a commit's `hist_level = GRAPH_COMPLETE` a moment *before* a
+  concurrent `invalidate_commit` call (e.g. corruption just detected
+  elsewhere) commits its `UNKNOWN`/`INVALID` write, the have-negotiation
+  path (`get_verified_have_commits`, unchanged this slice) will offer that
+  commit as a `have` in the in-flight fetch's request. The consequence is
+  **not** that the client trusts bad data as complete going forward — the
+  next `is_graph_have_eligible` read (e.g. the next fetch attempt, or a
+  concurrent one starting slightly later) will correctly see the
+  invalidated state once the writer's `MODIFY` is visible. The consequence
+  *is* that **this one in-flight fetch** may not receive replacement
+  objects for the commit whose corruption was just discovered, because the
+  server accepted the `have` as a valid common base and skipped sending its
+  reachable objects — deferring healing to a subsequent attempt rather than
+  this one. This is a stale-but-safe read with respect to the persistence
+  layer (no corrupted state is ever written or read as if certified when it
+  never was) but not a stale-but-*inconsequential* read with respect to
+  in-flight negotiation outcomes. Recommend one sentence be added to either
+  `is_commit_complete`'s doc comment or §4 of the design noting this
+  trade-off explicitly — analogous in spirit to how Slice 1's own review
+  (§3 above) flagged the `publish_snapshot_complete` new-branch-row gap as a
+  documentation-only, non-blocking note. Not a required revision; this
+  characteristic is inherent to any O(1) certificate read replacing a
+  fresh-per-call tree walk, and Slice 1's own class-doc already frames the
+  certificate as a durable record, not a live-recomputed guarantee.
+
+## 5. DR-004 decode-local cache reset: `reset_completion_budget()` idempotency
+
+**Confirmed safe by reading the actual method body.**
+`zcl_abapgit_ortec_pack_stream=>reset_completion_budget` is exactly:
+
+```abap
+METHOD reset_completion_budget.
+  gv_completion_attempts = 0.
+ENDMETHOD.
+```
+
+— a single `CLASS-DATA` integer reset with no other side effect anywhere in
+the method. The counter it resets (`gv_completion_attempts`, bounded by
+`c_max_completion_attempts = 20`) exists solely to cap nested
+completion-fetch calls *within one top-level decode attempt*
+(`complete_missing_base`'s own doc: "shared across an entire top-level fetch
+attempt, including any nested completion fetches"). Because
+`upload_pack_by_branch`/`by_commit`'s three tiers execute **sequentially**,
+not concurrently — tier 2 begins only after tier 1 has fully failed/returned,
+and tier 3 (`RECOVERY_BRANCH_FULL`) only after tier 2 has — there is no
+"mid-flight" thin or self-contained attempt still consuming this counter at
+the moment `RECOVERY_BRANCH_FULL` starts; whatever attempts it made are
+already complete by construction before the next tier's code path runs.
+Calling `reset_completion_budget()` an extra time immediately before the
+recovery tier's own attempt therefore cannot discard state a still-running
+prior tier depends on — there is no still-running prior tier at that point.
+The design's characterization (giving the recovery tier its own full 20-call
+budget rather than sharing whatever the failed thin/self-contained tiers
+already spent) is correct and matches the owner's "decode-local cache" reset
+requirement for that mode.
+
+## 6. Other findings
+
+- No other protocol- or persistence-layer correctness concern found beyond
+  §§2-5 above. The serializer's "zero SQL, zero HTTP" claim (§7 of the
+  design) is consistent with everything read this session — no method
+  signature proposed for `zcl_abapgit_ortec_fetch_req` takes a repo key,
+  opens a cursor, or accepts an `lo_client` reference, so there is no
+  plausible path for it to acquire either dependency later without a
+  visible signature change.
+- The have-list/want-list cardinality bounds stated in §7 (200 haves,
+  100 `MATERIALIZE_BLOBS` wants) are unchanged/new caps enforced at
+  call-time, not DDIC-level constraints — consistent with §1's finding that
+  no schema change is needed or proposed to support them.
+
+## Verdict: `APPROVE_WITH_MINOR_REVISIONS`
+
+Minor, documentation-only revisions (neither blocks proceeding past this
+review; neither requires a schema, scope, or architecture change):
+
+1. Add one sentence to `is_commit_complete`'s doc comment or design §4
+   making explicit that a stale-but-committed `is_graph_have_eligible` read
+   can, in a narrow concurrent-invalidation window, cause one in-flight
+   fetch attempt to skip healing a just-invalidated commit (self-corrects on
+   the next attempt/read) — finding §4 above.
+2. (Optional, matches the correctness review's own optional tier) Document
+   on `zcx_abapgit_ortec_git` that its boolean decision flags
+   (`mv_is_corruption`, `mv_retry_without_haves`, and the new
+   `mv_unsupported_capability`) are mutually exclusive by the convention of
+   one flag per dedicated static `raise*` factory, not by any structural
+   enforcement on the shared `constructor` — finding §3 above.
+
+No change is required to the approved architecture: the mode enum, the pure
+serializer, the `is_commit_complete` swap, and the DR-004 decode-local cache
+reset placement all stand as designed.
+
+## Risks requiring Michael's review
+
+- **`MATERIALIZE_BLOBS` blob-SHA1-want interop risk (finding §2).** The
+  design's capability-gating on `allow-reachable-sha1-in-want`/
+  `allow-tip-sha1-in-want` is structurally correct and sufficient per the
+  git protocol specification, but whether the specific git server
+  product(s) ORTEC's fetch requests actually target honor arbitrary *blob*
+  SHA1 wants in practice (as opposed to commit/tag SHA1 wants) once that
+  capability is advertised cannot be determined from source review alone —
+  it depends on live server behavior. Recommend a live-system smoke test of
+  a single-blob `MATERIALIZE_BLOBS` request against the actual target
+  server(s) before Slice 4 (the first slice expected to exercise this mode
+  for real) is treated as production-ready, independent of Slice 2's own
+  correctness (Slice 2 only builds and gates the request; it does not send
+  one in any currently-wired call site).
