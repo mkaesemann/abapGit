@@ -102,14 +102,12 @@
      <ROLLNAME>TZNTSTMPL</ROLLNAME>
      <ADMINFIELD>0</ADMINFIELD>
      <COMPTYPE>E</COMPTYPE>
-     <DDTEXT>Last successful verification timestamp</DDTEXT>
     </DD03P>
     <DD03P>
      <FIELDNAME>UPDATED_AT</FIELDNAME>
      <ROLLNAME>TZNTSTMPL</ROLLNAME>
      <ADMINFIELD>0</ADMINFIELD>
      <COMPTYPE>E</COMPTYPE>
-     <DDTEXT>Last state transition timestamp</DDTEXT>
     </DD03P>
    </DD03P_TABLE>
   </asx:values>
