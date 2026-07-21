@@ -109,12 +109,23 @@ CLASS zcl_abapgit_ortec_fastpath DEFINITION
                 zcx_abapgit_ortec_git.
 
     "! Thin-pack completion: fetches exactly ONE object (commit, tree, OR
-    "! blob - not necessarily a commit) by SHA1 via a minimal want-only
-    "! request (no haves, no shallow, deepen 1) and persists it (and
-    "! whatever the server bundles to resolve its own delta chain) into
-    "! zaog_obj_store via the normal streaming decode/resolve pipeline.
-    "! Called by zcl_abapgit_ortec_pack_stream=>complete_missing_base when a
-    "! larger pack's own delta resolution finds a base referenced but not
+    "! blob - not necessarily a commit) by SHA1 via a MATERIALIZE_BLOBS
+    "! minimal want-only request (no haves, no shallow, no deepen) and
+    "! persists it (and whatever the server bundles to resolve its own
+    "! delta chain) into zaog_obj_store via the normal streaming
+    "! decode/resolve pipeline.
+    "! DORMANT as of Slice 2C's correctness correction (finding F-2C-001):
+    "! its only caller, zcl_abapgit_ortec_pack_stream=>complete_missing_base,
+    "! is now a permanent no-op (one-request-per-missing-base HTTP repair is
+    "! not Variant-B-compliant), so this method is currently unreachable
+    "! from any live path. The serializer/decode logic below remains
+    "! correct and is expected to be reused by Slice 7's bulk
+    "! collect/deduplicate/MATERIALIZE_BLOBS external-base resolution -
+    "! kept in place for that purpose, not deleted.
+    "! Historical doc (still accurate for what this method itself does, just
+    "! not currently invoked): called by
+    "! zcl_abapgit_ortec_pack_stream=>complete_missing_base when a larger
+    "! pack's own delta resolution finds a base referenced but not
     "! included - see that method's doc and the "Architecture hardening
     "! plan" Phase-1-followup incident (.memory/state.md, 2026-07-20): even
     "! a non-thin, deeply-widened fetch is not always guaranteed
@@ -253,8 +264,8 @@ CLASS zcl_abapgit_ortec_fastpath DEFINITION
         iv_url          TYPE string
         iv_deepen_level TYPE i DEFAULT 0
         it_hashes       TYPE zif_abapgit_git_definitions=>ty_sha1_tt
-        iv_allow_thin   TYPE abap_bool DEFAULT abap_false
-        iv_force_full   TYPE abap_bool DEFAULT abap_false
+        iv_mode         TYPE zcl_abapgit_ortec_fetch_req=>ty_fetch_mode
+        iv_server_caps  TYPE string OPTIONAL
       RETURNING
         VALUE(rt_objects) TYPE zif_abapgit_definitions=>ty_objects_tt
       RAISING
@@ -402,6 +413,8 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
     DATA ls_header  LIKE LINE OF lt_headers.
     DATA lo_client  TYPE REF TO zcl_abapgit_http_client.
     DATA lt_hashes  TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lv_ref_data TYPE string.
+    DATA lv_server_caps TYPE string.
 
     APPEND iv_sha1 TO lt_hashes.
 
@@ -413,12 +426,19 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
       iv_url     = iv_url
       it_headers = lt_headers ).
 
-    " iv_force_full = abap_true: no haves, no shallow line - this is a
-    " targeted, self-contained fetch for exactly iv_sha1 (plus whatever the
-    " server needs to bundle to resolve its own delta chain), not a
-    " haves-based negotiation. iv_deepen_level = 1 keeps the request minimal
-    " (mirrors try_filtered_commit_fetch's own "deepen 1" single-object
-    " pattern) - we are not trying to fetch history, just one object.
+    lv_ref_data = lo_client->get_cdata( ).
+    lv_server_caps = zcl_abapgit_ortec_fetch_req=>parse_capabilities( lv_ref_data ).
+
+    " MATERIALIZE_BLOBS with a single-entry want list: no haves, no shallow
+    " line - this is a targeted, self-contained fetch for exactly iv_sha1
+    " (plus whatever the server needs to bundle to resolve its own delta
+    " chain), not a haves-based negotiation, and never a deepen (we are not
+    " trying to fetch history, just one object). MATERIALIZE_BLOBS hard-
+    " requires an arbitrary-object-want capability
+    " (allow-reachable-sha1-in-want/allow-tip-sha1-in-want); if the server
+    " does not advertise it, build_request raises zcx_abapgit_ortec_git with
+    " mv_unsupported_capability = abap_true, which this method already
+    " propagates unchanged (only zcx_abapgit_exception is caught below).
     " upload_pack persists every decoded/resolved object as a side effect
     " (via decode_streaming's underlying decode_and_persist_streaming +
     " resolve_streaming) regardless of iv_sha1's own type or of what
@@ -429,31 +449,24 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
         upload_pack(
           io_client       = lo_client
           iv_url          = iv_url
-          iv_deepen_level = 1
           it_hashes       = lt_hashes
-          iv_allow_thin   = abap_false
-          iv_force_full   = abap_true ).
+          iv_mode         = zcl_abapgit_ortec_fetch_req=>cs_fetch_mode-materialize_blobs
+          iv_server_caps  = lv_server_caps ).
       CATCH zcx_abapgit_exception INTO DATA(lx_std).
         zcx_abapgit_ortec_git=>raise( |Thin-pack completion failed: { lx_std->get_text( ) }| ).
     ENDTRY.
   ENDMETHOD.
 
+
   METHOD try_filtered_commit_fetch.
 
     DATA lo_client     TYPE REF TO zcl_abapgit_http_client.
-    DATA lv_buffer     TYPE string.
-    DATA lv_line       TYPE string.
-    DATA lv_capa       TYPE string.
     DATA lv_xstring    TYPE xstring.
     DATA lv_pack       TYPE xstring.
     DATA lv_ref_data   TYPE string.
-    DATA lv_null       TYPE c LENGTH 1.
-    DATA lv_has_filter TYPE abap_bool.
-    DATA lv_null_pos   TYPE i.
-    DATA lv_nl_pos     TYPE i.
-    DATA lv_caps       TYPE string.
-    DATA lv_offset     TYPE i.
+    DATA lv_server_caps TYPE string.
     DATA lt_objects    TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lt_want       TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
 
     IF iv_url IS INITIAL OR iv_commit IS INITIAL OR iv_repo_key IS INITIAL.
       RETURN.
@@ -478,41 +491,32 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
           IMPORTING
             eo_client = lo_client ).
 
-        " Check server capabilities for 'filter' (BEFORE set_headers to
-        " preserve the response) - identical pattern to fetch_tip_commits.
+        " Server capabilities (BEFORE set_headers to preserve the response) -
+        " identical pattern to fetch_tip_commits, now via the shared
+        " serializer's parser instead of an inline duplicate.
         lv_ref_data = lo_client->get_cdata( ).
-        lv_null = zcl_abapgit_git_utils=>get_null( ).
-        FIND FIRST OCCURRENCE OF lv_null IN lv_ref_data MATCH OFFSET lv_null_pos.
-        IF sy-subrc = 0.
-          lv_offset = lv_null_pos + 1.
-          lv_caps = lv_ref_data+lv_offset.
-          FIND FIRST OCCURRENCE OF cl_abap_char_utilities=>newline IN lv_caps
-            MATCH OFFSET lv_nl_pos.
-          IF sy-subrc = 0 AND lv_nl_pos > 0.
-            lv_caps = lv_caps(lv_nl_pos).
-            lv_has_filter = xsdbool( lv_caps CS 'filter' ).
-          ENDIF.
-        ENDIF.
-
-        IF lv_has_filter = abap_false.
-          RETURN.
-        ENDIF.
+        lv_server_caps = zcl_abapgit_ortec_fetch_req=>parse_capabilities( lv_ref_data ).
 
         lo_client->set_headers( iv_url     = iv_url
                                 iv_service = 'upload' ).
 
-        " want <commit> + deepen 1 + filter blob:none: commit + every
-        " reachable tree, but never blob content.
-        lv_capa = 'side-band-64k no-progress multi_ack filter'.
-        lv_line = |want { iv_commit } { lv_capa }{ cl_abap_char_utilities=>newline }|.
-        lv_buffer = zcl_abapgit_git_utils=>pkt_string( lv_line )
-          && zcl_abapgit_git_utils=>pkt_string( |deepen 1{ cl_abap_char_utilities=>newline }| )
-          && zcl_abapgit_git_utils=>pkt_string( |filter blob:none{ cl_abap_char_utilities=>newline }| )
-          && '0000'
-          && '0009done' && cl_abap_char_utilities=>newline.
+        " INITIAL_BRANCH_BLOBLESS: want <commit> + filter blob:none - commit
+        " + every reachable tree, but never blob content, never deepen. If
+        " the server does not advertise `filter`, build_request raises
+        " zcx_abapgit_ortec_git with mv_unsupported_capability = abap_true,
+        " which the outer CATCH below still swallows into the same
+        " rv_applicable = abap_false result as today's early RETURN on a
+        " missing filter capability - end-to-end surfacing of that flag to
+        " this method's own caller is deferred to Slice 3 (DR-001
+        " resolution, .memory/logs/variant_b_slice2_design.md §3).
+        APPEND iv_commit TO lt_want.
+        DATA(ls_request) = zcl_abapgit_ortec_fetch_req=>build_request(
+          iv_mode        = zcl_abapgit_ortec_fetch_req=>cs_fetch_mode-initial_branch_blobless
+          it_want_hashes = lt_want
+          iv_server_caps = lv_server_caps ).
 
         lv_xstring = lo_client->send_receive_close(
-          zcl_abapgit_convert=>string_to_xstring_utf8( lv_buffer ) ).
+          zcl_abapgit_convert=>string_to_xstring_utf8( ls_request-buffer ) ).
 
         parse( IMPORTING ev_pack = lv_pack
                CHANGING  cv_data = lv_xstring ).
@@ -551,6 +555,7 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
     ENDTRY.
 
   ENDMETHOD.
+
 
 METHOD pull_by_branch.
 
@@ -757,8 +762,8 @@ METHOD pull_by_branch.
     DATA lv_repo_key TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key.
     DATA ls_repo_state TYPE zcl_abapgit_ortec_repo_state=>ty_state.
     DATA lv_deepen_level TYPE i.
-    DATA lv_progressive_deepen TYPE i.
-    DATA lv_progressive_msgs TYPE string.
+    DATA lv_ref_data TYPE string.
+    DATA lv_server_caps TYPE string.
     FIELD-SYMBOLS <ls_branch> LIKE LINE OF it_branches.
 
 
@@ -767,7 +772,7 @@ METHOD pull_by_branch.
            ev_deepen_used.
 
     " Reset the thin-pack completion budget once for this WHOLE fetch
-    " attempt (shared across the thin/non-thin/progressive tiers below) -
+    " attempt (shared across the thin/self-contained/recovery tiers below) -
     " see zcl_abapgit_ortec_pack_stream=>reset_completion_budget's doc.
     zcl_abapgit_ortec_pack_stream=>reset_completion_budget( ).
 
@@ -789,9 +794,9 @@ METHOD pull_by_branch.
     " Use the LARGER of the caller-supplied depth and this repo/branch's own
     " last-successful depth (persisted by persist_pull_result via
     " zcl_abapgit_ortec_repo_state=>update_after_fetch) as the starting point
-    " for the thin/non-thin tiers - avoids repeatedly starting from a too-
-    " shallow depth on a repo that has already proven it needs more (Phase 1,
-    " .memory/state.md "Architecture hardening plan", 2026-07-20).
+    " for the thin/self-contained tiers - avoids repeatedly starting from a
+    " too-shallow depth on a repo that has already proven it needs more
+    " (Phase 1, .memory/state.md "Architecture hardening plan", 2026-07-20).
     lv_repo_key = zcl_abapgit_ortec_repo_state=>get_repo_key_for_url( iv_url ).
     lv_deepen_level = iv_deepen_level.
     IF lv_repo_key IS NOT INITIAL.
@@ -825,16 +830,30 @@ METHOD pull_by_branch.
       APPEND ev_branch TO lt_hashes.
     ENDIF.
 
+    " Server-advertised capabilities are read once per connection (same
+    " pattern already used by try_filtered_commit_fetch/fetch_tip_commits) -
+    " zcl_abapgit_ortec_fetch_req=>build_request intersects requested
+    " capabilities (thin-pack/ofs-delta for INCREMENTAL_THIN, filter for
+    " INITIAL_BRANCH_BLOBLESS, etc.) against this advertisement itself; this
+    " caller only needs to supply what the server actually said.
+    lv_ref_data = lo_client->get_cdata( ).
+    lv_server_caps = zcl_abapgit_ortec_fetch_req=>parse_capabilities( lv_ref_data ).
+
     TRY.
         et_objects = upload_pack(
           io_client       = lo_client
           iv_url          = iv_url
           iv_deepen_level = lv_deepen_level
           it_hashes       = lt_hashes
-          iv_allow_thin   = abap_true ).
-        ev_deepen_used = lv_deepen_level.
+          iv_mode         = zcl_abapgit_ortec_fetch_req=>cs_fetch_mode-incremental_thin
+          iv_server_caps  = lv_server_caps ).
+        " F-2C-002: the migrated wire modes never emit deepen (iv_deepen_level
+        " is not read by upload_pack's body); reporting the caller/persisted
+        " depth here would be a false signal implying a real shallow-history
+        " depth was negotiated. Always 0 for every migrated mode.
+        ev_deepen_used = 0.
       CATCH zcx_abapgit_ortec_git zcx_abapgit_exception INTO DATA(lx_thin_branch).
-        " Thin/ofs attempt failed - retry once, non-thin, with a fresh
+        " Thin/ofs attempt failed - retry once, self-contained, with a fresh
         " client (the failed attempt's request/response is already
         " consumed). See target_design_phase5.md §6 fail-safe cascade.
         " Both exception types are caught: a decode/resolve failure inside
@@ -853,72 +872,71 @@ METHOD pull_by_branch.
           CLEAR lt_hashes.
           APPEND ev_branch TO lt_hashes.
         ENDIF.
+        lv_ref_data = lo_client->get_cdata( ).
+        lv_server_caps = zcl_abapgit_ortec_fetch_req=>parse_capabilities( lv_ref_data ).
         TRY.
             et_objects = upload_pack(
               io_client       = lo_client
               iv_url          = iv_url
               iv_deepen_level = lv_deepen_level
               it_hashes       = lt_hashes
-              iv_allow_thin   = abap_false ).
-            ev_deepen_used = lv_deepen_level.
+              iv_mode         = zcl_abapgit_ortec_fetch_req=>cs_fetch_mode-incremental_self_contained
+              iv_server_caps  = lv_server_caps ).
+            " F-2C-002: see the matching comment in the thin tier above.
+            ev_deepen_used = 0.
           CATCH zcx_abapgit_ortec_git zcx_abapgit_exception INTO DATA(lx_nonthin_branch).
-            " Non-thin Ortec retry also failed. If either failure indicates
-            " a fresh haves-free fetch might succeed (the server claimed
-            " "nothing new" but our own cache verification disagreed), make
-            " a bounded, PROGRESSIVELY WIDENING series of haves-free
-            " attempts instead of one unbounded "give me everything" shot -
-            " see Phase 1 of the architecture hardening plan (.memory/
-            " state.md, 2026-07-20): requesting a repo's complete history in
-            " one shot is impractical for a repo with substantial real
-            " history (confirmed live: 4737 commits for abapGit's own repo)
-            " and failed on its own terms. Otherwise convert to
-            " zcx_abapgit_ortec_git (this method's own declared type) so
-            " the existing standard CATCH zcx_abapgit_ortec_git in
-            " zcl_abapgit_git_transport falls through to the fully
-            " standard fetch path.
+            " Self-contained Ortec retry also failed. If either failure
+            " indicates a fresh haves-free fetch might succeed (the server
+            " claimed "nothing new" but our own cache verification
+            " disagreed), make exactly ONE RECOVERY_BRANCH_FULL attempt -
+            " no progressive widening, no deepen (see the Variant B owner
+            " spec and .memory/logs/variant_b_slice2_design.md §3: a
+            " progressive, ever-widening haves-free loop is exactly the
+            " "deepen N is never completeness" anti-pattern this migration
+            " removes). Otherwise convert to zcx_abapgit_ortec_git (this
+            " method's own declared type) so the existing standard
+            " CATCH zcx_abapgit_ortec_git in zcl_abapgit_git_transport falls
+            " through to the fully standard fetch path.
             IF is_retry_without_haves( lx_thin_branch ) = abap_true
               OR is_retry_without_haves( lx_nonthin_branch ) = abap_true.
-              lv_progressive_deepen = first_progressive_deepen( lv_deepen_level ).
-              DO c_progressive_max_steps TIMES.
-                zcl_abapgit_git_transport=>find_branch_ortec(
-                  EXPORTING
-                    iv_url         = iv_url
-                    iv_service     = 'upload'
-                    iv_branch_name = iv_branch_name
-                  IMPORTING
-                    eo_client      = lo_client
-                    ev_branch      = ev_branch ).
-                IF it_branches IS INITIAL.
-                  CLEAR lt_hashes.
-                  APPEND ev_branch TO lt_hashes.
-                ENDIF.
-                TRY.
-                    et_objects = upload_pack(
-                      io_client       = lo_client
-                      iv_url          = iv_url
-                      iv_deepen_level = lv_progressive_deepen
-                      it_hashes       = lt_hashes
-                      iv_allow_thin   = abap_false
-                      iv_force_full   = abap_true ).
-                    ev_deepen_used = lv_progressive_deepen.
-                    RETURN.
-                  CATCH zcx_abapgit_ortec_git zcx_abapgit_exception INTO DATA(lx_progressive_branch).
-                    lv_progressive_msgs = lv_progressive_msgs &&
-                      |deepen { lv_progressive_deepen }: { lx_progressive_branch->get_text( ) }; |.
-                    IF lv_progressive_deepen >= c_progressive_max_deepen.
-                      EXIT. " Already at the ceiling - widening further is pointless.
-                    ENDIF.
-                    lv_progressive_deepen = next_progressive_deepen( lv_progressive_deepen ).
-                ENDTRY.
-              ENDDO.
-              zcx_abapgit_ortec_git=>raise(
-                |Ortec fastpath failed after thin+non-thin+progressive retry - thin: | &&
-                |{ lx_thin_branch->get_text( ) }, non-thin: { lx_nonthin_branch->get_text( ) }, | &&
-                |progressive: { lv_progressive_msgs }| ).
+              " Reset the decode-local completion budget again immediately
+              " before this single recovery attempt (DR-004 resolution,
+              " .memory/logs/variant_b_slice2_design.md §8) - in addition
+              " to, not instead of, the once-per-call reset above.
+              zcl_abapgit_ortec_pack_stream=>reset_completion_budget( ).
+              zcl_abapgit_git_transport=>find_branch_ortec(
+                EXPORTING
+                  iv_url         = iv_url
+                  iv_service     = 'upload'
+                  iv_branch_name = iv_branch_name
+                IMPORTING
+                  eo_client      = lo_client
+                  ev_branch      = ev_branch ).
+              IF it_branches IS INITIAL.
+                CLEAR lt_hashes.
+                APPEND ev_branch TO lt_hashes.
+              ENDIF.
+              lv_ref_data = lo_client->get_cdata( ).
+              lv_server_caps = zcl_abapgit_ortec_fetch_req=>parse_capabilities( lv_ref_data ).
+              TRY.
+                  et_objects = upload_pack(
+                    io_client       = lo_client
+                    iv_url          = iv_url
+                    it_hashes       = lt_hashes
+                    iv_mode         = zcl_abapgit_ortec_fetch_req=>cs_fetch_mode-recovery_branch_full
+                    iv_server_caps  = lv_server_caps ).
+                  ev_deepen_used = 0.
+                  RETURN.
+                CATCH zcx_abapgit_ortec_git zcx_abapgit_exception INTO DATA(lx_recovery_branch).
+                  zcx_abapgit_ortec_git=>raise(
+                    |Ortec fastpath failed after thin+self-contained+recovery retry - thin: | &&
+                    |{ lx_thin_branch->get_text( ) }, self-contained: { lx_nonthin_branch->get_text( ) }, | &&
+                    |recovery: { lx_recovery_branch->get_text( ) }| ).
+              ENDTRY.
             ENDIF.
             zcx_abapgit_ortec_git=>raise(
-              |Ortec fastpath failed after thin+non-thin retry - thin: { lx_thin_branch->get_text( ) }, | &&
-              |non-thin: { lx_nonthin_branch->get_text( ) }| ).
+              |Ortec fastpath failed after thin+self-contained retry - thin: { lx_thin_branch->get_text( ) }, | &&
+              |self-contained: { lx_nonthin_branch->get_text( ) }| ).
         ENDTRY.
     ENDTRY.
 
@@ -931,8 +949,8 @@ METHOD pull_by_branch.
     DATA lt_headers TYPE zcl_abapgit_http=>ty_headers.
     DATA ls_header  LIKE LINE OF lt_headers.
     DATA lo_client TYPE REF TO zcl_abapgit_http_client.
-    DATA lv_progressive_deepen TYPE i.
-    DATA lv_progressive_msgs TYPE string.
+    DATA lv_ref_data TYPE string.
+    DATA lv_server_caps TYPE string.
 
 
     CLEAR: et_objects,
@@ -953,16 +971,22 @@ METHOD pull_by_branch.
       iv_url     = iv_url
       it_headers = lt_headers ).
 
+    " See the matching comment in upload_pack_by_branch.
+    lv_ref_data = lo_client->get_cdata( ).
+    lv_server_caps = zcl_abapgit_ortec_fetch_req=>parse_capabilities( lv_ref_data ).
+
     TRY.
         et_objects = upload_pack(
           io_client       = lo_client
           iv_url          = iv_url
           iv_deepen_level = iv_deepen_level
           it_hashes       = lt_hashes
-          iv_allow_thin   = abap_true ).
-        ev_deepen_used = iv_deepen_level.
+          iv_mode         = zcl_abapgit_ortec_fetch_req=>cs_fetch_mode-incremental_thin
+          iv_server_caps  = lv_server_caps ).
+        " F-2C-002: see the matching comment in upload_pack_by_branch.
+        ev_deepen_used = 0.
       CATCH zcx_abapgit_ortec_git zcx_abapgit_exception INTO DATA(lx_thin_commit).
-        " Thin/ofs attempt failed - retry once, non-thin, with a fresh
+        " Thin/ofs attempt failed - retry once, self-contained, with a fresh
         " client (the failed attempt's request/response is already
         " consumed). See target_design_phase5.md §6 fail-safe cascade.
         " Both exception types are caught - see the matching comment in
@@ -970,55 +994,55 @@ METHOD pull_by_branch.
         lo_client = zcl_abapgit_http=>create_by_url(
           iv_url     = iv_url
           it_headers = lt_headers ).
+        lv_ref_data = lo_client->get_cdata( ).
+        lv_server_caps = zcl_abapgit_ortec_fetch_req=>parse_capabilities( lv_ref_data ).
         TRY.
             et_objects = upload_pack(
               io_client       = lo_client
               iv_url          = iv_url
               iv_deepen_level = iv_deepen_level
               it_hashes       = lt_hashes
-              iv_allow_thin   = abap_false ).
-            ev_deepen_used = iv_deepen_level.
+              iv_mode         = zcl_abapgit_ortec_fetch_req=>cs_fetch_mode-incremental_self_contained
+              iv_server_caps  = lv_server_caps ).
+            " F-2C-002: see the matching comment in upload_pack_by_branch.
+            ev_deepen_used = 0.
           CATCH zcx_abapgit_ortec_git zcx_abapgit_exception INTO DATA(lx_nonthin_commit).
-            " Non-thin Ortec retry also failed. See the matching comment in
-            " upload_pack_by_branch: if either failure indicates a fresh
-            " haves-free fetch might succeed, make a bounded, progressively
-            " widening series of haves-free attempts instead of one
-            " unbounded "give me everything" shot (Phase 1, .memory/
-            " state.md "Architecture hardening plan", 2026-07-20).
+            " Self-contained Ortec retry also failed. See the matching
+            " comment in upload_pack_by_branch: if either failure indicates
+            " a fresh haves-free fetch might succeed, make exactly ONE
+            " RECOVERY_BRANCH_FULL attempt - no progressive widening, no
+            " deepen.
             IF is_retry_without_haves( lx_thin_commit ) = abap_true
               OR is_retry_without_haves( lx_nonthin_commit ) = abap_true.
-              lv_progressive_deepen = first_progressive_deepen( iv_deepen_level ).
-              DO c_progressive_max_steps TIMES.
-                lo_client = zcl_abapgit_http=>create_by_url(
-                  iv_url     = iv_url
-                  it_headers = lt_headers ).
-                TRY.
-                    et_objects = upload_pack(
-                      io_client       = lo_client
-                      iv_url          = iv_url
-                      iv_deepen_level = lv_progressive_deepen
-                      it_hashes       = lt_hashes
-                      iv_allow_thin   = abap_false
-                      iv_force_full   = abap_true ).
-                    ev_deepen_used = lv_progressive_deepen.
-                    RETURN.
-                  CATCH zcx_abapgit_ortec_git zcx_abapgit_exception INTO DATA(lx_progressive_commit).
-                    lv_progressive_msgs = lv_progressive_msgs &&
-                      |deepen { lv_progressive_deepen }: { lx_progressive_commit->get_text( ) }; |.
-                    IF lv_progressive_deepen >= c_progressive_max_deepen.
-                      EXIT.
-                    ENDIF.
-                    lv_progressive_deepen = next_progressive_deepen( lv_progressive_deepen ).
-                ENDTRY.
-              ENDDO.
-              zcx_abapgit_ortec_git=>raise(
-                |Ortec fastpath failed after thin+non-thin+progressive retry - thin: | &&
-                |{ lx_thin_commit->get_text( ) }, non-thin: { lx_nonthin_commit->get_text( ) }, | &&
-                |progressive: { lv_progressive_msgs }| ).
+              " Reset the decode-local completion budget again immediately
+              " before this single recovery attempt (DR-004 resolution) -
+              " in addition to, not instead of, the once-per-call reset
+              " above.
+              zcl_abapgit_ortec_pack_stream=>reset_completion_budget( ).
+              lo_client = zcl_abapgit_http=>create_by_url(
+                iv_url     = iv_url
+                it_headers = lt_headers ).
+              lv_ref_data = lo_client->get_cdata( ).
+              lv_server_caps = zcl_abapgit_ortec_fetch_req=>parse_capabilities( lv_ref_data ).
+              TRY.
+                  et_objects = upload_pack(
+                    io_client       = lo_client
+                    iv_url          = iv_url
+                    it_hashes       = lt_hashes
+                    iv_mode         = zcl_abapgit_ortec_fetch_req=>cs_fetch_mode-recovery_branch_full
+                    iv_server_caps  = lv_server_caps ).
+                  ev_deepen_used = 0.
+                  RETURN.
+                CATCH zcx_abapgit_ortec_git zcx_abapgit_exception INTO DATA(lx_recovery_commit).
+                  zcx_abapgit_ortec_git=>raise(
+                    |Ortec fastpath failed after thin+self-contained+recovery retry - thin: | &&
+                    |{ lx_thin_commit->get_text( ) }, self-contained: { lx_nonthin_commit->get_text( ) }, | &&
+                    |recovery: { lx_recovery_commit->get_text( ) }| ).
+              ENDTRY.
             ENDIF.
             zcx_abapgit_ortec_git=>raise(
-              |Ortec fastpath failed after thin+non-thin retry - thin: { lx_thin_commit->get_text( ) }, | &&
-              |non-thin: { lx_nonthin_commit->get_text( ) }| ).
+              |Ortec fastpath failed after thin+self-contained retry - thin: { lx_thin_commit->get_text( ) }, | &&
+              |self-contained: { lx_nonthin_commit->get_text( ) }| ).
         ENDTRY.
     ENDTRY.
 
@@ -1027,7 +1051,6 @@ METHOD pull_by_branch.
 
 METHOD upload_pack.
 
-    DATA lv_buffer  TYPE string.
     DATA lv_xstring TYPE xstring.
     DATA lv_pack    TYPE xstring.
     DATA lt_ortec_haves TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
@@ -1043,38 +1066,49 @@ METHOD upload_pack.
 
     " Resolve have commits BEFORE assembling the want/capability line, so the
     " capability string can correctly reflect whether thin-pack/ofs-delta are
-    " safe to advertise. Both thin AND non-thin now use only VERIFIED-COMPLETE
-    " haves (index-ready, every reachable object present, no dangling delta
-    " base - see zcl_abapgit_ortec_fetch_neg=>get_verified_have_commits):
-    " advertising ANY have (thin or not) that turns out to be incomplete lets
-    " the server omit/delta-encode objects against content we don't actually
-    " have, which is exactly the failure class Phase 1 of the architecture
-    " hardening plan (.memory/state.md, 2026-07-20) exists to close - the
-    " unverified zcl_abapgit_ortec_fetch_neg=>get_have_commits must not be
-    " used for live negotiation on either tier.
-    " iv_force_full skips this entirely (leaving lt_ortec_haves empty): used
-    " by the thin+non-thin cascade's last-resort retry when a prior attempt
+    " safe to advertise. Both INCREMENTAL_THIN and INCREMENTAL_SELF_CONTAINED
+    " use only VERIFIED-COMPLETE haves (certified via
+    " zcl_abapgit_ortec_mat_state=>is_graph_have_eligible, see
+    " zcl_abapgit_ortec_fetch_neg=>get_verified_have_commits): advertising ANY
+    " have that turns out to be incomplete lets the server omit/delta-encode
+    " objects against content we don't actually have, which is exactly the
+    " failure class Phase 1 of the architecture hardening plan (.memory/
+    " state.md, 2026-07-20) exists to close - the unverified
+    " zcl_abapgit_ortec_fetch_neg=>get_have_commits must not be used for live
+    " negotiation for either mode.
+    " RECOVERY_BRANCH_FULL and MATERIALIZE_BLOBS never negotiate haves
+    " (lt_ortec_haves stays empty, per the Variant B mode table): used by the
+    " thin+non-thin cascade's last-resort retry when a prior attempt
     " discovered the server's "nothing new" response could not actually be
     " trusted against the local cache - offering the same haves again would
     " likely reproduce the identical false "nothing new" outcome.
-    IF iv_force_full = abap_false.
-      TRY.
-          lt_ortec_haves = zcl_abapgit_ortec_fetch_neg=>get_verified_have_commits(
-            iv_url         = iv_url
-            it_want_hashes = it_hashes ).
-        CATCH zcx_abapgit_ortec_git.
-      ENDTRY.
+    " F-2C-003: get_verified_have_commits is no longer wrapped in a blanket
+    " empty CATCH here. A valid "no candidates yet" outcome already returns
+    " an empty table (not an exception, see get_have_commits/
+    " get_verified_have_commits's own RETURN-on-no-state guards) - only a
+    " genuine technical failure while resolving/verifying haves raises
+    " zcx_abapgit_ortec_git, and upload_pack already declares
+    " RAISING zcx_abapgit_ortec_git, so such a failure now correctly
+    " propagates to this method's callers (upload_pack_by_branch/
+    " upload_pack_by_commit/complete_missing_object), which already catch
+    " zcx_abapgit_ortec_git as part of their existing retry/error handling -
+    " no new catch or repository-wide fallback is introduced.
+    IF iv_mode = zcl_abapgit_ortec_fetch_req=>cs_fetch_mode-incremental_thin
+        OR iv_mode = zcl_abapgit_ortec_fetch_req=>cs_fetch_mode-incremental_self_contained.
+      lt_ortec_haves = zcl_abapgit_ortec_fetch_neg=>get_verified_have_commits(
+        iv_url         = iv_url
+        it_want_hashes = it_hashes ).
     ENDIF.
 
-    lv_buffer = build_upload_pack_buffer(
-      iv_deepen_level = iv_deepen_level
-      it_hashes       = it_hashes
-      it_ortec_haves  = lt_ortec_haves
-      iv_allow_thin   = iv_allow_thin
-      iv_force_full   = iv_force_full ).
+    DATA(ls_request) = zcl_abapgit_ortec_fetch_req=>build_request(
+      iv_mode            = iv_mode
+      it_want_hashes     = it_hashes
+      it_certified_haves = lt_ortec_haves
+      iv_server_caps     = iv_server_caps ).
+
 
     lo_fetch_timer = zcl_abapgit_timer=>create( )->start( ).
-    lv_xstring = io_client->send_receive_close( zcl_abapgit_convert=>string_to_xstring_utf8( lv_buffer ) ).
+    lv_xstring = io_client->send_receive_close( zcl_abapgit_convert=>string_to_xstring_utf8( ls_request-buffer ) ).
 
     parse( IMPORTING ev_pack = lv_pack
            CHANGING  cv_data = lv_xstring ).
@@ -1256,8 +1290,8 @@ METHOD upload_pack.
     " Cached objects are unavailable or unsafe; caller must use the standard fetch path.
     " Every failure above means the same thing: the local cache cannot
     " safely stand in for the server's "nothing new" claim - a fresh
-    " haves-free retry (see upload_pack's iv_force_full) is always worth
-    " attempting regardless of which specific reason fired.
+    " haves-free retry (see upload_pack's RECOVERY_BRANCH_FULL mode) is
+    " always worth attempting regardless of which specific reason fired.
     IF lx_cache_reason IS BOUND.
       zcx_abapgit_ortec_git=>raise(
         iv_text                = |Cached objects not available for nothing-new response - | &&

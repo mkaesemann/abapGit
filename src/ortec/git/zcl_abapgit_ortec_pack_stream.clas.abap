@@ -209,43 +209,32 @@ CLASS zcl_abapgit_ortec_pack_stream DEFINITION
       RETURNING VALUE(rv_data) TYPE xstring
       RAISING   zcx_abapgit_ortec_git.
 
-    "! Thin-pack completion: fetches exactly one missing object by SHA1 via
-    "! a targeted, minimal "want <sha1>" request (zcl_abapgit_ortec_fastpath
-    "! =>complete_missing_object), so a larger pack's own delta resolution
-    "! can succeed on retry without needing to fetch/decode much more
-    "! history. See .memory/state.md's "Architecture hardening plan" /
-    "! Phase 1 incident log (2026-07-20): shallow/deepen negotiation with a
-    "! real, large, actively-developed repo is not always guaranteed to
-    "! produce a self-contained pack, even non-thin and even at very large
-    "! deepen values - GitHub's shallow pack generation can still reference
-    "! a stable, rarely-touched historical object as a delta base without
-    "! including it. Widening "deepen" further is not a reliable fix (see
-    "! incident evidence); fetching exactly the missing piece is.
-    "! Bounded by c_max_completion_attempts (a CLASS-DATA counter shared
-    "! across an entire top-level fetch attempt, including any nested
-    "! completion fetches - reset via reset_completion_budget( ), NOT here,
-    "! since a completion fetch's own decode goes through this same method)
-    "! so a pathological/network-flaky case cannot spiral into unbounded
-    "! nested network calls. A no-op (returns abap_false) if iv_url is
-    "! blank (e.g. unit tests that don't exercise the network path) or the
-    "! attempt budget is exhausted - callers must fall through to their
-    "! original "not found" handling in either case, never loop
-    "! indefinitely.
-    "! Known limitation: a successful nested completion fetch commits its
-    "! OWN resolve work (resolve_streaming's normal end-of-run COMMIT WORK)
-    "! in the SAME LUW as the outer, still-in-progress resolve pass, which
-    "! can force an early commit of the outer's not-yet-flushed batches.
-    "! This is not a correctness risk (early-committed rows are genuinely
-    "! valid, correctly-resolved, content-addressed objects either way) but
-    "! does mean the outer's own "ROLLBACK WORK on failure" guarantee is
-    "! weaker in the rare case where a nested completion succeeds and the
-    "! outer pass fails later regardless - tracked for the transaction-
-    "! ownership rework in a later architecture-hardening-plan phase
-    "! (.memory/state.md, P-07).
+    "! Thin-pack completion: DISABLED as of Slice 2C's correctness
+    "! correction (finding F-2C-001, .memory/logs/variant_b_slice2c_migration_map.md).
+    "! One MATERIALIZE_BLOBS request per missing delta base is a genuine
+    "! one-request-per-object repair - exactly the pattern the Variant B
+    "! architecture forbids (no one-request-per-object repair; external
+    "! bases must be collected, deduplicated, and bulk-loaded). This method
+    "! is now a permanent no-op (always returns abap_false, never calls
+    "! zcl_abapgit_ortec_fastpath=>complete_missing_object) until Slice 7
+    "! implements real collect/deduplicate/bulk external-base resolution.
+    "! Callers (get_base_bytes, resolve_one_meta) already treat
+    "! rv_attempted = abap_false as "completion not attempted" and correctly
+    "! raise with iv_retry_without_haves = abap_true, so a genuinely missing
+    "! external base now always escalates to the caller's existing bounded
+    "! RECOVERY_BRANCH_FULL/self-contained retry instead of a targeted
+    "! per-object fetch. c_max_completion_attempts/gv_completion_attempts/
+    "! reset_completion_budget are left physically present (unused while
+    "! disabled) for Slice 7 to reactivate against a bulk-resolution design.
+    "! Historical doc (kept for Slice 7 context, NOT current behavior): this
+    "! used to fetch exactly one missing object by SHA1 via a targeted,
+    "! minimal "want <sha1>" request - see .memory/state.md's "Architecture
+    "! hardening plan" / Phase 1 incident log (2026-07-20) for why a plain
+    "! deepen widening is not a reliable substitute for fetching the exact
+    "! missing piece; that need still exists, but must be met in bulk, not
+    "! one HTTP call per object.
     "! @parameter rv_attempted |
-    "! ABAP_TRUE if a completion fetch was actually attempted (regardless of
-    "! whether it ultimately supplied the missing object) - callers use this
-    "! to decide whether re-trying the original lookup is worthwhile.
+    "! Always abap_false while disabled.
     CLASS-METHODS complete_missing_base
       IMPORTING iv_repo_key       TYPE ty_repo_key
                 iv_sha1           TYPE zif_abapgit_git_definitions=>ty_sha1
@@ -375,28 +364,11 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD complete_missing_base.
-    IF iv_url IS INITIAL.
-      RETURN. " No network context (e.g. a unit test) - nothing we can do.
-    ENDIF.
-    IF gv_completion_attempts >= c_max_completion_attempts.
-      RETURN. " Budget exhausted - stop trying, let the caller's normal
-              " "not found" handling take over.
-    ENDIF.
-    gv_completion_attempts = gv_completion_attempts + 1.
-    rv_attempted = abap_true.
-
-    TRY.
-        zcl_abapgit_ortec_fastpath=>complete_missing_object(
-          iv_url      = iv_url
-          iv_repo_key = iv_repo_key
-          iv_sha1     = iv_sha1 ).
-      CATCH zcx_abapgit_ortec_git.
-        " Completion genuinely failed (network error, server doesn't support
-        " want-by-SHA1 for this object, or the follow-up pack still didn't
-        " resolve it) - the caller's retried lookup will simply miss again
-        " and fall through to the original "not found" error, exactly as if
-        " completion had never been attempted.
-    ENDTRY.
+    " F-2C-001: permanently disabled - see this method's doc comment. Never
+    " calls zcl_abapgit_ortec_fastpath=>complete_missing_object, never
+    " issues an HTTP request, never increments gv_completion_attempts.
+    " Callers already handle rv_attempted = abap_false correctly.
+    RETURN.
   ENDMETHOD.
 
   METHOD count_unresolved.

@@ -157,51 +157,20 @@ CLASS zcl_abapgit_ortec_fetch_neg IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD is_commit_complete.
-    DATA lt_sha1s   TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
-
+    " Slice 2C: delegates to Slice 1's O(1) certified-graph read
+    " (zcl_abapgit_ortec_mat_state=>is_graph_have_eligible) instead of an
+    " O(reachable-graph-size) tree walk. A commit present in
+    " zaog_obj_store but never certified via begin_attempt->
+    " mark_graph_complete is correctly reported as NOT have-eligible - this
+    " is intentional, not a regression (Slice 1's "no auto-backfill"
+    " guarantee).
     IF iv_repo_key IS INITIAL OR iv_commit IS INITIAL.
       RETURN.
     ENDIF.
 
-    " No is_index_ready pre-check here (removed): that index is a STAGE
-    " FILTER concern (zcl_abapgit_ortec_obj_index, built only when a
-    " filtered Stage/Diff resolution touches this exact commit) - it has
-    " nothing to do with whether this commit's actual git object graph is
-    " complete. Gating "have" eligibility on it meant a branch reached via
-    " a plain pull/switch (which never builds that index) could NEVER be
-    " offered as a have, even when fully fetched - confirmed live: the one
-    " commit recorded for a repo had zero rows in the stage-filter index,
-    " so every subsequent branch switch fell back to an unconditional
-    " `deepen` (full snapshot, ignoring haves entirely), regardless of how
-    " much object history it actually shared with that commit. The checks
-    " below are the actual, sufficient proof of completeness.
-    "
-    " get_reachable_sha1s already raises if any commit/tree/blob reachable
-    " from this commit is missing from the store - a clean success here is
-    " itself proof every reachable object is present. Uses the SHA1-only
-    " variant (never materializes blob DATA, never preloads the full-repo
-    " cache): this is a completeness CHECK, not a data read, and for a
-    " large/long-lived repo the general get_reachable_objects + its
-    " up-front populate_cache full-store preload can hold gigabytes of
-    " blob content in memory for no reason other than proving presence -
-    " confirmed as the direct cause of a SYSTEM_NO_ROLL crash on a
-    " branch-switch fetch (the negotiation-time full-store load coexisting
-    " with the subsequent pack decode's own working set).
-    TRY.
-        lt_sha1s = zcl_abapgit_ortec_obj_store=>get_reachable_sha1s(
-          iv_repo_key = iv_repo_key
-          iv_commit   = iv_commit ).
-      CATCH zcx_abapgit_ortec_git.
-        RETURN.
-    ENDTRY.
-
-    IF zcl_abapgit_ortec_obj_store=>has_dangling_delta_base(
-        iv_repo_key = iv_repo_key
-        it_sha1s    = lt_sha1s ) = abap_true.
-      RETURN.
-    ENDIF.
-
-    rv_yes = abap_true.
+    rv_yes = zcl_abapgit_ortec_mat_state=>is_graph_have_eligible(
+      iv_repo_key = iv_repo_key
+      iv_commit   = iv_commit ).
   ENDMETHOD.
 
   METHOD collect_ancestor_haves.

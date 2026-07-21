@@ -743,6 +743,13 @@ CLASS ltcl_completeness_gate DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION
     METHODS setup. METHODS teardown.
     METHODS has_dangling_delta_base_none  FOR TESTING RAISING cx_static_check.
     METHODS has_dangling_delta_base_found FOR TESTING RAISING cx_static_check.
+    "! Slice 2C: is_commit_complete now delegates entirely to
+    "! zcl_abapgit_ortec_mat_state=>is_graph_have_eligible (Slice 1's O(1)
+    "! certified-graph read) instead of walking zaog_obj_store. A commit is
+    "! only have-eligible once explicitly certified via
+    "! begin_attempt->mark_graph_complete (or ->mark_full_complete) -
+    "! object-store presence alone is no longer sufficient, by design (no
+    "! auto-backfill, Slice 1's own guarantee).
     METHODS complete_false_missing_object FOR TESTING RAISING cx_static_check.
     METHODS complete_true_when_ready FOR TESTING RAISING cx_static_check.
     "! Regression: completeness must NOT require the stage-filter index
@@ -753,17 +760,28 @@ CLASS ltcl_completeness_gate DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION
     "! have even when fully fetched, silently disabling incremental fetch
     "! for every branch that was never filter-staged.
     METHODS complete_true_without_index FOR TESTING RAISING cx_static_check.
+    "! A commit with no zaog_commit_hist row at all (never certified) must
+    "! be reported not-eligible, even when every reachable object is
+    "! physically present in zaog_obj_store - proves the delegation to
+    "! is_graph_have_eligible actually gates on certification, not on
+    "! object presence.
+    METHODS complete_false_uncertified FOR TESTING RAISING cx_static_check.
+    "! hist_level = FULL_COMPLETE must also be reported have-eligible (not
+    "! just GRAPH_COMPLETE).
+    METHODS complete_true_full_complete FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 CLASS ltcl_completeness_gate IMPLEMENTATION.
   METHOD setup.
     DELETE FROM zaog_obj_store WHERE repo_key = mc_repo.
     DELETE FROM zaog_obj_index WHERE repo_key = mc_repo.
     DELETE FROM zaog_pack_idx WHERE repo_key = mc_repo.
+    DELETE FROM zaog_commit_hist WHERE repo_key = mc_repo.
   ENDMETHOD.
   METHOD teardown.
     DELETE FROM zaog_obj_store WHERE repo_key = mc_repo.
     DELETE FROM zaog_obj_index WHERE repo_key = mc_repo.
     DELETE FROM zaog_pack_idx WHERE repo_key = mc_repo.
+    DELETE FROM zaog_commit_hist WHERE repo_key = mc_repo.
     ROLLBACK WORK.
   ENDMETHOD.
 
@@ -926,9 +944,10 @@ CLASS ltcl_completeness_gate IMPLEMENTATION.
       iv_sha1     = lv_src_tree_sha
       iv_type     = zif_abapgit_git_definitions=>c_type-tree
       iv_data     = lv_src_tree_data ).
-    " Deliberately do NOT store the blob - the commit's object graph is
-    " genuinely incomplete, which is what completeness must actually catch
-    " now that it no longer depends on the unrelated stage-filter index.
+    " Deliberately do NOT store the blob, and deliberately never certify
+    " this commit via zcl_abapgit_ortec_mat_state (Slice 2C: is_commit_complete
+    " no longer walks zaog_obj_store at all - it delegates to
+    " is_graph_have_eligible, which requires an explicit certification row).
 
     lv_complete = zcl_abapgit_ortec_fetch_neg=>is_commit_complete(
       iv_repo_key = mc_repo
@@ -937,7 +956,96 @@ CLASS ltcl_completeness_gate IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals(
       act = lv_complete
       exp = abap_false
-      msg = 'A commit missing a reachable blob must not be considered complete' ).
+      msg = 'An uncertified commit must not be considered complete' ).
+  ENDMETHOD.
+
+  METHOD complete_false_uncertified.
+    DATA lt_nodes TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+    DATA ls_node LIKE LINE OF lt_nodes.
+    DATA ls_commit TYPE zcl_abapgit_git_pack=>ty_commit.
+    DATA lv_blob_data TYPE xstring.
+    DATA lv_blob_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_tree_data TYPE xstring.
+    DATA lv_tree_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_commit_data TYPE xstring.
+    DATA lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_complete TYPE abap_bool.
+
+    lv_blob_data = '48656C6C6F'.
+    lv_blob_sha = zcl_abapgit_hash=>sha1_blob( lv_blob_data ).
+
+    ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-file.
+    ls_node-name  = 'hello.txt'.
+    ls_node-sha1  = lv_blob_sha.
+    APPEND ls_node TO lt_nodes.
+    lv_tree_data = zcl_abapgit_git_pack=>encode_tree( lt_nodes ).
+    lv_tree_sha = zcl_abapgit_hash=>sha1_tree( lv_tree_data ).
+
+    ls_commit-tree = lv_tree_sha.
+    ls_commit-author = 'Test <test@example.com> 0 +0000'.
+    ls_commit-committer = 'Test <test@example.com> 0 +0000'.
+    ls_commit-body = 'test'.
+    lv_commit_data = zcl_abapgit_git_pack=>encode_commit( ls_commit ).
+    lv_commit_sha = zcl_abapgit_hash=>sha1_commit( lv_commit_data ).
+
+    " Every reachable object is fully present - but this commit is
+    " deliberately NEVER certified (no begin_attempt/mark_graph_complete
+    " call, so zaog_commit_hist has zero rows for it). Proves
+    " is_commit_complete now gates on certification, not object presence.
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_commit_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-commit
+      iv_data     = lv_commit_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_tree_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-tree
+      iv_data     = lv_tree_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_blob_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-blob
+      iv_data     = lv_blob_data ).
+
+    lv_complete = zcl_abapgit_ortec_fetch_neg=>is_commit_complete(
+      iv_repo_key = mc_repo
+      iv_commit   = lv_commit_sha ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_complete
+      exp = abap_false
+      msg = 'A fully-present-but-never-certified commit must not be have-eligible ' &&
+            '(no auto-backfill from object presence, Slice 1 guarantee)' ).
+  ENDMETHOD.
+
+  METHOD complete_true_full_complete.
+    DATA lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_attempt_id TYPE zcl_abapgit_ortec_mat_state=>ty_attempt_id.
+    DATA lv_complete TYPE abap_bool.
+
+    lv_commit_sha = '3333333333333333333333333333333333333333'.
+
+    lv_attempt_id = zcl_abapgit_ortec_mat_state=>begin_attempt(
+      iv_repo_key = mc_repo
+      iv_commit   = lv_commit_sha ).
+    zcl_abapgit_ortec_mat_state=>mark_graph_complete(
+      iv_repo_key   = mc_repo
+      iv_commit     = lv_commit_sha
+      iv_attempt_id = lv_attempt_id ).
+    zcl_abapgit_ortec_mat_state=>mark_full_complete(
+      iv_repo_key   = mc_repo
+      iv_commit     = lv_commit_sha
+      iv_attempt_id = lv_attempt_id ).
+
+    lv_complete = zcl_abapgit_ortec_fetch_neg=>is_commit_complete(
+      iv_repo_key = mc_repo
+      iv_commit   = lv_commit_sha ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_complete
+      exp = abap_true
+      msg = 'A FULL_COMPLETE commit must be have-eligible, not just GRAPH_COMPLETE' ).
   ENDMETHOD.
 
   METHOD complete_true_without_index.
@@ -1006,6 +1114,16 @@ CLASS ltcl_completeness_gate IMPLEMENTATION.
     " Deliberately never call zcl_abapgit_ortec_obj_index=>get_files_for_filter
     " for this commit - the stage-filter index is never built, exactly like
     " a plain pull/branch-switch that never went through filtered Stage/Diff.
+    " Certify the commit's graph via Slice 1's mat_state API - this is what
+    " now governs have-eligibility (Slice 2C), not object-store presence or
+    " the stage-filter index.
+    DATA(lv_attempt_id) = zcl_abapgit_ortec_mat_state=>begin_attempt(
+      iv_repo_key = mc_repo
+      iv_commit   = lv_commit_sha ).
+    zcl_abapgit_ortec_mat_state=>mark_graph_complete(
+      iv_repo_key   = mc_repo
+      iv_commit     = lv_commit_sha
+      iv_attempt_id = lv_attempt_id ).
 
     lv_complete = zcl_abapgit_ortec_fetch_neg=>is_commit_complete(
       iv_repo_key = mc_repo
@@ -1014,7 +1132,7 @@ CLASS ltcl_completeness_gate IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals(
       act = lv_complete
       exp = abap_true
-      msg = 'A fully fetched commit must be eligible as a have even when its ' &&
+      msg = 'A certified (GRAPH_COMPLETE) commit must be eligible as a have even when its ' &&
             'stage-filter index was never built (e.g. reached via a plain pull)' ).
   ENDMETHOD.
 
@@ -1099,6 +1217,17 @@ CLASS ltcl_completeness_gate IMPLEMENTATION.
       exp = 1
       msg = 'Filtered index build must resolve one matching file' ).
 
+    " Certify the commit's graph via Slice 1's mat_state API - Slice 2C:
+    " is_commit_complete no longer infers completeness from index/object-
+    " store state, it delegates entirely to is_graph_have_eligible.
+    DATA(lv_attempt_id) = zcl_abapgit_ortec_mat_state=>begin_attempt(
+      iv_repo_key = mc_repo
+      iv_commit   = lv_commit_sha ).
+    zcl_abapgit_ortec_mat_state=>mark_graph_complete(
+      iv_repo_key   = mc_repo
+      iv_commit     = lv_commit_sha
+      iv_attempt_id = lv_attempt_id ).
+
     lv_complete = zcl_abapgit_ortec_fetch_neg=>is_commit_complete(
       iv_repo_key = mc_repo
       iv_commit   = lv_commit_sha ).
@@ -1106,7 +1235,7 @@ CLASS ltcl_completeness_gate IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals(
       act = lv_complete
       exp = abap_true
-      msg = 'Index-ready commit with complete reachable objects must pass' ).
+      msg = 'Index-ready AND certified commit must pass' ).
   ENDMETHOD.
 ENDCLASS.
 
@@ -2753,6 +2882,11 @@ CLASS ltcl_stream_resolve DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SH
     METHODS external_thin_base_resolves FOR TESTING RAISING cx_static_check.
     METHODS two_thin_bases_do_not_collide FOR TESTING RAISING cx_static_check.
     METHODS missing_base_raises FOR TESTING RAISING cx_static_check.
+    "! F-2C-001 correction: a genuinely missing external base with a
+    "! NON-BLANK iv_url must still escalate via retry_without_haves, not
+    "! attempt a per-base HTTP completion fetch (complete_missing_base is
+    "! now permanently disabled).
+    METHODS missing_base_no_http_retry FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 CLASS ltcl_stream_resolve IMPLEMENTATION.
   METHOD setup.
@@ -3029,6 +3163,50 @@ CLASS ltcl_stream_resolve IMPLEMENTATION.
         lv_caught = abap_true.
     ENDTRY.
     cl_abap_unit_assert=>assert_true( act = lv_caught msg = 'A genuinely missing base must raise zcx_abapgit_ortec_git' ).
+  ENDMETHOD.
+
+  METHOD missing_base_no_http_retry.
+    " Before F-2C-001's correction, a non-blank iv_url here would have made
+    " get_base_bytes attempt a real, targeted MATERIALIZE_BLOBS HTTP
+    " request for this single missing sha1 (zcl_abapgit_ortec_pack_stream=>
+    " complete_missing_base). That per-base HTTP repair is now permanently
+    " disabled (always returns rv_attempted = abap_false without ever
+    " calling zcl_abapgit_ortec_fastpath=>complete_missing_object), so this
+    " test can safely pass an obviously unreachable URL: if the disabled
+    " call were ever reactivated by accident, this test would fail/hang on
+    " a real network attempt instead of completing immediately with the
+    " expected retry_without_haves signal.
+    DATA lt_meta    TYPE zcl_abapgit_ortec_pack_stream=>ty_meta_tt.
+    DATA ls_meta    LIKE LINE OF lt_meta.
+    DATA lv_pack_id TYPE zcl_abapgit_ortec_pack_stream=>ty_pack_id.
+    DATA lx_missing TYPE REF TO zcx_abapgit_ortec_git.
+
+    lv_pack_id = mc_repo && '_MISSU'.
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = mc_repo && 'MISSU1' iv_type = 'ref_d' iv_data = '040590040121' ).
+    CLEAR ls_meta.
+    ls_meta-obj_index   = 1.
+    ls_meta-pack_offset = 0.
+    ls_meta-obj_type    = 'ref_d'.
+    ls_meta-temp_key    = mc_repo && 'MISSU1'.
+    ls_meta-delta_base  = 'ffffffffffffffffffffffffffffffffffffffff'.
+    APPEND ls_meta TO lt_meta.
+
+    TRY.
+        zcl_abapgit_ortec_pack_stream=>resolve_streaming(
+          EXPORTING iv_repo_key = mc_repo
+                    iv_pack_id  = lv_pack_id
+                    iv_url      = 'http://unit-test.invalid/should-not-be-called.git'
+          CHANGING  ct_meta     = lt_meta ).
+        cl_abap_unit_assert=>fail( 'A genuinely missing external base must raise' ).
+      CATCH zcx_abapgit_ortec_git INTO lx_missing.
+        cl_abap_unit_assert=>assert_equals(
+          act = lx_missing->mv_retry_without_haves
+          exp = abap_true
+          msg = 'A missing base with a non-blank URL must still signal retry_without_haves, ' &&
+                'not attempt a per-base HTTP completion fetch' ).
+    ENDTRY.
   ENDMETHOD.
 ENDCLASS.
 
