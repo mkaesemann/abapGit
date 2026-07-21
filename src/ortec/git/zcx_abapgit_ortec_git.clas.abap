@@ -22,6 +22,19 @@ CLASS zcx_abapgit_ortec_git DEFINITION
     "! with (e.g. a genuine network error).
     DATA mv_retry_without_haves TYPE abap_bool READ-ONLY.
 
+    "! Flag indicating the request could not be built because a hard-
+    "! required server capability was not advertised (e.g.
+    "! INITIAL_BRANCH_BLOBLESS without `filter`, or MATERIALIZE_BLOBS
+    "! without an arbitrary-blob-want capability). Callers MUST NOT
+    "! silently fall back to an unfiltered/unbounded request when this
+    "! flag is set - see mv_missing_capability for which capability was
+    "! missing.
+    DATA mv_unsupported_capability TYPE abap_bool READ-ONLY.
+
+    "! The exact capability token that was required but not advertised
+    "! by the server, set together with mv_unsupported_capability.
+    DATA mv_missing_capability TYPE string READ-ONLY.
+
     "! Filtered call stack captured at RAISE time (this class's own
     "! constructor/raise* frames removed), so the real caller is still
     "! inspectable after the stack has unwound - see get_source_position.
@@ -46,10 +59,12 @@ CLASS zcx_abapgit_ortec_git DEFINITION
     "! Previous exception
     METHODS constructor
       IMPORTING
-        iv_text               TYPE clike DEFAULT ''
-        iv_is_corruption      TYPE abap_bool DEFAULT abap_false
-        iv_retry_without_haves TYPE abap_bool DEFAULT abap_false
-        previous              TYPE REF TO cx_root OPTIONAL.
+        iv_text                    TYPE clike DEFAULT ''
+        iv_is_corruption           TYPE abap_bool DEFAULT abap_false
+        iv_retry_without_haves     TYPE abap_bool DEFAULT abap_false
+        iv_unsupported_capability  TYPE abap_bool DEFAULT abap_false
+        iv_missing_capability      TYPE string DEFAULT ''
+        previous                   TYPE REF TO cx_root OPTIONAL.
 
     "! Raise a non-corruption ORTEC exception.
     "! Callers should catch and fall back to standard abapGit behavior.
@@ -64,6 +79,25 @@ CLASS zcx_abapgit_ortec_git DEFINITION
       IMPORTING
         iv_text                TYPE clike
         iv_retry_without_haves TYPE abap_bool DEFAULT abap_false
+      RAISING
+        zcx_abapgit_ortec_git.
+
+    "! Raise a structured unsupported-capability failure - the server did
+    "! not advertise a capability a Variant B fetch mode hard-requires.
+    "! Callers must decide their own fallback policy (e.g. cold-init
+    "! cannot proceed); this factory only guarantees the signal is
+    "! structured - it never itself falls through to an unfiltered/
+    "! unbounded buffer.
+    "! @parameter iv_mode |
+    "! The ORTEC fetch mode that required the capability
+    "! @parameter iv_capability |
+    "! The missing capability token
+    "! @raising zcx_abapgit_ortec_git |
+    "! Always
+    CLASS-METHODS raise_unsupported_capability
+      IMPORTING
+        iv_mode       TYPE zcl_abapgit_ortec_fetch_req=>ty_fetch_mode
+        iv_capability TYPE string
       RAISING
         zcx_abapgit_ortec_git.
 
@@ -108,6 +142,8 @@ CLASS zcx_abapgit_ortec_git IMPLEMENTATION.
     mv_text = iv_text.
     mv_is_corruption = iv_is_corruption.
     mv_retry_without_haves = iv_retry_without_haves.
+    mv_unsupported_capability = iv_unsupported_capability.
+    mv_missing_capability = iv_missing_capability.
     save_callstack( ).
     get_source_position(
       IMPORTING
@@ -167,6 +203,16 @@ CLASS zcx_abapgit_ortec_git IMPLEMENTATION.
       EXPORTING
         iv_text                = iv_text
         iv_retry_without_haves = iv_retry_without_haves.
+  ENDMETHOD.
+
+
+  METHOD raise_unsupported_capability.
+    RAISE EXCEPTION TYPE zcx_abapgit_ortec_git
+      EXPORTING
+        iv_text                   = |ORTEC fetch mode { iv_mode } requires capability not advertised | &&
+                                     |by server: { iv_capability }|
+        iv_unsupported_capability = abap_true
+        iv_missing_capability     = iv_capability.
   ENDMETHOD.
 
 

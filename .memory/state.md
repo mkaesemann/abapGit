@@ -9,7 +9,7 @@
 - Status: `IN_PROGRESS`
 - Work branch: `ortec/abapgit_1_133-opt-rework`
 - Owner-approved specification: `.github/prompts/variant-b.prompt.md`
-- Current phase: `Slice 2 design gates complete; senior implementation not yet started`
+- Current phase: `Slice 2 sub-slices 2A+2B implemented and performance-audited; sub-slice 2C (call-site migration) not started`
 - Last completed slice: `Slice 1 - durable materialization model` - DDIC
   append to `ZAOG_COMMIT_HIST`/`ZAOG_REPO_STATE` + new class
   `zcl_abapgit_ortec_mat_state` (9 methods, zero `COMMIT WORK`). Fully
@@ -20,15 +20,22 @@
   focused reconciliation, design, correctness review, protocol/persistence
   review, and performance `DESIGN_GATE` are all complete
   (`APPROVE`/`APPROVE_WITH_MINOR_REVISIONS`, all revisions resolved directly
-  in the design doc). Senior implementation has **not** started. See
-  `.memory/logs/variant_b_slice2_design.md` for the full design plus all
-  three "Review resolution" sections.
-- Next action: senior implementation of Slice 2 per
-  `.memory/logs/variant_b_slice2_design.md` §8 (new class
-  `zcl_abapgit_ortec_fetch_req` + `.xml`; `zcx_abapgit_ortec_git` extension;
-  `zcl_abapgit_ortec_fastpath` call-site rewiring incl. the DR-004 decode
-  -local cache reset; `zcl_abapgit_ortec_fetch_neg=>is_commit_complete` body
-  swap), then performance scan + `IMPLEMENTATION_AUDIT`, then regression.
+  in the design doc). Performance `DESIGN_GATE` gate status: `CLOSED`
+  (`AUTHORIZED_FOR_2A_2B`) - see `.memory/reviews/performance_design_variant-b-partial-clone_slice2.md`
+  "Gate Closure" section. See `.memory/logs/variant_b_slice2_design.md` for
+  the full design plus all three "Review resolution" sections.
+- Sub-slices 2A+2B (`zcl_abapgit_ortec_fetch_req` + `.xml` new class;
+  `zcx_abapgit_ortec_git` extension) are implemented and have passed
+  performance `IMPLEMENTATION_AUDIT`: verdict `PASS`, AC1-AC4 all PASS, zero
+  SQL/HTTP, no new N-dependent cost. See
+  `.memory/logs/performance_audit_variant-b-partial-clone_slice2.md`. No
+  productive call site invokes this class yet (by design, sub-slice 2C
+  scope).
+- Next action: sub-slice 2C - `zcl_abapgit_ortec_fastpath` call-site
+  rewiring incl. the DR-004 decode-local cache reset, and
+  `zcl_abapgit_ortec_fetch_neg=>is_commit_complete` body swap (AC5/AC6),
+  then that sub-slice's own performance scan + `IMPLEMENTATION_AUDIT`, then
+  regression for the whole slice.
 - Binding preconditions carried forward for Slice 3 (do not start Slice 3
   design without addressing all of these in one coherent change, per
   `.memory/logs/variant_b_slice2_design.md` §5 and its review-resolution
@@ -51,6 +58,9 @@
     `zaog_obj_store` commit-object read (performance `DESIGN_GATE` finding,
     Slice 2).
 - Blocking condition: none currently known.
+- SAP validation status: `PENDING_SAP_IMPORT` (no live import/activation/ABAP
+  Unit/ATC execution was performed in this session; only static/structural
+  regression evidence is available).
 - Productive changes: Slice 1 is live on IT8. Slice 2 is design-approved but
   not implemented; implementation must follow the exact §8 file list.
 - Supersedes as standalone topic: H4 walk delegation.
@@ -129,6 +139,10 @@ requires specific historical evidence.
 - Slice 2 persistence review: appended to `.memory/logs/protocol_persistence.md`
 - Slice 2 performance design gate:
   `.memory/reviews/performance_design_variant-b-partial-clone_slice2.md`
+- Slice 2 sub-slices 2A+2B performance implementation audit:
+  `.memory/logs/performance_audit_variant-b-partial-clone_slice2.md`
+- Slice 2 sub-slices 2A+2B checkpoint handoff:
+  `.memory/handoffs/variant-b-slice2-2a2b-checkpoint.md`
 - External review: `.memory/logs/external_review_2026-07-20.md`
 - Historical full state: `.memory/archive/state_pre_variant_b_2026-07-20.md`
 
@@ -179,6 +193,24 @@ agent has performed the work.
 
 ## Last update
 
+- Date: 2026-07-21
+- Senior implementation, Slice 2 sub-slices 2A+2B (fetch-mode model + pure
+  request serializer): new class `zcl_abapgit_ortec_fetch_req` (+ `.xml`,
+  + `.clas.testclasses.abap` with 18 test methods) and additive
+  `zcx_abapgit_ortec_git` extension (`mv_unsupported_capability`,
+  `mv_missing_capability`, `raise_unsupported_capability`). Zero SQL/HTTP,
+  zero `deepen`/`shallow` emission, `MATERIALIZE_BLOBS` batch cap enforced
+  as a hard `RAISE`. No productive call site migrated (strict Slice 3
+  boundary respected - confirmed via git diff on
+  `zcl_abapgit_ortec_fastpath`/`zcl_abapgit_ortec_fetch_neg`/
+  `zcl_abapgit_ortec_filter_walk`, all empty). Low-cost performance scan:
+  PASS. Performance `IMPLEMENTATION_AUDIT`: `PASS`, AC1-AC4 all PASS - see
+  `.memory/logs/performance_audit_variant-b-partial-clone_slice2.md`.
+  Regression: `PASS` (static/structural; live SAP import/activation/ABAP
+  Unit execution still pending). Checkpoint handoff:
+  `.memory/handoffs/variant-b-slice2-2a2b-checkpoint.md`. Sub-slice 2C
+  (fastpath/fetch_neg call-site rewiring) not started - stopped per the
+  prompt's explicit instruction not to begin it in this pass.
 - Date: 2026-07-21
 - DESIGN_GATE (performance, Slice 2 explicit ORTEC fetch modes and request
   serializer): verdict `APPROVE_WITH_MINOR_REVISIONS`. Evidence: current

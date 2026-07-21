@@ -201,3 +201,44 @@ against actual committed source once implemented, and must re-confirm the
 `c_materialize_batch_max` cap is a genuine `RAISE`. The `collect_ancestor_haves`
 N-dependent read remains open and should be picked up explicitly in Slice 3's
 own `DESIGN_GATE`, not silently carried forward again.
+
+## Gate Closure
+
+- **Original verdict:** `APPROVE_WITH_MINOR_REVISIONS`.
+- **Required revisions:**
+  1. Correct §7's prose so it does not claim the entire upstream
+     have-resolution pipeline is N-independent; state accurately that only
+     per-candidate certification became O(1), and name
+     `collect_ancestor_haves`'s unbounded `zaog_obj_store` commit read as a
+     pre-existing, unaffected-by-Slice-2 cost with a tracked follow-up.
+  2. Promote the `RECOVERY_BRANCH_FULL` memory-risk gate from a soft mention
+     ("a Slice 5 orchestration decision") to a named, numbered binding
+     consequence for the slice that wires branch pull/switch decisions.
+- **Resolution evidence:**
+  1. `.memory/logs/variant_b_slice2_design.md` §7, "Expected behavior at
+     1 / 1,000 / 40,000 / 1,000,000 stored objects" — the overstated
+     N-independence sentence was replaced, and a new "Correction
+     (performance `DESIGN_GATE` finding, ...)" paragraph now states the
+     `collect_ancestor_haves` cost explicitly and tracks it as a Slice 3
+     candidate.
+  2. `.memory/logs/variant_b_slice2_design.md` §7, "Peak-memory model"
+     paragraph — the `RECOVERY_BRANCH_FULL` memory gate now ends with an
+     explicit "**Binding consequence:** whichever slice wires branch
+     pull/switch decisions (Slice 5 per the top-level spec) MUST implement
+     this memory gate as a named, reviewable design element..." sentence,
+     replacing the prior soft mention.
+- **Remaining non-blocking preconditions:**
+  - Bounding/eliminating `collect_ancestor_haves`'s unbounded
+    `zaog_obj_store` read is deferred to Slice 3's own `DESIGN_GATE` — not
+    required for Slice 2's own file list (§8), which never touches
+    `get_have_commits`/`collect_ancestor_haves`.
+  - The `RECOVERY_BRANCH_FULL` memory gate's exact threshold/mechanism is
+    deferred to Slice 5 — not required for Slice 2's own file list, which
+    only marks `ty_request-mode` for the caller and never invokes an HTTP
+    client itself.
+  - Both preconditions are documentation-tracked, not silently dropped, and
+    neither requires any change to Slice 2's approved architecture or
+    touched-file list.
+- **Final gate status: CLOSED**
+- **Implementation authorization:**
+  - `AUTHORIZED_FOR_2A_2B`
