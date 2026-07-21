@@ -27,15 +27,15 @@ CLASS ltcl_fetch_req DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT F
     METHODS self_contained_never_thin FOR TESTING RAISING cx_static_check.
 
     METHODS materialize_wants_and_bounds FOR TESTING RAISING cx_static_check.
-    METHODS materialize_missing_capa_raises FOR TESTING RAISING cx_static_check.
+    METHODS materialize_missing_capa_raise FOR TESTING RAISING cx_static_check.
     METHODS materialize_over_max_raises FOR TESTING RAISING cx_static_check.
     METHODS materialize_empty_raises FOR TESTING RAISING cx_static_check.
 
     METHODS recovery_minimal_and_no_haves FOR TESTING RAISING cx_static_check.
 
-    METHODS parse_capabilities_extracts_line FOR TESTING RAISING cx_static_check.
+    METHODS parse_capability_extracts_line FOR TESTING RAISING cx_static_check.
     METHODS parse_capabilities_no_null FOR TESTING RAISING cx_static_check.
-    METHODS parse_capabilities_no_trailing_nl FOR TESTING RAISING cx_static_check.
+    METHODS parse_capability_no_trailng_nl FOR TESTING RAISING cx_static_check.
 
 ENDCLASS.
 
@@ -220,7 +220,7 @@ CLASS ltcl_fetch_req IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( exp = 0 act = ls_request-have_count ).
   ENDMETHOD.
 
-  METHOD materialize_missing_capa_raises.
+  METHOD materialize_missing_capa_raise.
     DATA lt_want TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
     APPEND c_blob1 TO lt_want.
 
@@ -292,7 +292,7 @@ CLASS ltcl_fetch_req IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( exp = 0 act = ls_request-have_count ).
   ENDMETHOD.
 
-  METHOD parse_capabilities_extracts_line.
+  METHOD parse_capability_extracts_line.
     DATA lv_null TYPE c LENGTH 1.
     lv_null = zcl_abapgit_git_utils=>get_null( ).
 
@@ -310,7 +310,7 @@ CLASS ltcl_fetch_req IMPLEMENTATION.
     cl_abap_unit_assert=>assert_initial( lv_caps ).
   ENDMETHOD.
 
-  METHOD parse_capabilities_no_trailing_nl.
+  METHOD parse_capability_no_trailng_nl.
     DATA lv_null TYPE c LENGTH 1.
     lv_null = zcl_abapgit_git_utils=>get_null( ).
 
