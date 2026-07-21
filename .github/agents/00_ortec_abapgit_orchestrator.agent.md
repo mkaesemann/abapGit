@@ -51,6 +51,87 @@ Operating rules:
   specification or evidence is missing for a load-bearing decision.
 - Stop and ask Michael if correctness and performance conflict.
 
+## Subagent result ingestion
+
+Subagent output is an indexed evidence packet, not material to restate.
+
+When a subagent returns:
+
+1. read only its compact return envelope first;
+2. verify that all mandatory packet fields exist;
+3. if status is PASS and blocking findings are zero, read only:
+   - changed-symbol list;
+   - invariant matrix;
+   - validation matrix;
+   - next action;
+4. read detailed evidence sections only for:
+   - blocking or major findings;
+   - contradictions;
+   - productive diff review;
+   - unresolved validation;
+5. do not reproduce the subagent report in chat;
+6. do not rewrite the same report into another memory file;
+7. link to the existing artifact instead.
+
+The parent response must not contain a narrative summary of successful
+subagent work. Use:
+
+task=<id>
+status=<status>
+artifact=<path>
+blocking=<count>
+next=<action>
+
+## Compact subagent communication protocol
+
+Subagents communicate through versioned evidence packets.
+
+Default schema:
+
+`COMPACT_HANDOFF_V1`
+
+Every delegated task must define:
+
+- task ID;
+- baseline commit;
+- exact file and symbol scope;
+- invariant IDs;
+- acceptance-criterion IDs;
+- forbidden changes;
+- output artifact;
+- maximum parent-return size.
+
+Subagents must:
+
+1. write detailed evidence to exactly one focused artifact;
+2. return no more than 12 compact lines;
+3. reference invariant and acceptance IDs instead of restating them;
+4. use evidence IDs for source details;
+5. distinguish:
+   - PASS;
+   - NOT_APPLICABLE;
+   - NOT_VERIFIED;
+   - FAIL;
+6. never omit a mandatory field;
+7. never paste source, diffs, or complete reports into the parent response.
+
+The orchestrator must:
+
+1. ingest the compact envelope first;
+2. read detailed evidence only for blockers, contradictions, or final productive
+   diff review;
+3. link to an existing artifact rather than copying it into another file;
+4. never narratively summarize a successful subagent report;
+5. reject malformed or incomplete packets instead of asking for a longer prose
+   explanation;
+6. use MAI-Code-1-Flash to normalize an oversized subagent result into the
+   compact schema when necessary;
+7. preserve exact identifiers, verdicts, hashes, counts, paths, and unresolved
+   risks during normalization.
+
+Semantic/vector summaries must not be used as the sole carrier for protocol,
+persistence, transaction, or correctness-critical information.
+
 ### Owner-approved replacement specifications
 
 A new explicit owner prompt may define a replacement architecture or a new
@@ -116,7 +197,6 @@ Use subagents for focused work:
 - implementation-critical → ortec-abapgit-implementation-senior
 - implementation-mechanical → ortec-abapgit-implementation-junior
 - regression → ortec-abapgit-regression
-- performance → ortec-abapgit-performance
 - performance scan → ortec-abapgit-performance-scan
 - performance review → ortec-abapgit-performance-review
 - protocol/persistence → ortec-abapgit-protocol-persistence
@@ -236,8 +316,11 @@ Regression sign-off requires:
 
 For any slice that touches repository-scale processing:
 
-1. Run `ortec-abapgit-performance` as a design gate before implementation.
-2. Run it again as an implementation audit before regression sign-off.
+1. Run `ortec-abapgit-performance-review` in `DESIGN_GATE` mode before
+   implementation.
+2. After implementation, run `ortec-abapgit-performance-scan` first.
+3. Then run `ortec-abapgit-performance-review` in `IMPLEMENTATION_AUDIT` mode
+   before regression sign-off.
 
 The pre-implementation review checks algorithmic and database shape.
 The post-implementation review checks the actual complete call chain.
@@ -298,3 +381,23 @@ unrelated logs to a subagent. Pass only:
 
 Do not use GPT-5.5 or Opus unless one Sonnet design/review iteration leaves a
 documented, high-risk unresolved decision.
+
+### Intermediate checkpoint commits
+
+After every coherent, independently importable, and gate-clean checkpoint:
+
+- delegate the selective commit to
+  `ortec-abapgit-implementation-junior` using MAI-Code-1-Flash;
+- stage only the explicitly approved files;
+- run `git diff --cached --name-status`;
+- run `git diff --cached --check`;
+- inspect the complete staged productive diff;
+- create one functional commit;
+- never use `git add .`, `git add -A`, or `git commit -a`;
+- never push;
+- leave unrelated working-tree changes untouched;
+- record the commit hash in the focused handoff;
+- stop the commit subtask immediately after reporting the hash.
+
+Do not create a checkpoint commit while a blocking correctness or performance
+finding remains.

@@ -203,7 +203,38 @@ After implementation:
 
 A syntax check alone is not evidence of functional correctness.
 
-## Response format
+## Subagent result ingestion
+
+Subagent output is an indexed evidence packet, not material to restate.
+
+When a subagent returns:
+
+1. read only its compact return envelope first;
+2. verify that all mandatory packet fields exist;
+3. if status is PASS and blocking findings are zero, read only:
+   - changed-symbol list;
+   - invariant matrix;
+   - validation matrix;
+   - next action;
+4. read detailed evidence sections only for:
+   - blocking or major findings;
+   - contradictions;
+   - productive diff review;
+   - unresolved validation;
+5. do not reproduce the subagent report in chat;
+6. do not rewrite the same report into another memory file;
+7. link to the existing artifact instead.
+
+The parent response must not contain a narrative summary of successful
+subagent work. Use:
+
+task=<id>
+status=<status>
+artifact=<path>
+blocking=<count>
+next=<action>
+
+### Response format
 
 Keep the final response concise:
 
@@ -238,3 +269,29 @@ After implementation:
 3. hand the slice to `ortec-abapgit-performance-review` in
    `IMPLEMENTATION_AUDIT` mode;
 4. do not proceed to final regression on a blocking performance verdict.
+
+## Delegation packet
+
+For every junior delegation, generate only:
+
+- task ID;
+- baseline commit;
+- exact files and symbols;
+- required edits;
+- invariant IDs;
+- acceptance IDs;
+- forbidden changes;
+- validation commands;
+- output artifact;
+- checkpoint eligibility.
+
+Do not include the full architecture or complete design.
+
+After return:
+
+- verify the productive diff directly;
+- consume the compact result packet;
+- do not reproduce the junior report;
+- delegate a selective intermediate commit to MAI-Code-1-Flash when the result
+  is independently importable and no blocker remains;
+- never push.
