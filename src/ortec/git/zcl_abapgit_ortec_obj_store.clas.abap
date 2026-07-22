@@ -256,7 +256,7 @@ CLASS zcl_abapgit_ortec_obj_store DEFINITION
       END OF ty_sha1_row.
     TYPES ty_sha1_rows TYPE STANDARD TABLE OF ty_sha1_row WITH DEFAULT KEY.
 
-    CLASS-DATA mt_cache          TYPE HASHED TABLE OF ty_cache_entry
+    CLASS-DATA mt_cache          TYPE SORTED TABLE OF ty_cache_entry
                 WITH UNIQUE KEY repo_key obj_sha1.
     CLASS-DATA mv_cache_repo_key TYPE ty_repo_key.
     CLASS-DATA mv_full_cache_repo_key TYPE ty_repo_key.
