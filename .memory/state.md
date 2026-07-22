@@ -4,81 +4,52 @@
 - Topic: `variant-b-partial-clone`
 - Owner-approved goal: Variant B partial-clone fetch orchestration with certified haves, cold blobless graph acquisition, current-tip blob materialization, and no per-object SQL/HTTP repair.
 - Baseline / relevant commits: Slice 1 import/activation `10e75f850c3530fdf5de820fb5f4f5f1147359f6`; Slice 2A/2B SAP validation `96536177393e7d6650fdfe4487e8fa7f17ad4044` and ATC follow-up `6638cb6683e9b508b2e9144dfb9c80628ec23c98`.
-- Current phase: `Slice 2C post-IT8 correction applied, pending SAP re-validation`; Package B / Slice 3 not started.
-- Current status: `SLICE_2C_IT8_CORRECTION_PENDING_SAP`.
-- Committed productive paths (Slice 2C checkpoint `a2c4d155`): `src/ortec/git/zcl_abapgit_ortec_fastpath.clas.abap`, `src/ortec/git/zcl_abapgit_ortec_fetch_neg.clas.abap`, `src/ortec/git/zcl_abapgit_ortec_pack_stream.clas.abap`, `src/ortec/git/zcl_abapgit_ortec_git_tests.clas.testclasses.abap`. SAP syntax-fix `246bae77` touched only `zcl_abapgit_ortec_git_tests.clas.testclasses.abap` (2 xstring-literal test fixes + 2 over-30-char method renames).
+- Current phase: `Package B B0: APPROVED_WITH_RESOLVED_REVISIONS`.
+- Next phase: `Package B B1 - cold blobless graph acquisition (implementation)`.
+- Current validated HEAD: `cbe8bc73f7c1e17e3d436b1371fcc65f806dd989`.
+- Relevant commit chain: Slice 2C checkpoint `a2c4d155`; SAP syntax fix `246bae779f2504e50822a390e466dd652b7782f2`; post-IT8 resolver and ATC correction `90543197573601481430132e2e0b9677e9687be8`; base-cache hashed-key lookup fix `cbe8bc73f7c1e17e3d436b1371fcc65f806dd989`.
 
 ## Completed work
 - Slice 0 — status: COMPLETE; SAP: N/A; handoff: `.memory/logs/variant_b_reconciliation.md`; regression: N/A; performance: N/A; blocker: none.
 - Slice 1 — status: COMPLETE; implementation: `10e75f850c3530fdf5de820fb5f4f5f1147359f6`; SAP: PASS; handoff: `.memory/logs/variant_b_design.md`; regression: `.memory/logs/regression_variant_b_slice1.md`; performance: `.memory/reviews/performance_design_variant-b-partial-clone_slice1.md`; blocker: none.
 - Slice 2A/2B — status: COMPLETE; implementation: `96536177393e7d6650fdfe4487e8fa7f17ad4044` / `6638cb6683e9b508b2e9144dfb9c80628ec23c98`; SAP: PASS; handoff: `.memory/handoffs/variant-b-slice2-2a2b-checkpoint.md`; regression: `.memory/logs/regression_variant_b_slice2_2a2b.md`; performance: `.memory/logs/performance_audit_variant-b-partial-clone_slice2.md`; blocker: none.
-- Slice 2C — status: COMMITTED; implementation: `a2c4d155` (`ORTEC: Complete explicit fetch-mode call-site migration`); SAP: PENDING_SAP_IMPORT; handoff: `.memory/handoffs/variant-b-slice2c-checkpoint.md`; regression: `.memory/logs/regression_variant_b_slice2_2c.md`; performance: `.memory/logs/performance_audit_variant-b-partial-clone_slice2c.md`; blocker: none.
+- Slice 2C — status: SAP_VALIDATED_COMPLETE; implementation chain: `a2c4d155` → `246bae779f2504e50822a390e466dd652b7782f2` → `90543197573601481430132e2e0b9677e9687be8` → `cbe8bc73f7c1e17e3d436b1371fcc65f806dd989`; SAP: PASS; handoff: `.memory/handoffs/variant-b-slice2c-checkpoint.md`; regression: `.memory/logs/regression_variant_b_slice2_2c.md`; performance: `.memory/logs/performance_audit_variant-b-partial-clone_slice2c.md`; blocker: none.
 
-## Current Slice 2C facts
-- Corrected verdict: `READY_FOR_2C_CHECKPOINT`.
-- Per-delta-base HTTP completion is disabled.
-- Missing external delta bases escalate with `retry_without_haves`.
-- All migrated Variant B fetch tiers report `ev_deepen_used = 0`.
-- Technical certified-have resolution failures are propagated and are not silently converted into an empty valid have set.
-- Slice 2C performance audit: `PASS`.
-- Regression: static/structural `PASS`.
-- SAP import / activation / ABAP Unit / ATC: `PENDING_SAP_IMPORT`.
+## Productive validation
+- Import and activation: PASS.
+- Relevant ABAP Unit: PASS.
+- Productive ATC: PASS.
+- Base-cache ABAP Unit: PASS.
+- Base-cache ATC: PASS.
+- Slice 2C blockers: none.
 
-## Post-IT8 2C correction (this session)
+## Deferred non-blocking issue
+- Issue: `LTCL_CACHE_ADMIN=>OVERVIEW_AGGREGATES_COUNTS`
+- Classification: `DEFERRED_NON_PRODUCTIVE`
+- Current evidence: `CX_SY_OPEN_SQL_DB` in the cache-admin aggregation/report path; exact live SQL diagnostic remains unresolved.
+- Package B blocker: `NO`
+- Release requirement: Resolve or explicitly disposition before final release validation.
 
-- Root cause (REF_CHAIN_RESOLVES / OFS_CHAIN_RESOLVES): `resolve_one_meta`'s
-  in-pack base lookup called `get_base_bytes` unconditionally, which relies
-  on the Phase 1 LRU base cache (a byte-budgeted PERFORMANCE optimization,
-  not a correctness guarantee) to serve a base resolved earlier in the SAME
-  resolve pass but not yet flushed to `zaog_obj_store`. Fixed by checking
-  the in-memory `ct_write_batch` first (authoritative, bounded by
-  `c_batch_size`), falling back to `get_base_bytes` only if not found
-  there. `zcl_abapgit_ortec_base_cache.clas.abap` was NOT touched.
-- ATC `RESOLVE_STREAMING` field-symbol finding: fixed by using a dedicated
-  `<ls_row_after>` field symbol for the post-`resolve_one_meta` progress
-  check instead of reassigning the active `LOOP ... ASSIGNING <ls_row>`
-  iterator.
-- ATC exception-contract findings: `COMPLETE_MISSING_OBJECT` now wraps
-  `create_by_url` inside its existing TRY, translating to
-  `zcx_abapgit_ortec_git` with `previous` preserved (mirrors the existing
-  pattern in `zcl_abapgit_ortec_fetch_req=>build_request`).
-  `BUILD_UPLOAD_PACK_BUFFER` (legacy/dead code, only called by
-  `ltcl_fastpath_protocol`, all `RAISING cx_static_check`) now declares
-  `RAISING zcx_abapgit_exception`, propagating `pkt_string`'s declared
-  exception unchanged - no call-site changes required.
-- Cache/admin failures (`ltcl_base_cache`'s 5 tests, `OVERVIEW_AGGREGATES_COUNTS`):
-  classified `PRE_EXISTING_CURRENT_BASELINE`/`UNRESOLVED` - `zcl_abapgit_ortec_base_cache.clas.abap`
-  and `zcl_abapgit_ortec_cache_admin.clas.abap` last changed at `19bdbe40`
-  and `5afd40dd` respectively, both well before `a2c4d155`/`246bae77`; not
-  touched by this correction per the "no unrelated cache/admin fix without
-  provenance" constraint. Static review of `base_cache`'s current source
-  found no logic defect; live IT8 diagnostic access was not available this
-  session to confirm the deployed version matches HEAD - flagged for a
-  follow-up session with live IT8 access before further action.
-- Regression (`ortec-abapgit-regression`, MAI-Code-1-Flash): PASS, 0
-  blocking findings - see `.memory/logs/regression_variant_b_slice2_2c.md`
-  appendix for this pass's evidence.
-- No per-object HTTP path reachable; `complete_missing_base` remains an
-  unconditional `RETURN.`; `complete_missing_object` remains dormant
-  (confirmed zero live callers).
+## Package B objective
+- Package B combines Slices 3+4:
+  - cold blobless commit/tree graph acquisition;
+  - bounded graph-closure verification;
+  - current-tip blob discovery;
+  - deduplicated and bounded snapshot materialization.
 
-## Binding future work
-- No progressive deepen.
+## Binding Package B constraints
 - No `deepen` or `shallow` in Variant B requests.
 - No per-object SQL or HTTP.
 - No uncertified haves.
-- No branch-owned object payload duplication.
-- No productive blank repository-key fallback.
-- No same-pack standard-decoder fallback after ORTEC decode failure.
-- External delta bases are deferred to Package D1 / Slice 7 for collection, deduplication, and bulk loading.
-- Obsolete legacy methods are removed only after replacement paths are validated.
-
-## Combined package roadmap
-- Package A: corrected Slice 2C close-out and SAP validation.
-- Package B: Slices 3+4 — cold blobless graph acquisition plus current-tip snapshot materialization.
-- Package C: Slices 5+6 — branch orchestration plus certified-have policy.
-- Package D: shared design for Slices 7+8, followed by D1 bulk external bases and D2 attempt/transaction isolation.
-- Package E: Slice 9 obsolete-code cleanup.
+- Server capabilities must be intersected before request emission.
+- `INITIAL_BRANCH_BLOBLESS` may use `filter blob:none` only when advertised.
+- Selected blob materialization must use bounded, deduplicated batches.
+- Graph and snapshot certificates must only be published after verification.
+- No productive blank-repository-key fallback.
+- No per-delta-base remote repair.
+- Package D1/Slice 7 remains responsible for collect/deduplicate/bulk external delta-base resolution.
+- Package D2/Slice 8 remains responsible for final attempt and transaction isolation.
+- Physically obsolete legacy code is removed in Package E/Slice 9 only after replacement paths are validated.
 
 ## Active links
 - Owner specification: `.github/prompts/variant-b.prompt.md`
@@ -89,5 +60,52 @@
 - Current implementation map: `.memory/logs/variant_b_slice2c_migration_map.md`
 - Active diagram: `.memory/diagrams/variant_b_flow.mmd`
 
+## Package B progress
+- B0 design: `.memory/logs/variant_b_package_b_design.md` (DRAFT, both
+  reviews resolved in-place).
+- B0 protocol/persistence review: `.memory/reviews/variant_b_package_b_protocol_review.md`
+  (`APPROVE_WITH_MINOR_REVISIONS`, minor UUID-method note fixed in design).
+- B0 performance DESIGN_GATE review: `.memory/reviews/performance_design_variant_b_package_b.md`
+  (`APPROVE_WITH_MINOR_REVISIONS` after 2 passes; all 3 findings resolved:
+  memory-risk gate `c_max_graph_response_bytes`/INV-B-12 added, walk switched
+  to `iv_bulk_fetch = abap_false`/INV-B-13, split budget rescoped per-batch/
+  INV-B-07b).
+- New symbols planned: `ZCL_ABAPGIT_ORTEC_COLD_INIT` (acquire_blobless_graph,
+  materialize_tip_snapshot); `zcl_abapgit_ortec_obj_store=>verify_tree_closure`,
+  `=>get_tip_blob_sha1s` (new methods). No productive ABAP written yet.
+- Checkpoint plan: B1 (graph acquisition, own IT8 gate) then B2+B3 combined
+  (blob discovery + materialization — B2 has no independent productive
+  caller, combined per explicit checkpoint exception, decision recorded in
+  design §9).
+- B1 implementation: `ZCL_ABAPGIT_ORTEC_COLD_INIT=>acquire_blobless_graph`
+  and `zcl_abapgit_ortec_obj_store=>verify_tree_closure` implemented
+  (untracked, not yet committed/imported). Static perf scan: `PASS`
+  (`.memory/reviews/perf_scan_variant_b_b1.md`). Perf `IMPLEMENTATION_AUDIT`:
+  subagent verdict `REVISE_AND_REVIEW_ONCE` on one claimed BLOCKING finding
+  (`.memory/reviews/perf_audit_variant_b_b1.md`) was **rejected by the
+  orchestrator after direct source re-verification** — the finding claimed
+  `verify_tree_closure`'s frontier walk never detects a missing tree, but
+  `zcl_abapgit_ortec_obj_store=>get_objects` has an unconditional
+  found-vs-requested check that raises `zcx_abapgit_ortec_git` for ANY
+  missing SHA1 regardless of `iv_bulk_fetch`, and the pre-existing
+  `get_objects_missing` test already proves this exact path live. Rebuttal
+  with quoted source is recorded at the top of
+  `.memory/reviews/perf_audit_variant_b_b1.md`. No code change was needed.
+  Regression: `PASS` (`.memory/logs/regression_variant_b_b1.md`) — purely
+  additive diff, no productive caller wired yet, no method name >30 chars,
+  no test-class collisions, existing `ltcl_obj_store` tests intact.
+- B1 status: `IMPLEMENTATION_COMPLETE_PENDING_IT8` — ready for a selective
+  checkpoint commit, then must STOP for owner-executed IT8 validation
+  (import, activation, targeted + regression ABAP Unit, ATC) before B2+B3.
+
 ## Next action
-Import and validate the new Slice 2C checkpoint commit in IT8, activate the affected objects, run ABAP Unit and ATC, then update the state before starting Package B.
+After the B1 checkpoint commit lands, STOP productive editing and wait for
+owner-executed IT8 validation of B1 (import/activate
+`zcl_abapgit_ortec_cold_init` + the `zcl_abapgit_ortec_obj_store`/
+`zcl_abapgit_ortec_git_tests` changes; run ABAP Unit incl. the 3 new
+`verify_closure_*` tests and the 3 new `ltcl_cold_init` tests; run ATC) per
+the explicit owner instruction not to proceed to B2+B3 without that
+checkpoint. Once IT8-validated, proceed to B2+B3 (combined): add
+`get_tip_blob_sha1s` to `zcl_abapgit_ortec_obj_store` and
+`materialize_tip_snapshot` to `zcl_abapgit_ortec_cold_init`, per
+`.memory/logs/variant_b_package_b_design.md` §9/§11.

@@ -10,6 +10,9 @@ CLASS ltcl_obj_store DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
     METHODS reachable_objects_missing_tree FOR TESTING RAISING cx_static_check.
     METHODS reachable_sha1s_graph FOR TESTING RAISING cx_static_check.
     METHODS reachable_sha1s_missing_blob FOR TESTING RAISING cx_static_check.
+    METHODS verify_closure_ok FOR TESTING RAISING cx_static_check.
+    METHODS verify_closure_missing_tree FOR TESTING RAISING cx_static_check.
+    METHODS verify_closure_missing_blob_ok FOR TESTING RAISING cx_static_check.
     METHODS missing_sha1s_none FOR TESTING RAISING cx_static_check.
     METHODS missing_sha1s_some FOR TESTING RAISING cx_static_check.
     METHODS object_state_constants FOR TESTING RAISING cx_static_check.
@@ -284,6 +287,118 @@ CLASS ltcl_obj_store IMPLEMENTATION.
         cl_abap_unit_assert=>fail( 'Missing reachable blob must raise' ).
       CATCH zcx_abapgit_ortec_git.
     ENDTRY.
+  ENDMETHOD.
+  METHOD verify_closure_ok.
+    " Package B design §6: verify_tree_closure must succeed for a fully
+    " present commit+tree closure regardless of whether the referenced
+    " blob is stored - it is deliberately blob-blind.
+    DATA lt_nodes TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+    DATA ls_node LIKE LINE OF lt_nodes.
+    DATA ls_commit TYPE zcl_abapgit_git_pack=>ty_commit.
+    DATA lv_tree_data TYPE xstring.
+    DATA lv_tree_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_commit_data TYPE xstring.
+    DATA lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+
+    ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-file.
+    ls_node-name  = 'hello.txt'.
+    ls_node-sha1  = '48656C6C6F48656C6C6F48656C6C6F48656C6C6F'.
+    APPEND ls_node TO lt_nodes.
+
+    lv_tree_data = zcl_abapgit_git_pack=>encode_tree( lt_nodes ).
+    lv_tree_sha = zcl_abapgit_hash=>sha1_tree( lv_tree_data ).
+
+    ls_commit-tree = lv_tree_sha.
+    ls_commit-author = 'Test <test@example.com> 0 +0000'.
+    ls_commit-committer = 'Test <test@example.com> 0 +0000'.
+    ls_commit-body = 'closure ok'.
+    lv_commit_data = zcl_abapgit_git_pack=>encode_commit( ls_commit ).
+    lv_commit_sha = zcl_abapgit_hash=>sha1_commit( lv_commit_data ).
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_commit_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-commit
+      iv_data     = lv_commit_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_tree_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-tree
+      iv_data     = lv_tree_data ).
+
+    " Blob deliberately never stored - must not matter.
+    zcl_abapgit_ortec_obj_store=>verify_tree_closure(
+      iv_repo_key = mc_repo
+      iv_commit   = lv_commit_sha ).
+  ENDMETHOD.
+  METHOD verify_closure_missing_tree.
+    DATA ls_commit TYPE zcl_abapgit_git_pack=>ty_commit.
+    DATA lv_commit_data TYPE xstring.
+    DATA lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+
+    ls_commit-tree = '7777777777777777777777777777777777777777'.
+    ls_commit-author = 'Test <test@example.com> 0 +0000'.
+    ls_commit-committer = 'Test <test@example.com> 0 +0000'.
+    ls_commit-body = 'closure missing tree'.
+    lv_commit_data = zcl_abapgit_git_pack=>encode_commit( ls_commit ).
+    lv_commit_sha = zcl_abapgit_hash=>sha1_commit( lv_commit_data ).
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_commit_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-commit
+      iv_data     = lv_commit_data ).
+
+    TRY.
+        zcl_abapgit_ortec_obj_store=>verify_tree_closure(
+          iv_repo_key = mc_repo
+          iv_commit   = lv_commit_sha ).
+        cl_abap_unit_assert=>fail( 'Missing reachable tree must raise' ).
+      CATCH zcx_abapgit_ortec_git.
+    ENDTRY.
+  ENDMETHOD.
+  METHOD verify_closure_missing_blob_ok.
+    " Regression pin: unlike get_reachable_sha1s, a missing blob referenced
+    " by an otherwise-complete tree must NOT raise - this is the entire
+    " point of verify_tree_closure existing separately (Package B design
+    " §6): filtered/blobless historical blobs are promised, not corrupt.
+    DATA lt_nodes TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+    DATA ls_node LIKE LINE OF lt_nodes.
+    DATA ls_commit TYPE zcl_abapgit_git_pack=>ty_commit.
+    DATA lv_tree_data TYPE xstring.
+    DATA lv_tree_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_commit_data TYPE xstring.
+    DATA lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+
+    ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-file.
+    ls_node-name  = 'missing.txt'.
+    ls_node-sha1  = '8888888888888888888888888888888888888888'.
+    APPEND ls_node TO lt_nodes.
+
+    lv_tree_data = zcl_abapgit_git_pack=>encode_tree( lt_nodes ).
+    lv_tree_sha = zcl_abapgit_hash=>sha1_tree( lv_tree_data ).
+
+    ls_commit-tree = lv_tree_sha.
+    ls_commit-author = 'Test <test@example.com> 0 +0000'.
+    ls_commit-committer = 'Test <test@example.com> 0 +0000'.
+    ls_commit-body = 'closure missing blob ok'.
+    lv_commit_data = zcl_abapgit_git_pack=>encode_commit( ls_commit ).
+    lv_commit_sha = zcl_abapgit_hash=>sha1_commit( lv_commit_data ).
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_commit_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-commit
+      iv_data     = lv_commit_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_tree_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-tree
+      iv_data     = lv_tree_data ).
+
+    zcl_abapgit_ortec_obj_store=>verify_tree_closure(
+      iv_repo_key = mc_repo
+      iv_commit   = lv_commit_sha ).
   ENDMETHOD.
   METHOD missing_sha1s_none.
     DATA lt_sha1s TYPE zif_abapgit_git_definitions=>ty_sha1_tt.

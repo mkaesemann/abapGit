@@ -111,6 +111,36 @@ CLASS zcl_abapgit_ortec_obj_store DEFINITION
       RETURNING VALUE(rt_sha1s) TYPE zif_abapgit_git_definitions=>ty_sha1_tt
       RAISING   zcx_abapgit_ortec_git.
 
+    "! Variant B / Package B graph-closure verification: walks the SAME
+    "! commit -> tree structure as get_reachable_objects/get_reachable_sha1s,
+    "! but is deliberately blob-blind - it never collects, checks presence
+    "! of, or reads a single blob SHA1/byte. This is the one difference that
+    "! matters for a blobless (`filter blob:none`) cold-branch fetch: every
+    "! historical blob is legitimately PROMISED, not corrupt
+    "! (zcl_abapgit_ortec_mat_state's GRAPH_COMPLETE level is defined as
+    "! "requested commit and complete tree closure present; historical
+    "! blobs may be promised" - see .github/skills/git-partial-clone/SKILL.md).
+    "! get_reachable_sha1s cannot be reused here: it hard-requires every
+    "! reachable blob to be present (via get_present_sha1s) and raises
+    "! otherwise, which would incorrectly fail a perfectly valid blobless
+    "! fetch.
+    "! Uses iv_bulk_fetch = abap_false for every frontier read (design
+    "! decision INV-B-13, .memory/logs/variant_b_package_b_design.md §6):
+    "! get_objects' iv_bulk_fetch = abap_true branch does not chunk at
+    "! c_select_package_size, so abap_false is used to guarantee every bulk
+    "! read stays chunked regardless of how wide a real tree frontier is.
+    "! @parameter iv_repo_key |
+    "! Repository key
+    "! @parameter iv_commit |
+    "! Commit SHA1 whose tree closure must be verified
+    "! @raising zcx_abapgit_ortec_git |
+    "! If the commit or any tree reachable from it is missing, not the
+    "! expected type, undecodable, or contains an unrecognized chmod
+    CLASS-METHODS verify_tree_closure
+      IMPORTING iv_repo_key TYPE ty_repo_key
+                iv_commit   TYPE zif_abapgit_git_definitions=>ty_sha1
+      RAISING   zcx_abapgit_ortec_git.
+
     "! Set-based check for which of the given SHA1s are NOT present (status 'R')
     "! in the persistent store for this repository. One chunked SELECT per
     "! c_select_package_size objects; no per-object DB reads.
@@ -620,6 +650,88 @@ CLASS ZCL_ABAPGIT_ORTEC_OBJ_STORE IMPLEMENTATION.
         APPEND <lv_blob> TO rt_sha1s.
       ENDLOOP.
     ENDIF.
+  ENDMETHOD.
+
+
+  METHOD verify_tree_closure.
+    " Blob-blind commit -> tree closure walk. See declaration doc for why
+    " get_reachable_sha1s/get_reachable_objects are not reused.
+    DATA lt_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_commit_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lt_current_trees TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_next_trees TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_tree_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lt_seen_trees TYPE ty_sha1_set.
+    DATA ls_commit_object TYPE zif_abapgit_definitions=>ty_object.
+    DATA ls_commit TYPE zcl_abapgit_git_pack=>ty_commit.
+    DATA lt_nodes TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+
+    FIELD-SYMBOLS <ls_tree_object> LIKE LINE OF lt_tree_objects.
+    FIELD-SYMBOLS <ls_node> LIKE LINE OF lt_nodes.
+
+    APPEND iv_commit TO lt_commit_sha.
+    lt_commit_objects = get_objects( iv_repo_key   = iv_repo_key
+                                     it_sha1s      = lt_commit_sha
+                                     iv_bulk_fetch = abap_false ).
+    READ TABLE lt_commit_objects INTO ls_commit_object INDEX 1.
+    IF sy-subrc <> 0 OR ls_commit_object-type <> zif_abapgit_git_definitions=>c_type-commit.
+      zcx_abapgit_ortec_git=>raise( |Commit { iv_commit } not found in store| ).
+    ENDIF.
+
+    TRY.
+        ls_commit = zcl_abapgit_git_pack=>decode_commit( ls_commit_object-data ).
+      CATCH zcx_abapgit_exception.
+        zcx_abapgit_ortec_git=>raise( |Commit { iv_commit } could not be decoded| ).
+    ENDTRY.
+
+    IF ls_commit-tree IS INITIAL.
+      zcx_abapgit_ortec_git=>raise( |Commit { iv_commit } has no tree| ).
+    ENDIF.
+
+    APPEND ls_commit-tree TO lt_current_trees.
+    INSERT ls_commit-tree INTO TABLE lt_seen_trees.
+
+    WHILE lt_current_trees IS NOT INITIAL.
+      CLEAR lt_next_trees.
+      lt_tree_objects = get_objects( iv_repo_key   = iv_repo_key
+                                     it_sha1s      = lt_current_trees
+                                     iv_bulk_fetch = abap_false ).
+
+      LOOP AT lt_tree_objects ASSIGNING <ls_tree_object>.
+        IF <ls_tree_object>-type <> zif_abapgit_git_definitions=>c_type-tree.
+          zcx_abapgit_ortec_git=>raise( |Object { <ls_tree_object>-sha1 } is not a tree| ).
+        ENDIF.
+
+        TRY.
+            lt_nodes = zcl_abapgit_git_pack=>decode_tree( <ls_tree_object>-data ).
+          CATCH zcx_abapgit_exception.
+            zcx_abapgit_ortec_git=>raise( |Tree { <ls_tree_object>-sha1 } could not be decoded| ).
+        ENDTRY.
+
+        LOOP AT lt_nodes ASSIGNING <ls_node>.
+          CASE <ls_node>-chmod.
+            WHEN zif_abapgit_git_definitions=>c_chmod-dir.
+              READ TABLE lt_seen_trees WITH TABLE KEY table_line = <ls_node>-sha1 TRANSPORTING NO FIELDS.
+              IF sy-subrc <> 0.
+                INSERT <ls_node>-sha1 INTO TABLE lt_seen_trees.
+                APPEND <ls_node>-sha1 TO lt_next_trees.
+              ENDIF.
+            WHEN zif_abapgit_git_definitions=>c_chmod-file
+              OR zif_abapgit_git_definitions=>c_chmod-executable
+              OR zif_abapgit_git_definitions=>c_chmod-symbolic_link.
+              " Deliberately ignored - blob-blind by design, see class doc.
+              CONTINUE.
+            WHEN zif_abapgit_git_definitions=>c_chmod-submodule.
+              CONTINUE.
+            WHEN OTHERS.
+              zcx_abapgit_ortec_git=>raise( |Tree { <ls_tree_object>-sha1 } contains unknown chmod { <ls_node>-chmod }| ).
+          ENDCASE.
+        ENDLOOP.
+      ENDLOOP.
+
+      lt_current_trees = lt_next_trees.
+    ENDWHILE.
+
   ENDMETHOD.
 
 
