@@ -1,12 +1,44 @@
 # Variant B Package B — B2+B3 checkpoint handoff
 
-Status: `IMPLEMENTED_PENDING_SAP_VALIDATION`
+Status: `SAP_VALIDATED_COMPLETE`
 
 ## Baseline
 
 - Continues from B1 `SAP_VALIDATED_COMPLETE`, HEAD `85533762168fd2509ca469acd79c75b8e8b62279`.
 - Checkpoint plan: `B2_PLUS_B3` combined (per approved design §9 — B2 has no
   independent productive caller).
+- Implementation commit: `99e20f8d`.
+- SAP validation fix commit: `fc06f7f62218d6ce45e4ae5de1c709b4b39477ab`
+  (pushed to `origin/ortec/abapgit_1_133-opt-rework`).
+
+## SAP validation fix commit (`fc06f7f6`)
+
+Michael's own IT8 cycle required one follow-up fix commit before ABAP Unit/ATC passed:
+
+- Added `zcl_abapgit_ortec_cold_init.clas.locals_imp.abap` with
+  `CLASS ltcl_cold_init DEFINITION DEFERRED.` — the main class's
+  `LOCAL FRIENDS ltcl_cold_init` statement requires a forward declaration in
+  the class pool's locals-implementation include to resolve; this was missing
+  from the original implementation.
+- Moved the `GET_TIP_BLOB_SHA1S` unit tests out of the shared
+  `zcl_abapgit_ortec_git_tests.clas.testclasses.abap` into a dedicated
+  `zcl_abapgit_ortec_obj_store.clas.testclasses.abap` (own class-local test
+  class, matching the `zcl_abapgit_ortec_cold_init` pattern instead of the
+  older shared-test-class convention).
+- Changed `zcl_abapgit_ortec_obj_store`'s `mt_cache` internal table from
+  `HASHED` to `SORTED` to avoid a possible sequential read on partial-key
+  access (a `SORTED` table degrades to a binary search on a key prefix;
+  `HASHED` requires the full key).
+
+No further test-scenario or method-signature changes were needed — all 22
+new tests from this checkpoint passed once the friend-declaration and
+test-class-location fixes landed.
+
+## Validation
+
+- IT8 import and activation: `PASS`
+- ABAP Unit (new + full regression suite): `PASS`
+- Productive ATC: `PASS`
 
 ## Implemented
 
@@ -22,8 +54,9 @@ Status: `IMPLEMENTED_PENDING_SAP_VALIDATION`
 
 ## Tests added
 
-- `zcl_abapgit_ortec_git_tests.clas.testclasses.abap` (`ltcl_obj_store`): 11
-  new `TIP_BLOBS_*` tests for `GET_TIP_BLOB_SHA1S` — single root, nested
+- `zcl_abapgit_ortec_obj_store.clas.testclasses.abap` (`ltcl_obj_store`,
+  relocated here from the shared `zcl_abapgit_ortec_git_tests` class by the
+  fix commit): 11 new `TIP_BLOBS_*` tests for `GET_TIP_BLOB_SHA1S` — single root, nested
   dirs, dedup-tree-once, dedup-blob-once, missing-tree raises, non-READY-tree
   raises, wrong-type-tree raises, no-payload-read proof, empty-blob valid,
   >1000-wide frontier chunking, no graph/snapshot certificate side effect.
@@ -73,7 +106,6 @@ justification — not a DESIGN_GATE-triggering change.
 
 ## Next action
 
-- Owner-executed SAP validation (IT8 import, activation, ABAP Unit, ATC) —
-  `SAP_VALIDATION=PENDING`. Do not claim PASS before owner evidence.
-- On PASS: update `.memory/state.md` Package B status to
-  `B2+B3: SAP_VALIDATED_COMPLETE` and start Package C planning.
+- Package B (B0+B1+B2+B3) is fully `SAP_VALIDATED_COMPLETE`. Start Package C
+  (combined Slices 5+6) planning from validated HEAD
+  `fc06f7f62218d6ce45e4ae5de1c709b4b39477ab`.

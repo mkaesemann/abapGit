@@ -6,9 +6,11 @@
 
 ## Validated baseline
 
-- Current validated HEAD: `85533762168fd2509ca469acd79c75b8e8b62279`
+- Current validated HEAD: `fc06f7f62218d6ce45e4ae5de1c709b4b39477ab`
 - B1 implementation commit: `a94f08dad597c01d130f72b4ef3037a48f023111`
 - B1 exception-contract fix: `85533762168fd2509ca469acd79c75b8e8b62279`
+- B2+B3 implementation commit: `99e20f8d`
+- B2+B3 SAP validation fix commit: `fc06f7f62218d6ce45e4ae5de1c709b4b39477ab` (pushed, on `origin/ortec/abapgit_1_133-opt-rework`)
 
 ## Completed work
 
@@ -18,7 +20,7 @@
 - Slice 2C / Package A: SAP_VALIDATED_COMPLETE
 - Package B B0: APPROVED_WITH_RESOLVED_REVISIONS
 - Package B B1: SAP_VALIDATED_COMPLETE
-- Package B B2+B3: IMPLEMENTED_PENDING_SAP_VALIDATION
+- Package B B2+B3: SAP_VALIDATED_COMPLETE
 
 ## Package B status
 
@@ -36,7 +38,8 @@
 ## Current phase
 
 - Current phase: Package B B2+B3 — bounded selected-tip blob discovery and selected snapshot materialization
-- Status: implemented, `get_errors`-clean, self-performed perf audit APPROVE; `SAP_VALIDATION=PENDING` (owner-executed IT8/ABAP-Unit/ATC not yet run)
+- Status: `SAP_VALIDATED_COMPLETE` — owner-executed IT8 import/ABAP Unit/ATC passed after one fix commit
+- Fix commit `fc06f7f62218d6ce45e4ae5de1c709b4b39477ab`: corrected `ltcl_cold_init` test-class friend declaration (added `zcl_abapgit_ortec_cold_init.clas.locals_imp.abap` with `CLASS ltcl_cold_init DEFINITION DEFERRED.` so the main class's `LOCAL FRIENDS` statement resolves); moved `obj_store` unit tests out of the shared `zcl_abapgit_ortec_git_tests` class into a dedicated `zcl_abapgit_ortec_obj_store.clas.testclasses.abap`; changed `zcl_abapgit_ortec_obj_store`'s `mt_cache` internal table from `HASHED` to `SORTED` to avoid a possible sequential read on partial-key access.
 - Previous checkpoint: Package B B1 — SAP_VALIDATED_COMPLETE
 - Checkpoint artifact: `.memory/handoffs/variant-b-package-b-b2b3-checkpoint.md`
 
@@ -92,13 +95,14 @@
 
 ## Remaining roadmap
 
-- Package B B2+B3: current work
+- Package B B2+B3: SAP_VALIDATED_COMPLETE — no further action
 - Package C: combined Slices 5+6
 - Package D: shared design for Slices 7+8, separate D1 and D2 implementation checkpoints
 - Package E: Slice 9 cleanup
 
 ## Next action
 
-- Await Michael's owner-executed SAP validation (IT8 import, activation,
-  ABAP Unit, ATC) for the B2+B3 checkpoint commit. On PASS, mark Package B
-  B2+B3 `SAP_VALIDATED_COMPLETE` and start Package C planning.
+- Package B (B0+B1+B2+B3) is fully SAP_VALIDATED_COMPLETE. Start Package C
+  (combined Slices 5+6: productive branch orchestration and final have
+  policy) planning in a new session from validated HEAD
+  `fc06f7f62218d6ce45e4ae5de1c709b4b39477ab`.
