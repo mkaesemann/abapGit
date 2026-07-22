@@ -271,6 +271,32 @@ CLASS zcl_abapgit_ortec_fastpath DEFINITION
       IMPORTING iv_url        TYPE string
       RETURNING VALUE(rv_key) TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key.
 
+    "! Package C C2: certification lifecycle extracted from PERSIST_PULL_RESULT
+    "! so it is directly unit-testable without the URL-keyed
+    "! IS_ACTIVE_FOR_REPO switch (backed by a shared, singleton, XML-serialized
+    "! user settings persistence object with its own uncontrolled COMMIT WORK
+    "! AND WAIT - unsafe/impractical to flip from a unit test; see
+    "! zcl_abapgit_persistence_ortec=>set_repo_use_cache/update_repo_config).
+    "! Never called with an unresolved/blank iv_repo_key - PERSIST_PULL_RESULT
+    "! already guarantees that before calling this method.
+    "! Idempotent-safe: begin_attempt/mark_graph_complete/mark_full_complete
+    "! never downgrade an existing, higher certification level.
+    "! @parameter iv_repo_key |
+    "! Repository key (already resolved and non-initial)
+    "! @parameter iv_commit |
+    "! Fetched commit SHA1 to certify
+    "! @parameter iv_branch_name |
+    "! Branch whose materialized pointer is published on full completeness
+    "! @raising zcx_abapgit_ortec_git |
+    "! On a genuine technical/persistence failure (not on expected local
+    "! incompleteness, which is caught internally and simply skips
+    "! publication for this round)
+    CLASS-METHODS certify_fetched_commit
+      IMPORTING iv_repo_key    TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
+                iv_commit      TYPE zif_abapgit_git_definitions=>ty_sha1
+                iv_branch_name TYPE string
+      RAISING   zcx_abapgit_ortec_git.
+
     CLASS-METHODS upload_pack
       IMPORTING
         io_client       TYPE REF TO zcl_abapgit_http_client
@@ -1555,20 +1581,85 @@ METHOD upload_pack.
       " (bypassing store_object/store_objects which call invalidate_cache).
       zcl_abapgit_ortec_obj_store=>invalidate_cache( ).
     ENDIF.
+
+    " Package C C2: certification lifecycle - replaces the pre-Package-C raw
+    " ZAOG_COMMIT_HIST INSERT, which never set hist_level/snap_state (see
+    " .memory/logs/variant_b_package_c_design.md §0). This method is reached
+    " ONLY by the INCREMENTAL_UPDATE routing branch of
+    " zcl_abapgit_ortec_porcelain=>pull_by_branch/pull_by_commit -
+    " WARM_UNCHANGED and COLD_BRANCH are already fully (re-)certified by
+    " their own respective paths (local reconstruction / Package B
+    " zcl_abapgit_ortec_cold_init) before this method would ever run.
+    " Extracted into CERTIFY_FETCHED_COMMIT for direct unit-testability
+    " (see that method's doc comment for why it cannot be tested through
+    " this public entry point).
+    certify_fetched_commit(
+      iv_repo_key    = lv_repo_key
+      iv_commit      = iv_commit
+      iv_branch_name = iv_branch_name ).
+
+    " Bookkeeping only (deepen level / last-fetch pointer for the thin ->
+    " self-contained -> recovery cascade's own depth heuristics) - never a
+    " completeness/have-certification signal. Kept unconditional so a
+    " round that only achieved GRAPH_COMPLETE (or nothing) still records
+    " that a fetch attempt happened.
     zcl_abapgit_ortec_repo_state=>update_after_fetch(
         iv_repo_key    = lv_repo_key
         iv_branch_name = iv_branch_name
         iv_url         = iv_url
         iv_commit      = iv_commit
         iv_deepen      = iv_deepen_used ).
-    " Record completed fetch in commit history (for multi-branch have negotiation)
-    DATA ls_hist TYPE zaog_commit_hist.
-    ls_hist-repo_key    = lv_repo_key.
-    ls_hist-commit_sha1 = iv_commit.
-    ls_hist-branch_name = iv_branch_name.
-    ls_hist-fetched_at  = lv_ts.
-    INSERT zaog_commit_hist FROM ls_hist. "#EC SUBRC_OK - duplicate key = already recorded
+
     COMMIT WORK.
+  ENDMETHOD.
+
+  METHOD certify_fetched_commit.
+    DATA(lv_attempt_id) = zcl_abapgit_ortec_mat_state=>begin_attempt(
+      iv_repo_key = iv_repo_key
+      iv_commit   = iv_commit ).
+
+    DATA(lv_graph_complete) = abap_false.
+    TRY.
+        zcl_abapgit_ortec_obj_store=>verify_tree_closure(
+          iv_repo_key = iv_repo_key
+          iv_commit   = iv_commit ).
+        lv_graph_complete = abap_true.
+      CATCH zcx_abapgit_ortec_git.
+        " Expected, non-exceptional local incompleteness (e.g. a thin fetch
+        " whose delta bases/trees are not all locally resident yet) - no
+        " certificate is published this round. Already-persisted objects
+        " and the caller's bookkeeping call remain unaffected.
+    ENDTRY.
+
+    IF lv_graph_complete = abap_false.
+      RETURN.
+    ENDIF.
+
+    zcl_abapgit_ortec_mat_state=>mark_graph_complete(
+      iv_repo_key   = iv_repo_key
+      iv_commit     = iv_commit
+      iv_attempt_id = lv_attempt_id ).
+
+    DATA(lt_tip_blob_sha1s) = zcl_abapgit_ortec_obj_store=>get_tip_blob_sha1s(
+      iv_repo_key = iv_repo_key
+      iv_commit   = iv_commit ).
+    DATA(lt_missing_sha1s) = zcl_abapgit_ortec_obj_store=>get_missing_sha1s(
+      iv_repo_key = iv_repo_key
+      it_sha1s    = lt_tip_blob_sha1s ).
+
+    IF lt_missing_sha1s IS NOT INITIAL.
+      RETURN.
+    ENDIF.
+
+    zcl_abapgit_ortec_mat_state=>mark_full_complete(
+      iv_repo_key   = iv_repo_key
+      iv_commit     = iv_commit
+      iv_attempt_id = lv_attempt_id ).
+    zcl_abapgit_ortec_mat_state=>publish_snapshot_complete(
+      iv_repo_key    = iv_repo_key
+      iv_branch_name = iv_branch_name
+      iv_commit      = iv_commit
+      iv_attempt_id  = lv_attempt_id ).
   ENDMETHOD.
 
   METHOD resolve_repo_key.

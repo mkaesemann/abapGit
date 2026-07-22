@@ -179,7 +179,127 @@ CLASS zcl_abapgit_ortec_porcelain IMPLEMENTATION.
     DATA lx_pull           TYPE REF TO zcx_abapgit_exception.
     DATA lv_pull_error     TYPE string.
     DATA lv_deepen_used    TYPE i.
+    DATA lv_ortec_active   TYPE abap_bool.
+    DATA lv_target_commit  TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_op_class       TYPE zcl_abapgit_ortec_have_policy=>ty_op_class.
+    DATA lv_backfilled     TYPE abap_bool.
+    DATA ls_seed_object    TYPE zif_abapgit_definitions=>ty_object.
+    DATA lt_seed_objects   TYPE zif_abapgit_definitions=>ty_objects_tt.
 
+    lv_ortec_active = zcl_abapgit_ortec_git_switch=>is_active_for_repo( iv_url ).
+
+    IF lv_ortec_active = abap_true.
+      lv_ortec_repo_key = zcl_abapgit_ortec_repo_state=>get_or_create_repo_key_for_url( iv_url ).
+    ELSE.
+      lv_ortec_repo_key = zcl_abapgit_ortec_repo_state=>get_repo_key_for_url( iv_url ).
+    ENDIF.
+
+    " Package C C2 (design §1/§2/§3): classify BEFORE any upload-pack POST,
+    " using the advertised remote branch tip resolved via one lightweight
+    " info/refs GET - disclosed-but-accepted redundant with the cascade's
+    " own GET below (design §2). ORTEC-inactive or never-seen repos fall
+    " through with the default INCREMENTAL_UPDATE classification, which is
+    " exactly this method's unconditional pre-C2 behavior - standard
+    " abapGit behavior is unchanged when ORTEC is disabled.
+    lv_op_class = zcl_abapgit_ortec_have_policy=>cs_op_class-incremental_update.
+
+    IF lv_ortec_active = abap_true AND lv_ortec_repo_key IS NOT INITIAL.
+      lv_target_commit = zcl_abapgit_git_transport=>branches( iv_url )->find_by_name( iv_branch_name )-sha1.
+
+      IF lv_target_commit IS NOT INITIAL.
+        lv_op_class = zcl_abapgit_ortec_have_policy=>classify_operation(
+          iv_repo_key      = lv_ortec_repo_key
+          iv_target_commit = lv_target_commit ).
+
+        IF lv_op_class = zcl_abapgit_ortec_have_policy=>cs_op_class-cold_branch.
+          " At most one opportunistic, bounded, local-only backfill attempt
+          " (design §3a) - never retried within the same call.
+          TRY.
+              lv_backfilled = zcl_abapgit_ortec_have_policy=>try_backfill_target(
+                iv_repo_key      = lv_ortec_repo_key
+                iv_target_commit = lv_target_commit
+                iv_branch_name   = iv_branch_name ).
+            CATCH zcx_abapgit_ortec_git INTO DATA(lx_backfill).
+              zcx_abapgit_exception=>raise_with_text( lx_backfill ).
+          ENDTRY.
+
+          IF lv_backfilled = abap_true.
+            lv_op_class = zcl_abapgit_ortec_have_policy=>classify_operation(
+              iv_repo_key      = lv_ortec_repo_key
+              iv_target_commit = lv_target_commit ).
+          ENDIF.
+        ENDIF.
+      ENDIF.
+    ENDIF.
+
+    CASE lv_op_class.
+      WHEN zcl_abapgit_ortec_have_policy=>cs_op_class-warm_unchanged.
+        " Design §3 rule 1/§4: already SNAPSHOT_COMPLETE locally - no
+        " upload-pack POST, no Package B network call, no re-certification.
+        " Seed the existing PULL/WALK/WALK_TREE reconstruction with exactly
+        " one bounded commit-object read; WALK_TREE/WALK's own bulk
+        " PREWARM/FETCH_BLOBS_BULK calls (inside PULL) avoid any
+        " repository-wide or per-object read for the reachable set.
+        TRY.
+            ls_seed_object = zcl_abapgit_ortec_obj_store=>get_object(
+              iv_repo_key = lv_ortec_repo_key
+              iv_sha1     = lv_target_commit ).
+          CATCH zcx_abapgit_ortec_git INTO DATA(lx_warm_seed).
+            zcx_abapgit_exception=>raise_with_text( lx_warm_seed ).
+        ENDTRY.
+        CLEAR lt_seed_objects.
+        APPEND ls_seed_object TO lt_seed_objects.
+
+        rs_result-commit  = lv_target_commit.
+        rs_result-objects = lt_seed_objects.
+        rs_result-files   = pull(
+                                iv_commit   = lv_target_commit
+                                it_objects  = lt_seed_objects
+                                iv_repo_key = lv_ortec_repo_key
+                                iv_url      = iv_pull_url ).
+        RETURN.
+
+      WHEN zcl_abapgit_ortec_have_policy=>cs_op_class-cold_branch.
+        " Design §4/§6: still cold after the single backfill attempt above
+        " - route through the validated Package B cold-graph + tip-snapshot
+        " APIs (each verifies and certifies/commits its own work; no
+        " duplicate certification is performed here), then reconstruct
+        " locally exactly like WARM_UNCHANGED - no separate cold
+        " reconstruction implementation.
+        TRY.
+            zcl_abapgit_ortec_cold_init=>acquire_blobless_graph(
+              iv_url        = iv_url
+              iv_repo_key   = lv_ortec_repo_key
+              iv_tip_commit = lv_target_commit ).
+            zcl_abapgit_ortec_cold_init=>materialize_tip_snapshot(
+              iv_url         = iv_url
+              iv_repo_key    = lv_ortec_repo_key
+              iv_branch_name = iv_branch_name
+              iv_tip_commit  = lv_target_commit ).
+            ls_seed_object = zcl_abapgit_ortec_obj_store=>get_object(
+              iv_repo_key = lv_ortec_repo_key
+              iv_sha1     = lv_target_commit ).
+          CATCH zcx_abapgit_ortec_git INTO DATA(lx_cold).
+            zcx_abapgit_exception=>raise_with_text( lx_cold ).
+        ENDTRY.
+        CLEAR lt_seed_objects.
+        APPEND ls_seed_object TO lt_seed_objects.
+
+        rs_result-commit  = lv_target_commit.
+        rs_result-objects = lt_seed_objects.
+        rs_result-files   = pull(
+                                iv_commit   = lv_target_commit
+                                it_objects  = lt_seed_objects
+                                iv_repo_key = lv_ortec_repo_key
+                                iv_url      = iv_pull_url ).
+        RETURN.
+    ENDCASE.
+
+    " INCREMENTAL_UPDATE (including the ORTEC-inactive/no-repo-key
+    " fallback): unchanged thin -> self-contained -> at most one recovery
+    " cascade. zcl_abapgit_git_transport=>upload_pack_by_branch routes to
+    " zcl_abapgit_ortec_fastpath=>upload_pack_by_branch when ORTEC is
+    " active, which already applies C1's certified-have policy.
     zcl_abapgit_git_transport=>upload_pack_by_branch(
       EXPORTING
         iv_url          = iv_url
@@ -189,12 +309,6 @@ CLASS zcl_abapgit_ortec_porcelain IMPLEMENTATION.
         et_objects      = rs_result-objects
         ev_branch       = rs_result-commit
         ev_deepen_used  = lv_deepen_used ).
-
-    IF zcl_abapgit_ortec_git_switch=>is_active_for_repo( iv_url ) = abap_true.
-      lv_ortec_repo_key = zcl_abapgit_ortec_repo_state=>get_or_create_repo_key_for_url( iv_url ).
-    ELSE.
-      lv_ortec_repo_key = zcl_abapgit_ortec_repo_state=>get_repo_key_for_url( iv_url ).
-    ENDIF.
 
     TRY.
         rs_result-files = pull(
@@ -260,7 +374,10 @@ CLASS zcl_abapgit_ortec_porcelain IMPLEMENTATION.
     " that predates this pull - the exact cause of a live bug (2026-07-17)
     " where freshly-pulled, unchanged classes were wrongly shown with a
     " "deleted in remote" status badge, even though a direct diff correctly
-    " reported no differences.
+    " reported no differences. Package C C2: this call now also runs the
+    " full certification lifecycle (see
+    " zcl_abapgit_ortec_fastpath=>persist_pull_result) - reached only by
+    " this INCREMENTAL_UPDATE branch, never by WARM_UNCHANGED/COLD_BRANCH.
     TRY.
         zcl_abapgit_ortec_fastpath=>persist_pull_result(
           iv_url         = iv_url

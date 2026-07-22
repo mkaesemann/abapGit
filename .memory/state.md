@@ -6,7 +6,7 @@
 
 ### Validated baseline
 
-- Current repository HEAD:  `b3701afbc812e5379b886fdc6a1e3db134578012`
+- Current repository HEAD:  `39e7ae083f0700d600657c2806ca38fc3610019b`
 - Current SAP-validated productive baseline:  `b3701afbc812e5379b886fdc6a1e3db134578012`
 - Package C C1 implementation commit:  `aeac812652da4d18d46e0ee4aad742baaa179e80`
 - Package C C1 SAP/ATC fix commit:  `b3701afbc812e5379b886fdc6a1e3db134578012`
@@ -23,6 +23,7 @@
 - Package B B2+B3: SAP_VALIDATED_COMPLETE
 - Package C C0: `APPROVED_WITH_RESOLVED_REVISIONS`
 - Package C C1: `SAP_VALIDATED_COMPLETE`
+- Package C C2: `READY_FOR_SAP_VALIDATION` (self/static validation complete)
 
 ## Package B status
 
@@ -41,7 +42,7 @@
 
 ### Current phase
 
-- Current phase:  `Package C C2 — productive branch orchestration and certification`
+- Current phase:  `Package C C2 — awaiting owner SAP validation`
 - Previous checkpoint:  `Package C C1 — SAP_VALIDATED_COMPLETE`
 - Validated C1 HEAD:  `b3701afbc812e5379b886fdc6a1e3db134578012`
 - C1 implementation commit:  `aeac812652da4d18d46e0ee4aad742baaa179e80`
@@ -55,7 +56,12 @@
 - Relevant bundled regression ABAP Unit:  `PASS`
 - Productive C1 ATC:  `PASS`
 - Remaining C1 blockers:  none
-- Checkpoint plan:  `C1_THEN_C2`
+- C2 implementation commit:  see next action (commit pending)
+- C2 handoff:  `.memory/handoffs/variant-b-package-c-c2-checkpoint.md`
+- C2 static checks (get_errors, method-name length):  `PASS`
+- C2 self-performed performance gate:  `PASS` (dedicated scan agent unavailable this turn)
+- C2 SAP validation:  `PENDING` (owner)
+- Checkpoint plan:  `C1_THEN_C2_THEN_D`
 
 ### Current objective
 
@@ -84,6 +90,7 @@ Package C C2:
 - C1 implementation audit:  `.memory/reviews/implementation_audit_variant_b_package_c_c1.md`
 - C1 performance scan:  `.memory/reviews/performance_scan_variant_b_package_c_c1.md`
 - C1 regression:  `.memory/logs/regression_variant_b_package_c_c1.md`
+- C2 handoff:  `.memory/handoffs/variant-b-package-c-c2-checkpoint.md`
 - Package B final handoff:  `.memory/handoffs/variant-b-package-b-b2b3-checkpoint.md`
 
 ## Binding constraints
@@ -115,13 +122,17 @@ Package C C2:
 
 ### Remaining roadmap
 
-- Package C C2:  current work — productive orchestration and certification lifecycle
+- Package C C2:  implementation complete, self/static-validated; owner SAP validation pending
 - Package D:  shared design for Slices 7+8, followed by separate D1 and D2 implementation checkpoints
 - Package E:  Slice 9 validated legacy-code cleanup
 
 ### Next action
 
-Start Package C C2 in a new orchestrator chat from SAP-validated C1 HEAD
-`b3701afbc812e5379b886fdc6a1e3db134578012`.
+Delegate a selective C2 checkpoint commit (exact approved file list only), then
+hand off to `ortec-abapgit-regression`, then stop for owner-executed IT8
+import/ABAP Unit/ATC validation. See
+`.memory/handoffs/variant-b-package-c-c2-checkpoint.md` for full scope,
+invariant matrix, and the explicit test-coverage-decision rationale.
 
-Do not repeat C0 or C1. Do not start Package D.
+Do not repeat C0, C1, or re-litigate C2 scope. Do not start Package D until
+C2 is owner-SAP-validated.
