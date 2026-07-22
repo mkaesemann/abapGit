@@ -6,7 +6,8 @@
 
 ## Validated baseline
 
-- Current validated HEAD: `fc06f7f62218d6ce45e4ae5de1c709b4b39477ab`
+- Validated productive baseline: `fc06f7f62218d6ce45e4ae5de1c709b4b39477ab`
+- Current repository HEAD: `cf3d5cb87ca4eec4e68b7975df6fc127a8c5abc2`
 - B1 implementation commit: `a94f08dad597c01d130f72b4ef3037a48f023111`
 - B1 exception-contract fix: `85533762168fd2509ca469acd79c75b8e8b62279`
 - B2+B3 implementation commit: `99e20f8d`
@@ -32,39 +33,52 @@
 - Performance audit verdict: APPROVE
 - Performance gate: CLOSED
 - Original missing-tree finding: RETRACTED
-- Remaining B1 blockers: none
-- No productive caller is wired yet.
+- Package B final productive validation: PASS
+- Package B blockers: none
+- Package B final handoff:
+  `.memory/handoffs/variant-b-package-b-b2b3-checkpoint.md`
 
-## Current phase
+### Current phase
 
-- Current phase: Package B B2+B3 — bounded selected-tip blob discovery and selected snapshot materialization
-- Status: `SAP_VALIDATED_COMPLETE` — owner-executed IT8 import/ABAP Unit/ATC passed after one fix commit
-- Fix commit `fc06f7f62218d6ce45e4ae5de1c709b4b39477ab`: corrected `ltcl_cold_init` test-class friend declaration (added `zcl_abapgit_ortec_cold_init.clas.locals_imp.abap` with `CLASS ltcl_cold_init DEFINITION DEFERRED.` so the main class's `LOCAL FRIENDS` statement resolves); moved `obj_store` unit tests out of the shared `zcl_abapgit_ortec_git_tests` class into a dedicated `zcl_abapgit_ortec_obj_store.clas.testclasses.abap`; changed `zcl_abapgit_ortec_obj_store`'s `mt_cache` internal table from `HASHED` to `SORTED` to avoid a possible sequential read on partial-key access.
-- Previous checkpoint: Package B B1 — SAP_VALIDATED_COMPLETE
-- Checkpoint artifact: `.memory/handoffs/variant-b-package-b-b2b3-checkpoint.md`
+- Current phase: `Package C C1 - IMPLEMENTED_PENDING_SAP_VALIDATION`
+- Previous phase: `Package C C0 - APPROVED_WITH_RESOLVED_REVISIONS`
+- Previous package: `Package B - SAP_VALIDATED_COMPLETE`
+- C1 handoff: `.memory/handoffs/variant-b-package-c-c1-checkpoint.md`
+- C1 implementation audit: PASS, 0 blocking — `.memory/reviews/implementation_audit_variant_b_package_c_c1.md`
+- C1 performance scan: PASS, 0 blocking — `.memory/reviews/performance_scan_variant_b_package_c_c1.md`
+- C1 regression: PASS (after 1 orchestrator-corrected false positive) — `.memory/logs/regression_variant_b_package_c_c1.md`
+- Validated productive baseline:
+  `fc06f7f62218d6ce45e4ae5de1c709b4b39477ab`
+- Current repository HEAD:
+  `cf3d5cb87ca4eec4e68b7975df6fc127a8c5abc2`
+- C0 design: `.memory/logs/variant_b_package_c_design.md`
+- C0 correctness review: APPROVE_WITH_MINOR_REVISIONS (after 1 revision cycle)
+  — `.memory/reviews/variant_b_package_c_correctness_review.md`
+- C0 protocol review: APPROVE_WITH_MINOR_REVISIONS —
+  `.memory/reviews/variant_b_package_c_protocol_review.md`
+- C0 performance DESIGN_GATE: APPROVE_WITH_MINOR_REVISIONS —
+  `.memory/reviews/performance_design_variant_b_package_c.md`
+- Checkpoint plan: `C1_THEN_C2`
+- Central defect found and designed-for: `persist_pull_result`'s raw
+  `ZAOG_COMMIT_HIST` INSERT never sets `HIST_LEVEL`/`SNAP_STATE`, so
+  `get_verified_have_commits` returns empty in production today — every
+  incremental fetch after the first is effectively haves-less.
 
-## Current objective
+### Current objective
 
-- Iterative bounded selected-tip tree traversal
-- Unique selected-blob SHA discovery without payload reads
-- Bulk READY-presence checks
-- Bounded and deduplicated missing-blob batches
-- `MATERIALIZE_BLOBS` request use
-- Final selected snapshot verification
-- Snapshot-complete publication only after successful verification
+- Productive warm, incremental, cold, and recovery branch orchestration.
+- Certificate-based operation classification.
+- Bounded deterministic certified-have selection.
+- Migration of approved productive branch pull/switch callers.
+- Reuse of validated Package B APIs.
+- Publication only after graph and snapshot verification.
 
 ## Active links
 
 - Owner specification: `.github/prompts/variant-b.prompt.md`
 - Package B design: `.memory/logs/variant_b_package_b_design.md`
-- Package B protocol review: `.memory/reviews/variant_b_package_b_protocol_review.md`
-- Package B performance design gate: `.memory/reviews/performance_design_variant_b_package_b.md`
 - B1 handoff: `.memory/handoffs/variant-b-package-b-b1-checkpoint.md`
-- B1 performance audit: `.memory/reviews/perf_audit_variant_b_b1.md`
-- B1 regression: `.memory/logs/regression_variant_b_b1.md`
-- B2+B3 handoff: `.memory/handoffs/variant-b-package-b-b2b3-checkpoint.md`
-- B2+B3 performance audit: `.memory/reviews/perf_audit_variant_b_b2b3.md`
-- B2+B3 regression: `.memory/logs/regression_variant_b_b2b3.md`
+- B2+B3 final handoff: `.memory/handoffs/variant-b-package-b-b2b3-checkpoint.md`
 
 ## Binding constraints
 
@@ -100,9 +114,17 @@
 - Package D: shared design for Slices 7+8, separate D1 and D2 implementation checkpoints
 - Package E: Slice 9 cleanup
 
-## Next action
+  ### Next action
 
-- Package B (B0+B1+B2+B3) is fully SAP_VALIDATED_COMPLETE. Start Package C
-  (combined Slices 5+6: productive branch orchestration and final have
-  policy) planning in a new session from validated HEAD
-  `fc06f7f62218d6ce45e4ae5de1c709b4b39477ab`.
+- Package C C1 is implemented (new `ZCL_ABAPGIT_ORTEC_HAVE_POLICY` class +
+  `upload_pack` call-site migration), all static/audit gates PASS. Awaiting
+  owner-executed IT8 import/activation/ABAP Unit/ATC. Do NOT start C2
+  (porcelain routing + §6 certification lifecycle + cold-branch wiring)
+  until C1 is `SAP_VALIDATED_COMPLETE`. See
+  `.memory/handoffs/variant-b-package-c-c1-checkpoint.md` for full details.
+
+- Performance scan for Package C C1 (static, new/changed files only): PASS.
+  Artifact: `.memory/reviews/perf_scan_variant_b_package_c_c1.md`.
+  Verified invariants: no per-object SQL inside loops, one bulk SELECT in
+  `get_certified_haves`, no additional per-request SQL introduced in
+  `upload_pack`, and no full-table scan on `ZAOG_COMMIT_HIST`.

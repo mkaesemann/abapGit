@@ -1079,6 +1079,7 @@ METHOD upload_pack.
     DATA lv_xstring TYPE xstring.
     DATA lv_pack    TYPE xstring.
     DATA lt_ortec_haves TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lv_have_repo_key TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key.
 
     DATA lo_fetch_timer   TYPE REF TO zcl_abapgit_timer.
     DATA lv_fetch_duration TYPE string.
@@ -1092,37 +1093,38 @@ METHOD upload_pack.
     " Resolve have commits BEFORE assembling the want/capability line, so the
     " capability string can correctly reflect whether thin-pack/ofs-delta are
     " safe to advertise. Both INCREMENTAL_THIN and INCREMENTAL_SELF_CONTAINED
-    " use only VERIFIED-COMPLETE haves (certified via
-    " zcl_abapgit_ortec_mat_state=>is_graph_have_eligible, see
-    " zcl_abapgit_ortec_fetch_neg=>get_verified_have_commits): advertising ANY
+    " use only certified (HIST_LEVEL = FULL_COMPLETE) haves, sourced from
+    " ZCL_ABAPGIT_ORTEC_HAVE_POLICY=>GET_CERTIFIED_HAVES (Variant B Package C
+    " C1 - .memory/logs/variant_b_package_c_design.md §5): advertising ANY
     " have that turns out to be incomplete lets the server omit/delta-encode
     " objects against content we don't actually have, which is exactly the
     " failure class Phase 1 of the architecture hardening plan (.memory/
     " state.md, 2026-07-20) exists to close - the unverified
     " zcl_abapgit_ortec_fetch_neg=>get_have_commits must not be used for live
-    " negotiation for either mode.
+    " negotiation for either mode. GET_CERTIFIED_HAVES is a single bulk SQL
+    " read against ZAOG_COMMIT_HIST scoped by repo_key (no per-candidate SQL,
+    " no object-store payload read, no graph walk - see its own docstring);
+    " ZCL_ABAPGIT_ORTEC_FETCH_NEG=>GET_VERIFIED_HAVE_COMMITS/GET_HAVE_COMMITS/
+    " COLLECT_ANCESTOR_HAVES are no longer called from this method.
     " RECOVERY_BRANCH_FULL and MATERIALIZE_BLOBS never negotiate haves
     " (lt_ortec_haves stays empty, per the Variant B mode table): used by the
     " thin+non-thin cascade's last-resort retry when a prior attempt
     " discovered the server's "nothing new" response could not actually be
     " trusted against the local cache - offering the same haves again would
     " likely reproduce the identical false "nothing new" outcome.
-    " F-2C-003: get_verified_have_commits is no longer wrapped in a blanket
-    " empty CATCH here. A valid "no candidates yet" outcome already returns
-    " an empty table (not an exception, see get_have_commits/
-    " get_verified_have_commits's own RETURN-on-no-state guards) - only a
-    " genuine technical failure while resolving/verifying haves raises
-    " zcx_abapgit_ortec_git, and upload_pack already declares
-    " RAISING zcx_abapgit_ortec_git, so such a failure now correctly
-    " propagates to this method's callers (upload_pack_by_branch/
-    " upload_pack_by_commit/complete_missing_object), which already catch
-    " zcx_abapgit_ortec_git as part of their existing retry/error handling -
-    " no new catch or repository-wide fallback is introduced.
+    " GET_CERTIFIED_HAVES is not wrapped in a blanket empty CATCH here: a
+    " valid "no candidates yet" outcome already returns an empty table (not
+    " an exception, see its own no-repo-key/no-row RETURN guards) - it also
+    " performs no per-candidate SQL, so there is no per-candidate technical
+    " failure to normalize either.
     IF iv_mode = zcl_abapgit_ortec_fetch_req=>cs_fetch_mode-incremental_thin
         OR iv_mode = zcl_abapgit_ortec_fetch_req=>cs_fetch_mode-incremental_self_contained.
-      lt_ortec_haves = zcl_abapgit_ortec_fetch_neg=>get_verified_have_commits(
-        iv_url         = iv_url
-        it_want_hashes = it_hashes ).
+      lv_have_repo_key = zcl_abapgit_ortec_repo_state=>get_repo_key_for_url( iv_url ).
+      IF lv_have_repo_key IS NOT INITIAL.
+        lt_ortec_haves = zcl_abapgit_ortec_have_policy=>get_certified_haves(
+          iv_repo_key    = lv_have_repo_key
+          it_want_hashes = it_hashes ).
+      ENDIF.
     ENDIF.
 
     DATA(ls_request) = zcl_abapgit_ortec_fetch_req=>build_request(
