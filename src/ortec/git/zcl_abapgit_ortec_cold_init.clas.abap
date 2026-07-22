@@ -13,8 +13,7 @@
 "! caller is wired to this class yet (Package C scope) - see the same
 "! precedent already established by Slice 2's zcl_abapgit_ortec_fetch_req.
 CLASS zcl_abapgit_ortec_cold_init DEFINITION
-  PUBLIC
-  FINAL
+  PUBLIC FINAL
   CREATE PUBLIC.
 
   PUBLIC SECTION.
@@ -49,22 +48,18 @@ CLASS zcl_abapgit_ortec_cold_init DEFINITION
     "! failure, incomplete tree closure, or persistence failure. No
     "! GRAPH_COMPLETE certificate is published unless every step succeeds.
     CLASS-METHODS acquire_blobless_graph
-      IMPORTING
-        iv_url        TYPE string
-        iv_repo_key   TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
-        iv_tip_commit TYPE zif_abapgit_git_definitions=>ty_sha1
-      RAISING
-        zcx_abapgit_ortec_git.
-
-  PRIVATE SECTION.
+      IMPORTING iv_url        TYPE string
+                iv_repo_key   TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
+                iv_tip_commit TYPE zif_abapgit_git_definitions=>ty_sha1
+      RAISING   zcx_abapgit_ortec_git.
 ENDCLASS.
 
 
 CLASS zcl_abapgit_ortec_cold_init IMPLEMENTATION.
-
   METHOD acquire_blobless_graph.
 
     DATA lt_headers     TYPE zcl_abapgit_http=>ty_headers.
+    DATA lv_attempt_id  TYPE zcl_abapgit_ortec_mat_state=>ty_attempt_id.
     DATA ls_header      LIKE LINE OF lt_headers.
     DATA lo_client      TYPE REF TO zcl_abapgit_http_client.
     DATA lv_ref_data    TYPE string.
@@ -72,9 +67,10 @@ CLASS zcl_abapgit_ortec_cold_init IMPLEMENTATION.
     DATA lt_want        TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
     DATA lv_response    TYPE xstring.
     DATA lv_pack        TYPE xstring.
+    " TODO: variable is assigned but never used (ABAP cleaner)
     DATA lt_shallow     TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    " TODO: variable is assigned but never used (ABAP cleaner)
     DATA lt_unshallow   TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
-    DATA lv_attempt_id  TYPE zcl_abapgit_ortec_mat_state=>ty_attempt_id.
 
     IF iv_repo_key IS INITIAL.
       zcx_abapgit_ortec_git=>raise( 'Cold-init requires a repository key' ).
@@ -92,49 +88,54 @@ CLASS zcl_abapgit_ortec_cold_init IMPLEMENTATION.
     zcl_abapgit_ortec_pack_stream=>reset_completion_budget( ).
 
     lv_attempt_id = zcl_abapgit_ortec_mat_state=>begin_attempt(
-      iv_repo_key = iv_repo_key
-      iv_commit   = iv_tip_commit ).
-
-    ls_header-key   = '~request_uri'.
-    ls_header-value = zcl_abapgit_url=>path_name( iv_url ) && |/info/refs?service=git-upload-pack|.
-    APPEND ls_header TO lt_headers.
-
-    lo_client = zcl_abapgit_http=>create_by_url(
-      iv_url     = iv_url
-      it_headers = lt_headers ).
-
-    lv_ref_data    = lo_client->get_cdata( ).
-    lv_server_caps = zcl_abapgit_ortec_fetch_req=>parse_capabilities( lv_ref_data ).
-
-    APPEND iv_tip_commit TO lt_want.
-
-    DATA(ls_request) = zcl_abapgit_ortec_fetch_req=>build_request(
-      iv_mode        = zcl_abapgit_ortec_fetch_req=>cs_fetch_mode-initial_branch_blobless
-      it_want_hashes = lt_want
-      iv_server_caps = lv_server_caps ).
-
-    lo_client->set_headers( iv_url = iv_url iv_service = 'upload' ).
+                        iv_repo_key = iv_repo_key
+                        iv_commit   = iv_tip_commit ).
 
     TRY.
-        lv_response = lo_client->send_receive_close(
-          zcl_abapgit_convert=>string_to_xstring_utf8( ls_request-buffer ) ).
+
+        ls_header-key   = '~request_uri'.
+        ls_header-value = |{ zcl_abapgit_url=>path_name( iv_url ) }/info/refs?service=git-upload-pack|.
+        APPEND ls_header TO lt_headers.
+
+        lo_client = zcl_abapgit_http=>create_by_url(
+                        iv_url     = iv_url
+                        it_headers = lt_headers ).
+
+        lv_ref_data    = lo_client->get_cdata( ).
+        lv_server_caps = zcl_abapgit_ortec_fetch_req=>parse_capabilities( lv_ref_data ).
+
+        APPEND iv_tip_commit TO lt_want.
+
+        DATA(ls_request) = zcl_abapgit_ortec_fetch_req=>build_request(
+                               iv_mode        = zcl_abapgit_ortec_fetch_req=>cs_fetch_mode-initial_branch_blobless
+                               it_want_hashes = lt_want
+                               iv_server_caps = lv_server_caps ).
+
+        lo_client->set_headers( iv_url = iv_url iv_service = 'upload' ).
+
+        lv_response = lo_client->send_receive_close( zcl_abapgit_convert=>string_to_xstring_utf8( ls_request-buffer ) ).
 
         " INV-B-12: memory-risk gate, checked on the single materialized
         " HTTP response XSTRING BEFORE any further parsing/decoding.
         IF xstrlen( lv_response ) > c_max_graph_response_bytes.
-          zcx_abapgit_ortec_git=>raise(
-            |Cold-init blobless response for { iv_tip_commit } exceeds the memory-risk | &&
-            |ceiling ({ xstrlen( lv_response ) } > { c_max_graph_response_bytes } bytes)| ).
+          zcx_abapgit_ortec_git=>raise( |Cold-init blobless response for { iv_tip_commit } exceeds the memory-risk | &&
+                                        |ceiling ({ xstrlen( lv_response ) } > { c_max_graph_response_bytes } bytes)| ).
         ENDIF.
 
         zcl_abapgit_ortec_fastpath=>parse(
-          IMPORTING ev_pack      = lv_pack
-                    et_shallow   = lt_shallow
-                    et_unshallow = lt_unshallow
-          CHANGING  cv_data      = lv_response ).
+          IMPORTING
+            ev_pack      = lv_pack
+            et_shallow   = lt_shallow
+            et_unshallow = lt_unshallow
+          CHANGING
+            cv_data      = lv_response ).
       CATCH zcx_abapgit_exception INTO DATA(lx_error).
-        zcx_abapgit_ortec_git=>raise(
-          |Cold-init blobless fetch for { iv_tip_commit } failed: { lx_error->get_text( ) }| ).
+
+        RAISE EXCEPTION NEW zcx_abapgit_ortec_git(
+                                iv_text  = |Cold-init blobless fetch for { iv_tip_commit } failed: | &&
+                                           |{ lx_error->get_text( ) }|
+                                previous = lx_error ).
+
     ENDTRY.
 
     IF lv_pack IS INITIAL OR zcl_abapgit_ortec_pack_dec=>peek_object_count( lv_pack ) = 0.
@@ -142,21 +143,20 @@ CLASS zcl_abapgit_ortec_cold_init IMPLEMENTATION.
     ENDIF.
 
     zcl_abapgit_ortec_pack_stream=>decode_streaming(
-      iv_data     = lv_pack
-      iv_repo_key = iv_repo_key
-      iv_url      = iv_url ).
+        iv_data     = lv_pack
+        iv_repo_key = iv_repo_key
+        iv_url      = iv_url ).
 
     zcl_abapgit_ortec_obj_store=>verify_tree_closure(
-      iv_repo_key = iv_repo_key
-      iv_commit   = iv_tip_commit ).
+        iv_repo_key = iv_repo_key
+        iv_commit   = iv_tip_commit ).
 
     zcl_abapgit_ortec_mat_state=>mark_graph_complete(
-      iv_repo_key   = iv_repo_key
-      iv_commit     = iv_tip_commit
-      iv_attempt_id = lv_attempt_id ).
+        iv_repo_key   = iv_repo_key
+        iv_commit     = iv_tip_commit
+        iv_attempt_id = lv_attempt_id ).
 
     COMMIT WORK.
 
   ENDMETHOD.
-
 ENDCLASS.
