@@ -431,36 +431,37 @@ CLASS zcl_abapgit_ortec_fastpath IMPLEMENTATION.
 
     APPEND iv_sha1 TO lt_hashes.
 
-    ls_header-key   = '~request_uri'.
-    ls_header-value = zcl_abapgit_url=>path_name( iv_url ) && |/info/refs?service=git-upload-pack|.
-    APPEND ls_header TO lt_headers.
-
-    " MATERIALIZE_BLOBS with a single-entry want list: no haves, no shallow
-    " line - this is a targeted, self-contained fetch for exactly iv_sha1
-    " (plus whatever the server needs to bundle to resolve its own delta
-    " chain), not a haves-based negotiation, and never a deepen (we are not
-    " trying to fetch history, just one object). MATERIALIZE_BLOBS hard-
-    " requires an arbitrary-object-want capability
-    " (allow-reachable-sha1-in-want/allow-tip-sha1-in-want); if the server
-    " does not advertise it, build_request raises zcx_abapgit_ortec_git with
-    " mv_unsupported_capability = abap_true, which this method already
-    " propagates unchanged (only zcx_abapgit_exception is caught below).
-    " upload_pack persists every decoded/resolved object as a side effect
-    " (via decode_streaming's underlying decode_and_persist_streaming +
-    " resolve_streaming) regardless of iv_sha1's own type or of what
-    " decode_streaming's own commit-only return filter discards - the
-    " RETURNING value here is deliberately discarded, only the persistence
-    " side effect matters to the caller.
-    " This method's own declared contract is "RAISING zcx_abapgit_ortec_git"
-    " only, so CREATE_BY_URL (which raises zcx_abapgit_exception, e.g. on a
-    " network/connection failure) must be inside this same TRY, not just
-    " the final upload_pack( ) call - an earlier version left it outside,
-    " which let a plain zcx_abapgit_exception escape this method's boundary
-    " undeclared (a real ATC finding, not just a style issue: a checked
-    " exception can validly propagate without a RAISING declaration in
-    " ABAP, but every caller of this ORTEC-internal API expects only
-    " ZCX_ABAPGIT_ORTEC_GIT to ever cross it).
     TRY.
+
+        ls_header-key   = '~request_uri'.
+        ls_header-value = zcl_abapgit_url=>path_name( iv_url ) && |/info/refs?service=git-upload-pack|.
+        APPEND ls_header TO lt_headers.
+
+        " MATERIALIZE_BLOBS with a single-entry want list: no haves, no shallow
+        " line - this is a targeted, self-contained fetch for exactly iv_sha1
+        " (plus whatever the server needs to bundle to resolve its own delta
+        " chain), not a haves-based negotiation, and never a deepen (we are not
+        " trying to fetch history, just one object). MATERIALIZE_BLOBS hard-
+        " requires an arbitrary-object-want capability
+        " (allow-reachable-sha1-in-want/allow-tip-sha1-in-want); if the server
+        " does not advertise it, build_request raises zcx_abapgit_ortec_git with
+        " mv_unsupported_capability = abap_true, which this method already
+        " propagates unchanged (only zcx_abapgit_exception is caught below).
+        " upload_pack persists every decoded/resolved object as a side effect
+        " (via decode_streaming's underlying decode_and_persist_streaming +
+        " resolve_streaming) regardless of iv_sha1's own type or of what
+        " decode_streaming's own commit-only return filter discards - the
+        " RETURNING value here is deliberately discarded, only the persistence
+        " side effect matters to the caller.
+        " This method's own declared contract is "RAISING zcx_abapgit_ortec_git"
+        " only, so CREATE_BY_URL (which raises zcx_abapgit_exception, e.g. on a
+        " network/connection failure) must be inside this same TRY, not just
+        " the final upload_pack( ) call - an earlier version left it outside,
+        " which let a plain zcx_abapgit_exception escape this method's boundary
+        " undeclared (a real ATC finding, not just a style issue: a checked
+        " exception can validly propagate without a RAISING declaration in
+        " ABAP, but every caller of this ORTEC-internal API expects only
+        " ZCX_ABAPGIT_ORTEC_GIT to ever cross it).
         lo_client = zcl_abapgit_http=>create_by_url(
           iv_url     = iv_url
           it_headers = lt_headers ).

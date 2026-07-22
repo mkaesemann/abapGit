@@ -148,8 +148,13 @@ CLASS ltcl_have_policy IMPLEMENTATION.
     DATA(lt_haves) = zcl_abapgit_ortec_have_policy=>get_certified_haves( iv_repo_key = c_repo1 ).
 
     cl_abap_unit_assert=>assert_equals( act = lines( lt_haves ) exp = 1 ).
+
+    DATA(lv_have) = abap_false.
+    IF line_exists( lt_haves[ table_line = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' ] ).
+      lv_have = abap_true.
+    ENDIF.
     cl_abap_unit_assert=>assert_equals(
-      act = line_exists( lt_haves[ table_line = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' ] )
+      act = lv_have
       exp = abap_true ).
   ENDMETHOD.
 
@@ -195,8 +200,14 @@ CLASS ltcl_have_policy IMPLEMENTATION.
       it_want_hashes = VALUE #( ( 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' ) ) ).
 
     cl_abap_unit_assert=>assert_equals( act = lines( lt_haves ) exp = 1 ).
+
+    DATA(lv_have) = abap_false.
+    IF line_exists( lt_haves[ table_line = 'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE' ] ).
+      lv_have = abap_true.
+    ENDIF.
+
     cl_abap_unit_assert=>assert_equals(
-      act = line_exists( lt_haves[ table_line = 'EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE' ] )
+      act = lv_have
       exp = abap_true ).
   ENDMETHOD.
 
@@ -205,7 +216,10 @@ CLASS ltcl_have_policy IMPLEMENTATION.
     DATA lv_t2 TYPE timestampl.
 
     GET TIME STAMP FIELD lv_t1.
-    lv_t2 = lv_t1 + 3600. " one hour later
+    lv_t2 = cl_abap_tstmp=>add(
+                tstmp = lv_t1
+                secs  = 3600
+    ).
 
     " Two commits share the same (older) UPDATED_AT - tie-break must be
     " COMMIT_SHA1 ascending. A third, newer commit must sort first.
