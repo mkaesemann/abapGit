@@ -17,6 +17,17 @@ CLASS ltcl_obj_store DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
     METHODS missing_sha1s_some FOR TESTING RAISING cx_static_check.
     METHODS object_state_constants FOR TESTING RAISING cx_static_check.
     METHODS active_repo_key_fallback FOR TESTING RAISING cx_static_check.
+    METHODS tip_blobs_single_root FOR TESTING RAISING cx_static_check.
+    METHODS tip_blobs_nested_dirs FOR TESTING RAISING cx_static_check.
+    METHODS tip_blobs_dup_tree_once FOR TESTING RAISING cx_static_check.
+    METHODS tip_blobs_dup_blob_once FOR TESTING RAISING cx_static_check.
+    METHODS tip_blobs_missing_tree FOR TESTING RAISING cx_static_check.
+    METHODS tip_blobs_tree_not_ready FOR TESTING RAISING cx_static_check.
+    METHODS tip_blobs_wrong_type_tree FOR TESTING RAISING cx_static_check.
+    METHODS tip_blobs_no_payload_read FOR TESTING RAISING cx_static_check.
+    METHODS tip_blobs_empty_blob_ok FOR TESTING RAISING cx_static_check.
+    METHODS tip_blobs_wide_frontier FOR TESTING RAISING cx_static_check.
+    METHODS tip_blobs_no_certificate FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 CLASS ltcl_obj_store IMPLEMENTATION.
   METHOD setup. DELETE FROM zaog_obj_store WHERE repo_key = mc_repo. ENDMETHOD.
@@ -511,6 +522,569 @@ CLASS ltcl_obj_store IMPLEMENTATION.
       act = ls-sha1
       exp = '7777777777777777777777777777777777777777'
       msg = 'Blank iv_repo_key must resolve via the explicitly set active repo key' ).
+  ENDMETHOD.
+
+  METHOD tip_blobs_single_root.
+    " B2 test 1: single root tree with two distinct blob leaves.
+    DATA lt_nodes TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+    DATA ls_node LIKE LINE OF lt_nodes.
+    DATA ls_commit TYPE zcl_abapgit_git_pack=>ty_commit.
+    DATA lv_hello_data TYPE xstring.
+    DATA lv_hello_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_world_data TYPE xstring.
+    DATA lv_world_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_tree_data TYPE xstring.
+    DATA lv_tree_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_commit_data TYPE xstring.
+    DATA lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lt_result TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+
+    lv_hello_data = '48656C6C6F'.
+    lv_hello_sha = zcl_abapgit_hash=>sha1_blob( lv_hello_data ).
+    lv_world_data = '576F726C64'.
+    lv_world_sha = zcl_abapgit_hash=>sha1_blob( lv_world_data ).
+
+    ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-file.
+    ls_node-name  = 'hello.txt'.
+    ls_node-sha1  = lv_hello_sha.
+    APPEND ls_node TO lt_nodes.
+    ls_node-name  = 'world.txt'.
+    ls_node-sha1  = lv_world_sha.
+    APPEND ls_node TO lt_nodes.
+
+    lv_tree_data = zcl_abapgit_git_pack=>encode_tree( lt_nodes ).
+    lv_tree_sha = zcl_abapgit_hash=>sha1_tree( lv_tree_data ).
+
+    ls_commit-tree = lv_tree_sha.
+    ls_commit-author = 'Test <test@example.com> 0 +0000'.
+    ls_commit-committer = 'Test <test@example.com> 0 +0000'.
+    ls_commit-body = 'single root'.
+    lv_commit_data = zcl_abapgit_git_pack=>encode_commit( ls_commit ).
+    lv_commit_sha = zcl_abapgit_hash=>sha1_commit( lv_commit_data ).
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_commit_sha
+      iv_type = zif_abapgit_git_definitions=>c_type-commit iv_data = lv_commit_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_tree_sha
+      iv_type = zif_abapgit_git_definitions=>c_type-tree iv_data = lv_tree_data ).
+
+    lt_result = zcl_abapgit_ortec_obj_store=>get_tip_blob_sha1s(
+      iv_repo_key = mc_repo iv_commit = lv_commit_sha ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lines( lt_result ) exp = 2
+      msg = 'Both root-level blob leaves are discovered' ).
+    READ TABLE lt_result TRANSPORTING NO FIELDS WITH KEY table_line = lv_hello_sha.
+    cl_abap_unit_assert=>assert_subrc( msg = 'hello.txt blob SHA1 present' ).
+    READ TABLE lt_result TRANSPORTING NO FIELDS WITH KEY table_line = lv_world_sha.
+    cl_abap_unit_assert=>assert_subrc( msg = 'world.txt blob SHA1 present' ).
+  ENDMETHOD.
+
+  METHOD tip_blobs_nested_dirs.
+    " B2 test 2: a nested directory is descended into and its blob found.
+    DATA lt_child_nodes TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+    DATA ls_child_node LIKE LINE OF lt_child_nodes.
+    DATA lv_blob_data TYPE xstring.
+    DATA lv_blob_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_child_data TYPE xstring.
+    DATA lv_child_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lt_root_nodes TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+    DATA ls_root_node LIKE LINE OF lt_root_nodes.
+    DATA lv_root_data TYPE xstring.
+    DATA lv_root_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA ls_commit TYPE zcl_abapgit_git_pack=>ty_commit.
+    DATA lv_commit_data TYPE xstring.
+    DATA lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lt_result TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+
+    lv_blob_data = '48656C6C6F'.
+    lv_blob_sha = zcl_abapgit_hash=>sha1_blob( lv_blob_data ).
+
+    ls_child_node-chmod = zif_abapgit_git_definitions=>c_chmod-file.
+    ls_child_node-name  = 'nested.txt'.
+    ls_child_node-sha1  = lv_blob_sha.
+    APPEND ls_child_node TO lt_child_nodes.
+
+    lv_child_data = zcl_abapgit_git_pack=>encode_tree( lt_child_nodes ).
+    lv_child_sha = zcl_abapgit_hash=>sha1_tree( lv_child_data ).
+
+    ls_root_node-chmod = zif_abapgit_git_definitions=>c_chmod-dir.
+    ls_root_node-name  = 'sub'.
+    ls_root_node-sha1  = lv_child_sha.
+    APPEND ls_root_node TO lt_root_nodes.
+
+    lv_root_data = zcl_abapgit_git_pack=>encode_tree( lt_root_nodes ).
+    lv_root_sha = zcl_abapgit_hash=>sha1_tree( lv_root_data ).
+
+    ls_commit-tree = lv_root_sha.
+    ls_commit-author = 'Test <test@example.com> 0 +0000'.
+    ls_commit-committer = 'Test <test@example.com> 0 +0000'.
+    ls_commit-body = 'nested dirs'.
+    lv_commit_data = zcl_abapgit_git_pack=>encode_commit( ls_commit ).
+    lv_commit_sha = zcl_abapgit_hash=>sha1_commit( lv_commit_data ).
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_commit_sha
+      iv_type = zif_abapgit_git_definitions=>c_type-commit iv_data = lv_commit_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_root_sha
+      iv_type = zif_abapgit_git_definitions=>c_type-tree iv_data = lv_root_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_child_sha
+      iv_type = zif_abapgit_git_definitions=>c_type-tree iv_data = lv_child_data ).
+
+    lt_result = zcl_abapgit_ortec_obj_store=>get_tip_blob_sha1s(
+      iv_repo_key = mc_repo iv_commit = lv_commit_sha ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lines( lt_result ) exp = 1
+      msg = 'Blob nested one directory deep is discovered' ).
+    READ TABLE lt_result TRANSPORTING NO FIELDS WITH KEY table_line = lv_blob_sha.
+    cl_abap_unit_assert=>assert_subrc( msg = 'Nested blob SHA1 present' ).
+  ENDMETHOD.
+
+  METHOD tip_blobs_dup_tree_once.
+    " B2 test 3: two parent directory entries reference the same child
+    " tree - the shared subtree is only ever added to the next frontier
+    " once (lt_seen_trees), and the final result is still correct.
+    DATA lt_child_nodes TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+    DATA ls_child_node LIKE LINE OF lt_child_nodes.
+    DATA lv_blob_data TYPE xstring.
+    DATA lv_blob_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_child_data TYPE xstring.
+    DATA lv_child_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lt_root_nodes TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+    DATA ls_root_node LIKE LINE OF lt_root_nodes.
+    DATA lv_root_data TYPE xstring.
+    DATA lv_root_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA ls_commit TYPE zcl_abapgit_git_pack=>ty_commit.
+    DATA lv_commit_data TYPE xstring.
+    DATA lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lt_result TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+
+    lv_blob_data = '48656C6C6F'.
+    lv_blob_sha = zcl_abapgit_hash=>sha1_blob( lv_blob_data ).
+
+    ls_child_node-chmod = zif_abapgit_git_definitions=>c_chmod-file.
+    ls_child_node-name  = 'hello.txt'.
+    ls_child_node-sha1  = lv_blob_sha.
+    APPEND ls_child_node TO lt_child_nodes.
+
+    lv_child_data = zcl_abapgit_git_pack=>encode_tree( lt_child_nodes ).
+    lv_child_sha = zcl_abapgit_hash=>sha1_tree( lv_child_data ).
+
+    ls_root_node-chmod = zif_abapgit_git_definitions=>c_chmod-dir.
+    ls_root_node-name  = 'a'.
+    ls_root_node-sha1  = lv_child_sha.
+    APPEND ls_root_node TO lt_root_nodes.
+    ls_root_node-name  = 'b'.
+    APPEND ls_root_node TO lt_root_nodes.
+
+    lv_root_data = zcl_abapgit_git_pack=>encode_tree( lt_root_nodes ).
+    lv_root_sha = zcl_abapgit_hash=>sha1_tree( lv_root_data ).
+
+    ls_commit-tree = lv_root_sha.
+    ls_commit-author = 'Test <test@example.com> 0 +0000'.
+    ls_commit-committer = 'Test <test@example.com> 0 +0000'.
+    ls_commit-body = 'dup tree'.
+    lv_commit_data = zcl_abapgit_git_pack=>encode_commit( ls_commit ).
+    lv_commit_sha = zcl_abapgit_hash=>sha1_commit( lv_commit_data ).
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_commit_sha
+      iv_type = zif_abapgit_git_definitions=>c_type-commit iv_data = lv_commit_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_root_sha
+      iv_type = zif_abapgit_git_definitions=>c_type-tree iv_data = lv_root_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_child_sha
+      iv_type = zif_abapgit_git_definitions=>c_type-tree iv_data = lv_child_data ).
+
+    lt_result = zcl_abapgit_ortec_obj_store=>get_tip_blob_sha1s(
+      iv_repo_key = mc_repo iv_commit = lv_commit_sha ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lines( lt_result ) exp = 1
+      msg = 'A subtree referenced by two parent entries still yields one unique blob' ).
+  ENDMETHOD.
+
+  METHOD tip_blobs_dup_blob_once.
+    " B2 test 4: the same blob SHA1 referenced by two different leaf
+    " names in the same tree is only returned once.
+    DATA lt_nodes TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+    DATA ls_node LIKE LINE OF lt_nodes.
+    DATA lv_blob_data TYPE xstring.
+    DATA lv_blob_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_tree_data TYPE xstring.
+    DATA lv_tree_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA ls_commit TYPE zcl_abapgit_git_pack=>ty_commit.
+    DATA lv_commit_data TYPE xstring.
+    DATA lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lt_result TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+
+    lv_blob_data = '48656C6C6F'.
+    lv_blob_sha = zcl_abapgit_hash=>sha1_blob( lv_blob_data ).
+
+    ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-file.
+    ls_node-name  = 'a.txt'.
+    ls_node-sha1  = lv_blob_sha.
+    APPEND ls_node TO lt_nodes.
+    ls_node-name  = 'b.txt'.
+    APPEND ls_node TO lt_nodes.
+
+    lv_tree_data = zcl_abapgit_git_pack=>encode_tree( lt_nodes ).
+    lv_tree_sha = zcl_abapgit_hash=>sha1_tree( lv_tree_data ).
+
+    ls_commit-tree = lv_tree_sha.
+    ls_commit-author = 'Test <test@example.com> 0 +0000'.
+    ls_commit-committer = 'Test <test@example.com> 0 +0000'.
+    ls_commit-body = 'dup blob'.
+    lv_commit_data = zcl_abapgit_git_pack=>encode_commit( ls_commit ).
+    lv_commit_sha = zcl_abapgit_hash=>sha1_commit( lv_commit_data ).
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_commit_sha
+      iv_type = zif_abapgit_git_definitions=>c_type-commit iv_data = lv_commit_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_tree_sha
+      iv_type = zif_abapgit_git_definitions=>c_type-tree iv_data = lv_tree_data ).
+
+    " Blob deliberately never stored - discovery must not require presence.
+    lt_result = zcl_abapgit_ortec_obj_store=>get_tip_blob_sha1s(
+      iv_repo_key = mc_repo iv_commit = lv_commit_sha ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lines( lt_result ) exp = 1
+      msg = 'The same blob referenced by two names yields one unique SHA1' ).
+    READ TABLE lt_result TRANSPORTING NO FIELDS WITH KEY table_line = lv_blob_sha.
+    cl_abap_unit_assert=>assert_subrc( msg = 'Blob SHA1 present' ).
+  ENDMETHOD.
+
+  METHOD tip_blobs_missing_tree.
+    " B2 test 5: the commit's tree SHA1 was never stored.
+    DATA ls_commit TYPE zcl_abapgit_git_pack=>ty_commit.
+    DATA lv_commit_data TYPE xstring.
+    DATA lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+
+    ls_commit-tree = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'.
+    ls_commit-author = 'Test <test@example.com> 0 +0000'.
+    ls_commit-committer = 'Test <test@example.com> 0 +0000'.
+    ls_commit-body = 'missing tree'.
+    lv_commit_data = zcl_abapgit_git_pack=>encode_commit( ls_commit ).
+    lv_commit_sha = zcl_abapgit_hash=>sha1_commit( lv_commit_data ).
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_commit_sha
+      iv_type = zif_abapgit_git_definitions=>c_type-commit iv_data = lv_commit_data ).
+
+    TRY.
+        zcl_abapgit_ortec_obj_store=>get_tip_blob_sha1s(
+          iv_repo_key = mc_repo iv_commit = lv_commit_sha ).
+        cl_abap_unit_assert=>fail( 'Missing required tree must raise' ).
+      CATCH zcx_abapgit_ortec_git.
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD tip_blobs_tree_not_ready.
+    " B2 test 6: the commit's tree exists but is not READY (status 'I').
+    DATA lt_nodes TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+    DATA ls_node LIKE LINE OF lt_nodes.
+    DATA lv_tree_data TYPE xstring.
+    DATA lv_tree_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA ls_commit TYPE zcl_abapgit_git_pack=>ty_commit.
+    DATA lv_commit_data TYPE xstring.
+    DATA lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+
+    ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-file.
+    ls_node-name  = 'hello.txt'.
+    ls_node-sha1  = '48656C6C6F48656C6C6F48656C6C6F48656C6C6F'.
+    APPEND ls_node TO lt_nodes.
+
+    lv_tree_data = zcl_abapgit_git_pack=>encode_tree( lt_nodes ).
+    lv_tree_sha = zcl_abapgit_hash=>sha1_tree( lv_tree_data ).
+
+    ls_commit-tree = lv_tree_sha.
+    ls_commit-author = 'Test <test@example.com> 0 +0000'.
+    ls_commit-committer = 'Test <test@example.com> 0 +0000'.
+    ls_commit-body = 'tree not ready'.
+    lv_commit_data = zcl_abapgit_git_pack=>encode_commit( ls_commit ).
+    lv_commit_sha = zcl_abapgit_hash=>sha1_commit( lv_commit_data ).
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_commit_sha
+      iv_type = zif_abapgit_git_definitions=>c_type-commit iv_data = lv_commit_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_tree_sha
+      iv_type = zif_abapgit_git_definitions=>c_type-tree iv_data = lv_tree_data
+      iv_status = zcl_abapgit_ortec_pack_stream=>c_status_incomplete ).
+
+    TRY.
+        zcl_abapgit_ortec_obj_store=>get_tip_blob_sha1s(
+          iv_repo_key = mc_repo iv_commit = lv_commit_sha ).
+        cl_abap_unit_assert=>fail( 'Non-READY required tree must raise' ).
+      CATCH zcx_abapgit_ortec_git.
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD tip_blobs_wrong_type_tree.
+    " B2 test 7: the commit's tree SHA1 is stored, but as the wrong type.
+    DATA lv_data TYPE xstring.
+    DATA ls_commit TYPE zcl_abapgit_git_pack=>ty_commit.
+    DATA lv_commit_data TYPE xstring.
+    DATA lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_wrong_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+
+    lv_data = '48656C6C6F'.
+    lv_wrong_sha = zcl_abapgit_hash=>sha1_blob( lv_data ).
+
+    ls_commit-tree = lv_wrong_sha.
+    ls_commit-author = 'Test <test@example.com> 0 +0000'.
+    ls_commit-committer = 'Test <test@example.com> 0 +0000'.
+    ls_commit-body = 'wrong type tree'.
+    lv_commit_data = zcl_abapgit_git_pack=>encode_commit( ls_commit ).
+    lv_commit_sha = zcl_abapgit_hash=>sha1_commit( lv_commit_data ).
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_commit_sha
+      iv_type = zif_abapgit_git_definitions=>c_type-commit iv_data = lv_commit_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_wrong_sha
+      iv_type = zif_abapgit_git_definitions=>c_type-blob iv_data = lv_data ).
+
+    TRY.
+        zcl_abapgit_ortec_obj_store=>get_tip_blob_sha1s(
+          iv_repo_key = mc_repo iv_commit = lv_commit_sha ).
+        cl_abap_unit_assert=>fail( 'Wrong-type required tree must raise' ).
+      CATCH zcx_abapgit_ortec_git.
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD tip_blobs_no_payload_read.
+    " B2 test 8: a referenced blob is never stored at all - discovery
+    " must succeed anyway, proving blob payloads/presence are never read.
+    DATA lt_nodes TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+    DATA ls_node LIKE LINE OF lt_nodes.
+    DATA lv_blob_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_tree_data TYPE xstring.
+    DATA lv_tree_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA ls_commit TYPE zcl_abapgit_git_pack=>ty_commit.
+    DATA lv_commit_data TYPE xstring.
+    DATA lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lt_result TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+
+    lv_blob_sha = zcl_abapgit_hash=>sha1_blob( '48656C6C6F' ).
+
+    ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-file.
+    ls_node-name  = 'never_stored.txt'.
+    ls_node-sha1  = lv_blob_sha.
+    APPEND ls_node TO lt_nodes.
+
+    lv_tree_data = zcl_abapgit_git_pack=>encode_tree( lt_nodes ).
+    lv_tree_sha = zcl_abapgit_hash=>sha1_tree( lv_tree_data ).
+
+    ls_commit-tree = lv_tree_sha.
+    ls_commit-author = 'Test <test@example.com> 0 +0000'.
+    ls_commit-committer = 'Test <test@example.com> 0 +0000'.
+    ls_commit-body = 'no payload read'.
+    lv_commit_data = zcl_abapgit_git_pack=>encode_commit( ls_commit ).
+    lv_commit_sha = zcl_abapgit_hash=>sha1_commit( lv_commit_data ).
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_commit_sha
+      iv_type = zif_abapgit_git_definitions=>c_type-commit iv_data = lv_commit_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_tree_sha
+      iv_type = zif_abapgit_git_definitions=>c_type-tree iv_data = lv_tree_data ).
+
+    lt_result = zcl_abapgit_ortec_obj_store=>get_tip_blob_sha1s(
+      iv_repo_key = mc_repo iv_commit = lv_commit_sha ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lines( lt_result ) exp = 1
+      msg = 'A never-stored blob is still discovered by structure alone' ).
+    READ TABLE lt_result TRANSPORTING NO FIELDS WITH KEY table_line = lv_blob_sha.
+    cl_abap_unit_assert=>assert_subrc( msg = 'Never-stored blob SHA1 present' ).
+  ENDMETHOD.
+
+  METHOD tip_blobs_empty_blob_ok.
+    " B2 test 9: a 0-byte blob's SHA1 is still a valid selected object.
+    DATA lt_nodes TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+    DATA ls_node LIKE LINE OF lt_nodes.
+    DATA lv_empty_data TYPE xstring.
+    DATA lv_empty_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_tree_data TYPE xstring.
+    DATA lv_tree_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA ls_commit TYPE zcl_abapgit_git_pack=>ty_commit.
+    DATA lv_commit_data TYPE xstring.
+    DATA lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lt_result TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+
+    CLEAR lv_empty_data.
+    lv_empty_sha = zcl_abapgit_hash=>sha1_blob( lv_empty_data ).
+
+    ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-file.
+    ls_node-name  = 'empty.txt'.
+    ls_node-sha1  = lv_empty_sha.
+    APPEND ls_node TO lt_nodes.
+
+    lv_tree_data = zcl_abapgit_git_pack=>encode_tree( lt_nodes ).
+    lv_tree_sha = zcl_abapgit_hash=>sha1_tree( lv_tree_data ).
+
+    ls_commit-tree = lv_tree_sha.
+    ls_commit-author = 'Test <test@example.com> 0 +0000'.
+    ls_commit-committer = 'Test <test@example.com> 0 +0000'.
+    ls_commit-body = 'empty blob ok'.
+    lv_commit_data = zcl_abapgit_git_pack=>encode_commit( ls_commit ).
+    lv_commit_sha = zcl_abapgit_hash=>sha1_commit( lv_commit_data ).
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_commit_sha
+      iv_type = zif_abapgit_git_definitions=>c_type-commit iv_data = lv_commit_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_tree_sha
+      iv_type = zif_abapgit_git_definitions=>c_type-tree iv_data = lv_tree_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_empty_sha
+      iv_type = zif_abapgit_git_definitions=>c_type-blob iv_data = lv_empty_data ).
+
+    lt_result = zcl_abapgit_ortec_obj_store=>get_tip_blob_sha1s(
+      iv_repo_key = mc_repo iv_commit = lv_commit_sha ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lines( lt_result ) exp = 1
+      msg = 'An empty-content blob SHA1 remains a valid selected object' ).
+    READ TABLE lt_result TRANSPORTING NO FIELDS WITH KEY table_line = lv_empty_sha.
+    cl_abap_unit_assert=>assert_subrc( msg = 'Empty blob SHA1 present' ).
+  ENDMETHOD.
+
+  METHOD tip_blobs_wide_frontier.
+    " B2 test 10: a single-level frontier wider than the object store's
+    " internal bulk-read chunk size (1000, private c_select_package_size)
+    " must still be processed completely and correctly in bounded chunks.
+    CONSTANTS lc_leaf_count TYPE i VALUE 1001.
+    CONSTANTS lc_dummy_blob TYPE zif_abapgit_git_definitions=>ty_sha1
+      VALUE '9999999999999999999999999999999999999999'.
+
+    DATA lt_leaf_nodes TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+    DATA ls_leaf_node LIKE LINE OF lt_leaf_nodes.
+    DATA lt_root_nodes TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+    DATA ls_root_node LIKE LINE OF lt_root_nodes.
+    DATA lt_store TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA ls_store LIKE LINE OF lt_store.
+    DATA lv_leaf_data TYPE xstring.
+    DATA lv_leaf_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA ls_commit TYPE zcl_abapgit_git_pack=>ty_commit.
+    DATA lv_root_data TYPE xstring.
+    DATA lv_root_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_commit_data TYPE xstring.
+    DATA lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lt_result TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lv_index TYPE i.
+
+    DO lc_leaf_count TIMES.
+      lv_index = sy-index.
+      CLEAR lt_leaf_nodes.
+      ls_leaf_node-chmod = zif_abapgit_git_definitions=>c_chmod-file.
+      ls_leaf_node-name  = |leaf{ lv_index }|.
+      ls_leaf_node-sha1  = lc_dummy_blob.
+      APPEND ls_leaf_node TO lt_leaf_nodes.
+
+      lv_leaf_data = zcl_abapgit_git_pack=>encode_tree( lt_leaf_nodes ).
+      lv_leaf_sha  = zcl_abapgit_hash=>sha1_tree( lv_leaf_data ).
+
+      CLEAR ls_store.
+      ls_store-sha1 = lv_leaf_sha.
+      ls_store-type = zif_abapgit_git_definitions=>c_type-tree.
+      ls_store-data = lv_leaf_data.
+      APPEND ls_store TO lt_store.
+
+      CLEAR ls_root_node.
+      ls_root_node-chmod = zif_abapgit_git_definitions=>c_chmod-dir.
+      ls_root_node-name  = |dir{ lv_index }|.
+      ls_root_node-sha1  = lv_leaf_sha.
+      APPEND ls_root_node TO lt_root_nodes.
+    ENDDO.
+
+    lv_root_data = zcl_abapgit_git_pack=>encode_tree( lt_root_nodes ).
+    lv_root_sha  = zcl_abapgit_hash=>sha1_tree( lv_root_data ).
+
+    ls_commit-tree = lv_root_sha.
+    ls_commit-author = 'Test <test@example.com> 0 +0000'.
+    ls_commit-committer = 'Test <test@example.com> 0 +0000'.
+    ls_commit-body = 'wide frontier'.
+    lv_commit_data = zcl_abapgit_git_pack=>encode_commit( ls_commit ).
+    lv_commit_sha  = zcl_abapgit_hash=>sha1_commit( lv_commit_data ).
+
+    CLEAR ls_store.
+    ls_store-sha1 = lv_root_sha.
+    ls_store-type = zif_abapgit_git_definitions=>c_type-tree.
+    ls_store-data = lv_root_data.
+    APPEND ls_store TO lt_store.
+
+    CLEAR ls_store.
+    ls_store-sha1 = lv_commit_sha.
+    ls_store-type = zif_abapgit_git_definitions=>c_type-commit.
+    ls_store-data = lv_commit_data.
+    APPEND ls_store TO lt_store.
+
+    zcl_abapgit_ortec_obj_store=>store_objects(
+      iv_repo_key = mc_repo
+      it_objects  = lt_store ).
+
+    lt_result = zcl_abapgit_ortec_obj_store=>get_tip_blob_sha1s(
+      iv_repo_key = mc_repo iv_commit = lv_commit_sha ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lines( lt_result ) exp = 1
+      msg = 'Wide (>1000) single-level frontier collapses to the one shared dummy blob SHA1' ).
+    READ TABLE lt_result TRANSPORTING NO FIELDS WITH KEY table_line = lc_dummy_blob.
+    cl_abap_unit_assert=>assert_subrc( msg = 'Shared dummy blob SHA1 present' ).
+  ENDMETHOD.
+
+  METHOD tip_blobs_no_certificate.
+    " B2 test 11: calling get_tip_blob_sha1s alone must never change any
+    " zcl_abapgit_ortec_mat_state certificate.
+    DATA lt_nodes TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+    DATA ls_node LIKE LINE OF lt_nodes.
+    DATA lv_tree_data TYPE xstring.
+    DATA lv_tree_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA ls_commit TYPE zcl_abapgit_git_pack=>ty_commit.
+    DATA lv_commit_data TYPE xstring.
+    DATA lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA ls_state TYPE zcl_abapgit_ortec_mat_state=>ty_state.
+
+    ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-file.
+    ls_node-name  = 'hello.txt'.
+    ls_node-sha1  = '48656C6C6F48656C6C6F48656C6C6F48656C6C6F'.
+    APPEND ls_node TO lt_nodes.
+
+    lv_tree_data = zcl_abapgit_git_pack=>encode_tree( lt_nodes ).
+    lv_tree_sha = zcl_abapgit_hash=>sha1_tree( lv_tree_data ).
+
+    ls_commit-tree = lv_tree_sha.
+    ls_commit-author = 'Test <test@example.com> 0 +0000'.
+    ls_commit-committer = 'Test <test@example.com> 0 +0000'.
+    ls_commit-body = 'no certificate'.
+    lv_commit_data = zcl_abapgit_git_pack=>encode_commit( ls_commit ).
+    lv_commit_sha = zcl_abapgit_hash=>sha1_commit( lv_commit_data ).
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_commit_sha
+      iv_type = zif_abapgit_git_definitions=>c_type-commit iv_data = lv_commit_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_tree_sha
+      iv_type = zif_abapgit_git_definitions=>c_type-tree iv_data = lv_tree_data ).
+
+    zcl_abapgit_ortec_obj_store=>get_tip_blob_sha1s(
+      iv_repo_key = mc_repo iv_commit = lv_commit_sha ).
+
+    ls_state = zcl_abapgit_ortec_mat_state=>get_state(
+      iv_repo_key = mc_repo iv_commit = lv_commit_sha ).
+
+    cl_abap_unit_assert=>assert_initial(
+      act = ls_state-hist_level
+      msg = 'Discovering the tip blob set alone must not create/advance any materialization certificate' ).
   ENDMETHOD.
 ENDCLASS.
 

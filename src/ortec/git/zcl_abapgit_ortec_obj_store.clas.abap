@@ -141,6 +141,39 @@ CLASS zcl_abapgit_ortec_obj_store DEFINITION
                 iv_commit   TYPE zif_abapgit_git_definitions=>ty_sha1
       RAISING   zcx_abapgit_ortec_git.
 
+    "! Variant B / Package B checkpoint B2: blob-collecting counterpart to
+    "! verify_tree_closure - walks the identical commit -> tree structure
+    "! (same raise conditions: missing/wrong-type/non-READY commit or tree,
+    "! unrecognized chmod) but additionally collects every reachable blob
+    "! leaf SHA1 (chmod file/executable/symlink) into a deduplicated result
+    "! set. Never fetches blob DATA and never checks blob presence - a
+    "! blob SHA1 discovered here is a fact about the tree structure, not a
+    "! claim that the blob is materialized; callers (e.g.
+    "! zcl_abapgit_ortec_cold_init=>materialize_tip_snapshot) bulk-subtract
+    "! READY presence separately via get_missing_sha1s. get_reachable_sha1s
+    "! is not reused here for the same reason verify_tree_closure does not
+    "! reuse it: that method hard-requires every reachable blob to already
+    "! be present, which is exactly backwards for a call whose entire
+    "! purpose is to discover which of the tip's blobs are NOT yet present.
+    "! Uses iv_bulk_fetch = abap_false for every frontier read (INV-B-13,
+    "! same rationale as verify_tree_closure - the iv_bulk_fetch = abap_true
+    "! branch of get_objects is not chunked at c_select_package_size).
+    "! @parameter iv_repo_key |
+    "! Repository key
+    "! @parameter iv_commit |
+    "! Commit SHA1 whose tip blob set must be discovered
+    "! @parameter rt_sha1s |
+    "! Deduplicated SHA1 of every blob reachable from the commit's tree,
+    "! unfiltered by presence
+    "! @raising zcx_abapgit_ortec_git |
+    "! If the commit or any tree reachable from it is missing, not the
+    "! expected type, undecodable, or contains an unrecognized chmod
+    CLASS-METHODS get_tip_blob_sha1s
+      IMPORTING iv_repo_key      TYPE ty_repo_key
+                iv_commit        TYPE zif_abapgit_git_definitions=>ty_sha1
+      RETURNING VALUE(rt_sha1s) TYPE zif_abapgit_git_definitions=>ty_sha1_tt
+      RAISING   zcx_abapgit_ortec_git.
+
     "! Set-based check for which of the given SHA1s are NOT present (status 'R')
     "! in the persistent store for this repository. One chunked SELECT per
     "! c_select_package_size objects; no per-object DB reads.
@@ -721,6 +754,93 @@ CLASS ZCL_ABAPGIT_ORTEC_OBJ_STORE IMPLEMENTATION.
               OR zif_abapgit_git_definitions=>c_chmod-symbolic_link.
               " Deliberately ignored - blob-blind by design, see class doc.
               CONTINUE.
+            WHEN zif_abapgit_git_definitions=>c_chmod-submodule.
+              CONTINUE.
+            WHEN OTHERS.
+              zcx_abapgit_ortec_git=>raise( |Tree { <ls_tree_object>-sha1 } contains unknown chmod { <ls_node>-chmod }| ).
+          ENDCASE.
+        ENDLOOP.
+      ENDLOOP.
+
+      lt_current_trees = lt_next_trees.
+    ENDWHILE.
+
+  ENDMETHOD.
+
+
+  METHOD get_tip_blob_sha1s.
+    " Blob-collecting counterpart to verify_tree_closure. See declaration
+    " doc for why get_reachable_sha1s is not reused (it hard-requires
+    " blob presence, which is exactly backwards here).
+    DATA lt_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_commit_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lt_current_trees TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_next_trees TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_tree_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lt_seen_trees TYPE ty_sha1_set.
+    DATA lt_seen_blobs TYPE ty_sha1_set.
+    DATA ls_commit_object TYPE zif_abapgit_definitions=>ty_object.
+    DATA ls_commit TYPE zcl_abapgit_git_pack=>ty_commit.
+    DATA lt_nodes TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+
+    FIELD-SYMBOLS <ls_tree_object> LIKE LINE OF lt_tree_objects.
+    FIELD-SYMBOLS <ls_node> LIKE LINE OF lt_nodes.
+
+    APPEND iv_commit TO lt_commit_sha.
+    lt_commit_objects = get_objects( iv_repo_key   = iv_repo_key
+                                     it_sha1s      = lt_commit_sha
+                                     iv_bulk_fetch = abap_false ).
+    READ TABLE lt_commit_objects INTO ls_commit_object INDEX 1.
+    IF sy-subrc <> 0 OR ls_commit_object-type <> zif_abapgit_git_definitions=>c_type-commit.
+      zcx_abapgit_ortec_git=>raise( |Commit { iv_commit } not found in store| ).
+    ENDIF.
+
+    TRY.
+        ls_commit = zcl_abapgit_git_pack=>decode_commit( ls_commit_object-data ).
+      CATCH zcx_abapgit_exception.
+        zcx_abapgit_ortec_git=>raise( |Commit { iv_commit } could not be decoded| ).
+    ENDTRY.
+
+    IF ls_commit-tree IS INITIAL.
+      zcx_abapgit_ortec_git=>raise( |Commit { iv_commit } has no tree| ).
+    ENDIF.
+
+    APPEND ls_commit-tree TO lt_current_trees.
+    INSERT ls_commit-tree INTO TABLE lt_seen_trees.
+
+    WHILE lt_current_trees IS NOT INITIAL.
+      CLEAR lt_next_trees.
+      lt_tree_objects = get_objects( iv_repo_key   = iv_repo_key
+                                     it_sha1s      = lt_current_trees
+                                     iv_bulk_fetch = abap_false ).
+
+      LOOP AT lt_tree_objects ASSIGNING <ls_tree_object>.
+        IF <ls_tree_object>-type <> zif_abapgit_git_definitions=>c_type-tree.
+          zcx_abapgit_ortec_git=>raise( |Object { <ls_tree_object>-sha1 } is not a tree| ).
+        ENDIF.
+
+        TRY.
+            lt_nodes = zcl_abapgit_git_pack=>decode_tree( <ls_tree_object>-data ).
+          CATCH zcx_abapgit_exception.
+            zcx_abapgit_ortec_git=>raise( |Tree { <ls_tree_object>-sha1 } could not be decoded| ).
+        ENDTRY.
+
+        LOOP AT lt_nodes ASSIGNING <ls_node>.
+          CASE <ls_node>-chmod.
+            WHEN zif_abapgit_git_definitions=>c_chmod-dir.
+              READ TABLE lt_seen_trees WITH TABLE KEY table_line = <ls_node>-sha1 TRANSPORTING NO FIELDS.
+              IF sy-subrc <> 0.
+                INSERT <ls_node>-sha1 INTO TABLE lt_seen_trees.
+                APPEND <ls_node>-sha1 TO lt_next_trees.
+              ENDIF.
+            WHEN zif_abapgit_git_definitions=>c_chmod-file
+              OR zif_abapgit_git_definitions=>c_chmod-executable
+              OR zif_abapgit_git_definitions=>c_chmod-symbolic_link.
+              READ TABLE lt_seen_blobs WITH TABLE KEY table_line = <ls_node>-sha1 TRANSPORTING NO FIELDS.
+              IF sy-subrc <> 0.
+                INSERT <ls_node>-sha1 INTO TABLE lt_seen_blobs.
+                APPEND <ls_node>-sha1 TO rt_sha1s.
+              ENDIF.
             WHEN zif_abapgit_git_definitions=>c_chmod-submodule.
               CONTINUE.
             WHEN OTHERS.
