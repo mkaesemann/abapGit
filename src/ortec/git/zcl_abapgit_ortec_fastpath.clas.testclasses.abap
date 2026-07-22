@@ -182,8 +182,14 @@ CLASS ltcl_fastpath IMPLEMENTATION.
       exp = zcl_abapgit_ortec_mat_state=>cs_snap_state-complete ).
 
     DATA(lt_haves) = zcl_abapgit_ortec_have_policy=>get_certified_haves( iv_repo_key = c_repo1 ).
+
+    DATA(lv_have) = abap_false.
+    IF line_exists( lt_haves[ table_line = lv_commit ] ).
+      lv_have = abap_true.
+    ENDIF.
+
     cl_abap_unit_assert=>assert_equals(
-      act = line_exists( lt_haves[ table_line = lv_commit ] )
+      act = lv_have
       exp = abap_true ).
   ENDMETHOD.
 
