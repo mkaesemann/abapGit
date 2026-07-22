@@ -1,10 +1,30 @@
 # Regression validation: Variant B / Package C / Slice C1
 
-## Summary
-- Task: VB-C-C1-REGRESSION
-- Baseline commit: cf3d5cb87ca4eec4e68b7975df6fc127a8c5abc2
-- Status: FAIL
-- Blocking findings: 1
+### Summary
+
+- Task: `VB-C-C1-REGRESSION`
+- Design baseline:
+  `cf3d5cb87ca4eec4e68b7975df6fc127a8c5abc2`
+- C1 implementation commit:
+  `aeac812652da4d18d46e0ee4aad742baaa179e80`
+- C1 SAP/ATC fix commit:
+  `b3701afbc812e5379b886fdc6a1e3db134578012`
+- Validated C1 HEAD:
+  `b3701afbc812e5379b886fdc6a1e3db134578012`
+- Static regression status:
+  `PASS`
+- SAP validation status:
+  `PASS`
+- Final status:
+  `SAP_VALIDATED_COMPLETE`
+- Blocking findings:
+  `0`
+
+- The migrated productive call site no longer invokes
+  `GET_VERIFIED_HAVE_COMMITS`.
+- The legacy method definition remains physically present by design and is
+  scheduled for Package E removal.
+- Documentation references are non-executable.
 
 ## Validation results
 
@@ -88,3 +108,53 @@
   findings) for C1 acceptance purposes. Item 5's checklist wording is
   retired for future reruns of this exact check.
 
+## Owner-executed SAP validation
+
+### Repository identity
+
+- C1 implementation commit:
+  `aeac812652da4d18d46e0ee4aad742baaa179e80`
+- SAP/ATC fix commit:
+  `b3701afbc812e5379b886fdc6a1e3db134578012`
+- Validated HEAD:
+  `b3701afbc812e5379b886fdc6a1e3db134578012`
+- Working tree:
+  clean
+
+### IT8 validation
+
+- Import:
+  `PASS`
+- Activation:
+  `PASS`
+- All `ZCL_ABAPGIT_ORTEC_HAVE_POLICY` ABAP Unit tests:
+  `PASS`
+- Bundled ABAP Unit tests in `ZCL_ABAPGIT_ORTEC_GIT_TESTS`:
+  `PASS`
+- Productive ATC:
+  `PASS`
+
+### Focused SAP correction
+
+The SAP validation exposed one undeclared `ZCX_ABAPGIT_EXCEPTION` path in
+`ZCL_ABAPGIT_ORTEC_FASTPATH=>COMPLETE_MISSING_OBJECT`.
+
+The exception-translation boundary was extended to include the request-URI
+construction. The public ORTEC exception contract and original `previous`
+exception are preserved.
+
+This correction does not change:
+
+- certified-have selection;
+- `HIST_LEVEL = 'F'` eligibility;
+- want exclusion;
+- deterministic ordering or maximum-have limit;
+- Fetch Mode behavior;
+- dormant per-object completion reachability;
+- C2 scope.
+
+### Final verdict
+
+`SAP_VALIDATED_COMPLETE`
+
+Remaining C1 blockers: none.

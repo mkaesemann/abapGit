@@ -234,3 +234,55 @@ pre-existing walk-failure retry documentation) and the unexecuted
 medium/large/incremental-scale measured scenarios, none of which are C1
 implementation defects — they are C2 orchestrator-wiring and
 measurement-phase concerns.
+
+## Post-SAP validation closeout
+
+### Validated commits
+
+- C1 implementation:
+  `aeac812652da4d18d46e0ee4aad742baaa179e80`
+- SAP/ATC correction:
+  `b3701afbc812e5379b886fdc6a1e3db134578012`
+- Validated HEAD:
+  `b3701afbc812e5379b886fdc6a1e3db134578012`
+
+### Correction classification
+
+The SAP correction is limited to the exception boundary of
+`ZCL_ABAPGIT_ORTEC_FASTPATH=>COMPLETE_MISSING_OBJECT`.
+
+The existing `ZCX_ABAPGIT_EXCEPTION` to `ZCX_ABAPGIT_ORTEC_GIT` translation
+now also covers request-URI construction and preserves the original exception
+as `previous`.
+
+The correction does not change:
+
+- `ZCL_ABAPGIT_ORTEC_HAVE_POLICY`;
+- full-certified-only have eligibility;
+- deterministic have selection;
+- the migrated `UPLOAD_PACK` have source;
+- SQL or HTTP multiplicity;
+- Fetch Mode wire behavior;
+- C1/C2 scope boundaries.
+
+### Owner-executed evidence
+
+- IT8 import and activation:
+  `PASS`
+- Have-policy ABAP Unit:
+  `PASS`
+- Bundled regression ABAP Unit:
+  `PASS`
+- Productive ATC:
+  `PASS`
+
+### Final audit status
+
+- Original implementation-audit verdict:
+  `PASS`
+- Post-SAP correction impact:
+  non-behavioral exception-contract completion
+- Remaining blocking findings:
+  none
+- Gate status:
+  `CLOSED`
