@@ -29,7 +29,7 @@ CLASS zcl_abapgit_ortec_porcelain DEFINITION
   PRIVATE SECTION.
     CLASS-METHODS pull
       IMPORTING iv_commit         TYPE zif_abapgit_git_definitions=>ty_sha1
-                VALUE(it_objects) TYPE zif_abapgit_definitions=>ty_objects_tt
+                it_objects        TYPE zif_abapgit_definitions=>ty_objects_tt
                 iv_repo_key       TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key OPTIONAL
                 iv_url            TYPE string                                   OPTIONAL
       RETURNING VALUE(rt_files)   TYPE zif_abapgit_git_definitions=>ty_files_tt
@@ -94,10 +94,11 @@ CLASS zcl_abapgit_ortec_porcelain IMPLEMENTATION.
         zcx_abapgit_exception=>raise_with_text( lx_prewarm ).
     ENDTRY.
 
-    APPEND LINES OF lt_objects TO it_objects.
+    DATA(lt_objects_complete) = VALUE zif_abapgit_definitions=>ty_objects_tt( ( LINES OF it_objects )
+                                                                              ( LINES OF lt_objects ) ).
 
     lt_blob_manifest = walk_tree(
-                           it_objects  = it_objects
+                           it_objects  = lt_objects_complete
                            iv_tree     = lv_root_tree
                            iv_base     = '/'
                            iv_repo_key = iv_repo_key ).
@@ -108,10 +109,10 @@ CLASS zcl_abapgit_ortec_porcelain IMPLEMENTATION.
         CONTINUE.
       ENDIF.
 
-      IF NOT line_exists( it_objects[
-                                        KEY type
-                                        type = zif_abapgit_git_definitions=>c_type-blob
-                                        sha1 = ls_blob_manifest-sha1 ] ).
+      IF NOT line_exists( lt_objects_complete[
+                              KEY type
+                              type = zif_abapgit_git_definitions=>c_type-blob
+                              sha1 = ls_blob_manifest-sha1 ] ).
         " Only blobs NOT already resident in it_objects need batch-fetching -
         " walk_tree's manifest lists EVERY reachable blob unconditionally, so
         " without this filter a COMPLETE (non-sparse) it_objects would still
@@ -127,7 +128,7 @@ CLASS zcl_abapgit_ortec_porcelain IMPLEMENTATION.
     IF lt_remaining_sha1s IS INITIAL.
       walk(
         EXPORTING
-          it_objects  = it_objects
+          it_objects  = lt_objects_complete
           iv_sha1     = lv_root_tree
           iv_path     = '/'
           iv_repo_key = iv_repo_key
@@ -160,7 +161,7 @@ CLASS zcl_abapgit_ortec_porcelain IMPLEMENTATION.
 
         walk(
           EXPORTING
-            it_objects       = it_objects
+            it_objects       = lt_objects_complete
             iv_sha1          = lv_root_tree
             iv_path          = '/'
             iv_repo_key      = iv_repo_key
