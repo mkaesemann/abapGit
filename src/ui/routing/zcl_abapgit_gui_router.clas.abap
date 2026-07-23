@@ -692,7 +692,7 @@ METHOD jump_display_user.
       lv_key          TYPE zif_abapgit_persistence=>ty_repo-key,
       li_repo         TYPE REF TO zif_abapgit_repo,
       li_log          TYPE REF TO zif_abapgit_log,
-      ls_clear_result TYPE zcl_abapgit_ortec_git_switch=>ty_clear_result.
+      ls_clear_result TYPE zcl_abapgit_ortec_cache_admin=>ty_clear_result.
 
     lv_key = ii_event->query( )->get( 'KEY' ).
     IF lv_key IS NOT INITIAL.
@@ -748,9 +748,9 @@ METHOD jump_display_user.
         rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
       WHEN 'clear_cache'.                                                     " ORTEC clear repository cache
         TRY.
-            ls_clear_result = zcl_abapgit_ortec_git_switch=>clear_repo_cache(
-              iv_url = li_repo->ms_data-url ).
-            MESSAGE zcl_abapgit_ortec_git_switch=>format_clear_result( ls_clear_result ) TYPE 'S'.
+            ls_clear_result = zcl_abapgit_ortec_cache_admin=>clear_repo(
+              li_repo->get_key( ) ).
+            MESSAGE zcl_abapgit_ortec_cache_admin=>format_clear_result( ls_clear_result ) TYPE 'S'.
           CATCH zcx_abapgit_ortec_git INTO DATA(lx_ortec).
             MESSAGE lx_ortec->get_text( ) TYPE 'E'.
         ENDTRY.

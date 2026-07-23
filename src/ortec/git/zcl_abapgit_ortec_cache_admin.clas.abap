@@ -40,6 +40,19 @@ CLASS zcl_abapgit_ortec_cache_admin DEFINITION
            END OF ty_repo_f4.
     TYPES ty_repo_f4_tt TYPE STANDARD TABLE OF ty_repo_f4 WITH DEFAULT KEY.
 
+    TYPES:
+      BEGIN OF ty_clear_result,
+        repo_key    TYPE zcl_abapgit_ortec_repo_state=>ty_repo_key,
+        obj_store   TYPE i,
+        obj_index   TYPE i,
+        pack_idx    TYPE i,
+        pack_meta   TYPE i,
+        raw_pack    TYPE i,
+        fetch_sess  TYPE i,
+        commit_hist TYPE i,
+        repo_state  TYPE i,
+      END OF ty_clear_result.
+
     "! Build a read-only size/count overview, one row per (repo_key, branch).
     "! Aggregated counts (object/index/pack/commit/session) are computed once
     "! per repo_key and repeated on every branch row of that repository, since
@@ -56,21 +69,28 @@ CLASS zcl_abapgit_ortec_cache_admin DEFINITION
     CLASS-METHODS get_repo_f4_values
       RETURNING VALUE(rt_repo_f4) TYPE ty_repo_f4_tt.
 
-    "! Manually clear all cached ZAOG_* rows for one repository.
-    "! Acquires the repo-scoped enqueue lock (same lock object as the
-    "! fetch/decode path) so a clear can never race a concurrent fetch;
-    "! raises immediately (no retry/backoff - this is a foreground,
-    "! user-initiated action) if the repo is currently locked.
-    "! @parameter iv_repo_key |
-    "! Repository key to clear
-    "! @parameter rv_message |
-    "! Per-table deleted-row summary
-    "! @raising zcx_abapgit_ortec_git |
-    "! Raised if the repo key is blank, unknown, or currently locked
+    "! Delete all persistent ORTEC cache and materialization state for one
+    "! repository key.
+    "!
+    "! The operation is independent of REMOTE_URL because partially created
+    "! or legacy repository-state rows may not contain URL metadata.
+    "!
+    "! Acquires the repository administration lock, deletes all repository-
+    "! scoped cache rows, invalidates the internal object-store cache and
+    "! performs one final COMMIT WORK AND WAIT.
     CLASS-METHODS clear_repo
-      IMPORTING iv_repo_key       TYPE zcl_abapgit_ortec_repo_state=>ty_repo_key
-      RETURNING VALUE(rv_message) TYPE string
-      RAISING   zcx_abapgit_ortec_git.
+      IMPORTING
+        iv_repo_key      TYPE zcl_abapgit_ortec_repo_state=>ty_repo_key
+      RETURNING
+        VALUE(rs_result) TYPE ty_clear_result
+      RAISING
+        zcx_abapgit_ortec_git.
+
+    CLASS-METHODS format_clear_result
+      IMPORTING
+        is_result         TYPE ty_clear_result
+      RETURNING
+        VALUE(rv_message) TYPE string.
 
   PRIVATE SECTION.
     CLASS-METHODS acquire_lock
@@ -131,7 +151,7 @@ CLASS zcl_abapgit_ortec_cache_admin IMPLEMENTATION.
 
     SELECT repo_key,
            COUNT(*)        AS obj_count,
-           SUM( obj_size ) AS obj_size
+           SUM( CAST( obj_size AS DEC( 31, 0 ) ) ) AS obj_size
       FROM zaog_obj_store
       GROUP BY repo_key
       INTO TABLE @lt_obj_agg.
@@ -149,7 +169,7 @@ CLASS zcl_abapgit_ortec_cache_admin IMPLEMENTATION.
       INTO TABLE @lt_pack_agg.
 
     SELECT repo_key,
-           SUM( total_size ) AS pack_size
+           SUM( CAST( total_size AS DEC( 31, 0 ) ) ) AS pack_size
       FROM zaog_pack_meta
       WHERE raw_stored = @abap_true
       GROUP BY repo_key
@@ -214,59 +234,182 @@ CLASS zcl_abapgit_ortec_cache_admin IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD get_repo_f4_values.
-    DATA lt_state   TYPE STANDARD TABLE OF zaog_repo_state.
-    DATA ls_repo_f4 TYPE ty_repo_f4.
 
-    FIELD-SYMBOLS <ls_state> TYPE zaog_repo_state.
+    TYPES ty_repo_key_set TYPE HASHED TABLE OF
+      zcl_abapgit_ortec_repo_state=>ty_repo_key
+      WITH UNIQUE KEY table_line.
 
-    SELECT repo_key, branch_name, remote_url
+    DATA lt_keys     TYPE ty_repo_key_set.
+    DATA lt_state    TYPE STANDARD TABLE OF zaog_repo_state.
+    DATA ls_repo_f4  TYPE ty_repo_f4.
+    DATA lv_repo_key TYPE zcl_abapgit_ortec_repo_state=>ty_repo_key.
+
+    SELECT *
       FROM zaog_repo_state
-      ORDER BY repo_key, branch_name
-      INTO CORRESPONDING FIELDS OF TABLE @lt_state.
+      INTO TABLE @lt_state.
 
-    LOOP AT lt_state ASSIGNING <ls_state>.
+    LOOP AT lt_state ASSIGNING FIELD-SYMBOL(<ls_state>).
+
+      INSERT <ls_state>-repo_key INTO TABLE lt_keys.
+
       CLEAR ls_repo_f4.
-      ls_repo_f4-repo_key    = <ls_state>-repo_key.
+      ls_repo_f4-repo_key   = <ls_state>-repo_key.
       ls_repo_f4-branch_name = <ls_state>-branch_name.
-      IF ls_repo_f4-branch_name CP 'refs/heads/*'.
-        DATA(leadin) = strlen( 'refs/heads/' ).
-        SHIFT ls_repo_f4-branch_name BY leadin PLACES.
-      ENDIF.
       ls_repo_f4-remote_url = <ls_state>-remote_url.
+
+      IF ls_repo_f4-branch_name CP 'refs/heads/*'.
+        DATA(lv_prefix_length) = strlen( 'refs/heads/' ).
+        SHIFT ls_repo_f4-branch_name
+          BY lv_prefix_length PLACES.
+      ENDIF.
+
       APPEND ls_repo_f4 TO rt_repo_f4.
+
     ENDLOOP.
+
+    SELECT DISTINCT repo_key
+      FROM zaog_obj_store
+      INTO TABLE @DATA(lt_object_keys).
+
+    LOOP AT lt_object_keys INTO lv_repo_key.
+
+      IF line_exists( lt_keys[ table_line = lv_repo_key ] ).
+        CONTINUE.
+      ENDIF.
+
+      INSERT lv_repo_key INTO TABLE lt_keys.
+
+      APPEND VALUE #(
+        repo_key   = lv_repo_key
+        branch_name = '<orphaned cache>'
+        remote_url = '<no repository state>' )
+        TO rt_repo_f4.
+
+    ENDLOOP.
+
+    SELECT DISTINCT repo_key
+      FROM zaog_commit_hist
+      INTO TABLE @DATA(lt_history_keys).
+
+    LOOP AT lt_history_keys INTO lv_repo_key.
+
+      IF line_exists( lt_keys[ table_line = lv_repo_key ] ).
+        CONTINUE.
+      ENDIF.
+
+      INSERT lv_repo_key INTO TABLE lt_keys.
+
+      APPEND VALUE #(
+        repo_key   = lv_repo_key
+        branch_name = '<orphaned certificate>'
+        remote_url = '<no repository state>' )
+        TO rt_repo_f4.
+
+    ENDLOOP.
+
+    SORT rt_repo_f4 BY repo_key branch_name.
+
   ENDMETHOD.
 
   METHOD clear_repo.
-    DATA lv_url    TYPE string.
-    DATA ls_result TYPE zcl_abapgit_ortec_git_switch=>ty_clear_result.
 
     IF iv_repo_key IS INITIAL.
-      zcx_abapgit_ortec_git=>raise( 'Cache admin: repository key required' ).
+      zcx_abapgit_ortec_git=>raise(
+        'Cache admin: repository key required' ).
     ENDIF.
 
-    SELECT SINGLE remote_url FROM zaog_repo_state
-      WHERE repo_key = @iv_repo_key
-      INTO @lv_url.
-    IF sy-subrc <> 0 OR lv_url IS INITIAL.
-      zcx_abapgit_ortec_git=>raise( |Cache admin: no cached state for repo key { iv_repo_key }| ).
+    " Do not require REMOTE_URL. A repository may have object/cache state
+    " even when its repository-state URL metadata is incomplete.
+    SELECT SINGLE repo_key
+      FROM zaog_repo_state
+      INTO @DATA(lv_state_key)
+      WHERE repo_key = @iv_repo_key.
+
+    IF sy-subrc <> 0.
+
+      SELECT SINGLE repo_key
+        FROM zaog_obj_store
+        INTO @DATA(lv_object_key)
+        WHERE repo_key = @iv_repo_key.
+
+      IF sy-subrc <> 0.
+
+        SELECT SINGLE repo_key
+          FROM zaog_commit_hist
+          INTO @DATA(lv_hist_key)
+          WHERE repo_key = @iv_repo_key.
+
+        IF sy-subrc <> 0.
+          zcx_abapgit_ortec_git=>raise(
+            |Cache admin: no cached data for repo key { iv_repo_key }| ).
+        ENDIF.
+
+      ENDIF.
+
     ENDIF.
 
     IF acquire_lock( iv_repo_key ) = abap_false.
       zcx_abapgit_ortec_git=>raise(
-          |Cache admin: repository { iv_repo_key } is locked by a concurrent fetch - try again shortly| ).
+        |Cache admin: repository { iv_repo_key } is locked by a concurrent operation| ).
     ENDIF.
 
+    rs_result-repo_key = iv_repo_key.
+
     TRY.
-        ls_result = zcl_abapgit_ortec_git_switch=>clear_repo_cache( lv_url ).
-      CATCH zcx_abapgit_ortec_git INTO DATA(lx_error).
+
+        " Delete dependent/derived data before parent-like repository state.
+        DELETE FROM zaog_obj_index
+          WHERE repo_key = iv_repo_key.
+        rs_result-obj_index = sy-dbcnt.
+
+        DELETE FROM zaog_pack_idx
+          WHERE repo_key = iv_repo_key.
+        rs_result-pack_idx = sy-dbcnt.
+
+        DELETE FROM zaog_raw_pack
+          WHERE repo_key = iv_repo_key.
+        rs_result-raw_pack = sy-dbcnt.
+
+        DELETE FROM zaog_pack_meta
+          WHERE repo_key = iv_repo_key.
+        rs_result-pack_meta = sy-dbcnt.
+
+        DELETE FROM zaog_fetch_sess
+          WHERE repo_key = iv_repo_key.
+        rs_result-fetch_sess = sy-dbcnt.
+
+        DELETE FROM zaog_commit_hist
+          WHERE repo_key = iv_repo_key.
+        rs_result-commit_hist = sy-dbcnt.
+
+        DELETE FROM zaog_obj_store
+          WHERE repo_key = iv_repo_key.
+        rs_result-obj_store = sy-dbcnt.
+
+        DELETE FROM zaog_repo_state
+          WHERE repo_key = iv_repo_key.
+        rs_result-repo_state = sy-dbcnt.
+
+        zcl_abapgit_ortec_obj_store=>invalidate_cache( ).
+
+        COMMIT WORK AND WAIT.
+
+      CATCH cx_root INTO DATA(lx_error).
+
+        ROLLBACK WORK.
+        zcl_abapgit_ortec_obj_store=>invalidate_cache( ).
         release_lock( iv_repo_key ).
-        RAISE EXCEPTION lx_error.
+
+        RAISE EXCEPTION TYPE zcx_abapgit_ortec_git
+          EXPORTING
+            iv_text  =
+                       |Cache admin: failed to clear repository { iv_repo_key }: { lx_error->get_text( ) }|
+            previous = lx_error.
+
     ENDTRY.
 
     release_lock( iv_repo_key ).
 
-    rv_message = zcl_abapgit_ortec_git_switch=>format_clear_result( ls_result ).
   ENDMETHOD.
 
   METHOD acquire_lock.
@@ -300,5 +443,33 @@ CLASS zcl_abapgit_ortec_cache_admin IMPLEMENTATION.
         _scope               = '2'
         _synchron            = space
         _collect             = space.
+  ENDMETHOD.
+
+  METHOD format_clear_result.
+
+    DATA lv_total TYPE i.
+
+    lv_total =
+        is_result-obj_store
+      + is_result-obj_index
+      + is_result-pack_idx
+      + is_result-pack_meta
+      + is_result-raw_pack
+      + is_result-fetch_sess
+      + is_result-commit_hist
+      + is_result-repo_state.
+
+    rv_message =
+      |ORTEC cache cleared for repo key { is_result-repo_key }: | &&
+      |{ lv_total } row(s) removed | &&
+      |[OBJ_STORE={ is_result-obj_store }, | &&
+      |OBJ_INDEX={ is_result-obj_index }, | &&
+      |PACK_IDX={ is_result-pack_idx }, | &&
+      |PACK_META={ is_result-pack_meta }, | &&
+      |RAW_PACK={ is_result-raw_pack }, | &&
+      |FETCH_SESS={ is_result-fetch_sess }, | &&
+      |COMMIT_HIST={ is_result-commit_hist }, | &&
+      |REPO_STATE={ is_result-repo_state }]|.
+
   ENDMETHOD.
 ENDCLASS.

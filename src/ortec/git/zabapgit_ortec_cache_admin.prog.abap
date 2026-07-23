@@ -1,11 +1,11 @@
 REPORT zabapgit_ortec_cache_admin.
 
 SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-001.
-PARAMETERS p_repo TYPE zcl_abapgit_ortec_repo_state=>ty_repo_key.
+  PARAMETERS p_repo TYPE zcl_abapgit_ortec_repo_state=>ty_repo_key LOWER CASE.
 SELECTION-SCREEN END OF BLOCK b1.
 
 SELECTION-SCREEN BEGIN OF BLOCK b2 WITH FRAME TITLE TEXT-002.
-PARAMETERS p_clear TYPE abap_bool AS CHECKBOX DEFAULT abap_false.
+  PARAMETERS p_clear TYPE abap_bool AS CHECKBOX DEFAULT abap_false.
 SELECTION-SCREEN END OF BLOCK b2.
 
 AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_repo.
@@ -53,15 +53,15 @@ AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_repo.
 
   CALL FUNCTION 'F4IF_INT_TABLE_VALUE_REQUEST'
     EXPORTING
-      retfield    = 'REPO_KEY'
-      dynpprog    = sy-repid
-      dynpnr      = sy-dynnr
-      dynprofield = 'P_REPO'
-      value_org   = 'S'
+      retfield        = 'REPO_KEY'
+      dynpprog        = sy-repid
+      dynpnr          = sy-dynnr
+      dynprofield     = 'P_REPO'
+      value_org       = 'S'
     TABLES
-      value_tab   = lt_repo_values
-      field_tab   = lt_field_tab
-      return_tab  = lt_return
+      value_tab       = lt_repo_values
+      field_tab       = lt_field_tab
+      return_tab      = lt_return
     EXCEPTIONS
       parameter_error = 1
       no_values_found = 2
@@ -107,11 +107,22 @@ START-OF-SELECTION.
 
     IF lv_answer = '1'.
       TRY.
-          DATA(lv_message) = zcl_abapgit_ortec_cache_admin=>clear_repo( p_repo ).
+
+          DATA(ls_result) =
+            zcl_abapgit_ortec_cache_admin=>clear_repo(
+              iv_repo_key = p_repo ).
+
+          DATA(lv_message) =
+            zcl_abapgit_ortec_cache_admin=>format_clear_result(
+              ls_result ).
+
           MESSAGE lv_message TYPE 'S'.
+
         CATCH zcx_abapgit_ortec_git INTO DATA(lx_error).
           MESSAGE lx_error->get_text( ) TYPE 'E'.
+
       ENDTRY.
+
     ELSE.
       MESSAGE 'Cache clear cancelled' TYPE 'S'.
     ENDIF.
