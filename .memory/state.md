@@ -2,96 +2,77 @@
 
 - Repository / branch: abapGit on `ortec/abapgit_1_133-opt-rework`
 - Topic: `variant-b-partial-clone`
-- Owner-approved goal: Variant B partial-clone fetch orchestration with certified haves, cold blobless graph acquisition, current-tip blob materialization, and no per-object SQL/HTTP repair.
+- Current phase: `Package D — not started`
+- Previous phase: `Package C — SAP_VALIDATED_COMPLETE`
 
-### Validated baseline
+## Validated baseline
 
-- Current repository HEAD:  `39e7ae083f0700d600657c2806ca38fc3610019b`
-- Current SAP-validated productive baseline:  `b3701afbc812e5379b886fdc6a1e3db134578012`
-- Package C C1 implementation commit:  `aeac812652da4d18d46e0ee4aad742baaa179e80`
-- Package C C1 SAP/ATC fix commit:  `b3701afbc812e5379b886fdc6a1e3db134578012`
-- Package B final productive baseline:  `fc06f7f62218d6ce45e4ae5de1c709b4b39477ab`
+```text
+PACKAGE_C_STATUS=SAP_VALIDATED_COMPLETE
+PACKAGE_C_VALIDATED_HEAD=29199f629773c676e0eaa2f3a006f5167d304ae8
+SAP_SYSTEM=IT8
+SAP_VALIDATION_DATE=2026-07-23
+ATC=PASS
+ABAP_UNIT=PASS
+COLD_BRANCH=PASS
+WARM_UNCHANGED=PASS
+CERTIFIED_STATE=F/C
+CACHE_ADMIN=PASS
+LARGE_REPO_FUNCTIONAL=PASS
+```
+
+Package C at `29199f629773c676e0eaa2f3a006f5167d304ae8` is the current productive SAP-validated baseline.
 
 ## Completed work
 
-- Slice 0: COMPLETE
-- Slice 1: SAP_VALIDATED_COMPLETE
-- Slice 2A/2B: SAP_VALIDATED_COMPLETE
-- Slice 2C / Package A: SAP_VALIDATED_COMPLETE
-- Package B B0: APPROVED_WITH_RESOLVED_REVISIONS
-- Package B B1: SAP_VALIDATED_COMPLETE
-- Package B B2+B3: SAP_VALIDATED_COMPLETE
+- Slice 0: `COMPLETE`
+- Slice 1: `SAP_VALIDATED_COMPLETE`
+- Slice 2A/2B: `SAP_VALIDATED_COMPLETE`
+- Slice 2C / Package A: `SAP_VALIDATED_COMPLETE`
+- Package B B0: `APPROVED_WITH_RESOLVED_REVISIONS`
+- Package B B1: `SAP_VALIDATED_COMPLETE`
+- Package B B2+B3: `SAP_VALIDATED_COMPLETE`
 - Package C C0: `APPROVED_WITH_RESOLVED_REVISIONS`
 - Package C C1: `SAP_VALIDATED_COMPLETE`
-- Package C C2: `READY_FOR_SAP_VALIDATION` (self/static validation complete)
+- Package C C2 / Package C final: `SAP_VALIDATED_COMPLETE`
 
-## Package B status
+## Package C closeout
 
-- Implemented: `ZCL_ABAPGIT_ORTEC_COLD_INIT=>ACQUIRE_BLOBLESS_GRAPH`; `ZCL_ABAPGIT_ORTEC_OBJ_STORE=>VERIFY_TREE_CLOSURE`
-- IT8 import and activation: PASS
-- ABAP Unit: PASS
-- Productive ATC: PASS
-- Performance scan: PASS
-- Performance audit verdict: APPROVE
-- Performance gate: CLOSED
-- Original missing-tree finding: RETRACTED
-- Package B final productive validation: PASS
-- Package B blockers: none
-- Package B final handoff:
-  `.memory/handoffs/variant-b-package-b-b2b3-checkpoint.md`
+Validated in SAP IT8:
 
-### Current phase
+- all affected classes import and activate successfully;
+- productive ATC checks are clean;
+- all affected ABAP Unit tests pass;
+- cold-branch reconstruction produces correct files and deltas;
+- warm-unchanged reconstruction succeeds;
+- snapshot publication produces `HIST_LEVEL = F` and `SNAP_STATE = C` in
+  `ZAOG_COMMIT_HIST`;
+- the matching `ZAOG_REPO_STATE` row contains `SNAP_STATE = C`;
+- repository URL, URL hash, current commit, fetched commit and fetch timestamp
+  are persisted for cold snapshot publication;
+- cache administration clears all repository-scoped cache, certificate and
+  state data directly by `REPO_KEY`;
+- cache clearing supports incomplete repository metadata and orphaned cache
+  state;
+- large unfiltered repositories no longer create one repository-wide SHA1
+  range in `FETCH_BLOBS_BULK`;
+- bounded active blob-key and payload windows complete functionally for the
+  tested large repository.
 
-- Current phase:  `Package C C2 — awaiting owner SAP validation`
-- Previous checkpoint:  `Package C C1 — SAP_VALIDATED_COMPLETE`
-- Validated C1 HEAD:  `b3701afbc812e5379b886fdc6a1e3db134578012`
-- C1 implementation commit:  `aeac812652da4d18d46e0ee4aad742baaa179e80`
-- C1 SAP/ATC fix commit:  `b3701afbc812e5379b886fdc6a1e3db134578012`
-- C1 handoff:  `.memory/handoffs/variant-b-package-c-c1-checkpoint.md`
-- C1 implementation audit:  `PASS`, gate closed
-- C1 performance scan:  `PASS`
-- C1 regression:  `PASS`
-- IT8 import and activation:  `PASS`
-- C1 ABAP Unit:  `PASS`
-- Relevant bundled regression ABAP Unit:  `PASS`
-- Productive C1 ATC:  `PASS`
-- Remaining C1 blockers:  none
-- C2 implementation commit:  see next action (commit pending)
-- C2 handoff:  `.memory/handoffs/variant-b-package-c-c2-checkpoint.md`
-- C2 static checks (get_errors, method-name length):  `PASS`
-- C2 self-performed performance gate:  `PASS` (dedicated scan agent unavailable this turn)
-- C2 SAP validation:  `PENDING` (owner)
-- Checkpoint plan:  `C1_THEN_C2_THEN_D`
+Package C correctness blockers: `NONE`.
 
-### Current objective
+## Current objective
 
-Package C C2:
+Start Package D from the SAP-validated Package C baseline.
 
-- migrate the approved productive branch orchestration callers;
-- resolve and classify the advertised target as warm, incremental, or cold;
-- invoke the explicit opportunistic backfill at most once before accepting a
-  cold classification;
-- use the SAP-validated C1 certified-have policy;
-- route cold branches through the validated Package B graph and snapshot APIs;
-- preserve the bounded thin, self-contained, and recovery cascade;
-- replace the raw commit-history write with the approved certification
-  lifecycle;
-- publish branch state only after graph and selected snapshot verification;
-- preserve standard abapGit behavior when ORTEC is disabled.
+Package D scope:
 
-### Active links
-
-- Owner specification:  `.github/prompts/variant-b.prompt.md`
-- Package C design:  `.memory/logs/variant_b_package_c_design.md`
-- Package C correctness review:  `.memory/reviews/variant_b_package_c_correctness_review.md`
-- Package C protocol/persistence review:  `.memory/reviews/variant_b_package_c_protocol_review.md`
-- Package C performance design gate:  `.memory/reviews/performance_design_variant_b_package_c.md`
-- C1 handoff:  `.memory/handoffs/variant-b-package-c-c1-checkpoint.md`
-- C1 implementation audit:  `.memory/reviews/implementation_audit_variant_b_package_c_c1.md`
-- C1 performance scan:  `.memory/reviews/performance_scan_variant_b_package_c_c1.md`
-- C1 regression:  `.memory/logs/regression_variant_b_package_c_c1.md`
-- C2 handoff:  `.memory/handoffs/variant-b-package-c-c2-checkpoint.md`
-- Package B final handoff:  `.memory/handoffs/variant-b-package-b-b2b3-checkpoint.md`
+- shared design for Slices 7 and 8;
+- D1: generalized bounded external delta-base resolution;
+- D2: final attempt and transaction isolation;
+- preserve all Package C certification, reconstruction and cache-management
+  invariants;
+- do not reopen Package C without concrete regression evidence.
 
 ## Binding constraints
 
@@ -102,37 +83,65 @@ Package C C2:
 - No per-delta-base remote repair.
 - Server capabilities must be intersected before request emission.
 - `INITIAL_BRANCH_BLOBLESS` uses `filter blob:none` only when advertised.
-- B2 tree traversal is iterative and uses bounded bulk frontiers.
-- B2 performs no blob-payload reads.
-- B3 performs bounded, deduplicated selected-blob materialization.
+- Tree and blob processing must use bounded bulk windows.
+- Presence, metadata and payload access remain separated.
 - Graph and snapshot completeness remain separate states.
+- Snapshot publication requires `HIST_LEVEL = F`.
 - No graph or snapshot certificate is published before verification.
 - Standard abapGit behavior remains unchanged when ORTEC is disabled.
-- Package C owns productive branch orchestration and final have policy.
-- Package D1 owns generalized bulk external delta-base resolution.
+- Package D1 owns generalized bounded external delta-base resolution.
 - Package D2 owns final attempt and transaction isolation.
 - Package E owns validated legacy-code removal.
 
-## Deferred non-blocking issue
+## Active links
 
-- `LTCL_CACHE_ADMIN=>OVERVIEW_AGGREGATES_COUNTS`
-- Classification: `DEFERRED_NON_PRODUCTIVE`
-- Package B blocker: `NO`
-- Release requirement: Resolve or explicitly disposition before final release validation.
+- Owner specification: `.github/prompts/variant-b.prompt.md`
+- Package C design and closeout:
+  `.memory/logs/variant_b_package_c_design.md`
+- Package C final handoff:
+  `.memory/handoffs/variant-b-package-c-c2-checkpoint.md`
+- Package C correctness review:
+  `.memory/reviews/variant_b_package_c_correctness_review.md`
+- Package C protocol/persistence review:
+  `.memory/reviews/variant_b_package_c_protocol_review.md`
+- Package C performance design gate:
+  `.memory/reviews/performance_design_variant_b_package_c.md`
+- Package B final handoff:
+  `.memory/handoffs/variant-b-package-b-b2b3-checkpoint.md`
 
-### Remaining roadmap
+## Deferred non-blocking performance work
 
-- Package C C2:  implementation complete, self/static-validated; owner SAP validation pending
-- Package D:  shared design for Slices 7+8, followed by separate D1 and D2 implementation checkpoints
-- Package E:  Slice 9 validated legacy-code cleanup
+The following work is intentionally deferred to the final performance pass:
 
-### Next action
+- final SAT/ST05 profiling of very large unfiltered repositories;
+- tuning the active blob-key window and payload-byte budget;
+- reducing simultaneous manifest, SHA1, remote-file and local-status working
+  sets if measurements justify it;
+- reviewing remaining legacy cache-population paths;
+- assessing whether additional database-side joins or package processing
+  improve the validated bounded implementation.
 
-Delegate a selective C2 checkpoint commit (exact approved file list only), then
-hand off to `ortec-abapgit-regression`, then stop for owner-executed IT8
-import/ABAP Unit/ATC validation. See
-`.memory/handoffs/variant-b-package-c-c2-checkpoint.md` for full scope,
-invariant matrix, and the explicit test-coverage-decision rationale.
+These are optimization items, not Package C correctness blockers.
 
-Do not repeat C0, C1, or re-litigate C2 scope. Do not start Package D until
-C2 is owner-SAP-validated.
+## Remaining roadmap
+
+1. Package D shared design for Slices 7 and 8.
+2. Package D1 implementation and checkpoint validation.
+3. Package D2 implementation and checkpoint validation.
+4. Package E validated legacy-code cleanup.
+5. Final cross-package performance profiling and tuning.
+6. Final release validation.
+
+## Next action
+
+Start Package D design in a new orchestrator chat from the SAP-validated
+Package C baseline.
+
+Read only the current compact state, the final Package C handoff, the owner
+specification and the Package-D-relevant design context.
+
+Do not repeat Package C discovery, design review or implementation review
+unless Package D exposes a concrete regression.
+
+Do not perform speculative Package C performance work during Package D.
+Record new performance evidence for the final performance pass.

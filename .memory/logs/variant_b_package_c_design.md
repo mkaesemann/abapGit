@@ -1,6 +1,8 @@
 # Variant B Package C — design (Slices 5+6 combined)
 
-Status: `APPROVED_WITH_RESOLVED_REVISIONS`
+Design status: `APPROVED_WITH_RESOLVED_REVISIONS`
+
+Implementation status: `SAP_VALIDATED_COMPLETE`
 
 C0 gate closure:
 
@@ -11,7 +13,9 @@ C0 gate closure:
 - remaining findings: non-blocking documentation or optional optimization only
 - implementation authorization: `C1_AUTHORIZED`
   
-Baseline: HEAD `cf3d5cb87ca4eec4e68b7975df6fc127a8c5abc2` (Package B SAP_VALIDATED_COMPLETE)
+Design baseline: HEAD `cf3d5cb87ca4eec4e68b7975df6fc127a8c5abc2` (Package B SAP_VALIDATED_COMPLETE)
+
+Final SAP-validated Package C HEAD: `29199f629773c676e0eaa2f3a006f5167d304ae8`
 
 ## 0. Current-source finding that drives this design (verified by direct read)
 
@@ -502,3 +506,123 @@ entirely (no `obj_store=>exists` false positive).
 the "always-empty certified haves" production defect for every existing
 incremental fetch, without touching branch orchestration/publication/cold
 routing. It is import/activate/ABAP-Unit/ATC-validatable on its own.
+
+## 16. Final implementation and SAP validation closeout
+
+Package C reached `SAP_VALIDATED_COMPLETE` in SAP IT8 at HEAD
+`29199f629773c676e0eaa2f3a006f5167d304ae8` on 2026-07-23.
+
+This section is the authoritative Package C completion record. Historical
+planning and checkpoint text above remains as reviewed design rationale and
+must not be interpreted as an active implementation or validation task.
+
+### 16.1 Validation evidence
+
+The final implementation passed:
+
+- SAP import and activation;
+- productive ATC checks;
+- all affected ABAP Unit tests;
+- cold-branch functional reconstruction;
+- warm-unchanged reconstruction;
+- cache-clear and genuine cold-retry validation;
+- functional reconstruction of the tested large unfiltered repository after
+  bounding active blob-key and payload processing.
+
+### 16.2 Certified-state invariant
+
+The final publication sequence is:
+
+```text
+BEGIN_ATTEMPT
+→ acquire and verify graph closure
+→ MARK_GRAPH_COMPLETE
+→ discover and materialize selected blobs
+→ verify complete selected blob set
+→ MARK_FULL_COMPLETE
+→ PREPARE_FULL_SNAPSHOT
+→ PUBLISH_SNAPSHOT_COMPLETE
+→ one final COMMIT WORK
+```
+
+The validated persistent result is:
+
+```text
+ZAOG_COMMIT_HIST:
+  HIST_LEVEL = F
+  SNAP_STATE = C
+
+ZAOG_REPO_STATE:
+  SNAP_STATE = C
+```
+
+`PUBLISH_SNAPSHOT_COMPLETE` rejects graph-only state. The former invalid
+`G/C` combination is therefore prevented by the productive gate and covered
+by ABAP Unit tests.
+
+### 16.3 Repository bookkeeping
+
+Cold snapshot finalization establishes or preserves:
+
+```text
+REMOTE_URL
+URL_HASH
+CURR_COMMIT
+FETCH_COMMIT
+FETCH_TS
+IS_SHALLOW = false
+DEEPEN_LVL = 0
+BRANCH_NAME
+FETCHED_AT
+VERIFIED_AT
+UPDATED_AT
+```
+
+Commit certification remains keyed by repository and commit; branch metadata
+is diagnostic and does not redefine commit identity.
+
+### 16.4 Cache administration
+
+Whole-repository cache clearing is owned by
+`ZCL_ABAPGIT_ORTEC_CACHE_ADMIN`, not by the feature-switch class.
+
+The operation:
+
+- is keyed directly by `REPO_KEY`;
+- does not require populated URL metadata;
+- clears object, index, pack, fetch-session, commit-certificate and
+  repository-state rows;
+- supports orphaned or partially initialized cache state;
+- invalidates the in-memory object-store cache;
+- is covered by focused ABAP Unit tests.
+
+The previous deferred `OVERVIEW_AGGREGATES_COUNTS` finding is resolved and is
+not an active Package C or release blocker.
+
+### 16.5 Large-repository correction
+
+A large unfiltered repository exposed `DBSQL_STMNT_TOO_LARGE` when
+`FETCH_BLOBS_BULK` expanded more than the supported number of SHA1 comparison
+markers into one SQL statement.
+
+The final functional correction avoids one repository-wide SHA1 range and
+uses a bounded active key/payload window. The tested large repository
+completed functionally after the correction.
+
+Final tuning of key-window size, payload budget, SQL round trips and peak
+memory is intentionally deferred to the final cross-package performance pass.
+The deferred work is optimization, not a Package C correctness blocker.
+
+### 16.6 Final decision and next boundary
+
+```text
+PACKAGE_C=SAP_VALIDATED_COMPLETE
+PACKAGE_C_VALIDATED_HEAD=29199f629773c676e0eaa2f3a006f5167d304ae8
+CORRECTNESS_BLOCKERS=NONE
+PERFORMANCE_FOLLOWUP=DEFERRED_NON_BLOCKING
+NEXT=PACKAGE_D
+```
+
+Package D starts from this validated baseline and must preserve all Package C
+certification, reconstruction and cache-management invariants. Package C is
+not to be reopened without concrete regression evidence.
