@@ -156,16 +156,16 @@ CLASS zcl_abapgit_ortec_cold_init DEFINITION
       IMPORTING iv_response_bytes TYPE i
                 iv_batch_size     TYPE i
                 iv_splits_used    TYPE i
-      RETURNING VALUE(rv_action) TYPE ty_oversize_action.
+      RETURNING VALUE(rv_action)  TYPE ty_oversize_action.
 
   PRIVATE SECTION.
     "! Splits it_batch into two roughly-equal, order-preserving halves.
     "! Pure, HTTP-free - used by MATERIALIZE_BATCH's oversized-response
     "! recovery (design §10).
     CLASS-METHODS split_batch_in_half
-      IMPORTING it_batch           TYPE zif_abapgit_git_definitions=>ty_sha1_tt
-      EXPORTING et_first_half     TYPE zif_abapgit_git_definitions=>ty_sha1_tt
-                et_second_half    TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+      IMPORTING it_batch       TYPE zif_abapgit_git_definitions=>ty_sha1_tt
+      EXPORTING et_first_half  TYPE zif_abapgit_git_definitions=>ty_sha1_tt
+                et_second_half TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
 
     "! Fetches, decodes/persists (via the streaming path), and verifies
     "! exactly one bounded MATERIALIZE_BLOBS batch. Recurses (at most
@@ -225,6 +225,14 @@ CLASS zcl_abapgit_ortec_cold_init DEFINITION
     CLASS-METHODS may_publish_snapshot
       IMPORTING it_still_missing TYPE zif_abapgit_git_definitions=>ty_sha1_tt
       RETURNING VALUE(rv_yes)    TYPE abap_bool.
+
+    CLASS-METHODS finalize_snapshot
+      IMPORTING iv_url         TYPE string
+                iv_repo_key    TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
+                iv_branch_name TYPE string
+                iv_tip_commit  TYPE zif_abapgit_git_definitions=>ty_sha1
+                iv_attempt_id  TYPE zcl_abapgit_ortec_mat_state=>ty_attempt_id
+      RAISING   zcx_abapgit_ortec_git.
 ENDCLASS.
 
 
@@ -304,10 +312,9 @@ CLASS zcl_abapgit_ortec_cold_init IMPLEMENTATION.
             cv_data      = lv_response ).
       CATCH zcx_abapgit_exception INTO DATA(lx_error).
 
-        RAISE EXCEPTION NEW zcx_abapgit_ortec_git(
-                                iv_text  = |Cold-init blobless fetch for { iv_tip_commit } failed: | &&
-                                           |{ lx_error->get_text( ) }|
-                                previous = lx_error ).
+        RAISE EXCEPTION NEW zcx_abapgit_ortec_git( iv_text  = |Cold-init blobless fetch for { iv_tip_commit } failed: | &&
+                                                              |{ lx_error->get_text( ) }|
+                                                   previous = lx_error ).
 
     ENDTRY.
 
@@ -397,13 +404,25 @@ CLASS zcl_abapgit_ortec_cold_init IMPLEMENTATION.
         |snapshot not published| ).
     ENDIF.
 
+    zcl_abapgit_ortec_mat_state=>mark_full_complete(
+      iv_repo_key   = iv_repo_key
+      iv_commit     = iv_tip_commit
+      iv_attempt_id = lv_attempt_id ).
+
+    zcl_abapgit_ortec_repo_state=>prepare_full_snapshot(
+        iv_repo_key    = iv_repo_key
+        iv_branch_name = iv_branch_name
+        iv_url         = iv_url
+        iv_commit      = iv_tip_commit ).
+
     " Design §11 step 6 / §12: verify, then certify, then commit - never
     " the reverse, never partially. Raises per its own existing contract
     " if hist_level < GRAPH_COMPLETE (snapshot cannot precede graph).
-    zcl_abapgit_ortec_mat_state=>publish_snapshot_complete(
+    finalize_snapshot(
+        iv_url         = iv_url
         iv_repo_key    = iv_repo_key
         iv_branch_name = iv_branch_name
-        iv_commit      = iv_tip_commit
+        iv_tip_commit  = iv_tip_commit
         iv_attempt_id  = lv_attempt_id ).
 
     COMMIT WORK.
@@ -556,9 +575,8 @@ CLASS zcl_abapgit_ortec_cold_init IMPLEMENTATION.
             cv_data      = lv_response ).
       CATCH zcx_abapgit_exception INTO DATA(lx_error).
 
-        RAISE EXCEPTION NEW zcx_abapgit_ortec_git(
-                                iv_text  = |Materialize batch fetch failed: { lx_error->get_text( ) }|
-                                previous = lx_error ).
+        RAISE EXCEPTION NEW zcx_abapgit_ortec_git( iv_text  = |Materialize batch fetch failed: { lx_error->get_text( ) }|
+                                                   previous = lx_error ).
 
     ENDTRY.
 
@@ -610,4 +628,26 @@ CLASS zcl_abapgit_ortec_cold_init IMPLEMENTATION.
   METHOD may_publish_snapshot.
     rv_yes = boolc( it_still_missing IS INITIAL ).
   ENDMETHOD.
+
+  METHOD finalize_snapshot.
+
+    zcl_abapgit_ortec_mat_state=>mark_full_complete(
+      iv_repo_key   = iv_repo_key
+      iv_commit     = iv_tip_commit
+      iv_attempt_id = iv_attempt_id ).
+
+    zcl_abapgit_ortec_repo_state=>prepare_full_snapshot(
+      iv_repo_key    = iv_repo_key
+      iv_branch_name = iv_branch_name
+      iv_url         = iv_url
+      iv_commit      = iv_tip_commit ).
+
+    zcl_abapgit_ortec_mat_state=>publish_snapshot_complete(
+      iv_repo_key    = iv_repo_key
+      iv_branch_name = iv_branch_name
+      iv_commit      = iv_tip_commit
+      iv_attempt_id  = iv_attempt_id ).
+
+  ENDMETHOD.
+
 ENDCLASS.

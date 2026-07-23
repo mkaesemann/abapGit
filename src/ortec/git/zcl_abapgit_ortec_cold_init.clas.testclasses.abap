@@ -1,4 +1,5 @@
 CLASS zcl_abapgit_ortec_cold_init DEFINITION LOCAL FRIENDS ltcl_cold_init.
+CLASS zcl_abapgit_ortec_cold_init DEFINITION LOCAL FRIENDS ltcl_cold_finalize.
 
 CLASS ltcl_cold_init DEFINITION FINAL
   FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
@@ -463,4 +464,153 @@ CLASS ltcl_cold_init IMPLEMENTATION.
         act = lv_yes
         msg = 'A non-empty still-missing set must never gate publication' ).
   ENDMETHOD.
+ENDCLASS.
+
+CLASS ltcl_cold_finalize DEFINITION
+  FOR TESTING
+  RISK LEVEL HARMLESS
+  DURATION SHORT
+  FINAL.
+
+  PRIVATE SECTION.
+
+    CONSTANTS c_repo TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
+      VALUE 'ZAOGT_COLDF1'.
+
+    CONSTANTS c_branch TYPE string
+      VALUE 'refs/heads/unit-cold-final'.
+
+    CONSTANTS c_url TYPE string
+      VALUE 'https://unit.example.com/cold-final.git'.
+
+    CONSTANTS c_commit TYPE zif_abapgit_git_definitions=>ty_sha1
+      VALUE '1234567890abcdef1234567890abcdef12345678'.
+
+    METHODS setup.
+    METHODS teardown.
+    METHODS cleanup.
+
+    METHODS finalize_writes_full_state
+      FOR TESTING
+      RAISING cx_static_check.
+
+ENDCLASS.
+
+
+CLASS ltcl_cold_finalize IMPLEMENTATION.
+
+  METHOD setup.
+    cleanup( ).
+  ENDMETHOD.
+
+
+  METHOD teardown.
+    cleanup( ).
+  ENDMETHOD.
+
+
+  METHOD cleanup.
+
+    ROLLBACK WORK.
+
+    DELETE FROM zaog_commit_hist
+      WHERE repo_key = c_repo.
+
+    DELETE FROM zaog_repo_state
+      WHERE repo_key = c_repo.
+
+    COMMIT WORK.
+
+  ENDMETHOD.
+
+
+  METHOD finalize_writes_full_state.
+
+    DATA(lv_attempt) =
+      zcl_abapgit_ortec_mat_state=>begin_attempt(
+        iv_repo_key = c_repo
+        iv_commit   = c_commit ).
+
+    zcl_abapgit_ortec_mat_state=>mark_graph_complete(
+      iv_repo_key   = c_repo
+      iv_commit     = c_commit
+      iv_attempt_id = lv_attempt ).
+
+    zcl_abapgit_ortec_cold_init=>finalize_snapshot(
+      iv_url         = c_url
+      iv_repo_key    = c_repo
+      iv_branch_name = c_branch
+      iv_tip_commit  = c_commit
+      iv_attempt_id  = lv_attempt ).
+
+    SELECT SINGLE *
+      FROM zaog_commit_hist
+      INTO @DATA(ls_hist)
+      WHERE repo_key    = @c_repo
+        AND commit_sha1 = @c_commit.
+
+    cl_abap_unit_assert=>assert_equals(
+      act = sy-subrc
+      exp = 0 ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_hist-hist_level
+      exp = zcl_abapgit_ortec_mat_state=>cs_hist_level-full_complete ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_hist-snap_state
+      exp = zcl_abapgit_ortec_mat_state=>cs_snap_state-complete ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_hist-branch_name
+      exp = c_branch ).
+
+    cl_abap_unit_assert=>assert_not_initial(
+      act = ls_hist-fetched_at ).
+
+    SELECT SINGLE *
+      FROM zaog_repo_state
+      INTO @DATA(ls_repo)
+      WHERE repo_key    = @c_repo
+        AND branch_name = @c_branch.
+
+    cl_abap_unit_assert=>assert_equals(
+      act = sy-subrc
+      exp = 0 ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_repo-remote_url
+      exp = c_url ).
+
+    DATA(lv_expected_hash) =
+      zcl_abapgit_hash=>sha1_string( c_url ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_repo-url_hash
+      exp = lv_expected_hash ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_repo-curr_commit
+      exp = c_commit ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_repo-fetch_commit
+      exp = c_commit ).
+
+    cl_abap_unit_assert=>assert_not_initial(
+      act = ls_repo-fetch_ts ).
+
+    cl_abap_unit_assert=>assert_initial(
+      act = ls_repo-is_shallow ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_repo-deepen_lvl
+      exp = 0 ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_repo-snap_state
+      exp = zcl_abapgit_ortec_mat_state=>cs_snap_state-complete ).
+
+  ENDMETHOD.
+
 ENDCLASS.

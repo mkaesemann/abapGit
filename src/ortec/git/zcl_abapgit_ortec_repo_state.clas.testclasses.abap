@@ -191,4 +191,223 @@ CLASS ltcl_repo_state IMPLEMENTATION.
             '(never added to commit_hist) must ALSO be a candidate, not hidden ' &&
             'just because commit_hist happens to have an unrelated row' ).
   ENDMETHOD.
+
+ENDCLASS.
+
+CLASS ltcl_repo_full_snapshot DEFINITION
+  FOR TESTING
+  RISK LEVEL HARMLESS
+  DURATION SHORT
+  FINAL.
+
+  PRIVATE SECTION.
+
+    CONSTANTS c_repo TYPE zcl_abapgit_ortec_repo_state=>ty_repo_key
+      VALUE 'ZAOGT_REPS01'.
+
+    CONSTANTS c_branch TYPE string
+      VALUE 'refs/heads/unit-repo-state'.
+
+    CONSTANTS c_url TYPE string
+      VALUE 'https://unit.example.com/repo-state.git'.
+
+    CONSTANTS c_commit TYPE zif_abapgit_git_definitions=>ty_sha1
+      VALUE 'dddddddddddddddddddddddddddddddddddddddd'.
+
+    METHODS setup.
+    METHODS teardown.
+    METHODS cleanup.
+
+    METHODS prepare_full_new_row
+      FOR TESTING
+      RAISING cx_static_check.
+
+    METHODS prepare_preserves_fields
+      FOR TESTING
+      RAISING cx_static_check.
+
+ENDCLASS.
+
+
+CLASS ltcl_repo_full_snapshot IMPLEMENTATION.
+
+  METHOD setup.
+    cleanup( ).
+  ENDMETHOD.
+
+
+  METHOD teardown.
+    cleanup( ).
+  ENDMETHOD.
+
+
+  METHOD cleanup.
+
+    ROLLBACK WORK.
+
+    DELETE FROM zaog_repo_state
+      WHERE repo_key = c_repo.
+
+    DELETE FROM zaog_commit_hist
+      WHERE repo_key = c_repo.
+
+    COMMIT WORK.
+
+  ENDMETHOD.
+
+
+  METHOD prepare_full_new_row.
+
+    zcl_abapgit_ortec_repo_state=>prepare_full_snapshot(
+      iv_repo_key    = c_repo
+      iv_branch_name = c_branch
+      iv_url         = c_url
+      iv_commit      = c_commit ).
+
+    SELECT SINGLE *
+      FROM zaog_repo_state
+      INTO @DATA(ls_row)
+      WHERE repo_key    = @c_repo
+        AND branch_name = @c_branch.
+
+    cl_abap_unit_assert=>assert_equals(
+      act = sy-subrc
+      exp = 0 ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_row-repo_key
+      exp = c_repo ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_row-branch_name
+      exp = c_branch ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_row-remote_url
+      exp = c_url ).
+
+    DATA(lv_expected_hash) =
+      zcl_abapgit_hash=>sha1_string( c_url ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_row-url_hash
+      exp = lv_expected_hash ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_row-curr_commit
+      exp = c_commit ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_row-fetch_commit
+      exp = c_commit ).
+
+    cl_abap_unit_assert=>assert_not_initial(
+      act = ls_row-fetch_ts ).
+
+    cl_abap_unit_assert=>assert_initial(
+      act = ls_row-is_shallow ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_row-deepen_lvl
+      exp = 0 ).
+
+    cl_abap_unit_assert=>assert_not_initial(
+      act = ls_row-changed_by ).
+
+    cl_abap_unit_assert=>assert_not_initial(
+      act = ls_row-changed_at ).
+
+    " PREPARE does not publish the snapshot.
+    cl_abap_unit_assert=>assert_differs(
+      act = ls_row-snap_state
+      exp = zcl_abapgit_ortec_mat_state=>cs_snap_state-complete ).
+
+  ENDMETHOD.
+
+
+  METHOD prepare_preserves_fields.
+
+    DATA ls_before TYPE zaog_repo_state.
+    DATA lv_ts     TYPE timestampl.
+
+    GET TIME STAMP FIELD lv_ts.
+
+    ls_before-repo_key    = c_repo.
+    ls_before-branch_name = c_branch.
+    ls_before-remote_url  = 'https://old.example.com/repository.git'.
+    ls_before-url_hash =
+      zcl_abapgit_hash=>sha1_string( conv #( ls_before-remote_url ) ).
+
+    ls_before-curr_commit =
+      'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'.
+
+    ls_before-fetch_commit =
+      'ffffffffffffffffffffffffffffffffffffffff'.
+
+    ls_before-fetch_ts   = lv_ts.
+    ls_before-is_shallow = abap_true.
+    ls_before-deepen_lvl = 99.
+    ls_before-snap_state =
+      zcl_abapgit_ortec_mat_state=>cs_snap_state-invalid.
+    ls_before-changed_by = sy-uname.
+    ls_before-changed_at = lv_ts.
+
+    MODIFY zaog_repo_state FROM ls_before.
+
+    cl_abap_unit_assert=>assert_equals(
+      act = sy-subrc
+      exp = 0 ).
+
+    zcl_abapgit_ortec_repo_state=>prepare_full_snapshot(
+      iv_repo_key    = c_repo
+      iv_branch_name = c_branch
+      iv_url         = c_url
+      iv_commit      = c_commit ).
+
+    SELECT SINGLE *
+      FROM zaog_repo_state
+      INTO @DATA(ls_after)
+      WHERE repo_key    = @c_repo
+        AND branch_name = @c_branch.
+
+    cl_abap_unit_assert=>assert_equals(
+      act = sy-subrc
+      exp = 0 ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_after-remote_url
+      exp = c_url ).
+
+    DATA(lv_expected_hash) =
+      zcl_abapgit_hash=>sha1_string( c_url ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_after-url_hash
+      exp = lv_expected_hash ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_after-curr_commit
+      exp = c_commit ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_after-fetch_commit
+      exp = c_commit ).
+
+    cl_abap_unit_assert=>assert_not_initial(
+      act = ls_after-fetch_ts ).
+
+    cl_abap_unit_assert=>assert_initial(
+      act = ls_after-is_shallow ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_after-deepen_lvl
+      exp = 0 ).
+
+    " Prepare must not publish or overwrite the existing snapshot state.
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_after-snap_state
+      exp = zcl_abapgit_ortec_mat_state=>cs_snap_state-invalid ).
+
+  ENDMETHOD.
+
 ENDCLASS.

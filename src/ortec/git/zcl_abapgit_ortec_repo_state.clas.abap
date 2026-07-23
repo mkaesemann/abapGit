@@ -144,12 +144,67 @@ CLASS zcl_abapgit_ortec_repo_state DEFINITION
     CLASS-METHODS invalidate_all_history
       IMPORTING iv_repo_key TYPE ty_repo_key.
 
+    CLASS-METHODS prepare_full_snapshot
+      IMPORTING
+        iv_repo_key    TYPE ty_repo_key
+        iv_branch_name TYPE string
+        iv_url         TYPE string
+        iv_commit      TYPE zif_abapgit_git_definitions=>ty_sha1
+      RAISING
+        zcx_abapgit_ortec_git.
+
   PROTECTED SECTION.
   PRIVATE SECTION.
 ENDCLASS.
 
 
 CLASS zcl_abapgit_ortec_repo_state IMPLEMENTATION.
+  METHOD prepare_full_snapshot.
+
+    DATA lv_branch TYPE c LENGTH 255.
+    DATA lv_ts     TYPE timestampl.
+    DATA ls_row    TYPE zaog_repo_state.
+
+    lv_branch = iv_branch_name.
+    GET TIME STAMP FIELD lv_ts.
+
+    SELECT SINGLE * FROM zaog_repo_state
+      INTO ls_row
+      WHERE repo_key    = iv_repo_key
+        AND branch_name = lv_branch.
+
+    IF sy-subrc <> 0.
+      CLEAR ls_row.
+      ls_row-repo_key    = iv_repo_key.
+      ls_row-branch_name = lv_branch.
+    ENDIF.
+
+    ls_row-remote_url = iv_url.
+
+    TRY.
+        ls_row-url_hash = zcl_abapgit_hash=>sha1_string( iv_url ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_hash).
+        RAISE EXCEPTION NEW zcx_abapgit_ortec_git( iv_text  = |Failed to hash repository URL|
+                                                   previous = lx_hash ).
+    ENDTRY.
+
+    ls_row-curr_commit  = iv_commit.
+    ls_row-fetch_commit = iv_commit.
+    ls_row-fetch_ts     = lv_ts.
+    ls_row-is_shallow   = abap_false.
+    ls_row-deepen_lvl   = 0.
+    ls_row-changed_by   = sy-uname.
+    ls_row-changed_at   = lv_ts.
+
+    " SNAP_STATE is intentionally not set here.
+    " Publication remains owned by MAT_STATE.
+    MODIFY zaog_repo_state FROM ls_row.
+
+    IF sy-subrc <> 0.
+      zcx_abapgit_ortec_git=>raise( |Failed to prepare repository state for { iv_commit }| ).
+    ENDIF.
+
+  ENDMETHOD.
 
   METHOD get_state.
     DATA ls_row TYPE zaog_repo_state.

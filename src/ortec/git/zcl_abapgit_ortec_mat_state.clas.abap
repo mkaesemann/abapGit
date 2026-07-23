@@ -93,7 +93,7 @@ CLASS zcl_abapgit_ortec_mat_state DEFINITION
     "! Orchestrator-owned publication boundary: marks the commit's
     "! snapshot COMPLETE and atomically (same LUW, no COMMIT WORK) updates
     "! the branch's materialized commit pointer + denormalized snap_state.
-    "! Raises if hist_level < GRAPH_COMPLETE (snapshot cannot precede
+    "! Raises unless hist_level = FULL_COMPLETE (snapshot cannot precede
     "! graph) or if iv_attempt_id is stale. Issues NO COMMIT WORK - the
     "! calling orchestrator commits once, after this call and any related
     "! object-store writes all succeed, so a crash/rollback before that
@@ -242,6 +242,7 @@ CLASS zcl_abapgit_ortec_mat_state IMPLEMENTATION.
       ls_row-commit_sha1 = iv_commit.
       ls_row-hist_level  = cs_hist_level-unknown.
       ls_row-snap_state  = cs_snap_state-none.
+      ls_row-fetched_at  = lv_ts.
     ENDIF.
 
     " hist_level is never modified here - only initialized above when the
@@ -295,13 +296,13 @@ CLASS zcl_abapgit_ortec_mat_state IMPLEMENTATION.
     DATA lv_branch TYPE c LENGTH 255.
     DATA lv_ts     TYPE timestampl.
 
-    SELECT SINGLE * FROM zaog_commit_hist INTO ls_row
+    SELECT SINGLE * FROM zaog_commit_hist
+      INTO ls_row
       WHERE repo_key    = iv_repo_key
         AND commit_sha1 = iv_commit.
-    IF sy-subrc <> 0
-        OR ( ls_row-hist_level <> cs_hist_level-graph_complete
-        AND ls_row-hist_level <> cs_hist_level-full_complete ).
-      zcx_abapgit_ortec_git=>raise( |Materialization: snapshot cannot precede graph for { iv_commit }| ).
+    IF    sy-subrc          <> 0
+       OR ls_row-hist_level <> cs_hist_level-full_complete.
+      zcx_abapgit_ortec_git=>raise( |Materialization: snapshot requires full completion for { iv_commit }| ).
     ENDIF.
 
     IF ls_row-attempt_id <> iv_attempt_id.
@@ -312,6 +313,13 @@ CLASS zcl_abapgit_ortec_mat_state IMPLEMENTATION.
     ls_row-snap_state  = cs_snap_state-complete.
     ls_row-verified_at = lv_ts.
     ls_row-updated_at  = lv_ts.
+
+
+    " Diagnostic only. The certificate key remains REPO_KEY + COMMIT_SHA1
+    " because one commit can be referenced by multiple branches.
+    IF ls_row-branch_name IS INITIAL.
+      ls_row-branch_name = iv_branch_name.
+    ENDIF.
 
     MODIFY zaog_commit_hist FROM ls_row.
     IF sy-subrc <> 0.

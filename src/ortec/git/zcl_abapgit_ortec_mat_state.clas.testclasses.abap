@@ -1,9 +1,9 @@
 CLASS ltcl_mat_state DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINAL.
 
   PRIVATE SECTION.
-    CONSTANTS: c_repo1 TYPE zcl_abapgit_ortec_mat_state=>ty_repo_key VALUE 'ZAOG_TST_01',
-               c_repo2 TYPE zcl_abapgit_ortec_mat_state=>ty_repo_key VALUE 'ZAOG_TST_02',
-               c_sha1  TYPE zif_abapgit_git_definitions=>ty_sha1 VALUE 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+    CONSTANTS: c_repo1  TYPE zcl_abapgit_ortec_mat_state=>ty_repo_key VALUE 'ZAOG_TST_01',
+               c_repo2  TYPE zcl_abapgit_ortec_mat_state=>ty_repo_key VALUE 'ZAOG_TST_02',
+               c_sha1   TYPE zif_abapgit_git_definitions=>ty_sha1 VALUE 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
                c_branch TYPE string VALUE 'refs/heads/main'.
 
     CLASS-DATA gi_environment TYPE REF TO if_osql_test_environment.
@@ -156,11 +156,18 @@ CLASS ltcl_mat_state IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD begin_attempt_keeps_complete.
-    DATA(lv_attempt1) = zcl_abapgit_ortec_mat_state=>begin_attempt(
-      iv_repo_key = c_repo1
-      iv_commit   = c_sha1 ).
+
+    DATA(lv_attempt1) =
+      zcl_abapgit_ortec_mat_state=>begin_attempt(
+        iv_repo_key = c_repo1
+        iv_commit   = c_sha1 ).
 
     zcl_abapgit_ortec_mat_state=>mark_graph_complete(
+      iv_repo_key   = c_repo1
+      iv_commit     = c_sha1
+      iv_attempt_id = lv_attempt1 ).
+
+    zcl_abapgit_ortec_mat_state=>mark_full_complete(
       iv_repo_key   = c_repo1
       iv_commit     = c_sha1
       iv_attempt_id = lv_attempt1 ).
@@ -171,18 +178,30 @@ CLASS ltcl_mat_state IMPLEMENTATION.
       iv_commit      = c_sha1
       iv_attempt_id  = lv_attempt1 ).
 
-    " A new attempt must not downgrade an already-COMPLETE snap_state
-    " back to PENDING.
-    zcl_abapgit_ortec_mat_state=>begin_attempt(
-      iv_repo_key = c_repo1
-      iv_commit   = c_sha1 ).
+    " A new attempt must not downgrade an already-COMPLETE SNAP_STATE
+    " back to PENDING and must not downgrade FULL_COMPLETE.
+    DATA(lv_attempt2) =
+      zcl_abapgit_ortec_mat_state=>begin_attempt(
+        iv_repo_key = c_repo1
+        iv_commit   = c_sha1 ).
 
-    DATA(ls_state) = zcl_abapgit_ortec_mat_state=>get_state(
-      iv_repo_key = c_repo1
-      iv_commit   = c_sha1 ).
+    DATA(ls_state) =
+      zcl_abapgit_ortec_mat_state=>get_state(
+        iv_repo_key = c_repo1
+        iv_commit   = c_sha1 ).
 
-    cl_abap_unit_assert=>assert_equals( act = ls_state-snap_state
-                                         exp = zcl_abapgit_ortec_mat_state=>cs_snap_state-complete ).
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_state-snap_state
+      exp = zcl_abapgit_ortec_mat_state=>cs_snap_state-complete ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_state-hist_level
+      exp = zcl_abapgit_ortec_mat_state=>cs_hist_level-full_complete ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_state-attempt_id
+      exp = lv_attempt2 ).
+
   ENDMETHOD.
 
   METHOD mark_graph_complete_ok.
@@ -251,11 +270,18 @@ CLASS ltcl_mat_state IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD publish_snapshot_ok.
-    DATA(lv_attempt) = zcl_abapgit_ortec_mat_state=>begin_attempt(
-      iv_repo_key = c_repo1
-      iv_commit   = c_sha1 ).
+
+    DATA(lv_attempt) =
+      zcl_abapgit_ortec_mat_state=>begin_attempt(
+        iv_repo_key = c_repo1
+        iv_commit   = c_sha1 ).
 
     zcl_abapgit_ortec_mat_state=>mark_graph_complete(
+      iv_repo_key   = c_repo1
+      iv_commit     = c_sha1
+      iv_attempt_id = lv_attempt ).
+
+    zcl_abapgit_ortec_mat_state=>mark_full_complete(
       iv_repo_key   = c_repo1
       iv_commit     = c_sha1
       iv_attempt_id = lv_attempt ).
@@ -266,29 +292,56 @@ CLASS ltcl_mat_state IMPLEMENTATION.
       iv_commit      = c_sha1
       iv_attempt_id  = lv_attempt ).
 
-    DATA(ls_state) = zcl_abapgit_ortec_mat_state=>get_state(
-      iv_repo_key = c_repo1
-      iv_commit   = c_sha1 ).
-    cl_abap_unit_assert=>assert_equals( act = ls_state-snap_state
-                                         exp = zcl_abapgit_ortec_mat_state=>cs_snap_state-complete ).
+    DATA(ls_state) =
+      zcl_abapgit_ortec_mat_state=>get_state(
+        iv_repo_key = c_repo1
+        iv_commit   = c_sha1 ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_state-hist_level
+      exp = zcl_abapgit_ortec_mat_state=>cs_hist_level-full_complete ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_state-snap_state
+      exp = zcl_abapgit_ortec_mat_state=>cs_snap_state-complete ).
 
     DATA lv_branch TYPE c LENGTH 255.
-    DATA ls_repo TYPE zaog_repo_state.
+    DATA ls_repo   TYPE zaog_repo_state.
+
     lv_branch = c_branch.
-    SELECT SINGLE * FROM zaog_repo_state INTO ls_repo
-      WHERE repo_key = c_repo1 AND branch_name = lv_branch.
-    cl_abap_unit_assert=>assert_subrc( exp = 0 ).
-    cl_abap_unit_assert=>assert_equals( act = ls_repo-fetch_commit exp = c_sha1 ).
-    cl_abap_unit_assert=>assert_equals( act = ls_repo-snap_state
-                                         exp = zcl_abapgit_ortec_mat_state=>cs_snap_state-complete ).
+
+    SELECT SINGLE *
+      FROM zaog_repo_state
+      INTO ls_repo
+      WHERE repo_key    = c_repo1
+        AND branch_name = lv_branch.
+
+    cl_abap_unit_assert=>assert_subrc(
+      exp = 0 ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_repo-fetch_commit
+      exp = c_sha1 ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_repo-snap_state
+      exp = zcl_abapgit_ortec_mat_state=>cs_snap_state-complete ).
+
   ENDMETHOD.
 
   METHOD publish_snapshot_stale.
-    DATA(lv_attempt) = zcl_abapgit_ortec_mat_state=>begin_attempt(
-      iv_repo_key = c_repo1
-      iv_commit   = c_sha1 ).
+
+    DATA(lv_attempt) =
+      zcl_abapgit_ortec_mat_state=>begin_attempt(
+        iv_repo_key = c_repo1
+        iv_commit   = c_sha1 ).
 
     zcl_abapgit_ortec_mat_state=>mark_graph_complete(
+      iv_repo_key   = c_repo1
+      iv_commit     = c_sha1
+      iv_attempt_id = lv_attempt ).
+
+    zcl_abapgit_ortec_mat_state=>mark_full_complete(
       iv_repo_key   = c_repo1
       iv_commit     = c_sha1
       iv_attempt_id = lv_attempt ).
@@ -299,9 +352,31 @@ CLASS ltcl_mat_state IMPLEMENTATION.
           iv_branch_name = c_branch
           iv_commit      = c_sha1
           iv_attempt_id  = 'STALE_ATTEMPT_ID_NOT_REAL' ).
-        cl_abap_unit_assert=>fail( 'Expected raise on stale attempt ID' ).
-      CATCH zcx_abapgit_ortec_git.
+
+        cl_abap_unit_assert=>fail(
+          'Expected raise on stale attempt ID' ).
+
+      CATCH zcx_abapgit_ortec_git INTO DATA(lx_error).
+
+        cl_abap_unit_assert=>assert_char_cp(
+          act = lx_error->get_text( )
+          exp = '*stale attempt ID*' ).
+
     ENDTRY.
+
+    DATA(ls_state) =
+      zcl_abapgit_ortec_mat_state=>get_state(
+        iv_repo_key = c_repo1
+        iv_commit   = c_sha1 ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_state-hist_level
+      exp = zcl_abapgit_ortec_mat_state=>cs_hist_level-full_complete ).
+
+    cl_abap_unit_assert=>assert_differs(
+      act = ls_state-snap_state
+      exp = zcl_abapgit_ortec_mat_state=>cs_snap_state-complete ).
+
   ENDMETHOD.
 
   METHOD publish_from_unknown.
@@ -506,6 +581,344 @@ CLASS ltcl_mat_state IMPLEMENTATION.
       iv_repo_key = c_repo1
       iv_commit   = c_sha1 ).
     cl_abap_unit_assert=>assert_equals( act = ls_state-attempt_id exp = lv_attempt ).
+  ENDMETHOD.
+
+ENDCLASS.
+
+CLASS ltcl_mat_publication DEFINITION
+  FOR TESTING
+  RISK LEVEL HARMLESS
+  DURATION SHORT
+  FINAL.
+
+  PRIVATE SECTION.
+
+    CONSTANTS c_repo TYPE zcl_abapgit_ortec_mat_state=>ty_repo_key
+      VALUE 'ZAOGT_MATP01'.
+
+    CONSTANTS c_commit TYPE zif_abapgit_git_definitions=>ty_sha1
+      VALUE 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'.
+
+    CONSTANTS c_branch TYPE string
+      VALUE 'refs/heads/unit-mat-publish'.
+
+    CONSTANTS c_url TYPE string
+      VALUE 'https://unit.example.com/mat-state.git'.
+
+    METHODS setup.
+    METHODS teardown.
+    METHODS cleanup.
+
+    METHODS publish_requires_full
+      FOR TESTING
+      RAISING cx_static_check.
+
+    METHODS full_can_publish
+      FOR TESTING
+      RAISING cx_static_check.
+
+    METHODS publish_keeps_repo_meta
+      FOR TESTING
+      RAISING cx_static_check.
+
+    METHODS no_c_snapshot_without_f
+      FOR TESTING
+      RAISING cx_static_check.
+
+ENDCLASS.
+
+
+CLASS ltcl_mat_publication IMPLEMENTATION.
+
+  METHOD setup.
+    cleanup( ).
+  ENDMETHOD.
+
+
+  METHOD teardown.
+    cleanup( ).
+  ENDMETHOD.
+
+
+  METHOD cleanup.
+
+    ROLLBACK WORK.
+
+    DELETE FROM zaog_commit_hist
+      WHERE repo_key = c_repo.
+
+    DELETE FROM zaog_repo_state
+      WHERE repo_key = c_repo.
+
+    COMMIT WORK.
+
+  ENDMETHOD.
+
+
+  METHOD publish_requires_full.
+
+    DATA lv_failed TYPE abap_bool.
+
+    DATA(lv_attempt) =
+      zcl_abapgit_ortec_mat_state=>begin_attempt(
+        iv_repo_key = c_repo
+        iv_commit   = c_commit ).
+
+    zcl_abapgit_ortec_mat_state=>mark_graph_complete(
+      iv_repo_key   = c_repo
+      iv_commit     = c_commit
+      iv_attempt_id = lv_attempt ).
+
+    TRY.
+        zcl_abapgit_ortec_mat_state=>publish_snapshot_complete(
+          iv_repo_key    = c_repo
+          iv_branch_name = c_branch
+          iv_commit      = c_commit
+          iv_attempt_id  = lv_attempt ).
+
+      CATCH zcx_abapgit_ortec_git.
+        lv_failed = abap_true.
+    ENDTRY.
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_failed
+      exp = abap_true
+      msg = 'Graph-only state must not publish snapshot complete' ).
+
+    DATA(ls_state) =
+      zcl_abapgit_ortec_mat_state=>get_state(
+        iv_repo_key = c_repo
+        iv_commit   = c_commit ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_state-hist_level
+      exp = zcl_abapgit_ortec_mat_state=>cs_hist_level-graph_complete ).
+
+    cl_abap_unit_assert=>assert_differs(
+      act = ls_state-snap_state
+      exp = zcl_abapgit_ortec_mat_state=>cs_snap_state-complete ).
+
+  ENDMETHOD.
+
+
+  METHOD full_can_publish.
+
+    DATA(lv_attempt) =
+      zcl_abapgit_ortec_mat_state=>begin_attempt(
+        iv_repo_key = c_repo
+        iv_commit   = c_commit ).
+
+    zcl_abapgit_ortec_mat_state=>mark_graph_complete(
+      iv_repo_key   = c_repo
+      iv_commit     = c_commit
+      iv_attempt_id = lv_attempt ).
+
+    zcl_abapgit_ortec_mat_state=>mark_full_complete(
+      iv_repo_key   = c_repo
+      iv_commit     = c_commit
+      iv_attempt_id = lv_attempt ).
+
+    zcl_abapgit_ortec_mat_state=>publish_snapshot_complete(
+      iv_repo_key    = c_repo
+      iv_branch_name = c_branch
+      iv_commit      = c_commit
+      iv_attempt_id  = lv_attempt ).
+
+    DATA(ls_state) =
+      zcl_abapgit_ortec_mat_state=>get_state(
+        iv_repo_key = c_repo
+        iv_commit   = c_commit ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_state-hist_level
+      exp = zcl_abapgit_ortec_mat_state=>cs_hist_level-full_complete ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_state-snap_state
+      exp = zcl_abapgit_ortec_mat_state=>cs_snap_state-complete ).
+
+    SELECT SINGLE hist_level, snap_state, branch_name, fetched_at
+      FROM zaog_commit_hist
+      INTO @DATA(ls_hist)
+      WHERE repo_key    = @c_repo
+        AND commit_sha1 = @c_commit.
+
+    cl_abap_unit_assert=>assert_equals(
+      act = sy-subrc
+      exp = 0 ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_hist-hist_level
+      exp = zcl_abapgit_ortec_mat_state=>cs_hist_level-full_complete ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_hist-snap_state
+      exp = zcl_abapgit_ortec_mat_state=>cs_snap_state-complete ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_hist-branch_name
+      exp = c_branch ).
+
+    cl_abap_unit_assert=>assert_not_initial(
+      act = ls_hist-fetched_at ).
+
+  ENDMETHOD.
+
+
+  METHOD publish_keeps_repo_meta.
+
+    DATA ls_repo TYPE zaog_repo_state.
+    DATA lv_old_ts TYPE timestampl.
+
+    GET TIME STAMP FIELD lv_old_ts.
+
+    ls_repo-repo_key    = c_repo.
+    ls_repo-branch_name = c_branch.
+    ls_repo-remote_url  = c_url.
+    ls_repo-url_hash =
+      zcl_abapgit_hash=>sha1_string( c_url ).
+
+    ls_repo-curr_commit =
+      'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'.
+
+    ls_repo-fetch_commit =
+      'cccccccccccccccccccccccccccccccccccccccc'.
+
+    ls_repo-fetch_ts   = lv_old_ts.
+    ls_repo-is_shallow = abap_true.
+    ls_repo-deepen_lvl = 17.
+    ls_repo-snap_state =
+      zcl_abapgit_ortec_mat_state=>cs_snap_state-pending.
+    ls_repo-changed_by = sy-uname.
+    ls_repo-changed_at = lv_old_ts.
+
+    MODIFY zaog_repo_state FROM ls_repo.
+
+    cl_abap_unit_assert=>assert_equals(
+      act = sy-subrc
+      exp = 0 ).
+
+    DATA(lv_attempt) =
+      zcl_abapgit_ortec_mat_state=>begin_attempt(
+        iv_repo_key = c_repo
+        iv_commit   = c_commit ).
+
+    zcl_abapgit_ortec_mat_state=>mark_graph_complete(
+      iv_repo_key   = c_repo
+      iv_commit     = c_commit
+      iv_attempt_id = lv_attempt ).
+
+    zcl_abapgit_ortec_mat_state=>mark_full_complete(
+      iv_repo_key   = c_repo
+      iv_commit     = c_commit
+      iv_attempt_id = lv_attempt ).
+
+    zcl_abapgit_ortec_mat_state=>publish_snapshot_complete(
+      iv_repo_key    = c_repo
+      iv_branch_name = c_branch
+      iv_commit      = c_commit
+      iv_attempt_id  = lv_attempt ).
+
+    SELECT SINGLE *
+      FROM zaog_repo_state
+      INTO @DATA(ls_after)
+      WHERE repo_key    = @c_repo
+        AND branch_name = @c_branch.
+
+    cl_abap_unit_assert=>assert_equals(
+      act = sy-subrc
+      exp = 0 ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_after-remote_url
+      exp = c_url ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_after-url_hash
+      exp = ls_repo-url_hash ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_after-curr_commit
+      exp = ls_repo-curr_commit ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_after-fetch_ts
+      exp = lv_old_ts ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_after-is_shallow
+      exp = abap_true ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_after-deepen_lvl
+      exp = 17 ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_after-fetch_commit
+      exp = c_commit ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_after-snap_state
+      exp = zcl_abapgit_ortec_mat_state=>cs_snap_state-complete ).
+
+  ENDMETHOD.
+
+
+  METHOD no_c_snapshot_without_f.
+
+    DATA lv_failed TYPE abap_bool.
+
+    DATA(lv_attempt) =
+      zcl_abapgit_ortec_mat_state=>begin_attempt(
+        iv_repo_key = c_repo
+        iv_commit   = c_commit ).
+
+    zcl_abapgit_ortec_mat_state=>mark_graph_complete(
+      iv_repo_key   = c_repo
+      iv_commit     = c_commit
+      iv_attempt_id = lv_attempt ).
+
+    TRY.
+        zcl_abapgit_ortec_mat_state=>publish_snapshot_complete(
+          iv_repo_key    = c_repo
+          iv_branch_name = c_branch
+          iv_commit      = c_commit
+          iv_attempt_id  = lv_attempt ).
+
+      CATCH zcx_abapgit_ortec_git.
+        lv_failed = abap_true.
+    ENDTRY.
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_failed
+      exp = abap_true ).
+
+    SELECT SINGLE hist_level, snap_state
+      FROM zaog_commit_hist
+      INTO @DATA(ls_hist)
+      WHERE repo_key    = @c_repo
+        AND commit_sha1 = @c_commit.
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_hist-hist_level
+      exp = zcl_abapgit_ortec_mat_state=>cs_hist_level-graph_complete ).
+
+    cl_abap_unit_assert=>assert_differs(
+      act = ls_hist-snap_state
+      exp = zcl_abapgit_ortec_mat_state=>cs_snap_state-complete ).
+
+    SELECT COUNT(*)
+      FROM zaog_repo_state
+      WHERE repo_key    = @c_repo
+        AND branch_name = @c_branch
+        AND snap_state  =
+          @zcl_abapgit_ortec_mat_state=>cs_snap_state-complete
+      INTO @DATA(lv_complete_rows).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_complete_rows
+      exp = 0 ).
+
   ENDMETHOD.
 
 ENDCLASS.
