@@ -84,86 +84,226 @@ CLASS zcl_abapgit_ortec_walk_prep IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD fetch_blobs_bulk.
-    DATA lt_metadata    TYPE STANDARD TABLE OF zaog_obj_store WITH DEFAULT KEY.
-    DATA lr_sha1s       TYPE RANGE OF zaog_obj_store-obj_sha1.
-    DATA ls_metadata    LIKE LINE OF lt_metadata.
+
+    CONSTANTS lc_key_chunk_size TYPE i VALUE 2000.
+    CONSTANTS lc_byte_budget    TYPE i VALUE 67108864.
+
+    TYPES:
+      BEGIN OF ty_metadata,
+        obj_sha1 TYPE zaog_obj_store-obj_sha1,
+        obj_size TYPE zaog_obj_store-obj_size,
+      END OF ty_metadata.
+
+    DATA lt_requested TYPE
+      zif_abapgit_git_definitions=>ty_sha1_tt.
+
+    DATA lt_requested_set TYPE HASHED TABLE OF
+      zif_abapgit_git_definitions=>ty_sha1
+      WITH UNIQUE KEY table_line.
+
+    DATA lt_metadata TYPE HASHED TABLE OF ty_metadata
+      WITH UNIQUE KEY obj_sha1.
+
+    DATA ls_metadata TYPE ty_metadata.
+
+    DATA lt_candidates TYPE
+      zif_abapgit_git_definitions=>ty_sha1_tt.
+
     DATA lv_this_bytes  TYPE i.
-    DATA lv_budget      TYPE i VALUE 268435456.
-    DATA lt_candidates  TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
-    DATA lv_total_bytes TYPE i.
-    DATA ls_object      TYPE zif_abapgit_definitions=>ty_object.
+    DATA lv_total_bytes TYPE int8.
+
     FIELD-SYMBOLS <lv_sha1> LIKE LINE OF it_sha1s.
 
-    IF iv_repo_key IS INITIAL OR it_sha1s IS INITIAL.
+    IF iv_repo_key IS INITIAL
+        OR it_sha1s IS INITIAL.
       RETURN.
     ENDIF.
 
-    LOOP AT it_sha1s ASSIGNING <lv_sha1> WHERE table_line IS NOT INITIAL.
-      APPEND VALUE #( sign   = 'I'
-                      option = 'EQ'
-                      low    = <lv_sha1> ) TO lr_sha1s.
-    ENDLOOP.
+    " Build one bounded and unique key window.
+    "
+    " The internal-table JOIN avoids expansion into one DBSL marker per
+    " repository blob. The explicit window also bounds transfer of the
+    " temporary internal-table data source and the following metadata result.
+    LOOP AT it_sha1s ASSIGNING <lv_sha1>
+      WHERE table_line IS NOT INITIAL.
 
-    IF lr_sha1s IS INITIAL.
-      RETURN.
-    ENDIF.
-
-    SELECT obj_sha1, obj_size FROM zaog_obj_store
-      INTO CORRESPONDING FIELDS OF TABLE @lt_metadata
-      WHERE repo_key  = @iv_repo_key
-        AND obj_sha1 IN @lr_sha1s
-        AND status    = 'R'.
-
-    LOOP AT it_sha1s ASSIGNING <lv_sha1> WHERE table_line IS NOT INITIAL.
-      READ TABLE lt_metadata INTO ls_metadata WITH KEY obj_sha1 = <lv_sha1>.
-      IF sy-subrc <> 0.
-        " Genuinely missing from the object store even after prewarm's own
-        " topup_missing_blobs step - this must never be silently skipped
-        " (that would leave a hole in rt_files, violating the
-        " "not-buffered != deletion" invariant) and must still be drained
-        " from ct_remaining_sha1s, or pull()'s batching WHILE loop would
-        " spin forever on a SHA1 that can never be satisfied.
-        READ TABLE ct_remaining_sha1s WITH KEY table_line = <lv_sha1> TRANSPORTING NO FIELDS.
-        IF sy-subrc = 0.
-          DELETE ct_remaining_sha1s INDEX sy-tabix.
-        ENDIF.
-        zcx_abapgit_ortec_git=>raise( |Blob { <lv_sha1> } not found in object store| ).
+      IF line_exists(
+           lt_requested_set[
+             table_line = <lv_sha1> ] ).
+        CONTINUE.
       ENDIF.
 
-      lv_this_bytes = ls_metadata-obj_size.
-      IF lv_this_bytes > lv_budget.
-        CLEAR lt_candidates.
-        APPEND <lv_sha1> TO lt_candidates.
+      INSERT <lv_sha1>
+        INTO TABLE lt_requested_set.
+
+      APPEND <lv_sha1>
+        TO lt_requested.
+
+      IF lines( lt_requested ) >= lc_key_chunk_size.
         EXIT.
       ENDIF.
 
-      IF lv_total_bytes + lv_this_bytes > lv_budget.
+    ENDLOOP.
+
+    IF lt_requested IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    TRY.
+
+        " Database-side join with the bounded internal key table.
+        "
+        " Only OBJ_SHA1 and OBJ_SIZE are transferred. Blob payload is loaded
+        " later and only for the byte-budgeted candidate subset.
+        SELECT store~obj_sha1,
+               store~obj_size
+          FROM zaog_obj_store AS store
+          INNER JOIN @lt_requested AS requested
+            ON store~obj_sha1 = requested~table_line
+          WHERE store~repo_key = @iv_repo_key
+            AND store~status   = 'R'
+          INTO TABLE @lt_metadata
+          ##itab_db_select.
+
+      CATCH cx_sy_open_sql_db INTO DATA(lx_sql).
+
+        RAISE EXCEPTION TYPE zcx_abapgit_ortec_git
+          EXPORTING
+            iv_text  =
+                       |Bulk blob metadata read failed for | &&
+                       |{ lines( lt_requested ) } SHA1 values|
+            previous = lx_sql.
+
+    ENDTRY.
+
+    CLEAR lv_total_bytes.
+
+    " Select one bounded payload window from this key window.
+    LOOP AT lt_requested ASSIGNING <lv_sha1>.
+
+      READ TABLE lt_metadata
+        WITH TABLE KEY
+          obj_sha1 = <lv_sha1>
+        INTO ls_metadata.
+
+      IF sy-subrc <> 0.
+
+        " Remove every duplicate defensively so the caller's WHILE loop
+        " cannot remain stuck on an impossible SHA1.
+        DELETE ct_remaining_sha1s
+          WHERE table_line = <lv_sha1>.
+
+        zcx_abapgit_ortec_git=>raise(
+          |Blob { <lv_sha1> } not found in object store| ).
+
+      ENDIF.
+
+      lv_this_bytes = ls_metadata-obj_size.
+
+      IF lv_this_bytes < 0.
+
+        DELETE ct_remaining_sha1s
+          WHERE table_line = <lv_sha1>.
+
+        zcx_abapgit_ortec_git=>raise(
+          |Blob { <lv_sha1> } has an invalid stored size| ).
+
+      ENDIF.
+
+      " Preserve support for one blob larger than the normal window.
+      " Such an object is processed alone. This matches the previous
+      " behavior while preventing additional blobs from sharing its window.
+      IF lv_this_bytes > lc_byte_budget.
+
+        IF lt_candidates IS INITIAL.
+          APPEND <lv_sha1> TO lt_candidates.
+        ENDIF.
+
+        EXIT.
+
+      ENDIF.
+
+      IF lt_candidates IS NOT INITIAL
+          AND lv_total_bytes + lv_this_bytes > lc_byte_budget.
         EXIT.
       ENDIF.
 
       APPEND <lv_sha1> TO lt_candidates.
-      lv_total_bytes += lv_this_bytes.
+
+      lv_total_bytes =
+        lv_total_bytes + lv_this_bytes.
+
     ENDLOOP.
 
     IF lt_candidates IS INITIAL.
-      RETURN.
+
+      " This should be unreachable for valid nonnegative OBJ_SIZE values.
+      " Raise instead of returning without progress.
+      zcx_abapgit_ortec_git=>raise(
+        'Bulk blob reconstruction produced no candidate window' ).
+
     ENDIF.
 
-    DATA(lt_objects) = zcl_abapgit_ortec_obj_store=>get_objects(
-                           iv_repo_key   = iv_repo_key
-                           it_sha1s      = lt_candidates
-                           iv_bulk_fetch = abap_true ).
+    " The candidate list is limited both by key count and declared payload.
+    " GET_OBJECTS may therefore load only the active reconstruction window.
+    DATA(lt_objects) =
+      zcl_abapgit_ortec_obj_store=>get_objects(
+        iv_repo_key   = iv_repo_key
+        it_sha1s      = lt_candidates
+        iv_bulk_fetch = abap_true ).
 
-    LOOP AT lt_objects INTO ls_object.
-      IF NOT line_exists( lt_candidates[ table_line = ls_object-sha1 ] ).
+    IF lt_objects IS INITIAL.
+
+      zcx_abapgit_ortec_git=>raise(
+        |Bulk blob reconstruction returned no objects for | &&
+        |{ lines( lt_candidates ) } candidates| ).
+
+    ENDIF.
+
+    LOOP AT lt_objects INTO DATA(ls_object).
+
+      IF NOT line_exists(
+           lt_requested_set[
+             table_line = ls_object-sha1 ] ).
         CONTINUE.
       ENDIF.
-      READ TABLE ct_remaining_sha1s WITH KEY table_line = ls_object-sha1 TRANSPORTING NO FIELDS.
-      IF sy-subrc = 0.
-        DELETE ct_remaining_sha1s INDEX sy-tabix.
+
+      IF ls_object-type <>
+           zif_abapgit_git_definitions=>c_type-blob.
+
+        DELETE ct_remaining_sha1s
+          WHERE table_line = ls_object-sha1.
+
+        zcx_abapgit_ortec_git=>raise(
+          |Object { ls_object-sha1 } expected type blob, | &&
+          |got { ls_object-type }| ).
+
       ENDIF.
+
+      DELETE ct_remaining_sha1s
+        WHERE table_line = ls_object-sha1.
+
       APPEND ls_object TO rt_objects.
+
     ENDLOOP.
+
+    " Defensive progress/completeness check for the selected candidate set.
+    LOOP AT lt_candidates ASSIGNING <lv_sha1>.
+
+      IF line_exists(
+           ct_remaining_sha1s[
+             table_line = <lv_sha1> ] ).
+
+        DELETE ct_remaining_sha1s
+          WHERE table_line = <lv_sha1>.
+
+        zcx_abapgit_ortec_git=>raise(
+          |Blob { <lv_sha1> } was selected but not returned| ).
+
+      ENDIF.
+
+    ENDLOOP.
+
   ENDMETHOD.
 
   METHOD has_complete_object_graph.

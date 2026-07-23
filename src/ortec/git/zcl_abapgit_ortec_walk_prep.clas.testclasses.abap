@@ -10,11 +10,11 @@ CLASS ltcl_walk_prep DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT F
       IMPORTING iv_repo TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key.
 
     METHODS build_blob
-      IMPORTING iv_text TYPE string
+      IMPORTING iv_text       TYPE string
       RETURNING VALUE(rs_obj) TYPE zif_abapgit_definitions=>ty_object.
 
     METHODS build_tree
-      IMPORTING it_nodes TYPE zcl_abapgit_git_pack=>ty_nodes_tt
+      IMPORTING it_nodes      TYPE zcl_abapgit_git_pack=>ty_nodes_tt
       RETURNING VALUE(rs_obj) TYPE zif_abapgit_definitions=>ty_object.
 
     METHODS store_obj
@@ -33,6 +33,7 @@ CLASS ltcl_walk_prep DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT F
     METHODS bulk_drains_across_batches FOR TESTING RAISING cx_static_check.
     METHODS oversized_blob_single_batch FOR TESTING RAISING cx_static_check.
 
+    METHODS fetch_window_progress FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 
 CLASS ltcl_walk_prep IMPLEMENTATION.
@@ -45,12 +46,61 @@ CLASS ltcl_walk_prep IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD cleanup_repo.
-    ROLLBACK WORK. "#EC CI_ROLLBACK
+    ROLLBACK WORK.                                     "#EC CI_ROLLBACK
     DELETE FROM zaog_obj_store WHERE repo_key = iv_repo.
     DELETE FROM zaog_commit_hist WHERE repo_key = iv_repo.
     DELETE FROM zaog_repo_state WHERE repo_key = iv_repo.
     COMMIT WORK.
     zcl_abapgit_ortec_obj_store=>invalidate_cache( ).
+  ENDMETHOD.
+
+  METHOD fetch_window_progress.
+
+    DATA lt_sha1s     TYPE
+      zif_abapgit_git_definitions=>ty_sha1_tt.
+
+    DATA lt_remaining TYPE
+      zif_abapgit_git_definitions=>ty_sha1_tt.
+
+    DATA lv_data TYPE xstring.
+
+    DO 3 TIMES.
+
+      lv_data =
+        zcl_abapgit_convert=>string_to_xstring_utf8(
+          |fetch-window-{ sy-index }| ).
+
+      DATA(lv_sha1) =
+        zcl_abapgit_hash=>sha1_blob( lv_data ).
+
+      zcl_abapgit_ortec_obj_store=>store_object(
+        iv_repo_key = mc_repo
+        iv_sha1     = lv_sha1
+        iv_type     =
+          zif_abapgit_git_definitions=>c_type-blob
+        iv_data     = lv_data ).
+
+      APPEND lv_sha1 TO lt_sha1s.
+
+    ENDDO.
+
+    lt_remaining = lt_sha1s.
+
+    DATA(lt_objects) =
+      zcl_abapgit_ortec_walk_prep=>fetch_blobs_bulk(
+        EXPORTING
+          iv_repo_key = mc_repo
+          it_sha1s    = lt_remaining
+        CHANGING
+          ct_remaining_sha1s = lt_remaining ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lines( lt_objects )
+      exp = 3 ).
+
+    cl_abap_unit_assert=>assert_initial(
+      act = lt_remaining ).
+
   ENDMETHOD.
 
   METHOD build_blob.
