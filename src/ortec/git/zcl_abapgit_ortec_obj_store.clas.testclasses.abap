@@ -513,3 +513,505 @@ CLASS ltcl_obj_store IMPLEMENTATION.
       msg = 'Blank iv_repo_key must resolve via the explicitly set active repo key' ).
   ENDMETHOD.
 ENDCLASS.
+
+CLASS ltcl_completeness_gate DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+  PRIVATE SECTION.
+    CONSTANTS mc_repo TYPE c LENGTH 12 VALUE 'ZAOGT_CMPLT1'.
+    METHODS setup. METHODS teardown.
+    METHODS has_dangling_delta_base_none  FOR TESTING RAISING cx_static_check.
+    METHODS has_dangling_delta_base_found FOR TESTING RAISING cx_static_check.
+    "! Slice 2C: is_commit_complete now delegates entirely to
+    "! zcl_abapgit_ortec_mat_state=>is_graph_have_eligible (Slice 1's O(1)
+    "! certified-graph read) instead of walking zaog_obj_store. A commit is
+    "! only have-eligible once explicitly certified via
+    "! begin_attempt->mark_graph_complete (or ->mark_full_complete) -
+    "! object-store presence alone is no longer sufficient, by design (no
+    "! auto-backfill, Slice 1's own guarantee).
+    METHODS complete_false_missing_object FOR TESTING RAISING cx_static_check.
+    METHODS complete_true_when_ready FOR TESTING RAISING cx_static_check.
+    "! Regression: completeness must NOT require the stage-filter index
+    "! (zcl_abapgit_ortec_obj_index) to have ever been built for this
+    "! commit - that index is only built by a filtered Stage/Diff
+    "! resolution, so gating "have" eligibility on it meant a commit
+    "! reached via a plain pull/branch-switch could never be offered as a
+    "! have even when fully fetched, silently disabling incremental fetch
+    "! for every branch that was never filter-staged.
+    METHODS complete_true_without_index FOR TESTING RAISING cx_static_check.
+    "! A commit with no zaog_commit_hist row at all (never certified) must
+    "! be reported not-eligible, even when every reachable object is
+    "! physically present in zaog_obj_store - proves the delegation to
+    "! is_graph_have_eligible actually gates on certification, not on
+    "! object presence.
+    METHODS complete_false_uncertified FOR TESTING RAISING cx_static_check.
+    "! hist_level = FULL_COMPLETE must also be reported have-eligible (not
+    "! just GRAPH_COMPLETE).
+    METHODS complete_true_full_complete FOR TESTING RAISING cx_static_check.
+ENDCLASS.
+CLASS ltcl_completeness_gate IMPLEMENTATION.
+  METHOD setup.
+    DELETE FROM zaog_obj_store WHERE repo_key = mc_repo.
+    DELETE FROM zaog_obj_index WHERE repo_key = mc_repo.
+    DELETE FROM zaog_pack_idx WHERE repo_key = mc_repo.
+    DELETE FROM zaog_commit_hist WHERE repo_key = mc_repo.
+  ENDMETHOD.
+  METHOD teardown.
+    DELETE FROM zaog_obj_store WHERE repo_key = mc_repo.
+    DELETE FROM zaog_obj_index WHERE repo_key = mc_repo.
+    DELETE FROM zaog_pack_idx WHERE repo_key = mc_repo.
+    DELETE FROM zaog_commit_hist WHERE repo_key = mc_repo.
+    ROLLBACK WORK.
+  ENDMETHOD.
+
+  METHOD has_dangling_delta_base_none.
+    DATA lt_nodes TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+    DATA ls_node LIKE LINE OF lt_nodes.
+    DATA ls_commit TYPE zcl_abapgit_git_pack=>ty_commit.
+    DATA lv_blob_data TYPE xstring.
+    DATA lv_blob_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_tree_data TYPE xstring.
+    DATA lv_tree_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_commit_data TYPE xstring.
+    DATA lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lt_sha1s TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lv_dangling TYPE abap_bool.
+
+    lv_blob_data = '48656C6C6F'.
+    lv_blob_sha = zcl_abapgit_hash=>sha1_blob( lv_blob_data ).
+
+    ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-file.
+    ls_node-name  = 'hello.txt'.
+    ls_node-sha1  = lv_blob_sha.
+    APPEND ls_node TO lt_nodes.
+
+    lv_tree_data = zcl_abapgit_git_pack=>encode_tree( lt_nodes ).
+    lv_tree_sha = zcl_abapgit_hash=>sha1_tree( lv_tree_data ).
+
+    ls_commit-tree = lv_tree_sha.
+    ls_commit-author = 'Test <test@example.com> 0 +0000'.
+    ls_commit-committer = 'Test <test@example.com> 0 +0000'.
+    ls_commit-body = 'test'.
+    lv_commit_data = zcl_abapgit_git_pack=>encode_commit( ls_commit ).
+    lv_commit_sha = zcl_abapgit_hash=>sha1_commit( lv_commit_data ).
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_commit_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-commit
+      iv_data     = lv_commit_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_tree_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-tree
+      iv_data     = lv_tree_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_blob_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-blob
+      iv_data     = lv_blob_data ).
+
+    APPEND lv_commit_sha TO lt_sha1s.
+    APPEND lv_tree_sha TO lt_sha1s.
+    APPEND lv_blob_sha TO lt_sha1s.
+
+    lv_dangling = zcl_abapgit_ortec_obj_store=>has_dangling_delta_base(
+      iv_repo_key = mc_repo
+      it_sha1s    = lt_sha1s ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_dangling
+      exp = abap_false
+      msg = 'Objects without delta-base references must not be dangling' ).
+  ENDMETHOD.
+
+  METHOD has_dangling_delta_base_found.
+    DATA lv_blob_data TYPE xstring.
+    DATA lv_blob_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lt_sha1s TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lv_dangling TYPE abap_bool.
+    DATA lt_entries TYPE zcl_abapgit_ortec_pack_index=>tty_index_entries.
+    DATA ls_entry TYPE zcl_abapgit_ortec_pack_index=>ty_index_entry.
+
+    lv_blob_data = '31'.
+    lv_blob_sha = zcl_abapgit_hash=>sha1_blob( lv_blob_data ).
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_blob_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-blob
+      iv_data     = lv_blob_data ).
+
+    ls_entry-obj_index = 1.
+    ls_entry-obj_sha1 = lv_blob_sha.
+    ls_entry-obj_type = zif_abapgit_git_definitions=>c_type-blob.
+    ls_entry-dec_status = 'D'.
+    ls_entry-delta_base = 'ffffffffffffffffffffffffffffffffffffffff'.
+    APPEND ls_entry TO lt_entries.
+
+    zcl_abapgit_ortec_pack_index=>store_entries(
+      iv_repo_key = mc_repo
+      iv_pack_id  = 'CMPLTTESTPACK000000000000000000'
+      it_entries  = lt_entries ).
+
+    APPEND lv_blob_sha TO lt_sha1s.
+
+    lv_dangling = zcl_abapgit_ortec_obj_store=>has_dangling_delta_base(
+      iv_repo_key = mc_repo
+      it_sha1s    = lt_sha1s ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_dangling
+      exp = abap_true
+      msg = 'Missing recorded delta base must be detected as dangling' ).
+  ENDMETHOD.
+
+  METHOD complete_false_missing_object.
+    DATA lt_nodes TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+    DATA ls_node LIKE LINE OF lt_nodes.
+    DATA ls_commit TYPE zcl_abapgit_git_pack=>ty_commit.
+    DATA lv_blob_data TYPE xstring.
+    DATA lv_blob_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_src_tree_data TYPE xstring.
+    DATA lv_src_tree_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_root_tree_data TYPE xstring.
+    DATA lv_root_tree_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_commit_data TYPE xstring.
+    DATA lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_complete TYPE abap_bool.
+
+    lv_blob_data = '48656C6C6F'.
+    lv_blob_sha = zcl_abapgit_hash=>sha1_blob( lv_blob_data ).
+
+    CLEAR ls_node.
+    ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-file.
+    ls_node-name  = 'zprogram.prog.abap'.
+    ls_node-sha1  = lv_blob_sha.
+    CLEAR lt_nodes.
+    APPEND ls_node TO lt_nodes.
+    lv_src_tree_data = zcl_abapgit_git_pack=>encode_tree( lt_nodes ).
+    lv_src_tree_sha = zcl_abapgit_hash=>sha1_tree( lv_src_tree_data ).
+
+    CLEAR ls_node.
+    ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-dir.
+    ls_node-name  = 'src'.
+    ls_node-sha1  = lv_src_tree_sha.
+    CLEAR lt_nodes.
+    APPEND ls_node TO lt_nodes.
+    lv_root_tree_data = zcl_abapgit_git_pack=>encode_tree( lt_nodes ).
+    lv_root_tree_sha = zcl_abapgit_hash=>sha1_tree( lv_root_tree_data ).
+
+    ls_commit-tree = lv_root_tree_sha.
+    ls_commit-author = 'Test <test@example.com> 0 +0000'.
+    ls_commit-committer = 'Test <test@example.com> 0 +0000'.
+    ls_commit-body = 'test'.
+    lv_commit_data = zcl_abapgit_git_pack=>encode_commit( ls_commit ).
+    lv_commit_sha = zcl_abapgit_hash=>sha1_commit( lv_commit_data ).
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_commit_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-commit
+      iv_data     = lv_commit_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_root_tree_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-tree
+      iv_data     = lv_root_tree_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_src_tree_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-tree
+      iv_data     = lv_src_tree_data ).
+    " Deliberately do NOT store the blob, and deliberately never certify
+    " this commit via zcl_abapgit_ortec_mat_state (Slice 2C: is_commit_complete
+    " no longer walks zaog_obj_store at all - it delegates to
+    " is_graph_have_eligible, which requires an explicit certification row).
+
+    lv_complete = zcl_abapgit_ortec_fetch_neg=>is_commit_complete(
+      iv_repo_key = mc_repo
+      iv_commit   = lv_commit_sha ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_complete
+      exp = abap_false
+      msg = 'An uncertified commit must not be considered complete' ).
+  ENDMETHOD.
+
+  METHOD complete_false_uncertified.
+    DATA lt_nodes TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+    DATA ls_node LIKE LINE OF lt_nodes.
+    DATA ls_commit TYPE zcl_abapgit_git_pack=>ty_commit.
+    DATA lv_blob_data TYPE xstring.
+    DATA lv_blob_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_tree_data TYPE xstring.
+    DATA lv_tree_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_commit_data TYPE xstring.
+    DATA lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_complete TYPE abap_bool.
+
+    lv_blob_data = '48656C6C6F'.
+    lv_blob_sha = zcl_abapgit_hash=>sha1_blob( lv_blob_data ).
+
+    ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-file.
+    ls_node-name  = 'hello.txt'.
+    ls_node-sha1  = lv_blob_sha.
+    APPEND ls_node TO lt_nodes.
+    lv_tree_data = zcl_abapgit_git_pack=>encode_tree( lt_nodes ).
+    lv_tree_sha = zcl_abapgit_hash=>sha1_tree( lv_tree_data ).
+
+    ls_commit-tree = lv_tree_sha.
+    ls_commit-author = 'Test <test@example.com> 0 +0000'.
+    ls_commit-committer = 'Test <test@example.com> 0 +0000'.
+    ls_commit-body = 'test'.
+    lv_commit_data = zcl_abapgit_git_pack=>encode_commit( ls_commit ).
+    lv_commit_sha = zcl_abapgit_hash=>sha1_commit( lv_commit_data ).
+
+    " Every reachable object is fully present - but this commit is
+    " deliberately NEVER certified (no begin_attempt/mark_graph_complete
+    " call, so zaog_commit_hist has zero rows for it). Proves
+    " is_commit_complete now gates on certification, not object presence.
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_commit_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-commit
+      iv_data     = lv_commit_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_tree_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-tree
+      iv_data     = lv_tree_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_blob_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-blob
+      iv_data     = lv_blob_data ).
+
+    lv_complete = zcl_abapgit_ortec_fetch_neg=>is_commit_complete(
+      iv_repo_key = mc_repo
+      iv_commit   = lv_commit_sha ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_complete
+      exp = abap_false
+      msg = 'A fully-present-but-never-certified commit must not be have-eligible ' &&
+            '(no auto-backfill from object presence, Slice 1 guarantee)' ).
+  ENDMETHOD.
+
+  METHOD complete_true_full_complete.
+    DATA lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_attempt_id TYPE zcl_abapgit_ortec_mat_state=>ty_attempt_id.
+    DATA lv_complete TYPE abap_bool.
+
+    lv_commit_sha = '3333333333333333333333333333333333333333'.
+
+    lv_attempt_id = zcl_abapgit_ortec_mat_state=>begin_attempt(
+      iv_repo_key = mc_repo
+      iv_commit   = lv_commit_sha ).
+    zcl_abapgit_ortec_mat_state=>mark_graph_complete(
+      iv_repo_key   = mc_repo
+      iv_commit     = lv_commit_sha
+      iv_attempt_id = lv_attempt_id ).
+    zcl_abapgit_ortec_mat_state=>mark_full_complete(
+      iv_repo_key   = mc_repo
+      iv_commit     = lv_commit_sha
+      iv_attempt_id = lv_attempt_id ).
+
+    lv_complete = zcl_abapgit_ortec_fetch_neg=>is_commit_complete(
+      iv_repo_key = mc_repo
+      iv_commit   = lv_commit_sha ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_complete
+      exp = abap_true
+      msg = 'A FULL_COMPLETE commit must be have-eligible, not just GRAPH_COMPLETE' ).
+  ENDMETHOD.
+
+  METHOD complete_true_without_index.
+    DATA lt_nodes TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+    DATA ls_node LIKE LINE OF lt_nodes.
+    DATA ls_commit TYPE zcl_abapgit_git_pack=>ty_commit.
+    DATA lv_blob_data TYPE xstring.
+    DATA lv_blob_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_src_tree_data TYPE xstring.
+    DATA lv_src_tree_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_root_tree_data TYPE xstring.
+    DATA lv_root_tree_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_commit_data TYPE xstring.
+    DATA lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_complete TYPE abap_bool.
+
+    lv_blob_data = '48656C6C6F'.
+    lv_blob_sha = zcl_abapgit_hash=>sha1_blob( lv_blob_data ).
+
+    CLEAR ls_node.
+    ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-file.
+    ls_node-name  = 'zprogram.prog.abap'.
+    ls_node-sha1  = lv_blob_sha.
+    CLEAR lt_nodes.
+    APPEND ls_node TO lt_nodes.
+    lv_src_tree_data = zcl_abapgit_git_pack=>encode_tree( lt_nodes ).
+    lv_src_tree_sha = zcl_abapgit_hash=>sha1_tree( lv_src_tree_data ).
+
+    CLEAR ls_node.
+    ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-dir.
+    ls_node-name  = 'src'.
+    ls_node-sha1  = lv_src_tree_sha.
+    CLEAR lt_nodes.
+    APPEND ls_node TO lt_nodes.
+    lv_root_tree_data = zcl_abapgit_git_pack=>encode_tree( lt_nodes ).
+    lv_root_tree_sha = zcl_abapgit_hash=>sha1_tree( lv_root_tree_data ).
+
+    ls_commit-tree = lv_root_tree_sha.
+    ls_commit-author = 'Test <test@example.com> 0 +0000'.
+    ls_commit-committer = 'Test <test@example.com> 0 +0000'.
+    ls_commit-body = 'test'.
+    lv_commit_data = zcl_abapgit_git_pack=>encode_commit( ls_commit ).
+    lv_commit_sha = zcl_abapgit_hash=>sha1_commit( lv_commit_data ).
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_commit_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-commit
+      iv_data     = lv_commit_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_root_tree_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-tree
+      iv_data     = lv_root_tree_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_src_tree_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-tree
+      iv_data     = lv_src_tree_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_blob_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-blob
+      iv_data     = lv_blob_data ).
+
+    " Deliberately never call zcl_abapgit_ortec_obj_index=>get_files_for_filter
+    " for this commit - the stage-filter index is never built, exactly like
+    " a plain pull/branch-switch that never went through filtered Stage/Diff.
+    " Certify the commit's graph via Slice 1's mat_state API - this is what
+    " now governs have-eligibility (Slice 2C), not object-store presence or
+    " the stage-filter index.
+    DATA(lv_attempt_id) = zcl_abapgit_ortec_mat_state=>begin_attempt(
+      iv_repo_key = mc_repo
+      iv_commit   = lv_commit_sha ).
+    zcl_abapgit_ortec_mat_state=>mark_graph_complete(
+      iv_repo_key   = mc_repo
+      iv_commit     = lv_commit_sha
+      iv_attempt_id = lv_attempt_id ).
+
+    lv_complete = zcl_abapgit_ortec_fetch_neg=>is_commit_complete(
+      iv_repo_key = mc_repo
+      iv_commit   = lv_commit_sha ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_complete
+      exp = abap_true
+      msg = 'A certified (GRAPH_COMPLETE) commit must be eligible as a have even when its ' &&
+            'stage-filter index was never built (e.g. reached via a plain pull)' ).
+  ENDMETHOD.
+
+  METHOD complete_true_when_ready.
+    DATA lt_nodes TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+    DATA ls_node LIKE LINE OF lt_nodes.
+    DATA ls_commit TYPE zcl_abapgit_git_pack=>ty_commit.
+    DATA lv_blob_data TYPE xstring.
+    DATA lv_blob_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_src_tree_data TYPE xstring.
+    DATA lv_src_tree_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_root_tree_data TYPE xstring.
+    DATA lv_root_tree_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_commit_data TYPE xstring.
+    DATA lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lo_dot TYPE REF TO zcl_abapgit_dot_abapgit.
+    DATA lo_filter TYPE REF TO zcl_abapgit_object_filter_obj.
+    DATA lt_files TYPE zif_abapgit_git_definitions=>ty_files_tt.
+    DATA lv_complete TYPE abap_bool.
+
+    lv_blob_data = '48656C6C6F'.
+    lv_blob_sha = zcl_abapgit_hash=>sha1_blob( lv_blob_data ).
+
+    CLEAR ls_node.
+    ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-file.
+    ls_node-name  = 'zprogram.prog.abap'.
+    ls_node-sha1  = lv_blob_sha.
+    CLEAR lt_nodes.
+    APPEND ls_node TO lt_nodes.
+    lv_src_tree_data = zcl_abapgit_git_pack=>encode_tree( lt_nodes ).
+    lv_src_tree_sha = zcl_abapgit_hash=>sha1_tree( lv_src_tree_data ).
+
+    CLEAR ls_node.
+    ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-dir.
+    ls_node-name  = 'src'.
+    ls_node-sha1  = lv_src_tree_sha.
+    CLEAR lt_nodes.
+    APPEND ls_node TO lt_nodes.
+    lv_root_tree_data = zcl_abapgit_git_pack=>encode_tree( lt_nodes ).
+    lv_root_tree_sha = zcl_abapgit_hash=>sha1_tree( lv_root_tree_data ).
+
+    ls_commit-tree = lv_root_tree_sha.
+    ls_commit-author = 'Test <test@example.com> 0 +0000'.
+    ls_commit-committer = 'Test <test@example.com> 0 +0000'.
+    ls_commit-body = 'test'.
+    lv_commit_data = zcl_abapgit_git_pack=>encode_commit( ls_commit ).
+    lv_commit_sha = zcl_abapgit_hash=>sha1_commit( lv_commit_data ).
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_commit_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-commit
+      iv_data     = lv_commit_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_root_tree_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-tree
+      iv_data     = lv_root_tree_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_src_tree_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-tree
+      iv_data     = lv_src_tree_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_blob_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-blob
+      iv_data     = lv_blob_data ).
+
+    lo_dot = zcl_abapgit_dot_abapgit=>build_default( ).
+    lo_filter = NEW #( it_filter = VALUE #( ( object = 'PROG' obj_name = 'ZPROGRAM' ) ) ).
+
+    lt_files = zcl_abapgit_ortec_obj_index=>get_files_for_filter(
+      iv_repo_key   = mc_repo
+      iv_commit     = lv_commit_sha
+      ii_obj_filter = lo_filter
+      io_dot        = lo_dot
+      iv_devclass   = '$PACK' ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lines( lt_files )
+      exp = 1
+      msg = 'Filtered index build must resolve one matching file' ).
+
+    " Certify the commit's graph via Slice 1's mat_state API - Slice 2C:
+    " is_commit_complete no longer infers completeness from index/object-
+    " store state, it delegates entirely to is_graph_have_eligible.
+    DATA(lv_attempt_id) = zcl_abapgit_ortec_mat_state=>begin_attempt(
+      iv_repo_key = mc_repo
+      iv_commit   = lv_commit_sha ).
+    zcl_abapgit_ortec_mat_state=>mark_graph_complete(
+      iv_repo_key   = mc_repo
+      iv_commit     = lv_commit_sha
+      iv_attempt_id = lv_attempt_id ).
+
+    lv_complete = zcl_abapgit_ortec_fetch_neg=>is_commit_complete(
+      iv_repo_key = mc_repo
+      iv_commit   = lv_commit_sha ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_complete
+      exp = abap_true
+      msg = 'Index-ready AND certified commit must pass' ).
+  ENDMETHOD.
+ENDCLASS.

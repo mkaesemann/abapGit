@@ -1566,7 +1566,7 @@ METHOD upload_pack.
     lt_missing_sha1s = zcl_abapgit_ortec_obj_store=>get_missing_sha1s(
                          iv_repo_key = iv_repo_key
                          it_sha1s    = lt_unique_sha1s ).
-    LOOP AT lt_missing_sha1s INTO <lv_sha1>.
+    LOOP AT lt_missing_sha1s assigning <lv_sha1>.
       INSERT <lv_sha1> INTO TABLE lt_missing_lookup.
     ENDLOOP.
 

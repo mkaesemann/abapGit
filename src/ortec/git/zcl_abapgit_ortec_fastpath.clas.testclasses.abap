@@ -50,7 +50,7 @@ CLASS ltcl_fastpath IMPLEMENTATION.
     " store_object, which does - so DELETE + bare ROLLBACK WORK cannot be
     " trusted (see repo memory: DELETE + ROLLBACK WORK only cleans up
     " correctly when the SUT never commits).
-    ROLLBACK WORK.
+    ROLLBACK WORK. "#EC CI_ROLLBACK
     DELETE FROM zaog_commit_hist WHERE repo_key = iv_repo.
     DELETE FROM zaog_obj_store WHERE repo_key = iv_repo.
     DELETE FROM zaog_repo_state WHERE repo_key = iv_repo.
@@ -360,4 +360,229 @@ CLASS ltcl_fastpath IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = lv_after - lv_before exp = 1 ).
   ENDMETHOD.
 
+ENDCLASS.
+
+CLASS ltcl_fastpath_protocol DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+  PRIVATE SECTION.
+    METHODS buffer_emits_shallow_lines FOR TESTING RAISING cx_static_check.
+    METHODS buffer_skips_shallow_forced FOR TESTING RAISING cx_static_check.
+    METHODS buffer_send_deepen_even_forced FOR TESTING RAISING cx_static_check.
+    METHODS parse_collects_shallow FOR TESTING RAISING cx_static_check.
+    METHODS parse_ignores_bad_shallow FOR TESTING RAISING cx_static_check.
+    METHODS progress_deepen_widens_n_caps FOR TESTING RAISING cx_static_check.
+ENDCLASS.
+CLASS ltcl_fastpath_protocol IMPLEMENTATION.
+  METHOD buffer_emits_shallow_lines.
+    DATA lt_hashes TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_haves  TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lv_buffer TYPE string.
+
+    APPEND '1111111111111111111111111111111111111111' TO lt_hashes.
+    APPEND '2222222222222222222222222222222222222222' TO lt_haves.
+
+    lv_buffer = zcl_abapgit_ortec_fastpath=>build_upload_pack_buffer(
+      iv_deepen_level = 0
+      it_hashes       = lt_hashes
+      it_ortec_haves  = lt_haves
+      iv_allow_thin   = abap_false
+      iv_force_full   = abap_false ).
+
+    FIND FIRST OCCURRENCE OF 'want 1111111111111111111111111111111111111111' IN lv_buffer.
+    cl_abap_unit_assert=>assert_subrc( exp = 0 msg = 'Want line must be present' ).
+    FIND FIRST OCCURRENCE OF 'shallow 2222222222222222222222222222222222222222' IN lv_buffer.
+    cl_abap_unit_assert=>assert_subrc( exp = 0 msg = 'Shallow line must be present' ).
+    FIND FIRST OCCURRENCE OF '0000' IN lv_buffer.
+    cl_abap_unit_assert=>assert_subrc( exp = 0 msg = 'Flush pkt must be present' ).
+
+    FIND FIRST OCCURRENCE OF 'shallow 2222222222222222222222222222222222222222' IN lv_buffer MATCH OFFSET DATA(lv_shallow_pos).
+    FIND FIRST OCCURRENCE OF '0000' IN lv_buffer MATCH OFFSET DATA(lv_flush_pos).
+    cl_abap_unit_assert=>assert_true( act = xsdbool( lv_shallow_pos < lv_flush_pos ) msg = 'Shallow lines must be emitted before the flush pkt' ).
+  ENDMETHOD.
+
+  METHOD buffer_skips_shallow_forced.
+    DATA lt_hashes TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_haves  TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lv_buffer TYPE string.
+
+    APPEND '1111111111111111111111111111111111111111' TO lt_hashes.
+
+    lv_buffer = zcl_abapgit_ortec_fastpath=>build_upload_pack_buffer(
+      iv_deepen_level = 0
+      it_hashes       = lt_hashes
+      it_ortec_haves  = lt_haves
+      iv_allow_thin   = abap_false
+      iv_force_full   = abap_false ).
+
+    FIND FIRST OCCURRENCE OF 'shallow ' IN lv_buffer.
+    cl_abap_unit_assert=>assert_subrc( exp = 4 msg = 'Shallow lines must be skipped when no haves are provided' ).
+
+    lv_buffer = zcl_abapgit_ortec_fastpath=>build_upload_pack_buffer(
+      iv_deepen_level = 0
+      it_hashes       = lt_hashes
+      it_ortec_haves  = VALUE zif_abapgit_git_definitions=>ty_sha1_tt( ( '2222222222222222222222222222222222222222' ) )
+      iv_allow_thin   = abap_false
+      iv_force_full   = abap_true ).
+
+    FIND FIRST OCCURRENCE OF 'shallow ' IN lv_buffer.
+    cl_abap_unit_assert=>assert_subrc( exp = 4 msg = 'Shallow lines must be skipped when iv_force_full is true' ).
+  ENDMETHOD.
+
+  METHOD buffer_send_deepen_even_forced.
+    " Phase 1 of the architecture hardening plan (.memory/state.md,
+    " 2026-07-20) REVERTED the earlier "omit deepen entirely when
+    " iv_force_full = abap_true" behavior: that meant requesting a repo's
+    " COMPLETE, unbounded history in one shot, which failed live for a repo
+    " with substantial real history (abapGit's own repo: 4737 commits).
+    " force_full callers are now responsible for choosing a PROGRESSIVELY
+    " WIDENING iv_deepen_level themselves across repeated attempts (see
+    " upload_pack_by_branch/upload_pack_by_commit's retry loop) - this
+    " method's job is unchanged: always send a deepen line whenever there
+    " are no haves, using whatever value the caller passed, regardless of
+    " iv_force_full.
+    DATA lt_hashes TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lv_buffer TYPE string.
+
+    APPEND '1111111111111111111111111111111111111111' TO lt_hashes.
+
+    " No haves + NOT forced -> deepen line IS expected (unchanged behavior).
+    lv_buffer = zcl_abapgit_ortec_fastpath=>build_upload_pack_buffer(
+      iv_deepen_level = 1
+      it_hashes       = lt_hashes
+      iv_allow_thin   = abap_false
+      iv_force_full   = abap_false ).
+
+    FIND FIRST OCCURRENCE OF 'deepen 1' IN lv_buffer.
+    cl_abap_unit_assert=>assert_subrc( exp = 0 msg = 'A deepen line is expected for a normal no-haves fetch' ).
+
+    " No haves + FORCED -> a deepen line is STILL sent, using the caller's
+    " (now progressively-widened) iv_deepen_level - force_full no longer
+    " means "omit deepen", it means "send no haves" (shallow/have lines
+    " stay skipped, asserted separately in buffer_skips_shallow_forced).
+    lv_buffer = zcl_abapgit_ortec_fastpath=>build_upload_pack_buffer(
+      iv_deepen_level = 500
+      it_hashes       = lt_hashes
+      iv_allow_thin   = abap_false
+      iv_force_full   = abap_true ).
+
+    FIND FIRST OCCURRENCE OF 'deepen 500' IN lv_buffer.
+    cl_abap_unit_assert=>assert_subrc( exp = 0 msg = 'A deepen line reflecting the caller-supplied (progressive) depth must still be sent when iv_force_full is true' ).
+  ENDMETHOD.
+
+  METHOD parse_collects_shallow.
+    DATA lv_data TYPE xstring.
+    DATA lv_pack TYPE xstring.
+    DATA lt_shallow TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_unshallow TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lv_pkt TYPE string.
+
+    " Build a minimal pkt-line stream: plain shallow/unshallow lines, then
+    " a flush pkt, and one ordinary text pkt-line.
+    lv_pkt = zcl_abapgit_git_utils=>pkt_string( |shallow 1111111111111111111111111111111111111111| ).
+    lv_data = zcl_abapgit_convert=>string_to_xstring_utf8( lv_pkt ).
+
+    lv_pkt = zcl_abapgit_git_utils=>pkt_string( |unshallow 2222222222222222222222222222222222222222| ).
+    lv_data = lv_data && zcl_abapgit_convert=>string_to_xstring_utf8( lv_pkt ).
+
+    lv_data = lv_data && zcl_abapgit_convert=>string_to_xstring_utf8( '0000' ).
+
+    lv_pkt = zcl_abapgit_git_utils=>pkt_string( |ok| ).
+    lv_data = lv_data && zcl_abapgit_convert=>string_to_xstring_utf8( lv_pkt ).
+
+    zcl_abapgit_ortec_fastpath=>parse(
+      IMPORTING
+        et_shallow = lt_shallow
+        et_unshallow = lt_unshallow
+        ev_pack = lv_pack
+      CHANGING
+        cv_data = lv_data ).
+
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_shallow ) exp = 1 msg = 'Shallow SHA should be collected' ).
+    cl_abap_unit_assert=>assert_equals( act = lt_shallow[ 1 ] exp = '1111111111111111111111111111111111111111' msg = 'Shallow SHA value must be preserved' ).
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_unshallow ) exp = 1 msg = 'Unshallow SHA should be collected' ).
+    cl_abap_unit_assert=>assert_equals( act = lt_unshallow[ 1 ] exp = '2222222222222222222222222222222222222222' msg = 'Unshallow SHA value must be preserved' ).
+    cl_abap_unit_assert=>assert_equals( act = lv_pack exp = '' msg = 'No pack data should be parsed from a plain text pkt-line stream' ).
+  ENDMETHOD.
+
+  METHOD parse_ignores_bad_shallow.
+    DATA lv_data TYPE xstring.
+    DATA lv_pack TYPE xstring.
+    DATA lt_shallow TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_unshallow TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+
+    DATA lv_pkt TYPE string.
+
+    lv_pkt = zcl_abapgit_git_utils=>pkt_string( |shallow| ).
+    lv_data = zcl_abapgit_convert=>string_to_xstring_utf8( lv_pkt ).
+
+    lv_pkt = zcl_abapgit_git_utils=>pkt_string( |unshallow 2222222222222222222222222222222222222222| ).
+    lv_data = lv_data && zcl_abapgit_convert=>string_to_xstring_utf8( lv_pkt ).
+
+    lv_data = lv_data && zcl_abapgit_convert=>string_to_xstring_utf8( '0000' ).
+
+    lv_pkt = zcl_abapgit_git_utils=>pkt_string( |ok| ).
+    lv_data = lv_data && zcl_abapgit_convert=>string_to_xstring_utf8( lv_pkt ).
+
+    TRY.
+        zcl_abapgit_ortec_fastpath=>parse(
+          IMPORTING
+            et_shallow = lt_shallow
+            et_unshallow = lt_unshallow
+            ev_pack = lv_pack
+          CHANGING
+            cv_data = lv_data ).
+      CATCH zcx_abapgit_ortec_git.
+        cl_abap_unit_assert=>fail( 'Malformed shallow-update lines must not raise' ).
+    ENDTRY.
+
+    cl_abap_unit_assert=>assert_initial( act = lt_shallow msg = 'Malformed shallow line should be ignored' ).
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_unshallow ) exp = 1 msg = 'Well-formed unshallow line should still be collected' ).
+    cl_abap_unit_assert=>assert_initial( act = lv_pack msg = 'Plain text pkt-lines should not be treated as pack data' ).
+  ENDMETHOD.
+
+  METHOD progress_deepen_widens_n_caps.
+    " Phase 1 of the architecture hardening plan (.memory/state.md,
+    " 2026-07-20): the progressive recovery loop must start at a sensible
+    " minimum, widen by the configured factor on each failure, and never
+    " exceed the configured ceiling - regardless of how large or small the
+    " prior/current depth was.
+    DATA lv_deepen TYPE i.
+
+    " A tiny prior depth (e.g. 1, the usual incremental default) must still
+    " start the progressive loop at a reasonably useful minimum, not just
+    " prior*factor (which would be a useless "4").
+    lv_deepen = zcl_abapgit_ortec_fastpath=>first_progressive_deepen( 1 ).
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_deepen
+      exp = zcl_abapgit_ortec_fastpath=>c_progressive_start_min
+      msg = 'A small prior depth must start progressive recovery at the configured minimum' ).
+
+    " A larger prior depth must start from prior*factor, not the minimum.
+    lv_deepen = zcl_abapgit_ortec_fastpath=>first_progressive_deepen( 100 ).
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_deepen
+      exp = 100 * zcl_abapgit_ortec_fastpath=>c_progressive_widen_factor
+      msg = 'A larger prior depth must widen by the configured factor' ).
+
+    " Widening must multiply by the configured factor each step.
+    lv_deepen = zcl_abapgit_ortec_fastpath=>next_progressive_deepen( 50 ).
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_deepen
+      exp = 50 * zcl_abapgit_ortec_fastpath=>c_progressive_widen_factor
+      msg = 'Each widening step must multiply by the configured factor' ).
+
+    " Widening must never exceed the configured ceiling.
+    lv_deepen = zcl_abapgit_ortec_fastpath=>next_progressive_deepen(
+      zcl_abapgit_ortec_fastpath=>c_progressive_max_deepen ).
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_deepen
+      exp = zcl_abapgit_ortec_fastpath=>c_progressive_max_deepen
+      msg = 'Widening must be capped at the configured ceiling' ).
+
+    lv_deepen = zcl_abapgit_ortec_fastpath=>first_progressive_deepen(
+      zcl_abapgit_ortec_fastpath=>c_progressive_max_deepen * 10 ).
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_deepen
+      exp = zcl_abapgit_ortec_fastpath=>c_progressive_max_deepen
+      msg = 'The initial progressive depth must also be capped at the configured ceiling' ).
+  ENDMETHOD.
 ENDCLASS.

@@ -336,7 +336,7 @@ CLASS zcl_abapgit_ortec_walk_prep IMPLEMENTATION.
       LOOP AT lt_current_trees INTO lv_tree_sha.
         CLEAR lt_frontier_matches.
         READ TABLE lt_current_frontier_objs INTO ls_tree_object
-             WITH TABLE KEY sha1 = lv_tree_sha.
+             WITH TABLE KEY sha COMPONENTS sha1 = lv_tree_sha.
         IF sy-subrc <> 0.
           zcx_abapgit_ortec_git=>raise( |Tree { lv_tree_sha } missing from frontier| ).
         ENDIF.
