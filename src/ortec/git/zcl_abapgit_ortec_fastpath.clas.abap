@@ -85,6 +85,11 @@ CLASS zcl_abapgit_ortec_fastpath DEFINITION
                 iv_deepen_used TYPE i DEFAULT 1
       RAISING   zcx_abapgit_ortec_git.
 
+    CLASS-METHODS persist_missing_objects
+      IMPORTING iv_repo_key TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
+                it_objects  TYPE zif_abapgit_definitions=>ty_objects_tt
+      RAISING   zcx_abapgit_ortec_git.
+
     "! Fetch tip commit objects for branch metadata — read-only, no ORTEC fastpath routing.
     "! Used by the branch picker to retrieve last-changed dates without touching
     "! the persistent object store or delta-negotiation state.
@@ -1535,13 +1540,70 @@ METHOD upload_pack.
 
   ENDMETHOD.
 
-  METHOD persist_pull_result.
-    DATA lv_repo_key       TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key.
+  METHOD persist_missing_objects.
     DATA lv_ts             TYPE timestampl.
     DATA ls_row            TYPE zaog_obj_store.
     DATA lt_new            TYPE STANDARD TABLE OF zaog_obj_store.
-    DATA lt_existing_shas  TYPE HASHED TABLE OF zif_abapgit_git_definitions=>ty_sha1
-                            WITH UNIQUE KEY table_line.
+    DATA lt_unique_sha1s   TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_missing_sha1s  TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_missing_lookup TYPE HASHED TABLE OF zif_abapgit_git_definitions=>ty_sha1 WITH UNIQUE KEY table_line.
+    DATA lt_appended_sha1s TYPE HASHED TABLE OF zif_abapgit_git_definitions=>ty_sha1 WITH UNIQUE KEY table_line.
+
+    GET TIME STAMP FIELD lv_ts.
+
+    FIELD-SYMBOLS <ls_obj> LIKE LINE OF it_objects.
+    FIELD-SYMBOLS <lv_sha1> LIKE LINE OF lt_unique_sha1s.
+
+    LOOP AT it_objects ASSIGNING <ls_obj>.
+      IF <ls_obj>-sha1 IS INITIAL.
+        CONTINUE.
+      ENDIF.
+      APPEND <ls_obj>-sha1 TO lt_unique_sha1s.
+    ENDLOOP.
+    SORT lt_unique_sha1s.
+    DELETE ADJACENT DUPLICATES FROM lt_unique_sha1s.
+
+    lt_missing_sha1s = zcl_abapgit_ortec_obj_store=>get_missing_sha1s(
+                         iv_repo_key = iv_repo_key
+                         it_sha1s    = lt_unique_sha1s ).
+    LOOP AT lt_missing_sha1s INTO <lv_sha1>.
+      INSERT <lv_sha1> INTO TABLE lt_missing_lookup.
+    ENDLOOP.
+
+    LOOP AT it_objects ASSIGNING <ls_obj>.
+      IF <ls_obj>-sha1 IS INITIAL.
+        CONTINUE.
+      ENDIF.
+      READ TABLE lt_missing_lookup WITH TABLE KEY table_line = <ls_obj>-sha1 TRANSPORTING NO FIELDS.
+      IF sy-subrc <> 0.
+        CONTINUE.
+      ENDIF.
+      READ TABLE lt_appended_sha1s WITH TABLE KEY table_line = <ls_obj>-sha1 TRANSPORTING NO FIELDS.
+      IF sy-subrc = 0.
+        CONTINUE.
+      ENDIF.
+      INSERT <ls_obj>-sha1 INTO TABLE lt_appended_sha1s.
+
+      CLEAR ls_row.
+      ls_row-repo_key   = iv_repo_key.
+      ls_row-obj_sha1   = <ls_obj>-sha1.
+      ls_row-obj_type   = <ls_obj>-type.
+      ls_row-obj_data   = <ls_obj>-data.
+      ls_row-obj_size   = xstrlen( <ls_obj>-data ).
+      ls_row-created_at = lv_ts.
+      ls_row-status     = 'R'.
+      APPEND ls_row TO lt_new.
+    ENDLOOP.
+    IF lt_new IS NOT INITIAL.
+      MODIFY zaog_obj_store FROM TABLE lt_new.
+      " Invalidate in-memory session cache: MODIFY wrote directly to DB
+      " (bypassing store_object/store_objects which call invalidate_cache).
+      zcl_abapgit_ortec_obj_store=>invalidate_cache( ).
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD persist_pull_result.
+    DATA lv_repo_key TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key.
 
     IF zcl_abapgit_ortec_git_switch=>is_active_for_repo( iv_url ) = abap_false.
       RETURN.
@@ -1555,32 +1617,9 @@ METHOD upload_pack.
       RETURN.
     ENDIF.
 
-    GET TIME STAMP FIELD lv_ts.
-    SELECT obj_sha1 FROM zaog_obj_store INTO TABLE lt_existing_shas
-      WHERE repo_key = lv_repo_key
-        AND status   = 'R'.
-
-    FIELD-SYMBOLS <ls_obj> LIKE LINE OF it_objects.
-    LOOP AT it_objects ASSIGNING <ls_obj>.
-      READ TABLE lt_existing_shas WITH TABLE KEY table_line = <ls_obj>-sha1 TRANSPORTING NO FIELDS.
-      IF sy-subrc <> 0.
-        CLEAR ls_row.
-        ls_row-repo_key   = lv_repo_key.
-        ls_row-obj_sha1   = <ls_obj>-sha1.
-        ls_row-obj_type   = <ls_obj>-type.
-        ls_row-obj_data   = <ls_obj>-data.
-        ls_row-obj_size   = xstrlen( <ls_obj>-data ).
-        ls_row-created_at = lv_ts.
-        ls_row-status     = 'R'.
-        APPEND ls_row TO lt_new.
-      ENDIF.
-    ENDLOOP.
-    IF lt_new IS NOT INITIAL.
-      MODIFY zaog_obj_store FROM TABLE lt_new.
-      " Invalidate in-memory session cache: MODIFY wrote directly to DB
-      " (bypassing store_object/store_objects which call invalidate_cache).
-      zcl_abapgit_ortec_obj_store=>invalidate_cache( ).
-    ENDIF.
+    persist_missing_objects(
+      iv_repo_key = lv_repo_key
+      it_objects  = it_objects ).
 
     " Package C C2: certification lifecycle - replaces the pre-Package-C raw
     " ZAOG_COMMIT_HIST INSERT, which never set hist_level/snap_state (see

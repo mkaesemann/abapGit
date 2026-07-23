@@ -54,13 +54,18 @@ CLASS zcl_abapgit_ortec_porcelain DEFINITION
                 iv_repo_key        TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key OPTIONAL
       RETURNING VALUE(rt_expanded) TYPE zif_abapgit_git_definitions=>ty_expanded_tt
       RAISING   zcx_abapgit_exception.
+
+    CLASS-METHODS materialize_from_manifest
+      IMPORTING it_objects       TYPE zif_abapgit_definitions=>ty_objects_tt
+                it_blob_manifest TYPE zif_abapgit_git_definitions=>ty_expanded_tt
+      CHANGING  ct_files         TYPE zif_abapgit_git_definitions=>ty_files_tt
+      RAISING   zcx_abapgit_exception.
 ENDCLASS.
 
 
 CLASS zcl_abapgit_ortec_porcelain IMPLEMENTATION.
   METHOD pull.
     DATA lt_blob_manifest   TYPE zif_abapgit_git_definitions=>ty_expanded_tt.
-    DATA lt_batch_manifest  TYPE zif_abapgit_git_definitions=>ty_expanded_tt.
     DATA ls_object          TYPE zif_abapgit_definitions=>ty_object.
     DATA ls_commit          TYPE zcl_abapgit_git_pack=>ty_commit.
     DATA lv_root_tree       TYPE zif_abapgit_git_definitions=>ty_sha1.
@@ -124,55 +129,37 @@ CLASS zcl_abapgit_ortec_porcelain IMPLEMENTATION.
       ENDIF.
     ENDLOOP.
 
+    materialize_from_manifest(
+      EXPORTING
+        it_objects       = lt_objects_complete
+        it_blob_manifest = lt_blob_manifest
+      CHANGING
+        ct_files         = rt_files ).
+
+    SORT lt_blob_sha1s.
+    DELETE ADJACENT DUPLICATES FROM lt_blob_sha1s.
+
     lt_remaining_sha1s = lt_blob_sha1s.
-    IF lt_remaining_sha1s IS INITIAL.
-      walk(
+    WHILE lt_remaining_sha1s IS NOT INITIAL.
+      CLEAR lt_batch_objects.
+      TRY.
+          lt_batch_objects = zcl_abapgit_ortec_walk_prep=>fetch_blobs_bulk(
+                               EXPORTING
+                                 iv_repo_key        = iv_repo_key
+                                 it_sha1s           = lt_remaining_sha1s
+                               CHANGING
+                                 ct_remaining_sha1s = lt_remaining_sha1s ).
+        CATCH zcx_abapgit_ortec_git INTO DATA(lx_fetch_blobs).
+          zcx_abapgit_exception=>raise_with_text( lx_fetch_blobs ).
+      ENDTRY.
+
+      materialize_from_manifest(
         EXPORTING
-          it_objects  = lt_objects_complete
-          iv_sha1     = lv_root_tree
-          iv_path     = '/'
-          iv_repo_key = iv_repo_key
-          iv_url      = iv_url
-          iv_commit   = iv_commit
+          it_objects       = lt_batch_objects
+          it_blob_manifest = lt_blob_manifest
         CHANGING
-          ct_files    = rt_files ).
-    ELSE.
-      WHILE lt_remaining_sha1s IS NOT INITIAL.
-        CLEAR lt_batch_objects.
-        CLEAR lt_batch_manifest.
-        TRY.
-            lt_batch_objects = zcl_abapgit_ortec_walk_prep=>fetch_blobs_bulk(
-                                 EXPORTING
-                                   iv_repo_key        = iv_repo_key
-                                   it_sha1s           = lt_remaining_sha1s
-                                 CHANGING
-                                   ct_remaining_sha1s = lt_remaining_sha1s ).
-          CATCH zcx_abapgit_ortec_git INTO DATA(lx_fetch_blobs).
-            zcx_abapgit_exception=>raise_with_text( lx_fetch_blobs ).
-        ENDTRY.
-
-        LOOP AT lt_batch_objects INTO ls_object.
-          READ TABLE lt_blob_manifest INTO ls_blob_manifest
-               WITH KEY sha1 = ls_object-sha1.
-          IF sy-subrc = 0.
-            APPEND ls_blob_manifest TO lt_batch_manifest.
-          ENDIF.
-        ENDLOOP.
-
-        walk(
-          EXPORTING
-            it_objects       = lt_objects_complete
-            iv_sha1          = lv_root_tree
-            iv_path          = '/'
-            iv_repo_key      = iv_repo_key
-            iv_url           = iv_url
-            iv_commit        = iv_commit
-            it_blob_objects  = lt_batch_objects
-            it_blob_manifest = lt_batch_manifest
-          CHANGING
-            ct_files         = rt_files ).
-      ENDWHILE.
-    ENDIF.
+          ct_files         = rt_files ).
+    ENDWHILE.
   ENDMETHOD.
 
   METHOD pull_by_branch.
@@ -415,6 +402,50 @@ CLASS zcl_abapgit_ortec_porcelain IMPLEMENTATION.
                           it_objects  = rs_result-objects
                           iv_repo_key = lv_ortec_repo_key
                           iv_url      = iv_pull_url ).
+  ENDMETHOD.
+
+  METHOD materialize_from_manifest.
+    DATA ls_ortec_object        TYPE zif_abapgit_definitions=>ty_object.
+    DATA ls_file                LIKE LINE OF ct_files.
+    DATA ls_blob_manifest       LIKE LINE OF it_blob_manifest.
+    DATA lt_blob_object_lookup  TYPE HASHED TABLE OF zif_abapgit_definitions=>ty_object WITH UNIQUE KEY sha1.
+    DATA lt_blob_sha1_lookup    TYPE HASHED TABLE OF zif_abapgit_git_definitions=>ty_sha1 WITH UNIQUE KEY table_line.
+
+    FIELD-SYMBOLS <ls_blob> LIKE LINE OF it_objects.
+
+    LOOP AT it_objects ASSIGNING <ls_blob>.
+      IF <ls_blob>-type <> zif_abapgit_git_definitions=>c_type-blob.
+        CONTINUE.
+      ENDIF.
+      IF <ls_blob>-sha1 IS INITIAL.
+        CONTINUE.
+      ENDIF.
+      INSERT <ls_blob> INTO TABLE lt_blob_object_lookup.
+      INSERT <ls_blob>-sha1 INTO TABLE lt_blob_sha1_lookup.
+    ENDLOOP.
+
+    LOOP AT it_blob_manifest INTO ls_blob_manifest.
+      IF ls_blob_manifest-chmod <> zif_abapgit_git_definitions=>c_chmod-file.
+        CONTINUE.
+      ENDIF.
+
+      IF NOT line_exists( lt_blob_sha1_lookup[ table_line = ls_blob_manifest-sha1 ] ).
+        CONTINUE.
+      ENDIF.
+
+      READ TABLE lt_blob_object_lookup INTO ls_ortec_object
+           WITH TABLE KEY sha1 = ls_blob_manifest-sha1.
+      IF sy-subrc <> 0.
+        CONTINUE.
+      ENDIF.
+
+      CLEAR ls_file.
+      ls_file-path = ls_blob_manifest-path.
+      ls_file-filename = ls_blob_manifest-name.
+      ls_file-data = ls_ortec_object-data.
+      ls_file-sha1 = ls_ortec_object-sha1.
+      APPEND ls_file TO ct_files.
+    ENDLOOP.
   ENDMETHOD.
 
   METHOD walk.

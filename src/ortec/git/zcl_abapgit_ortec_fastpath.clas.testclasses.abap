@@ -28,6 +28,8 @@ CLASS ltcl_fastpath DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FI
 
     METHODS persist_stores_new_objects FOR TESTING RAISING cx_static_check.
     METHODS persist_skips_existing_obj FOR TESTING RAISING cx_static_check.
+    METHODS persist_dup_sha_once       FOR TESTING RAISING cx_static_check.
+    METHODS persist_ignores_other      FOR TESTING RAISING cx_static_check.
 
 ENDCLASS.
 
@@ -220,10 +222,6 @@ CLASS ltcl_fastpath IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD persist_stores_new_objects.
-    " Regression: PERSIST_PULL_RESULT's pre-existing object-persistence
-    " loop (unchanged by C2) must still store new objects (test list
-    " item 6's "missing filter capability remains typed" companion -
-    " proves the dedup/insert path used before certification still works).
     DATA lt_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
     DATA ls_object  LIKE LINE OF lt_objects.
 
@@ -236,7 +234,7 @@ CLASS ltcl_fastpath IMPLEMENTATION.
       act = zcl_abapgit_ortec_obj_store=>exists( iv_repo_key = c_repo1 iv_sha1 = ls_object-sha1 )
       exp = abap_false ).
 
-    zcl_abapgit_ortec_obj_store=>store_objects(
+    zcl_abapgit_ortec_fastpath=>persist_missing_objects(
       iv_repo_key = c_repo1
       it_objects  = lt_objects ).
 
@@ -246,27 +244,120 @@ CLASS ltcl_fastpath IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD persist_skips_existing_obj.
-    " An object already READY in the store must not be re-persisted
-    " (existing dedup behavior, unchanged by C2 - kept as an explicit
-    " regression guard since this loop now directly precedes new
-    " certification logic in the same method).
-    DATA(lv_commit) = build_commit( iv_repo = c_repo1 ).
+    DATA ls_object  TYPE zif_abapgit_definitions=>ty_object.
+    DATA lt_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lv_count   TYPE i.
 
-    cl_abap_unit_assert=>assert_equals(
-      act = zcl_abapgit_ortec_obj_store=>exists( iv_repo_key = c_repo1 iv_sha1 = lv_commit )
-      exp = abap_true ).
-
-    " Re-storing the same SHA1 must remain a safe no-op (store_object's own
-    " existing idempotency, not new C2 behavior).
+    ls_object-type = zif_abapgit_git_definitions=>c_type-blob.
+    ls_object-sha1 = zcl_abapgit_hash=>sha1_blob( zcl_abapgit_convert=>string_to_xstring_utf8( 'existing' ) ).
+    ls_object-data = zcl_abapgit_convert=>string_to_xstring_utf8( 'existing' ).
     zcl_abapgit_ortec_obj_store=>store_object(
       iv_repo_key = c_repo1
-      iv_sha1     = lv_commit
-      iv_type     = zif_abapgit_git_definitions=>c_type-commit
-      iv_data     = zcl_abapgit_ortec_obj_store=>get_object( iv_repo_key = c_repo1 iv_sha1 = lv_commit )-data ).
+      iv_sha1     = ls_object-sha1
+      iv_type     = ls_object-type
+      iv_data     = ls_object-data ).
+    APPEND ls_object TO lt_objects.
+
+    SELECT COUNT( * ) FROM zaog_obj_store
+      INTO @lv_count
+      WHERE repo_key = @c_repo1
+        AND obj_sha1 = @ls_object-sha1.
+
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 1 ).
+
+    zcl_abapgit_ortec_fastpath=>persist_missing_objects(
+      iv_repo_key = c_repo1
+      it_objects  = lt_objects ).
+
+    SELECT COUNT( * ) FROM zaog_obj_store
+      INTO @lv_count
+      WHERE repo_key = @c_repo1
+        AND obj_sha1 = @ls_object-sha1.
+
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 1 ).
+  ENDMETHOD.
+
+  METHOD persist_dup_sha_once.
+    DATA lt_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA ls_object  LIKE LINE OF lt_objects.
+    DATA ls_object2 LIKE LINE OF lt_objects.
+    DATA lv_count   TYPE i.
+
+    ls_object-type = zif_abapgit_git_definitions=>c_type-blob.
+    ls_object-sha1 = zcl_abapgit_hash=>sha1_blob( zcl_abapgit_convert=>string_to_xstring_utf8( 'dup' ) ).
+    ls_object-data = zcl_abapgit_convert=>string_to_xstring_utf8( 'dup' ).
+    APPEND ls_object TO lt_objects.
+
+    ls_object2-type = zif_abapgit_git_definitions=>c_type-blob.
+    ls_object2-sha1 = ls_object-sha1.
+    ls_object2-data = zcl_abapgit_convert=>string_to_xstring_utf8( 'dup' ).
+    APPEND ls_object2 TO lt_objects.
+
+    zcl_abapgit_ortec_fastpath=>persist_missing_objects(
+      iv_repo_key = c_repo1
+      it_objects  = lt_objects ).
+
+    SELECT COUNT( * ) FROM zaog_obj_store
+      INTO @lv_count
+      WHERE repo_key = @c_repo1
+        AND obj_sha1 = @ls_object-sha1.
+
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 1 ).
+  ENDMETHOD.
+
+  METHOD persist_ignores_other.
+    DATA lt_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA ls_new     LIKE LINE OF lt_objects.
+    DATA ls_existing1 TYPE zif_abapgit_definitions=>ty_object.
+    DATA ls_existing2 TYPE zif_abapgit_definitions=>ty_object.
+    DATA lv_before  TYPE i.
+    DATA lv_after   TYPE i.
+
+    ls_existing1-type = zif_abapgit_git_definitions=>c_type-blob.
+    ls_existing1-sha1 = zcl_abapgit_hash=>sha1_blob( zcl_abapgit_convert=>string_to_xstring_utf8( 'one' ) ).
+    ls_existing1-data = zcl_abapgit_convert=>string_to_xstring_utf8( 'one' ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = c_repo1
+      iv_sha1     = ls_existing1-sha1
+      iv_type     = ls_existing1-type
+      iv_data     = ls_existing1-data ).
+
+    ls_existing2-type = zif_abapgit_git_definitions=>c_type-blob.
+    ls_existing2-sha1 = zcl_abapgit_hash=>sha1_blob( zcl_abapgit_convert=>string_to_xstring_utf8( 'two' ) ).
+    ls_existing2-data = zcl_abapgit_convert=>string_to_xstring_utf8( 'two' ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = c_repo1
+      iv_sha1     = ls_existing2-sha1
+      iv_type     = ls_existing2-type
+      iv_data     = ls_existing2-data ).
+
+    ls_new-type = zif_abapgit_git_definitions=>c_type-blob.
+    ls_new-sha1 = zcl_abapgit_hash=>sha1_blob( zcl_abapgit_convert=>string_to_xstring_utf8( 'new' ) ).
+    ls_new-data = zcl_abapgit_convert=>string_to_xstring_utf8( 'new' ).
+    APPEND ls_new TO lt_objects.
+
+    SELECT COUNT( * ) FROM zaog_obj_store
+      INTO @lv_before
+      WHERE repo_key = @c_repo1.
+
+    zcl_abapgit_ortec_fastpath=>persist_missing_objects(
+      iv_repo_key = c_repo1
+      it_objects  = lt_objects ).
+
+    SELECT COUNT( * ) FROM zaog_obj_store
+      INTO @lv_after
+      WHERE repo_key = @c_repo1.
 
     cl_abap_unit_assert=>assert_equals(
-      act = zcl_abapgit_ortec_obj_store=>exists( iv_repo_key = c_repo1 iv_sha1 = lv_commit )
+      act = zcl_abapgit_ortec_obj_store=>exists( iv_repo_key = c_repo1 iv_sha1 = ls_new-sha1 )
       exp = abap_true ).
+    cl_abap_unit_assert=>assert_equals(
+      act = zcl_abapgit_ortec_obj_store=>exists( iv_repo_key = c_repo1 iv_sha1 = ls_existing1-sha1 )
+      exp = abap_true ).
+    cl_abap_unit_assert=>assert_equals(
+      act = zcl_abapgit_ortec_obj_store=>exists( iv_repo_key = c_repo1 iv_sha1 = ls_existing2-sha1 )
+      exp = abap_true ).
+    cl_abap_unit_assert=>assert_equals( act = lv_after - lv_before exp = 1 ).
   ENDMETHOD.
 
 ENDCLASS.

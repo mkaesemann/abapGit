@@ -288,13 +288,19 @@ CLASS zcl_abapgit_ortec_walk_prep IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD warm_trees.
-    DATA lt_tree_objects  TYPE zif_abapgit_definitions=>ty_objects_tt.
-    DATA lt_nodes         TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
-    DATA lt_current_trees TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
-    DATA lt_seen_trees    TYPE HASHED TABLE OF zif_abapgit_git_definitions=>ty_sha1 WITH UNIQUE KEY table_line.
-    DATA lt_next_trees    TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
-    DATA lv_tree_sha      TYPE zif_abapgit_git_definitions=>ty_sha1.
-    DATA ls_tree_object   TYPE zif_abapgit_definitions=>ty_object.
+    DATA lt_tree_objects           TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lt_nodes                  TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+    DATA lt_current_trees          TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_seen_trees             TYPE HASHED TABLE OF zif_abapgit_git_definitions=>ty_sha1 WITH UNIQUE KEY table_line.
+    DATA lt_next_trees             TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_current_frontier_objs  TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lt_missing_frontier_sha1s TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_frontier_matches       TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lt_frontier_lookup        TYPE HASHED TABLE OF zif_abapgit_git_definitions=>ty_sha1 WITH UNIQUE KEY table_line.
+    DATA lv_tree_sha               TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA ls_tree_object            TYPE zif_abapgit_definitions=>ty_object.
+    DATA ls_frontier_match         TYPE zif_abapgit_definitions=>ty_object.
+    DATA ls_node                   TYPE zcl_abapgit_git_pack=>ty_node.
 
     FIELD-SYMBOLS <ls_node> LIKE LINE OF lt_nodes.
 
@@ -303,32 +309,50 @@ CLASS zcl_abapgit_ortec_walk_prep IMPLEMENTATION.
 
     WHILE lt_current_trees IS NOT INITIAL.
       CLEAR lt_next_trees.
+      CLEAR lt_current_frontier_objs.
+      CLEAR lt_missing_frontier_sha1s.
+      CLEAR lt_frontier_lookup.
+
       LOOP AT lt_current_trees INTO lv_tree_sha.
         CLEAR ls_tree_object.
         READ TABLE it_objects INTO ls_tree_object
              WITH KEY type COMPONENTS type = zif_abapgit_git_definitions=>c_type-tree
                                       sha1 = lv_tree_sha.
+        IF sy-subrc = 0.
+          APPEND ls_tree_object TO lt_current_frontier_objs.
+        ELSE.
+          APPEND lv_tree_sha TO lt_missing_frontier_sha1s.
+        ENDIF.
+      ENDLOOP.
+
+      IF lt_missing_frontier_sha1s IS NOT INITIAL.
+        DATA(lt_db_frontier_objs) = zcl_abapgit_ortec_obj_store=>get_objects(
+                                     iv_repo_key   = iv_repo_key
+                                     it_sha1s      = lt_missing_frontier_sha1s
+                                     iv_bulk_fetch = abap_false ).
+        APPEND LINES OF lt_db_frontier_objs TO lt_current_frontier_objs.
+      ENDIF.
+
+      LOOP AT lt_current_trees INTO lv_tree_sha.
+        CLEAR lt_frontier_matches.
+        READ TABLE lt_current_frontier_objs INTO ls_tree_object
+             WITH TABLE KEY sha1 = lv_tree_sha.
         IF sy-subrc <> 0.
-          TRY.
-              ls_tree_object = zcl_abapgit_ortec_obj_store=>get_object(
-                                   iv_repo_key = iv_repo_key
-                                   iv_sha1     = lv_tree_sha ).
-            CATCH zcx_abapgit_ortec_git.
-              CONTINUE.
-          ENDTRY.
+          zcx_abapgit_ortec_git=>raise( |Tree { lv_tree_sha } missing from frontier| ).
         ENDIF.
 
         IF ls_tree_object-type <> zif_abapgit_git_definitions=>c_type-tree.
-          CONTINUE.
+          zcx_abapgit_ortec_git=>raise( |Tree { lv_tree_sha } has wrong type| ).
         ENDIF.
+        ls_tree_object = ls_tree_object.
 
         IF NOT line_exists( ct_objects[
                                           KEY type
                                           type = zif_abapgit_git_definitions=>c_type-tree
                                           sha1 = ls_tree_object-sha1 ] ).
           APPEND ls_tree_object TO ct_objects.
-          APPEND ls_tree_object TO lt_tree_objects.
         ENDIF.
+        APPEND ls_tree_object TO lt_tree_objects.
 
         TRY.
             lt_nodes = zcl_abapgit_git_pack=>decode_tree( ls_tree_object-data ).
