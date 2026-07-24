@@ -1248,7 +1248,7 @@ after seeing Phase 1 land.
   further investigation.
 
 ## Known issues to fix
-- `Walk, tree not found` after branch switching or a partially buffered store. **PARTIALLY FIXED (2026-07-12, commit `51c1c52e`)**: Michael reproduced this in ES6 after switching branches, with a slow standard-decoder detour (`zcl_abapgit_zlib_huffman`) beforehand. Full root-cause analysis in [.memory/logs/incident_branch_switch_walk_failure.md](.memory/logs/incident_branch_switch_walk_failure.md). Two concrete pre-existing bugs were fixed: (1) `zcl_abapgit_ortec_obj_store=>set_active_repo_key` now makes the delta-base blank-`iv_repo_key` fallback reliable instead of depending on an accidental side effect; (2) `pull_by_branch`'s self-heal now calls the new `zcl_abapgit_ortec_repo_state=>invalidate_all_history` (repo-wide) instead of the branch-scoped `reset_fetch_commit`, so a retry actually degrades to a full/deepen pack as intended. **STILL OUTSTANDING**: the H4 walk-delegation architecture from `target_architecture.mmd` (bulk-collect-then-fetch-then-retry for `walk`/`walk_tree`) remains unimplemented - the two fixes above reduce how often the failure surfaces and make the self-heal actually effective, but do not add real recovery for a genuinely-never-cached object on a brand-new branch/commit. That is a larger, separate design/implementation effort. Not yet re-verified live in ES6 - awaiting Michael's next IT8/ES6 test round.
+- `Walk, tree not found` after branch switching or a partially buffered store. **PARTIALLY FIXED (2026-07-12, commit `51c1c52e`)**: Michael reproduced this in ES6 after switching branches, with a slow standard-decoder detour (`zcl_abapgit_zlib_huffman`) beforehand. Full root-cause analysis in [.memory/logs/incident_branch_switch_walk_failure.md](.memory/logs/incident_branch_switch_walk_failure.md). Two concrete pre-existing bugs were fixed: (1) `zcl_abapgit_ortec_obj_store=>set_active_repo_key` now makes the delta-base blank-`iv_repo_key` fallback reliable instead of depending on an accidental side effect; (2) `pull_by_branch`'s self-heal now calls the new `zcl_abapgit_ortec_repo_state=>invalidate_all_history` (repo-wide) instead of the branch-scoped `reset_fetch_commit`, so a retry actually degrades to a full/deepen pack as intended. **STILL OUTSTANDING**: the H4 walk-delegation architecture from `h4_target_architecture_legacy.mmd` (bulk-collect-then-fetch-then-retry for `walk`/`walk_tree`) remains unimplemented - the two fixes above reduce how often the failure surfaces and make the self-heal actually effective, but do not add real recovery for a genuinely-never-cached object on a brand-new branch/commit. That is a larger, separate design/implementation effort. Not yet re-verified live in ES6 - awaiting Michael's next IT8/ES6 test round.
 - Wrong delta indicators in filtered stage-by-transport.
 - **Wrong "D" (deleted) status badge on abapGit's OWN repo status view after a normal pull, recurring
   (2026-07-17, LIVE, screenshot confirmed)** - the 5 classes just imported for Phase 1/Phase 2 (streaming
@@ -1362,7 +1362,7 @@ or the `ortec-abapgit-resume` subagent.
 - **Original problem statement** (still accurate): give `zcl_abapgit_git_porcelain`'s `walk`/
   `walk_tree` a real bulk-collect-then-fetch-then-persist-then-retry capability for missing tree/blob
   objects, mirroring `zcl_abapgit_ortec_missing_obj=>ensure_available`. This is the H4 box in
-  [.memory/diagrams/target_architecture.mmd](.memory/diagrams/target_architecture.mmd).
+  [.memory/diagrams/h4_target_architecture_legacy.mmd](.memory/diagrams/h4_target_architecture_legacy.mmd).
 - **Design report (`ortec-abapgit-design`, 2026-07-16, no code written) - the previously-open design
   question is now RESOLVED**: "how does `walk`/`walk_tree` obtain `iv_url`/root commit for a
   negotiated top-up" -> root commit needs NO new threading (pre-warm runs ONCE at the `pull()` level,
@@ -2350,8 +2350,8 @@ evidence chain, code excerpts, and file/line references: `.memory/logs/archaeolo
 ## Design phase plan & risk (2026-07-10, model: Claude Opus 4.8)
 
 Full design: `.memory/logs/target_design.md`. Target diagram:
-`.memory/diagrams/target_architecture.mmd`. Open decisions:
-`.memory/decisions/design_review_required.md`.
+`.memory/diagrams/h4_target_architecture_legacy.mmd`. Open decisions:
+`.memory/decisions/h4_design_decisions_d1_d7.md`.
 
 ### Core design decision
 Split **policy** from **data availability**. The read-only filtered walk (Stage/Diff/Patch)

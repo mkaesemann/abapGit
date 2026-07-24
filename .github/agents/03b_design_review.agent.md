@@ -87,8 +87,12 @@ Required states:
 
 ## Output
 
-Write to:
-`/.memory/reviews/design_review.md`
+Write only to the exact review path in the parent's `OUTPUT_ARTIFACTS`.
+If no exact path is supplied, return `INSUFFICIENT_SCOPE` without writing.
+Do not overwrite the generic historical `design_review.md`.
+Do not modify `.memory/state.md` or diagrams.
+Read only the reviewed design, named focused discoveries, current source needed
+to verify blocking claims, and explicitly allowed skills.
 
 ### Format
 

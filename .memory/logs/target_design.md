@@ -430,7 +430,7 @@ the smallest, safest change. Phases 3–6 are the durable rework.
 ---
 
 ## 11. Open decisions for Michael
-See `.memory/decisions/design_review_required.md` (D1–D7). **All of D1–D7 are now resolved by
+See `.memory/decisions/h4_design_decisions_d1_d7.md` (D1–D7). **All of D1–D7 are now resolved by
 the owner** (D1 = Option B strict opt-in; D3 = delta-base index; D4 = two-mode switch +
 broad stale-data protection; D5 = manual clear default + optional admin report; D6 = per-op
 default + switchable short-TTL benchmark mode; D7 = minimal-touch standard porcelain, else
@@ -440,8 +440,8 @@ go-ahead to begin coding.
 ---
 
 ## 12. Files produced by this design pass
-- `.memory/diagrams/target_architecture.mmd` (rewritten)
+- `.memory/diagrams/h4_target_architecture_legacy.mmd` (rewritten)
 - `.memory/logs/target_design.md` (this file)
-- `.memory/decisions/design_review_required.md` (new)
+- `.memory/decisions/h4_design_decisions_d1_d7.md` (new)
 - `.memory/state.md` (plan/risk section appended)
 - No productive ABAP source modified. No transports created.

@@ -6,12 +6,19 @@ description: Persistent memory and resume discipline
 # Memory protocol skill
 
 Always:
-1. Read `.memory/state.md` first.
-2. Update `.memory/state.md` after every meaningful finding, decision, code change, or test result.
-3. Put long phase details under `.memory/logs/` and link them from state.
-4. Put handoff summaries under `.memory/handoffs/`.
-5. Put reviewed or pending decisions under `.memory/decisions/`.
-6. If interrupted, the next agent must be able to resume without redoing discovery.
+- The orchestrator reads `.memory/state.md` first.
+- Subagents read `.memory/state.md` only when it is listed in `ALLOWED_CONTEXT`.
+- Subagents write only their exact parent-specified artifact and return a compact result packet.
+- The orchestrator alone owns `.memory/state.md`.
+- Update `.memory/state.md` only for a durable phase/checkpoint transition,
+  owner decision, validated blocker, implementation commit, or validation
+  result that changes the next action.
+- Do not update active state for routine searches, successful subagent work,
+  intermediate hypotheses, or documentation cleanup.
+- Put detailed evidence in one focused log/review/handoff and link it from state
+  only when it becomes active resume information.
+- If interrupted, the latest focused handoff plus compact state must allow
+  resume without broad rediscovery.
 
 State entries must include:
 - timestamp,
@@ -63,3 +70,10 @@ Each major topic must have:
 
 Do not let an unrelated resumable backlog topic control a newly named owner
 topic.
+
+### Parent-scope precedence
+
+Exact `ALLOWED_CONTEXT`, `OUTPUT_ARTIFACTS`, `FORBIDDEN_PATHS`, and write
+permissions supplied by the parent override generic skill or agent defaults.
+A skill must never broaden a focused task into archive reading, state updates,
+or diagram maintenance.

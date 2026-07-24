@@ -512,7 +512,7 @@ advertised.
 ## 8. Requirement 8 — open decisions needing Michael's input
 
 See `.memory/decisions/phase5_ofs_delta_review_required.md` (D-P5-1 … D-P5-7), same format as
-`design_review_required.md`. The two with genuine data-corruption stakes — flagged rather than
+`h4_design_decisions_d1_d7.md`. The two with genuine data-corruption stakes — flagged rather than
 guessed — are:
 - **D-P5-2** completeness gate strength (marker-only vs marker **+** no-dangling-delta-base
   scan before advertising thin).

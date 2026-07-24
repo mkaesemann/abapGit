@@ -5,11 +5,16 @@ description: Mermaid diagram generation for call flows and target design
 
 # Mermaid flow skill
 
-Create and maintain only diagrams linked from the active topic in
-`.memory/state.md`.
+Create or modify a diagram only when the current parent task explicitly sets
+`DIAGRAM_WRITE_ALLOWED=yes` and names the exact path in `OUTPUT_ARTIFACTS`.
+A diagram linked from active state is eligible context, not an automatic write
+target.
+
+Do not rewrite, archive, rename, or reclassify historical diagrams during a
+source-discovery, design, review, implementation, regression, or performance
+task unless diagram maintenance is itself an explicit deliverable.
 
 For `variant-b-partial-clone`, the target diagram is:
-
 - `.memory/diagrams/variant_b_flow.mmd`
 
 Rules:

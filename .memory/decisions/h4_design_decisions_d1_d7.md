@@ -6,7 +6,7 @@
   Plan is implementation-ready; per the design-mode gate, coding still starts only on Michael's
   explicit go-ahead. No decision remains blocking; residual items are implementation-time
   confirmations noted inline.
-- **Companion:** `.memory/logs/target_design.md`, `.memory/diagrams/target_architecture.mmd`
+- **Companion:** `.memory/logs/target_design.md`, `.memory/diagrams/h4_target_architecture_legacy.mmd`
 
 The design separates a **safe read-only sparse lookup** (data-validity gated) from the
 **mutating/protocol-altering persistent-cache opt-in**. The decisions below are the points where

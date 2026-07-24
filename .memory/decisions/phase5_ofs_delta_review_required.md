@@ -7,7 +7,7 @@
 - **Ground truth (do not re-derive):** `.memory/logs/phase5_findings.md`
 - **Prior decisions still in force:** D1 = Option B strict opt-in; D3 = delta-base index used to
   allow thin only when base completeness verified; D7 = minimal-touch standard porcelain else
-  Ortec mirror. (See `design_review_required.md`.)
+  Ortec mirror. (See `h4_design_decisions_d1_d7.md`.)
 
 ---
 

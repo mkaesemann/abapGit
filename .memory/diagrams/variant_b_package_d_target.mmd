@@ -1,0 +1,65 @@
+%% Variant B Package D target design intent
+%% This diagram defines D0 design boundaries; exact method/file mapping must be
+%% verified from current productive source before implementation.
+flowchart TD
+  classDef current fill:#e6f0ff,stroke:#2457a6,color:#10284f
+  classDef target fill:#fff4cc,stroke:#9c7a00,color:#332700
+  classDef success fill:#dff5e1,stroke:#237a3b,color:#102a16
+  classDef failure fill:#fde2e2,stroke:#b42318,color:#3b0a08
+
+  subgraph D1[Package D1 — bounded external delta-base resolution]
+    P[Parse immutable pack-entry metadata]
+    K[Build stable in-pack identity maps]
+    F1[Run iterative in-pack fixpoint]
+    U{Residual unresolved dependencies?}
+    C[Collect and deduplicate external base SHA1s]
+    M[Bulk-read READY metadata by repository key]
+    L[Load base payloads in row- and byte-bounded windows]
+    E[Seed attempt-scoped SHA-keyed base map/cache]
+    F2[Run fixpoint again]
+    R{Residual unresolved dependencies?}
+    OK[All objects reconstructed and hash/type verified]
+    REC[At most one bounded recovery tier]
+    ERR[Structured residual dependency failure]
+
+    P --> K --> F1 --> U
+    U -- No --> OK
+    U -- Yes --> C --> M --> L --> E --> F2 --> R
+    R -- No --> OK
+    R -- Yes --> REC --> R2{Resolved after recovery?}
+    R2 -- Yes --> OK
+    R2 -- No --> ERR
+  end
+
+  subgraph D2[Package D2 — attempt/session/transaction isolation]
+    A[Create unique top-level attempt identity]
+    S[Persist attempt-scoped STAGED rows]
+    VIS[STAGED visible only to owning attempt; never have-eligible]
+    VER[Verify pack, object hashes/types, graph and selected snapshot]
+    PUB{All required verification successful?}
+    PROM[Set-based promotion to READY]
+    CERT[Publish commit certificate and branch pointer]
+    COM[Orchestrator-owned final commit]
+    RB[Rollback or set-based failed-attempt cleanup]
+
+    A --> S --> VIS --> VER --> PUB
+    PUB -- Yes --> PROM --> CERT --> COM
+    PUB -- No --> RB
+  end
+
+  NET[Bounded network attempt] --> A
+  A --> P
+  OK --> VER
+  ERR --> RB
+
+  INV1[No SQL or HTTP during per-delta apply]
+  INV2[No mutable nonunique identity lookup]
+  INV3[No commits in low-level object/delta loops]
+  INV4[No READY rows, certificate, or branch publication from failed attempt]
+  INV5[Final certificate invariant remains F/C]
+
+  class P,K,F1,C,M,L,E,F2,REC,A,S,VIS,VER current
+  class U,R,PUB,R2 target
+  class OK,PROM,CERT,COM success
+  class ERR,RB failure
+  class INV1,INV2,INV3,INV4,INV5 failure

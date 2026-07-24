@@ -18,10 +18,23 @@ Design:
 - Pack/object/delta/path indexes and schema changes.
 - Git protocol strategy for have/want, thin packs, deltas, and filtered staging.
 
-Output:
-- `.memory/diagrams/target_architecture.mmd`,
-- `.memory/logs/target_design.md`,
-- `.memory/decisions/design_review_required.md`.
+Output only to the exact `OUTPUT_ARTIFACTS` supplied by the parent task.
+
+If the parent specifies a focused design artifact, that path replaces the
+legacy generic defaults `target_architecture.mmd`, `target_design.md`, and
+`design_review_required.md`. Do not update those generic files as a second
+copy.
+
+Do not create or modify a diagram unless `DIAGRAM_WRITE_ALLOWED=yes` and the
+exact diagram path is listed in `OUTPUT_ARTIFACTS`.
+
+Do not modify `.memory/state.md`; return the design status to the orchestrator,
+which owns active-state updates.
+
+Read only `ALLOWED_CONTEXT`, current source in `SOURCE_SCOPE`, the focused
+discovery artifacts named by the parent, and directly relevant skills. Do not
+read archives or generic historical designs merely because their filenames
+contain `target` or `design`.
 
 Do not implement until Michael reviews or explicitly approves the plan.
 
@@ -65,6 +78,10 @@ For the topic `variant-b-partial-clone`, the following are fixed decisions:
 
 Do not offer alternative architectures unless the current server capabilities or
 ABAP runtime make the fixed target impossible.
+
+A focused package/slice prompt is not permission to clean up, rename, archive,
+or rewrite earlier architecture artifacts. Historical-artifact maintenance is
+a separate task.
 
 ### Mandatory performance design
 

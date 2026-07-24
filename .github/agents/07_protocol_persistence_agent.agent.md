@@ -20,10 +20,16 @@ Focus:
 - schema/index changes for `zaog_*`.
 
 Output:
-- `.memory/logs/protocol_persistence.md`,
-- schema/index proposal,
-- method signatures for bulk lookup/fetch APIs,
-- risks requiring Michael review.
+Output only to the exact artifact path supplied by the parent task.
+If no exact path is supplied, return `INSUFFICIENT_SCOPE` without writing.
+
+Do not update generic `protocol_persistence.md`, `.memory/state.md`, decisions,
+or diagrams unless each exact path is explicitly listed in
+`OUTPUT_ARTIFACTS`.
+
+Read only `ALLOWED_CONTEXT`, the design under review, current source in
+`SOURCE_SCOPE`, and directly relevant DDIC definitions.
+
 
 ### Partial clone / promisor review
 

@@ -6,7 +6,7 @@ commit `85d44685`). Switching branches: shows "retrieves data from remote repo",
 long time in a "decode delta" step calling `zcl_abapgit_zlib_huffman` (the slow pure-ABAP
 manual decoder), then fails with "Walk, tree not found".
 
-## Answer to "is the target flow (target_architecture.mmd) implemented or incomplete?"
+## Answer to "is the target flow (h4_target_architecture_legacy.mmd) implemented or incomplete?"
 **Incomplete - a specific, known box in the diagram was deliberately deferred and never built.**
 The diagram's `H4` hook (`zcl_abapgit_git_porcelain=>walk / walk_tree` -> "missing node ->
 delegate to collector" -> `MO` = `zcl_abapgit_ortec_missing_obj`) was explicitly deferred in
@@ -86,7 +86,7 @@ deliver a complete (non-thin) pack") does not actually hold.
    - Fix `reset_fetch_commit`'s self-heal to also clear (or bypass) `ZAOG_COMMIT_HIST` for the
      affected commit/branch so the retry is actually guaranteed non-thin, OR switch the self-heal
      to call `invalidate_tip_commit` (which already clears history) instead of `reset_fetch_commit`.
-3. **Full architectural fix (larger, matches target_architecture.mmd's H4 box):** give
+3. **Full architectural fix (larger, matches h4_target_architecture_legacy.mmd's H4 box):** give
    `walk`/`walk_tree` a real bulk-collect-then-fetch-then-persist-then-retry capability
    (mirroring `zcl_abapgit_ortec_missing_obj`), so a genuinely-missing node triggers ONE targeted
    remote repair instead of an immediate hard failure. This is the correct, complete fix but is

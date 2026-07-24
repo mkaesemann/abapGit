@@ -174,8 +174,9 @@ Do not:
 
 ## Handoff
 
-Update `.memory/state.md` only with factual scan status, output path, files
-inspected, and unresolved findings.
+Do not update `.memory/state.md`. Return factual scan status, output path,
+files inspected, and unresolved findings to the orchestrator. Write only the
+exact output artifact supplied by the parent.
 
 Return concisely:
 

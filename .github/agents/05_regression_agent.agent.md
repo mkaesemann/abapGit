@@ -10,7 +10,7 @@ target: vscode
 Validate implemented changes using the regression-validation skill.
 
 Produce:
-- `.memory/logs/regression_<phase>.md`,
+- Produce the exact regression artifact named by the parent task. The generic `regression_<phase>.md` name is only a fallback when the parent explicitly permits it. Do not update `.memory/state.md`, diagrams, or unrelated regression logs.
 - pass/fail scenario matrix,
 - exact failing class/method for any failure,
 - corrective proposal or small safe fix if clearly trivial.

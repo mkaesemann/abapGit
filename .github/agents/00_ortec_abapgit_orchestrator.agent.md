@@ -100,6 +100,12 @@ Every delegated task must define:
 - forbidden changes;
 - output artifact;
 - maximum parent-return size.
+- allowed context;
+- source scope;
+- exact output artifacts;
+- forbidden paths;
+- whether state writes are allowed;
+- whether diagram writes are allowed.
 
 Subagents must:
 
@@ -142,7 +148,9 @@ When such a prompt is supplied:
 - Treat the explicit current owner prompt as the highest-priority requirement.
 - Do not resume an unrelated backlog topic merely because it is currently listed
   first in `.memory/state.md`.
-- Create a dedicated topic in `.memory/state.md` for the new work.
+- The orchestrator may update `.memory/state.md` only when the current parent
+  task permits state writes and a real phase/checkpoint transition occurred.
+  Subagents never create or change active topics directly.
 - Historical memory remains evidence, not automatically current truth.
 - Classify relevant memory statements as:
   - CONFIRMED_CURRENT
@@ -203,6 +211,51 @@ Use subagents for focused work:
 
 Do not delegate resume/orientation to a separate agent.
 The orchestrator reads and reconciles the active topic state directly.
+
+### Delegated artifact and context isolation
+
+The parent task's exact scope is authoritative for every subagent.
+
+Every delegation must contain:
+
+- `ALLOWED_CONTEXT`: exact memory files and source paths the subagent may read;
+- `SOURCE_SCOPE`: exact files, classes, methods, or narrow globs to inspect;
+- `OUTPUT_ARTIFACTS`: exact files the subagent may create or update;
+- `FORBIDDEN_PATHS`: files and directories the subagent must not read or write;
+- `STATE_WRITE_ALLOWED`: `yes` or `no`;
+- `DIAGRAM_WRITE_ALLOWED`: `yes` or `no`.
+
+When the parent task supplies these fields, they override generic subagent
+output defaults and generic skill output paths.
+
+For focused Package D work, default to:
+
+```text
+STATE_WRITE_ALLOWED=no
+DIAGRAM_WRITE_ALLOWED=no
+FORBIDDEN_PATHS=.memory/archive/**,.memory/state.md,.memory/diagrams/**,editor-memory/**
+```
+
+unless the parent task explicitly requests one of those outputs.
+
+A subagent must not broaden discovery into `.memory/**`. It may read only the
+memory files named in `ALLOWED_CONTEXT`. Current productive source may be
+searched only within `SOURCE_SCOPE` and directly invoked dependencies.
+
+If a subagent's generic agent definition or skill requests a different output
+file, the parent-specified `OUTPUT_ARTIFACTS` wins. The subagent must not write
+both files.
+
+The orchestrator must reject a result as `SCOPE_VIOLATION` when the subagent:
+
+- reads a forbidden memory/archive path without a named evidence need;
+- writes `.memory/state.md` when `STATE_WRITE_ALLOWED=no`;
+- creates or rewrites a diagram when `DIAGRAM_WRITE_ALLOWED=no`;
+- writes a generic artifact instead of the parent-specified artifact;
+- changes productive code during a read-only task.
+
+On `SCOPE_VIOLATION`, stop consuming that result, revert only the unauthorized
+changes after checking for pre-existing work, and redelegate with exact scope.
 
 ### Implementation routing
 

@@ -1,62 +1,54 @@
-%% Variant B - Slice 1: durable materialization state machine
-%% hist_level x snap_state combined states. API calls own the transitions.
-%% (GRAPH_COMPLETE|FULL_COMPLETE, INVALID) is not reachable: invalidate_commit
-%% always resets hist_level to UNKNOWN in the same call.
-stateDiagram-v2
-    [*] --> U_N
+%% Variant B validated baseline after Package C
+%% Authority: current productive source and SAP IT8 validation at
+%% 29199f629773c676e0eaa2f3a006f5167d304ae8
+flowchart TD
+  classDef validated fill:#dff5e1,stroke:#237a3b,color:#102a16
+  classDef boundary fill:#fff4cc,stroke:#9c7a00,color:#332700
+  classDef forbidden fill:#fde2e2,stroke:#b42318,color:#3b0a08
+  classDef store fill:#e6f0ff,stroke:#2457a6,color:#10284f
 
-    state "hist=UNKNOWN / snap=NONE" as U_N
-    state "hist=UNKNOWN / snap=PENDING" as U_P
-    state "hist=UNKNOWN / snap=INVALID" as U_I
-    state "hist=GRAPH_COMPLETE / snap=PENDING" as G_P
-    state "hist=GRAPH_COMPLETE / snap=COMPLETE" as G_C
-    state "hist=FULL_COMPLETE / snap=PENDING" as F_P
-    state "hist=FULL_COMPLETE / snap=COMPLETE" as F_C
-    state "REJECTED (raises zcx_abapgit_ortec_git, no state change)" as REJ
+  A[Branch operation] --> B{ORTEC active?}
+  B -- No --> STD[Standard abapGit behavior unchanged]
+  B -- Yes --> R[Resolve repository key and advertised branch tip]
+  R --> C{Certified local state}
 
-    U_N --> U_P : begin_attempt()
-    U_I --> U_P : begin_attempt()
+  C -- Warm unchanged --> W[Serve verified snapshot locally]
+  C -- Known changed tip --> I[Incremental fetch with certified haves]
+  C -- Unknown or uncertified --> G[Cold blobless graph acquisition]
 
-    U_P --> G_P : mark_graph_complete()\n[attempt_id matches]
-    G_P --> G_C : publish_snapshot_complete()\n[branch fetch_commit + snap_state\nupdated atomically, no COMMIT WORK]
-    G_P --> G_P : begin_attempt()\n[refresh attempt_id only]
-    G_C --> G_C : begin_attempt()\n[refresh attempt_id,\nsnap_state left COMPLETE]
+  I --> V1[Verify received graph and selected tip blobs]
+  G --> GC[Verify requested commit and complete tree closure]
+  GC --> MG[Publish GRAPH_COMPLETE]
+  MG --> MB[Materialize current-tip blobs in bounded batches]
+  MB --> V2[Verify complete selected blob set]
+  V1 --> MF[Mark FULL_COMPLETE]
+  V2 --> MF
+  MF --> RP[Prepare repository bookkeeping]
+  RP --> PS[Publish SNAPSHOT_COMPLETE]
+  PS --> FC[Persisted invariant: HIST_LEVEL F and SNAP_STATE C]
+  W --> OUT[Files and deltas reconstructed]
+  FC --> OUT
 
-    G_P --> F_P : mark_full_complete()\n[attempt_id matches]
-    G_C --> F_C : mark_full_complete()\n[attempt_id matches,\nsnap_state left COMPLETE]
-    F_P --> F_C : publish_snapshot_complete()
-    F_P --> F_P : begin_attempt()\n[refresh attempt_id only]
-    F_C --> F_C : begin_attempt()\n[refresh attempt_id,\nsnap_state left COMPLETE]
+  I -. pack decode .-> D1B[Package D1 boundary: generalized external delta-base resolution]
+  G -. pack decode .-> D1B
+  D1B -. publication safety .-> D2B[Package D2 boundary: attempt/session/transaction isolation]
 
-    U_N --> U_I : invalidate_commit()
-    U_P --> U_I : invalidate_commit()
-    G_P --> U_I : invalidate_commit()
-    G_C --> U_I : invalidate_commit()
-    F_P --> U_I : invalidate_commit()
-    F_C --> U_I : invalidate_commit()
+  OS[(Repository-shared SHA object store)]
+  RS[(Branch/ref state)]
+  CH[(Commit materialization certificates)]
+  I --> OS
+  G --> OS
+  MB --> OS
+  RP --> RS
+  MF --> CH
+  PS --> RS
 
-    U_N --> REJ : publish_snapshot_complete()\n[hist < GRAPH_COMPLETE]
-    U_P --> REJ : publish_snapshot_complete()\n[hist < GRAPH_COMPLETE]
-    U_I --> REJ : publish_snapshot_complete()\n[hist < GRAPH_COMPLETE]
-    U_N --> REJ : mark_full_complete()\n[hist < GRAPH_COMPLETE]
-    U_P --> REJ : mark_full_complete()\n[hist < GRAPH_COMPLETE]
-    U_I --> REJ : mark_full_complete()\n[hist < GRAPH_COMPLETE]
-    U_N --> REJ : mark_graph_complete()\n[stale/absent attempt_id]
+  X1[No deepen or shallow correctness strategy]
+  X2[No per-object SQL or HTTP]
+  X3[No uncertified haves]
+  X4[No snapshot C before history F]
 
-    note right of U_I
-      snap_state INVALID only ever
-      coexists with hist_level UNKNOWN.
-      A snapshot-only retry (graph still
-      good, snapshot batch failed) stays
-      at G_P/F_P - no separate
-      mark_snapshot_invalid exists.
-    end note
-
-    note right of REJ
-      clean_incomplete_attempts() is a
-      set-based, out-of-band sweep of
-      orphaned attempt_id values; it does
-      not appear as a modeled transition
-      here since it never changes
-      hist_level/snap_state.
-    end note
+  class STD,W,I,G,GC,MG,MB,V1,V2,MF,RP,PS,FC,OUT,OS,RS,CH validated
+  class D1B,D2B boundary
+  class X1,X2,X3,X4 forbidden
+  class OS,RS,CH store

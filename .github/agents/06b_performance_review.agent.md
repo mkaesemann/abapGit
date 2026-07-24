@@ -35,6 +35,10 @@ measured traces, and current owner decisions take precedence.
 
 Do not read complete source concatenations or the complete memory archive.
 
+The parent task must supply an exact report path. That path overrides generic
+report naming. Do not update `.memory/state.md`; return the verdict and report
+path to the orchestrator.
+
 ## Operating modes
 
 The parent task must specify one mode:
@@ -260,8 +264,9 @@ Write audit results to:
 
 `.memory/logs/performance_audit_<topic>_<slice>.md`
 
-Update `.memory/state.md` with mode, verdict, evidence type, inspected paths,
-blocking findings, and next action.
+Return mode, verdict, evidence type, inspected paths, blocking findings, and
+next action to the orchestrator. The orchestrator alone decides whether a
+checkpoint-level `.memory/state.md` update is warranted.
 
 ## Implementation scope
 

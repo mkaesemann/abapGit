@@ -17,7 +17,7 @@ High
 ### DR-001
 - Type: correctness
 - Severity: minor
-- Evidence: `.memory/logs/target_design.md`, `.memory/decisions/design_review_required.md`
+- Evidence: `.memory/logs/target_design.md`, `.memory/decisions/h4_design_decisions_d1_d7.md`
 - Why it matters: `walk_tree` was still scheduled too late for a correctness bug.
 - Fix: pull the explicit `repo_key` fix into Phase 1 with the read-path gate removal.
 
