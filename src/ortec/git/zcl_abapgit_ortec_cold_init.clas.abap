@@ -60,11 +60,25 @@ CLASS zcl_abapgit_ortec_cold_init DEFINITION
     "! the same MATERIALIZE_TIP_SNAPSHOT call.
     CONSTANTS c_max_batch_response_bytes TYPE i VALUE 26214400.
 
-    "! Bound on halving splits per top-level batch - ceil(log2(100)) = 7,
-    "! since C_MATERIALIZE_BATCH_MAX = 100 is the largest possible
+    "! Bound on halving splits per top-level batch - ceil(log2(1000)) = 10,
+    "! since C_MATERIALIZE_BATCH_MAX = 1000 is the largest possible
     "! top-level batch.
-    CONSTANTS c_max_oversize_splits TYPE i VALUE 7.
+    CONSTANTS c_max_oversize_splits TYPE i VALUE 10.
 
+    "! Desired successful response size used by the adaptive controller.
+    "! The controller adjusts the next row count from the response bytes of the
+    "! preceding successful top-level batch.
+    CONSTANTS c_target_response_bytes TYPE i VALUE 16777216.
+
+    "! Adaptive row-count limits. The serializer's absolute hard maximum remains
+    "! ZCL_ABAPGIT_ORTEC_FETCH_REQ=>C_MATERIALIZE_BATCH_MAX = 1000.
+    CONSTANTS c_batch_rows_initial TYPE i VALUE 500.
+    CONSTANTS c_batch_rows_min     TYPE i VALUE 50.
+    CONSTANTS c_batch_rows_max     TYPE i VALUE 1000.
+
+    "! A successful batch may at most double the row count of its predecessor.
+    "! This prevents a very small response from causing an unbounded jump.
+    CONSTANTS c_max_batch_growth TYPE i VALUE 2.
 
     "! B1 entry point. Establishes its own HTTP connection (own
     "! info/refs capability discovery, exactly like
@@ -167,48 +181,35 @@ CLASS zcl_abapgit_ortec_cold_init DEFINITION
       EXPORTING et_first_half  TYPE zif_abapgit_git_definitions=>ty_sha1_tt
                 et_second_half TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
 
-    "! Fetches, decodes/persists (via the streaming path), and verifies
-    "! exactly one bounded MATERIALIZE_BLOBS batch. Recurses (at most
-    "! C_MAX_OVERSIZE_SPLITS times) if the response is oversized and can
-    "! still be split - see DECIDE_OVERSIZE_ACTION. Establishes its own
-    "! HTTP connection per actual request (including split retries),
-    "! matching ACQUIRE_BLOBLESS_GRAPH's own connection-per-attempt shape.
-    "! @parameter iv_url |
-    "! Repository remote URL
-    "! @parameter iv_repo_key |
-    "! Repository key
-    "! @parameter it_batch |
-    "! Blob SHA1s to want in this batch (1..C_MATERIALIZE_BATCH_MAX)
-    "! @parameter iv_splits_used |
-    "! Number of times the ORIGINAL top-level batch (before any split in
-    "! this call tree) has already been halved - threaded through
-    "! recursive splits so the budget is shared across both halves
-    "! @raising zcx_abapgit_ortec_git |
-    "! Capability missing, oversized response with exhausted split budget,
-    "! decode failure, or a requested SHA1 not verified present/blob-typed
-    "! afterwards
+    "! Fetches and decodes/persists exactly one bounded MATERIALIZE_BLOBS
+    "! batch. Reuses the operation-local authenticated HTTP client and the
+    "! capability set created once by INIT_MATERIALIZE_CLIENT.
+    "!
+    "! If the response exceeds the hard byte ceiling, the batch is split into
+    "! two order-preserving halves. Both recursive children use the same client
+    "! and capability set.
+    "!
+    "! MATERIALIZE_BATCH never closes the client. Client ownership and cleanup
+    "! belong exclusively to MATERIALIZE_TIP_SNAPSHOT.
     CLASS-METHODS materialize_batch
-      IMPORTING iv_url         TYPE string
-                iv_repo_key    TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
-                it_batch       TYPE zif_abapgit_git_definitions=>ty_sha1_tt
-                iv_splits_used TYPE i DEFAULT 0
-      RAISING   zcx_abapgit_ortec_git.
+      IMPORTING
+        iv_url            TYPE string
+        iv_repo_key       TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
+        it_batch          TYPE zif_abapgit_git_definitions=>ty_sha1_tt
+        iv_server_caps    TYPE string
+        io_client         TYPE REF TO zcl_abapgit_http_client
+        iv_splits_used    TYPE i DEFAULT 0
+      EXPORTING
+        ev_response_bytes TYPE i
+        ev_split_used     TYPE abap_bool
+      RAISING
+        zcx_abapgit_ortec_git.
 
-    "! Bulk, bounded (≤ C_MATERIALIZE_BATCH_MAX rows) post-batch
-    "! verification: every SHA1 in it_batch must now be present with
-    "! status 'R' and obj_type = blob. Reuses GET_OBJECTS (already-approved
-    "! bulk shape, INV-B-13) rather than inventing a new lookup - since a
-    "! batch is bounded to at most 100 wants, this reads at most 100
-    "! objects' data back, the same order of magnitude as the response
-    "! XSTRING that was just received for this exact batch (never more).
-    "! @parameter iv_repo_key |
-    "! Repository key
-    "! @parameter it_batch |
-    "! SHA1s that must now be present and blob-typed
-    "! @raising zcx_abapgit_ortec_git |
-    "! A requested SHA1 is missing (covers both "server never sent it" and
-    "! "content hashed to a different real SHA1", design §11 step 4e,
-    "! INV-B-09) or is present under an unexpected object type
+    "! Legacy per-batch payload verification retained temporarily for existing
+    "! Package B unit tests. MATERIALIZE_TIP_SNAPSHOT no longer calls this
+    "! method; Package E uses one final metadata-only VERIFY_READY_BLOBS call.
+    "! Physical removal belongs to Package F after reference and regression
+    "! validation.
     CLASS-METHODS verify_batch_objects
       IMPORTING iv_repo_key TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
                 it_batch    TYPE zif_abapgit_git_definitions=>ty_sha1_tt
@@ -233,6 +234,50 @@ CLASS zcl_abapgit_ortec_cold_init DEFINITION
                 iv_tip_commit  TYPE zif_abapgit_git_definitions=>ty_sha1
                 iv_attempt_id  TYPE zcl_abapgit_ortec_mat_state=>ty_attempt_id
       RAISING   zcx_abapgit_ortec_git.
+
+    "! Create and authenticate one operation-local HTTP client through the
+    "! upload-pack info/refs endpoint. Return the advertised capabilities and
+    "! keep the client open for all materialization batches of this operation.
+    "! The caller owns the client and must close it on success and failure.
+    CLASS-METHODS init_materialize_client
+      IMPORTING
+        iv_url         TYPE string
+      EXPORTING
+        eo_client      TYPE REF TO zcl_abapgit_http_client
+        ev_server_caps TYPE string
+      RAISING
+        zcx_abapgit_ortec_git.
+
+    "! Deduplicate SHA1 values while preserving the order of their first
+    "! occurrence. This is executed once before adaptive batching begins.
+    CLASS-METHODS deduplicate_sha1s
+      IMPORTING
+        it_sha1s        TYPE zif_abapgit_git_definitions=>ty_sha1_tt
+      RETURNING
+        VALUE(rt_sha1s) TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+
+    "! Return the next bounded slice of an already deduplicated SHA1 list.
+    "! EV_NEXT_INDEX identifies the first row not returned by this invocation.
+    CLASS-METHODS take_next_batch
+      IMPORTING
+        it_sha1s       TYPE zif_abapgit_git_definitions=>ty_sha1_tt
+        iv_start_index TYPE i
+        iv_max_rows    TYPE i
+      EXPORTING
+        et_batch       TYPE zif_abapgit_git_definitions=>ty_sha1_tt
+        ev_next_index  TYPE i.
+
+    "! Calculate the next desired top-level batch size.
+    "! A split halves the next top-level size. A successful unsplit batch scales
+    "! proportionally toward C_TARGET_RESPONSE_BYTES, with bounded growth.
+    CLASS-METHODS calculate_next_batch_size
+      IMPORTING
+        iv_current_rows     TYPE i
+        iv_response_bytes   TYPE i
+        iv_split_used       TYPE abap_bool
+      RETURNING
+        VALUE(rv_next_rows) TYPE i.
+
 ENDCLASS.
 
 
@@ -343,92 +388,170 @@ CLASS zcl_abapgit_ortec_cold_init IMPLEMENTATION.
 
   METHOD materialize_tip_snapshot.
 
-    DATA lt_all_blob_sha1s TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
-    DATA lt_missing        TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
-    DATA lt_batches        TYPE ty_sha1_batch_tt.
-    DATA lv_attempt_id     TYPE zcl_abapgit_ortec_mat_state=>ty_attempt_id.
+    DATA lt_all_blob_sha1s TYPE
+      zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_missing TYPE
+      zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_ordered_missing TYPE
+      zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_batch TYPE
+      zif_abapgit_git_definitions=>ty_sha1_tt.
 
-    FIELD-SYMBOLS <lt_batch> LIKE LINE OF lt_batches.
+    DATA lv_attempt_id TYPE
+      zcl_abapgit_ortec_mat_state=>ty_attempt_id.
+    DATA lo_client TYPE REF TO zcl_abapgit_http_client.
+    DATA lv_server_caps TYPE string.
+    DATA lv_batch_rows TYPE i.
+    DATA lv_next_index TYPE i.
+    DATA lv_response_bytes TYPE i.
+    DATA lv_split_used TYPE abap_bool.
 
     IF iv_repo_key IS INITIAL.
-      zcx_abapgit_ortec_git=>raise( 'Materialize requires a repository key' ).
-    ENDIF.
-    IF iv_branch_name IS INITIAL.
-      zcx_abapgit_ortec_git=>raise( 'Materialize requires a branch name' ).
-    ENDIF.
-    IF iv_tip_commit IS INITIAL.
-      zcx_abapgit_ortec_git=>raise( 'Materialize requires a tip commit' ).
+      zcx_abapgit_ortec_git=>raise(
+        'Materialize requires a repository key' ).
     ENDIF.
 
-    " Design §11 step 1: re-verify closure and discover the tip blob set
-    " independently every call - no cross-call in-memory trust.
-    lt_all_blob_sha1s = zcl_abapgit_ortec_obj_store=>get_tip_blob_sha1s(
+    IF iv_branch_name IS INITIAL.
+      zcx_abapgit_ortec_git=>raise(
+        'Materialize requires a branch name' ).
+    ENDIF.
+
+    IF iv_tip_commit IS INITIAL.
+      zcx_abapgit_ortec_git=>raise(
+        'Materialize requires a tip commit' ).
+    ENDIF.
+
+    " Independently verify the graph/tree closure and derive the complete,
+    " unique set of blobs referenced by the selected tip.
+    lt_all_blob_sha1s =
+      zcl_abapgit_ortec_obj_store=>get_tip_blob_sha1s(
         iv_repo_key = iv_repo_key
         iv_commit   = iv_tip_commit ).
 
-    " Design §11 step 2: bulk-subtract READY presence - INV-B-08, an
-    " empty result means zero HTTP calls at all.
-    lt_missing = zcl_abapgit_ortec_obj_store=>get_missing_sha1s(
+    " Presence-only lookup. GET_MISSING_SHA1S does not load OBJ_DATA.
+    lt_missing =
+      zcl_abapgit_ortec_obj_store=>get_missing_sha1s(
         iv_repo_key = iv_repo_key
         it_sha1s    = lt_all_blob_sha1s ).
 
-    " Design §11 step 3: single attempt_id reused across every batch.
-    lv_attempt_id = zcl_abapgit_ortec_mat_state=>begin_attempt(
+    " One attempt spans every adaptive network batch and the final
+    " snapshot publication.
+    lv_attempt_id =
+      zcl_abapgit_ortec_mat_state=>begin_attempt(
         iv_repo_key = iv_repo_key
         iv_commit   = iv_tip_commit ).
 
     IF lt_missing IS NOT INITIAL.
-      " True top-level fetch attempt - reset the shared thin-completion
-      " budget once, matching ACQUIRE_BLOBLESS_GRAPH's own precedent.
-      zcl_abapgit_ortec_pack_stream=>reset_completion_budget( ).
 
-      lt_batches = chunk_missing_sha1s( lt_missing ).
+      TRY.
 
-      LOOP AT lt_batches ASSIGNING <lt_batch>.
-        materialize_batch(
-            iv_url      = iv_url
-            iv_repo_key = iv_repo_key
-            it_batch    = <lt_batch> ).
-      ENDLOOP.
+          " Create and authenticate exactly one operation-local HTTP client.
+          " The INFO/REFS response also supplies the advertised capabilities.
+          init_materialize_client(
+            EXPORTING
+              iv_url         = iv_url
+            IMPORTING
+              eo_client      = lo_client
+              ev_server_caps = lv_server_caps ).
 
-      " Design §11 step 5: final re-check across the COMPLETE original
-      " set, not just the last batch.
-      lt_missing = zcl_abapgit_ortec_obj_store=>get_missing_sha1s(
-          iv_repo_key = iv_repo_key
-          it_sha1s    = lt_all_blob_sha1s ).
+          " One reset for the complete top-level materialization attempt,
+          " not once per adaptive batch.
+          zcl_abapgit_ortec_pack_stream=>reset_completion_budget( ).
+
+          lt_ordered_missing = deduplicate_sha1s( lt_missing ).
+
+          lv_batch_rows = c_batch_rows_initial.
+          lv_next_index = 1.
+
+          WHILE lv_next_index <= lines( lt_ordered_missing ).
+
+            CLEAR:
+              lt_batch,
+              lv_response_bytes,
+              lv_split_used.
+
+            take_next_batch(
+              EXPORTING
+                it_sha1s       = lt_ordered_missing
+                iv_start_index = lv_next_index
+                iv_max_rows    = lv_batch_rows
+              IMPORTING
+                et_batch       = lt_batch
+                ev_next_index  = lv_next_index ).
+
+            IF lt_batch IS INITIAL.
+              EXIT.
+            ENDIF.
+
+            materialize_batch(
+              EXPORTING
+                iv_url           = iv_url
+                iv_repo_key      = iv_repo_key
+                it_batch         = lt_batch
+                iv_server_caps   = lv_server_caps
+                io_client        = lo_client
+                iv_splits_used   = 0
+              IMPORTING
+                ev_response_bytes = lv_response_bytes
+                ev_split_used     = lv_split_used ).
+
+            lv_batch_rows = calculate_next_batch_size(
+              iv_current_rows   = lines( lt_batch )
+              iv_response_bytes = lv_response_bytes
+              iv_split_used     = lv_split_used ).
+
+          ENDWHILE.
+
+        CATCH zcx_abapgit_ortec_git INTO DATA(lx_materialize).
+
+          " The operation owns the client and must close it on every failure.
+          IF lo_client IS BOUND.
+            lo_client->close( ).
+            CLEAR lo_client.
+          ENDIF.
+
+          RAISE EXCEPTION lx_materialize.
+
+      ENDTRY.
+
+      " Normal successful completion of all adaptive and split batches.
+      IF lo_client IS BOUND.
+        lo_client->close( ).
+        CLEAR lo_client.
+      ENDIF.
+
     ENDIF.
+
+    " One metadata-only verification over the complete selected-tip blob set.
+    " VERIFY_READY_BLOBS must not load OBJ_DATA.
+    zcl_abapgit_ortec_obj_store=>verify_ready_blobs(
+      iv_repo_key = iv_repo_key
+      it_sha1s    = lt_all_blob_sha1s ).
+
+    " VERIFY_READY_BLOBS either proves the complete set or raises.
+    CLEAR lt_missing.
 
     IF may_publish_snapshot( lt_missing ) = abap_false.
       zcx_abapgit_ortec_git=>raise(
-        |Materialize: { lines( lt_missing ) } selected blob(s) still missing after all batches - | &&
-        |snapshot not published| ).
+        'Materialize: selected snapshot is not complete' ).
     ENDIF.
 
-    zcl_abapgit_ortec_mat_state=>mark_full_complete(
-      iv_repo_key   = iv_repo_key
-      iv_commit     = iv_tip_commit
-      iv_attempt_id = lv_attempt_id ).
-
-    zcl_abapgit_ortec_repo_state=>prepare_full_snapshot(
-        iv_repo_key    = iv_repo_key
-        iv_branch_name = iv_branch_name
-        iv_url         = iv_url
-        iv_commit      = iv_tip_commit ).
-
-    " Design §11 step 6 / §12: verify, then certify, then commit - never
-    " the reverse, never partially. Raises per its own existing contract
-    " if hist_level < GRAPH_COMPLETE (snapshot cannot precede graph).
+    " FINALIZE_SNAPSHOT already performs:
+    " - MARK_FULL_COMPLETE
+    " - PREPARE_FULL_SNAPSHOT
+    " - PUBLISH_SNAPSHOT_COMPLETE
+    "
+    " Do not call the first two operations separately here.
     finalize_snapshot(
-        iv_url         = iv_url
-        iv_repo_key    = iv_repo_key
-        iv_branch_name = iv_branch_name
-        iv_tip_commit  = iv_tip_commit
-        iv_attempt_id  = lv_attempt_id ).
+      iv_url         = iv_url
+      iv_repo_key    = iv_repo_key
+      iv_branch_name = iv_branch_name
+      iv_tip_commit  = iv_tip_commit
+      iv_attempt_id  = lv_attempt_id ).
 
     COMMIT WORK.
 
   ENDMETHOD.
-
 
   METHOD chunk_missing_sha1s.
 
@@ -500,70 +623,127 @@ CLASS zcl_abapgit_ortec_cold_init IMPLEMENTATION.
 
   METHOD materialize_batch.
 
-    DATA lt_headers     TYPE zcl_abapgit_http=>ty_headers.
-    DATA ls_header      LIKE LINE OF lt_headers.
-    DATA lo_client      TYPE REF TO zcl_abapgit_http_client.
-    DATA lv_ref_data    TYPE string.
-    DATA lv_server_caps TYPE string.
-    DATA lv_response    TYPE xstring.
-    DATA lv_pack        TYPE xstring.
-    DATA lv_action      TYPE ty_oversize_action.
-    DATA lt_first_half  TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
-    DATA lt_second_half TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
-    " TODO: variable is assigned but never used (ABAP cleaner)
-    DATA lt_shallow     TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
-    " TODO: variable is assigned but never used (ABAP cleaner)
-    DATA lt_unshallow   TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lv_response TYPE xstring.
+    DATA lv_pack TYPE xstring.
+    DATA lv_action TYPE ty_oversize_action.
+
+    DATA lt_first_half TYPE
+      zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_second_half TYPE
+      zif_abapgit_git_definitions=>ty_sha1_tt.
+
+    DATA lt_shallow TYPE
+      zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_unshallow TYPE
+      zif_abapgit_git_definitions=>ty_sha1_tt.
+
+    DATA lv_child_bytes TYPE i.
+    DATA lv_child_split TYPE abap_bool.
+
+    CLEAR:
+      ev_response_bytes,
+      ev_split_used.
+
+    IF it_batch IS INITIAL.
+      zcx_abapgit_ortec_git=>raise(
+        'Materialize batch must contain at least one SHA1' ).
+    ENDIF.
+
+    IF lines( it_batch ) >
+         zcl_abapgit_ortec_fetch_req=>c_materialize_batch_max.
+      zcx_abapgit_ortec_git=>raise(
+        |Materialize batch contains { lines( it_batch ) } wants; maximum is | &&
+        |{ zcl_abapgit_ortec_fetch_req=>c_materialize_batch_max }| ).
+    ENDIF.
+
+    IF io_client IS NOT BOUND.
+      zcx_abapgit_ortec_git=>raise(
+        'Materialize batch requires an initialized HTTP client' ).
+    ENDIF.
 
     TRY.
-        ls_header-key   = '~request_uri'.
-        ls_header-value = |{ zcl_abapgit_url=>path_name( iv_url ) }/info/refs?service=git-upload-pack|.
-        APPEND ls_header TO lt_headers.
 
-        lo_client = zcl_abapgit_http=>create_by_url(
-                        iv_url     = iv_url
-                        it_headers = lt_headers ).
+        DATA(ls_request) =
+          zcl_abapgit_ortec_fetch_req=>build_request(
+            iv_mode =
+              zcl_abapgit_ortec_fetch_req=>cs_fetch_mode-materialize_blobs
+            it_want_hashes = it_batch
+            iv_server_caps = iv_server_caps ).
 
-        lv_ref_data    = lo_client->get_cdata( ).
-        lv_server_caps = zcl_abapgit_ortec_fetch_req=>parse_capabilities( lv_ref_data ).
+        " Restore the Git upload-pack request configuration before every POST.
+        " For Digest authentication SET_HEADERS also recalculates the
+        " request-specific Authorization header.
+        io_client->set_headers(
+          iv_url     = iv_url
+          iv_service = 'upload' ).
 
-        DATA(ls_request) = zcl_abapgit_ortec_fetch_req=>build_request(
-                               iv_mode        = zcl_abapgit_ortec_fetch_req=>cs_fetch_mode-materialize_blobs
-                               it_want_hashes = it_batch
-                               iv_server_caps = lv_server_caps ).
+        " SEND_RECEIVE_DATA sends the request without closing the authenticated
+        " client. MATERIALIZE_TIP_SNAPSHOT owns and closes the client.
+        lv_response = io_client->send_receive_data(
+          zcl_abapgit_convert=>string_to_xstring_utf8(
+            ls_request-buffer ) ).
 
-        lo_client->set_headers( iv_url = iv_url iv_service = 'upload' ).
-
-        lv_response = lo_client->send_receive_close( zcl_abapgit_convert=>string_to_xstring_utf8( ls_request-buffer ) ).
+        ev_response_bytes = xstrlen( lv_response ).
 
         lv_action = decide_oversize_action(
-            iv_response_bytes = xstrlen( lv_response )
-            iv_batch_size     = lines( it_batch )
-            iv_splits_used    = iv_splits_used ).
+          iv_response_bytes = ev_response_bytes
+          iv_batch_size     = lines( it_batch )
+          iv_splits_used    = iv_splits_used ).
 
         IF lv_action = cs_oversize_action-raise.
           zcx_abapgit_ortec_git=>raise(
-            |Materialize: batch response ({ xstrlen( lv_response ) } bytes) exceeds the | &&
-            |{ c_max_batch_response_bytes } byte ceiling and cannot be split further| ).
+            |Materialize: batch response ({ ev_response_bytes } bytes) | &&
+            |exceeds the { c_max_batch_response_bytes } byte ceiling | &&
+            |and cannot be split further| ).
         ENDIF.
 
         IF lv_action = cs_oversize_action-split.
+
           split_batch_in_half(
-            EXPORTING it_batch       = it_batch
-            IMPORTING et_first_half  = lt_first_half
-                      et_second_half = lt_second_half ).
+            EXPORTING
+              it_batch       = it_batch
+            IMPORTING
+              et_first_half  = lt_first_half
+              et_second_half = lt_second_half ).
+
+          CLEAR:
+            lv_child_bytes,
+            lv_child_split.
 
           materialize_batch(
-              iv_url         = iv_url
-              iv_repo_key    = iv_repo_key
-              it_batch       = lt_first_half
-              iv_splits_used = iv_splits_used + 1 ).
+            EXPORTING
+              iv_url           = iv_url
+              iv_repo_key      = iv_repo_key
+              it_batch         = lt_first_half
+              iv_server_caps   = iv_server_caps
+              io_client        = io_client
+              iv_splits_used   = iv_splits_used + 1
+            IMPORTING
+              ev_response_bytes = lv_child_bytes
+              ev_split_used     = lv_child_split ).
+
+          CLEAR:
+            lv_child_bytes,
+            lv_child_split.
+
           materialize_batch(
-              iv_url         = iv_url
-              iv_repo_key    = iv_repo_key
-              it_batch       = lt_second_half
-              iv_splits_used = iv_splits_used + 1 ).
+            EXPORTING
+              iv_url           = iv_url
+              iv_repo_key      = iv_repo_key
+              it_batch         = lt_second_half
+              iv_server_caps   = iv_server_caps
+              io_client        = io_client
+              iv_splits_used   = iv_splits_used + 1
+            IMPORTING
+              ev_response_bytes = lv_child_bytes
+              ev_split_used     = lv_child_split ).
+
+          " The original top-level batch required splitting. Its oversized
+          " response must not be used to grow the following top-level batch.
+          ev_split_used = abap_true.
+          CLEAR ev_response_bytes.
           RETURN.
+
         ENDIF.
 
         zcl_abapgit_ortec_fastpath=>parse(
@@ -573,28 +753,31 @@ CLASS zcl_abapgit_ortec_cold_init IMPLEMENTATION.
             et_unshallow = lt_unshallow
           CHANGING
             cv_data      = lv_response ).
+
       CATCH zcx_abapgit_exception INTO DATA(lx_error).
 
-        RAISE EXCEPTION NEW zcx_abapgit_ortec_git( iv_text  = |Materialize batch fetch failed: { lx_error->get_text( ) }|
+        RAISE EXCEPTION NEW zcx_abapgit_ortec_git( iv_text  =
+                                                              |Materialize batch fetch failed: { lx_error->get_text( ) }|
                                                    previous = lx_error ).
 
     ENDTRY.
 
-    IF lv_pack IS INITIAL OR zcl_abapgit_ortec_pack_dec=>peek_object_count( lv_pack ) = 0.
-      zcx_abapgit_ortec_git=>raise( 'Materialize batch fetch returned no pack data' ).
+    IF lv_pack IS INITIAL
+        OR zcl_abapgit_ortec_pack_dec=>peek_object_count( lv_pack ) = 0.
+      zcx_abapgit_ortec_git=>raise(
+        'Materialize batch fetch returned no pack data' ).
     ENDIF.
 
     zcl_abapgit_ortec_pack_stream=>decode_streaming(
-        iv_data     = lv_pack
-        iv_repo_key = iv_repo_key
-        iv_url      = iv_url ).
+      iv_data     = lv_pack
+      iv_repo_key = iv_repo_key
+      iv_url      = iv_url ).
 
-    verify_batch_objects(
-        iv_repo_key = iv_repo_key
-        it_batch    = it_batch ).
+    " No per-batch payload verification. The complete selected-tip blob set
+    " is verified exactly once after every adaptive/split batch succeeds.
+    ev_split_used = abap_false.
 
   ENDMETHOD.
-
 
   METHOD verify_batch_objects.
 
@@ -647,6 +830,160 @@ CLASS zcl_abapgit_ortec_cold_init IMPLEMENTATION.
       iv_branch_name = iv_branch_name
       iv_commit      = iv_tip_commit
       iv_attempt_id  = iv_attempt_id ).
+
+  ENDMETHOD.
+
+  METHOD init_materialize_client.
+
+    DATA lt_headers TYPE zcl_abapgit_http=>ty_headers.
+    DATA ls_header LIKE LINE OF lt_headers.
+    DATA lv_ref_data TYPE string.
+
+    CLEAR:
+      eo_client,
+      ev_server_caps.
+
+    TRY.
+
+        ls_header-key = '~request_uri'.
+        ls_header-value =
+          |{ zcl_abapgit_url=>path_name( iv_url ) }/info/refs?service=git-upload-pack|.
+        APPEND ls_header TO lt_headers.
+
+        " CREATE_BY_URL immediately executes the INFO/REFS GET and handles:
+        " - stored Basic authorization;
+        " - a possible HTTP 401 challenge;
+        " - Basic or Digest authentication;
+        " - proxy and exit configuration;
+        " - HTTP status validation.
+        "
+        " This exact client remains open and executes every following
+        " upload-pack POST belonging to this materialization operation.
+        eo_client = zcl_abapgit_http=>create_by_url(
+          iv_url     = iv_url
+          it_headers = lt_headers ).
+
+        lv_ref_data = eo_client->get_cdata( ).
+
+        ev_server_caps =
+          zcl_abapgit_ortec_fetch_req=>parse_capabilities(
+            lv_ref_data ).
+
+      CATCH zcx_abapgit_exception INTO DATA(lx_error).
+
+        IF eo_client IS BOUND.
+          eo_client->close( ).
+          CLEAR eo_client.
+        ENDIF.
+
+        RAISE EXCEPTION NEW zcx_abapgit_ortec_git( iv_text  =
+                                                              |Materialize client initialization failed: { lx_error->get_text( ) }|
+                                                   previous = lx_error ).
+
+    ENDTRY.
+
+  ENDMETHOD.
+
+
+  METHOD deduplicate_sha1s.
+
+    DATA lt_seen TYPE HASHED TABLE OF
+      zif_abapgit_git_definitions=>ty_sha1
+      WITH UNIQUE KEY table_line.
+
+    FIELD-SYMBOLS <lv_sha1> LIKE LINE OF it_sha1s.
+
+    LOOP AT it_sha1s ASSIGNING <lv_sha1>
+         WHERE table_line IS NOT INITIAL.
+
+      INSERT <lv_sha1> INTO TABLE lt_seen.
+      IF sy-subrc = 0.
+        APPEND <lv_sha1> TO rt_sha1s.
+      ENDIF.
+
+    ENDLOOP.
+
+  ENDMETHOD.
+
+
+  METHOD take_next_batch.
+
+    DATA lv_index TYPE i.
+    DATA lv_added TYPE i.
+
+    CLEAR et_batch.
+
+    lv_index = iv_start_index.
+    IF lv_index < 1.
+      lv_index = 1.
+    ENDIF.
+
+    WHILE lv_index <= lines( it_sha1s )
+      AND lv_added < iv_max_rows.
+
+      READ TABLE it_sha1s INDEX lv_index INTO DATA(lv_sha1).
+      IF sy-subrc <> 0.
+        EXIT.
+      ENDIF.
+
+      IF lv_sha1 IS NOT INITIAL.
+        APPEND lv_sha1 TO et_batch.
+        lv_added = lv_added + 1.
+      ENDIF.
+
+      lv_index = lv_index + 1.
+
+    ENDWHILE.
+
+    ev_next_index = lv_index.
+
+  ENDMETHOD.
+
+
+  METHOD calculate_next_batch_size.
+
+    DATA lv_scaled TYPE int8.
+    DATA lv_growth_limit TYPE i.
+    DATA lv_next TYPE i.
+
+    IF iv_current_rows <= 0.
+      rv_next_rows = c_batch_rows_initial.
+      RETURN.
+    ENDIF.
+
+    IF iv_split_used = abap_true.
+      lv_next = iv_current_rows DIV 2.
+
+    ELSEIF iv_response_bytes > 0.
+      lv_scaled =
+          CONV int8( iv_current_rows )
+        * CONV int8( c_target_response_bytes )
+        / CONV int8( iv_response_bytes ).
+
+      lv_next = CONV i( lv_scaled ).
+
+      lv_growth_limit = iv_current_rows * c_max_batch_growth.
+      IF lv_next > lv_growth_limit.
+        lv_next = lv_growth_limit.
+      ENDIF.
+
+    ELSE.
+      lv_next = iv_current_rows.
+    ENDIF.
+
+    IF lv_next < c_batch_rows_min.
+      lv_next = c_batch_rows_min.
+    ELSEIF lv_next > c_batch_rows_max.
+      lv_next = c_batch_rows_max.
+    ENDIF.
+
+    IF lv_next >
+         zcl_abapgit_ortec_fetch_req=>c_materialize_batch_max.
+      lv_next =
+        zcl_abapgit_ortec_fetch_req=>c_materialize_batch_max.
+    ENDIF.
+
+    rv_next_rows = lv_next.
 
   ENDMETHOD.
 

@@ -30,9 +30,10 @@ CLASS zcl_abapgit_ortec_fetch_req DEFINITION
                  recovery_branch_full       TYPE ty_fetch_mode VALUE 'R',
                END OF cs_fetch_mode.
 
-    "! Hard cap on MATERIALIZE_BLOBS want-list size. BUILD_REQUEST raises
-    "! rather than truncating or emitting an oversized want list.
-    CONSTANTS c_materialize_batch_max TYPE i VALUE 100.
+    "! Absolute wire-level maximum for MATERIALIZE_BLOBS wants.2"! The cold-init orchestrator starts
+    "! below this limit and adapts subsequent3"! batch sizes from the measured response size.
+    "! This constant remains the4"! hard serializer guard and must never be exceeded by a single request.
+    CONSTANTS c_materialize_batch_max TYPE i VALUE 1000.
 
     TYPES: BEGIN OF ty_request,
              mode        TYPE ty_fetch_mode,
@@ -67,7 +68,7 @@ CLASS zcl_abapgit_ortec_fetch_req DEFINITION
         it_certified_haves TYPE zif_abapgit_git_definitions=>ty_sha1_tt OPTIONAL
         iv_server_caps     TYPE string OPTIONAL
       RETURNING
-        VALUE(rs_request) TYPE ty_request
+        VALUE(rs_request)  TYPE ty_request
       RAISING
         zcx_abapgit_ortec_git.
 

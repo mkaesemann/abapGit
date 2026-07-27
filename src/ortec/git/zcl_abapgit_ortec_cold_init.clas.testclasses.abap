@@ -50,6 +50,15 @@ CLASS ltcl_cold_init DEFINITION FINAL
       EXPORTING ev_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1
                 ev_blob_sha   TYPE zif_abapgit_git_definitions=>ty_sha1.
 
+    METHODS adaptive_initial_size      FOR TESTING RAISING cx_static_check.
+    METHODS adaptive_growth_capped     FOR TESTING RAISING cx_static_check.
+    METHODS adaptive_split_halves      FOR TESTING RAISING cx_static_check.
+    METHODS adaptive_minimum_enforced  FOR TESTING RAISING cx_static_check.
+    METHODS adaptive_maximum_enforced  FOR TESTING RAISING cx_static_check.
+    METHODS adaptive_zero_bytes_stable FOR TESTING RAISING cx_static_check.
+    METHODS take_batch_respects_limit  FOR TESTING RAISING cx_static_check.
+    METHODS deduplicate_keeps_order    FOR TESTING RAISING cx_static_check.
+
 ENDCLASS.
 
 
@@ -280,7 +289,7 @@ CLASS ltcl_cold_init IMPLEMENTATION.
     DATA lt_missing TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
     DATA lt_batches TYPE zcl_abapgit_ortec_cold_init=>ty_sha1_batch_tt.
 
-    DO 101 TIMES.
+    DO 1001 TIMES.
       lv_index = sy-index.
       lv_sha1 = |{ lv_index WIDTH = 40 ALIGN = RIGHT PAD = '0' }|.
       APPEND lv_sha1 TO lt_missing.
@@ -464,6 +473,156 @@ CLASS ltcl_cold_init IMPLEMENTATION.
         act = lv_yes
         msg = 'A non-empty still-missing set must never gate publication' ).
   ENDMETHOD.
+
+  METHOD adaptive_initial_size.
+
+    DATA(lv_next) =
+      zcl_abapgit_ortec_cold_init=>calculate_next_batch_size(
+        iv_current_rows   = 500
+        iv_response_bytes = 16777216
+        iv_split_used     = abap_false ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_next
+      exp = 500 ).
+
+  ENDMETHOD.
+
+
+  METHOD adaptive_growth_capped.
+
+    DATA(lv_next) =
+      zcl_abapgit_ortec_cold_init=>calculate_next_batch_size(
+        iv_current_rows   = 100
+        iv_response_bytes = 1048576
+        iv_split_used     = abap_false ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_next
+      exp = 200
+      msg = 'One successful batch may at most double the row target' ).
+
+  ENDMETHOD.
+
+
+  METHOD adaptive_split_halves.
+
+    DATA(lv_next) =
+      zcl_abapgit_ortec_cold_init=>calculate_next_batch_size(
+        iv_current_rows   = 500
+        iv_response_bytes = 0
+        iv_split_used     = abap_true ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_next
+      exp = 250 ).
+
+  ENDMETHOD.
+
+
+  METHOD adaptive_minimum_enforced.
+
+    DATA(lv_next) =
+      zcl_abapgit_ortec_cold_init=>calculate_next_batch_size(
+        iv_current_rows   = 50
+        iv_response_bytes = 25000000
+        iv_split_used     = abap_true ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_next
+      exp = 50 ).
+
+  ENDMETHOD.
+
+
+  METHOD adaptive_maximum_enforced.
+
+    DATA(lv_next) =
+      zcl_abapgit_ortec_cold_init=>calculate_next_batch_size(
+        iv_current_rows   = 1000
+        iv_response_bytes = 1048576
+        iv_split_used     = abap_false ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_next
+      exp = 1000 ).
+
+  ENDMETHOD.
+
+
+  METHOD adaptive_zero_bytes_stable.
+
+    DATA(lv_next) =
+      zcl_abapgit_ortec_cold_init=>calculate_next_batch_size(
+        iv_current_rows   = 500
+        iv_response_bytes = 0
+        iv_split_used     = abap_false ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_next
+      exp = 500 ).
+
+  ENDMETHOD.
+
+
+  METHOD take_batch_respects_limit.
+
+    DATA lt_sha1s TYPE
+      zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_batch TYPE
+      zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lv_next_index TYPE i.
+
+    APPEND '1111111111111111111111111111111111111111' TO lt_sha1s.
+    APPEND '2222222222222222222222222222222222222222' TO lt_sha1s.
+    APPEND '3333333333333333333333333333333333333333' TO lt_sha1s.
+
+    zcl_abapgit_ortec_cold_init=>take_next_batch(
+      EXPORTING
+        it_sha1s       = lt_sha1s
+        iv_start_index = 1
+        iv_max_rows    = 2
+      IMPORTING
+        et_batch       = lt_batch
+        ev_next_index  = lv_next_index ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lines( lt_batch )
+      exp = 2 ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_next_index
+      exp = 3 ).
+
+  ENDMETHOD.
+
+
+  METHOD deduplicate_keeps_order.
+
+    DATA lt_sha1s TYPE
+      zif_abapgit_git_definitions=>ty_sha1_tt.
+
+    APPEND '1111111111111111111111111111111111111111' TO lt_sha1s.
+    APPEND '2222222222222222222222222222222222222222' TO lt_sha1s.
+    APPEND '1111111111111111111111111111111111111111' TO lt_sha1s.
+
+    DATA(lt_unique) =
+      zcl_abapgit_ortec_cold_init=>deduplicate_sha1s( lt_sha1s ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lines( lt_unique )
+      exp = 2 ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lt_unique[ 1 ]
+      exp = '1111111111111111111111111111111111111111' ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lt_unique[ 2 ]
+      exp = '2222222222222222222222222222222222222222' ).
+
+  ENDMETHOD.
+
 ENDCLASS.
 
 CLASS ltcl_cold_finalize DEFINITION

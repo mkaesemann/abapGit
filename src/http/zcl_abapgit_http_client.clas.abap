@@ -27,6 +27,11 @@ CLASS zcl_abapgit_http_client DEFINITION PUBLIC CREATE PUBLIC.
                   iv_service TYPE string
         RAISING   zcx_abapgit_exception.
 
+    METHODS send_receive_data
+      IMPORTING iv_data        TYPE xstring
+      RETURNING VALUE(rv_data) TYPE xstring
+      RAISING   zcx_abapgit_exception.
+
     METHODS set_header
       IMPORTING
         iv_key   TYPE string
@@ -222,6 +227,23 @@ CLASS zcl_abapgit_http_client IMPLEMENTATION.
     IF mo_digest IS BOUND.
       mo_digest->run( mi_client ).
     ENDIF.
+
+  ENDMETHOD.
+
+  METHOD send_receive_data.
+
+* Do not use SET_CDATA because it changes the Content-Type header field
+* previously configured by SET_HEADERS for Git smart HTTP.
+    mi_client->request->set_data( iv_data ).
+
+    send_receive( ).
+    check_http_200( ).
+
+    rv_data = mi_client->response->get_data( ).
+
+* The caller owns the authenticated client and closes it explicitly after
+* the complete logical operation. This permits multiple sequential Git
+* upload-pack requests on the same authenticated HTTP client.
 
   ENDMETHOD.
 ENDCLASS.

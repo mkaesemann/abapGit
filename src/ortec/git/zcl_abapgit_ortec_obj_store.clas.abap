@@ -106,8 +106,8 @@ CLASS zcl_abapgit_ortec_obj_store DEFINITION
     "! If the commit, a tree, or a blob reachable from it is not found or
     "! cannot be decoded
     CLASS-METHODS get_reachable_sha1s
-      IMPORTING iv_repo_key      TYPE ty_repo_key
-                iv_commit        TYPE zif_abapgit_git_definitions=>ty_sha1
+      IMPORTING iv_repo_key     TYPE ty_repo_key
+                iv_commit       TYPE zif_abapgit_git_definitions=>ty_sha1
       RETURNING VALUE(rt_sha1s) TYPE zif_abapgit_git_definitions=>ty_sha1_tt
       RAISING   zcx_abapgit_ortec_git.
 
@@ -169,8 +169,8 @@ CLASS zcl_abapgit_ortec_obj_store DEFINITION
     "! If the commit or any tree reachable from it is missing, not the
     "! expected type, undecodable, or contains an unrecognized chmod
     CLASS-METHODS get_tip_blob_sha1s
-      IMPORTING iv_repo_key      TYPE ty_repo_key
-                iv_commit        TYPE zif_abapgit_git_definitions=>ty_sha1
+      IMPORTING iv_repo_key     TYPE ty_repo_key
+                iv_commit       TYPE zif_abapgit_git_definitions=>ty_sha1
       RETURNING VALUE(rt_sha1s) TYPE zif_abapgit_git_definitions=>ty_sha1_tt
       RAISING   zcx_abapgit_ortec_git.
 
@@ -187,6 +187,18 @@ CLASS zcl_abapgit_ortec_obj_store DEFINITION
       IMPORTING iv_repo_key       TYPE ty_repo_key
                 it_sha1s          TYPE zif_abapgit_git_definitions=>ty_sha1_tt
       RETURNING VALUE(rt_missing) TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+
+    "! Verify the complete selected-tip blob set without loading OBJ_DATA.
+    "! Every requested SHA1 must exist with STATUS = 'R' and OBJ_TYPE = blob.
+    "! The implementation is chunked at C_SELECT_PACKAGE_SIZE and performs no
+    "! database operation per individual SHA1.
+    CLASS-METHODS verify_ready_blobs
+      IMPORTING
+        iv_repo_key TYPE ty_repo_key
+        it_sha1s    TYPE zif_abapgit_git_definitions=>ty_sha1_tt
+      RAISING
+        zcx_abapgit_ortec_git.
+
 
     "! Set-based check for whether any of the given SHA1s was originally
     "! decoded as a delta whose recorded base (ZAOG_PACK_IDX-DELTA_BASE) is
@@ -291,7 +303,7 @@ ENDCLASS.
 
 
 
-CLASS ZCL_ABAPGIT_ORTEC_OBJ_STORE IMPLEMENTATION.
+CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
 
 
   METHOD store_object.
@@ -1172,4 +1184,118 @@ CLASS ZCL_ABAPGIT_ORTEC_OBJ_STORE IMPLEMENTATION.
       ENDIF.
     ENDLOOP.
   ENDMETHOD.
+
+  METHOD verify_ready_blobs.
+
+    TYPES:
+      BEGIN OF ty_blob_meta,
+        obj_sha1 TYPE zaog_obj_store-obj_sha1,
+        obj_type TYPE zaog_obj_store-obj_type,
+      END OF ty_blob_meta,
+      ty_blob_meta_tt TYPE STANDARD TABLE OF ty_blob_meta
+        WITH EMPTY KEY.
+
+    DATA lt_unique TYPE ty_sha1_set.
+    DATA lt_package TYPE ty_sha1_rows.
+    DATA lt_rows TYPE ty_blob_meta_tt.
+    DATA lt_found TYPE ty_sha1_set.
+    DATA lt_wrong_type TYPE
+      zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_missing TYPE
+      zif_abapgit_git_definitions=>ty_sha1_tt.
+
+    FIELD-SYMBOLS <lv_sha1> LIKE LINE OF it_sha1s.
+    FIELD-SYMBOLS <ls_row> LIKE LINE OF lt_rows.
+
+    IF iv_repo_key IS INITIAL.
+      zcx_abapgit_ortec_git=>raise(
+        'Ready-blob verification requires a repository key' ).
+    ENDIF.
+
+    LOOP AT it_sha1s ASSIGNING <lv_sha1>
+         WHERE table_line IS NOT INITIAL.
+      INSERT <lv_sha1> INTO TABLE lt_unique.
+    ENDLOOP.
+
+    IF lt_unique IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    LOOP AT lt_unique ASSIGNING <lv_sha1>.
+
+      APPEND VALUE #( sha1 = <lv_sha1> ) TO lt_package.
+
+      IF lines( lt_package ) >= c_select_package_size.
+
+        CLEAR lt_rows.
+
+        SELECT obj_sha1, obj_type
+          FROM zaog_obj_store
+          FOR ALL ENTRIES IN @lt_package
+          WHERE repo_key = @iv_repo_key
+            AND obj_sha1 = @lt_package-sha1
+            AND status   = 'R'
+          INTO TABLE @lt_rows.
+
+        LOOP AT lt_rows ASSIGNING <ls_row>.
+          INSERT <ls_row>-obj_sha1 INTO TABLE lt_found.
+
+          IF <ls_row>-obj_type <>
+               zif_abapgit_git_definitions=>c_type-blob.
+            APPEND <ls_row>-obj_sha1 TO lt_wrong_type.
+          ENDIF.
+        ENDLOOP.
+
+        CLEAR lt_package.
+      ENDIF.
+
+    ENDLOOP.
+
+    IF lt_package IS NOT INITIAL.
+
+      CLEAR lt_rows.
+
+      SELECT obj_sha1, obj_type
+        FROM zaog_obj_store
+        FOR ALL ENTRIES IN @lt_package
+        WHERE repo_key = @iv_repo_key
+          AND obj_sha1 = @lt_package-sha1
+          AND status   = 'R'
+        INTO TABLE @lt_rows.
+
+      LOOP AT lt_rows ASSIGNING <ls_row>.
+        INSERT <ls_row>-obj_sha1 INTO TABLE lt_found.
+
+        IF <ls_row>-obj_type <>
+             zif_abapgit_git_definitions=>c_type-blob.
+          APPEND <ls_row>-obj_sha1 TO lt_wrong_type.
+        ENDIF.
+      ENDLOOP.
+
+    ENDIF.
+
+    IF lt_wrong_type IS NOT INITIAL.
+      zcx_abapgit_ortec_git=>raise(
+        |Materialize: { lines( lt_wrong_type ) } selected object(s) | &&
+        |are READY but are not blobs| ).
+    ENDIF.
+
+    LOOP AT lt_unique ASSIGNING <lv_sha1>.
+      READ TABLE lt_found
+        WITH TABLE KEY table_line = <lv_sha1>
+        TRANSPORTING NO FIELDS.
+
+      IF sy-subrc <> 0.
+        APPEND <lv_sha1> TO lt_missing.
+      ENDIF.
+    ENDLOOP.
+
+    IF lt_missing IS NOT INITIAL.
+      zcx_abapgit_ortec_git=>raise(
+        |Materialize: { lines( lt_missing ) } selected blob(s) | &&
+        |still missing after all adaptive batches; snapshot not published| ).
+    ENDIF.
+
+  ENDMETHOD.
+
 ENDCLASS.
