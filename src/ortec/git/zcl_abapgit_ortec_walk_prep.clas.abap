@@ -109,6 +109,13 @@ CLASS zcl_abapgit_ortec_walk_prep IMPLEMENTATION.
     DATA lt_candidates TYPE
       zif_abapgit_git_definitions=>ty_sha1_tt.
 
+    DATA lt_loaded_sha1s TYPE HASHED TABLE OF
+      zif_abapgit_git_definitions=>ty_sha1
+      WITH UNIQUE KEY table_line.
+
+    DATA lt_new_remaining TYPE
+      zif_abapgit_git_definitions=>ty_sha1_tt.
+
     DATA lv_this_bytes  TYPE i.
     DATA lv_total_bytes TYPE int8.
 
@@ -280,29 +287,42 @@ CLASS zcl_abapgit_ortec_walk_prep IMPLEMENTATION.
 
       ENDIF.
 
-      DELETE ct_remaining_sha1s
-        WHERE table_line = ls_object-sha1.
+      INSERT ls_object-sha1 INTO TABLE lt_loaded_sha1s.
 
       APPEND ls_object TO rt_objects.
 
     ENDLOOP.
 
-    " Defensive progress/completeness check for the selected candidate set.
+    " Defensive completeness check for the selected candidate set.
     LOOP AT lt_candidates ASSIGNING <lv_sha1>.
 
-      IF line_exists(
-           ct_remaining_sha1s[
-             table_line = <lv_sha1> ] ).
+      READ TABLE lt_loaded_sha1s
+        WITH TABLE KEY table_line = <lv_sha1>
+        TRANSPORTING NO FIELDS.
 
-        DELETE ct_remaining_sha1s
-          WHERE table_line = <lv_sha1>.
-
+      IF sy-subrc <> 0.
         zcx_abapgit_ortec_git=>raise(
           |Blob { <lv_sha1> } was selected but not returned| ).
-
       ENDIF.
 
     ENDLOOP.
+
+    " Rebuild the remaining list once. This replaces one full standard-table
+    " DELETE WHERE scan per loaded object with O(n) iteration plus O(1)
+    " hashed lookups.
+    LOOP AT ct_remaining_sha1s ASSIGNING <lv_sha1>.
+
+      READ TABLE lt_loaded_sha1s
+        WITH TABLE KEY table_line = <lv_sha1>
+        TRANSPORTING NO FIELDS.
+
+      IF sy-subrc <> 0.
+        APPEND <lv_sha1> TO lt_new_remaining.
+      ENDIF.
+
+    ENDLOOP.
+
+    ct_remaining_sha1s = lt_new_remaining.
 
   ENDMETHOD.
 
@@ -518,3 +538,4 @@ CLASS zcl_abapgit_ortec_walk_prep IMPLEMENTATION.
     rt_tree_objects = lt_tree_objects.
   ENDMETHOD.
 ENDCLASS.
+

@@ -34,6 +34,7 @@ CLASS ltcl_walk_prep DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT F
     METHODS oversized_blob_single_batch FOR TESTING RAISING cx_static_check.
 
     METHODS fetch_window_progress FOR TESTING RAISING cx_static_check.
+    METHODS duplicate_remaining_drained FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 
 CLASS ltcl_walk_prep IMPLEMENTATION.
@@ -101,6 +102,44 @@ CLASS ltcl_walk_prep IMPLEMENTATION.
     cl_abap_unit_assert=>assert_initial(
       act = lt_remaining ).
 
+  ENDMETHOD.
+
+
+  METHOD duplicate_remaining_drained.
+    DATA lt_requested TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_remaining TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lv_data TYPE xstring.
+    DATA lv_loaded_sha1 TYPE zif_abapgit_git_definitions=>ty_sha1.
+
+    lv_data = '4455504C4943415445'.
+    lv_loaded_sha1 = zcl_abapgit_hash=>sha1_blob( lv_data ).
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_loaded_sha1
+      iv_type     = zif_abapgit_git_definitions=>c_type-blob
+      iv_data     = lv_data ).
+
+    APPEND lv_loaded_sha1 TO lt_requested.
+    APPEND lv_loaded_sha1 TO lt_remaining.
+    APPEND lv_loaded_sha1 TO lt_remaining.
+
+    lt_objects = zcl_abapgit_ortec_walk_prep=>fetch_blobs_bulk(
+      EXPORTING
+        iv_repo_key = mc_repo
+        it_sha1s    = lt_requested
+      CHANGING
+        ct_remaining_sha1s = lt_remaining ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lines( lt_objects )
+      exp = 1
+      msg = 'The loaded blob is returned exactly once' ).
+
+    cl_abap_unit_assert=>assert_initial(
+      act = lt_remaining
+      msg = 'Every duplicate occurrence is removed by the linear rebuild' ).
   ENDMETHOD.
 
   METHOD build_blob.
