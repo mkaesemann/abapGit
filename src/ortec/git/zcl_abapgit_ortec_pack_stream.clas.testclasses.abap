@@ -1,3 +1,5 @@
+CLASS zcl_abapgit_ortec_pack_stream DEFINITION LOCAL FRIENDS ltcl_pack_stream.
+
 CLASS ltcl_pack_stream DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
   PRIVATE SECTION.
     CONSTANTS mc_repo TYPE c LENGTH 12 VALUE 'ZAOGT_STREAM'.
@@ -8,6 +10,10 @@ CLASS ltcl_pack_stream DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT
     METHODS corrupt_trailer_no_rows FOR TESTING RAISING cx_static_check.
     METHODS decode_streaming_is_sparse FOR TESTING RAISING cx_static_check.
     METHODS ext_base_resolve_after_preload FOR TESTING RAISING cx_static_check.
+    "! Package D1: resolve_streaming's phase 1.5 bulk load must resolve a
+    "! genuinely external REF_DELTA base up front - resolve_one_meta's own
+    "! on-demand per-object thin-fetch fallback must never be reached.
+    METHODS no_thin_fetch_for_ext_base FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 CLASS ltcl_pack_stream IMPLEMENTATION.
   METHOD setup.
@@ -20,6 +26,7 @@ CLASS ltcl_pack_stream IMPLEMENTATION.
     " never depend on ordering relative to the SUT's own commit.
     DELETE FROM zaog_obj_store WHERE repo_key = mc_repo.
     COMMIT WORK.
+    zcl_abapgit_ortec_pack_stream=>gv_thin_fetch_calls = 0.
   ENDMETHOD.
   METHOD teardown.
     " ROLLBACK WORK FIRST to discard anything this test left uncommitted,
@@ -214,6 +221,80 @@ CLASS ltcl_pack_stream IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals(
       act = ls_resolved-data
       exp = lv_expected_data ).
+  ENDMETHOD.
+
+  METHOD no_thin_fetch_for_ext_base.
+    DATA lv_base_data TYPE xstring VALUE '41414141'.
+    DATA lv_base_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_base_raw TYPE x LENGTH 20.
+    DATA lv_delta TYPE xstring VALUE '040590040121'.
+    DATA lv_compressed TYPE xstring.
+    DATA lv_adler TYPE zif_abapgit_git_definitions=>ty_adler32.
+    DATA lv_pack_magic TYPE x LENGTH 4 VALUE '5041434B'.
+    DATA lv_version TYPE x LENGTH 4 VALUE '00000002'.
+    DATA lv_obj_count TYPE x LENGTH 4 VALUE '00000001'.
+    DATA lv_zlib_hdr TYPE x LENGTH 2 VALUE '789C'.
+    DATA lv_type_len TYPE x LENGTH 1 VALUE '76'.
+    DATA lv_pack TYPE xstring.
+    DATA lv_trailer_hex TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_trailer_raw TYPE x LENGTH 20.
+    DATA lt_meta TYPE zcl_abapgit_ortec_pack_stream=>ty_meta_tt.
+    DATA lv_pack_id TYPE zcl_abapgit_ortec_pack_stream=>ty_pack_id.
+    DATA lv_expected_data TYPE xstring VALUE '4141414121'.
+    DATA lv_expected_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+
+    " Same fixture as ext_base_resolve_after_preload - one REF_DELTA whose
+    " base is genuinely external (present only in the object store, not in
+    " this pack). Package D1's phase 1.5 must resolve it via one bulk call
+    " during resolve_streaming itself, so resolve_one_meta's own on-demand
+    " thin-fetch fallback (gv_thin_fetch_calls) must never fire.
+    lv_base_sha = zcl_abapgit_hash=>sha1_blob( lv_base_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_base_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-blob
+      iv_data     = lv_base_data ).
+
+    cl_abap_gzip=>compress_binary(
+      EXPORTING raw_in = lv_delta
+      IMPORTING gzip_out = lv_compressed ).
+    lv_adler = zcl_abapgit_hash=>adler32( lv_delta ).
+    lv_base_raw = to_upper( lv_base_sha ).
+
+    CONCATENATE lv_pack_magic lv_version lv_obj_count INTO lv_pack IN BYTE MODE.
+    CONCATENATE lv_pack lv_type_len lv_base_raw lv_zlib_hdr lv_compressed lv_adler
+      INTO lv_pack IN BYTE MODE.
+    lv_trailer_hex = zcl_abapgit_hash=>sha1_raw( lv_pack ).
+    lv_trailer_raw = to_upper( lv_trailer_hex ).
+    CONCATENATE lv_pack lv_trailer_raw INTO lv_pack IN BYTE MODE.
+
+    lt_meta = zcl_abapgit_ortec_pack_stream=>decode_and_persist_streaming(
+      EXPORTING
+        iv_data     = lv_pack
+        iv_repo_key = mc_repo
+      IMPORTING
+        ev_pack_id  = lv_pack_id ).
+
+    zcl_abapgit_ortec_obj_store=>invalidate_cache( ).
+    zcl_abapgit_ortec_base_cache=>get_instance( )->clear( ).
+
+    zcl_abapgit_ortec_pack_stream=>resolve_streaming(
+      EXPORTING
+        iv_repo_key = mc_repo
+        iv_pack_id  = lv_pack_id
+      CHANGING
+        ct_meta     = lt_meta ).
+
+    lv_expected_sha = zcl_abapgit_hash=>sha1_blob( lv_expected_data ).
+    cl_abap_unit_assert=>assert_equals(
+      act = lt_meta[ 1 ]-sha1
+      exp = lv_expected_sha ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = zcl_abapgit_ortec_pack_stream=>gv_thin_fetch_calls
+      exp = 0
+      msg = 'phase 1.5''s bulk load must resolve the external base up front - ' &&
+            'resolve_one_meta''s on-demand thin-fetch fallback must never fire' ).
   ENDMETHOD.
 
   METHOD corrupt_trailer_no_rows.

@@ -2,7 +2,7 @@
 
 - Repository / branch: abapGit on `ortec/abapgit_1_133-opt-rework`
 - Topic: `variant-b-partial-clone`
-- Current phase: `Package D1 — implementation authorized, not started`
+- Current phase: `Package D1 — implementation complete, local checkpoint ready for SAP import`
 - Previous checkpoint: `Package D0 — DESIGN_APPROVED`
 - Planned next phase: Package E — Snapshot Consumer Coherence and Adaptive Materialization
 - Planned following phase: Package F — Validated Legacy-Code Cleanup
@@ -35,6 +35,48 @@ PROTOCOL_PERSISTENCE_REVIEW=APPROVE
 PERFORMANCE_DESIGN_GATE=APPROVE_WITH_MINOR_REVISIONS
 IMPLEMENTATION_AUTHORIZED=YES
 BLOCKERS=NONE
+```
+
+## Package D1 status
+
+```text
+PACKAGE_D_D1=IMPLEMENTED
+BASELINE=5a1171f24f0fe0664eeaa3a832fee1bc7076a2e3
+CHANGED_PRODUCTIVE=zcl_abapgit_ortec_delta.clas.abap/.xml,
+  zcl_abapgit_ortec_pack_dec.clas.abap, zcl_abapgit_ortec_pack_stream.clas.abap
+CHANGED_TESTS=zcl_abapgit_ortec_delta.clas.testclasses.abap (13 tests total:
+  9 pre-existing + 4 new this gate: duplicate_declared_sha_ok,
+  base_later_in_pack_order, exhausted_recovery_raises added here;
+  partial_recovery_resumes added to zcl_abapgit_ortec_pack_dec.clas.testclasses.abap),
+  zcl_abapgit_ortec_pack_stream.clas.testclasses.abap (+LOCAL FRIENDS,
+  +no_thin_fetch_for_ext_base)
+TEST_MATRIX=COMPLETE (13/13 D1 acceptance IDs mapped to a distinct method;
+  see .memory/logs/regression_variant_b_package_d_d1.md "D1 acceptance
+  test-ID matrix" section)
+MISSING_TESTS=NONE
+INSTRUMENTATION_DISPOSITION=gv_bulk_load_calls/gv_thin_fetch_calls kept as
+  approved bounded observability counters, doc comments tightened with
+  explicit lifecycle/reset/concurrency/production-semantics statements
+  (owner directive item 2, closed)
+SQL_SHAPE=one bulk get_objects(iv_bulk_fetch=X) call per pack per resolver
+HTTP_SHAPE=unchanged (no new HTTP call sites)
+LOCAL_VALIDATION=get_errors PASS on all 5 changed/new files (0 errors);
+  abaplint run shows only pre-existing project-wide baseline noise
+  (confirmed via zcl_abapgit_ortec_fastpath.clas.abap, an untouched file,
+  also showing 38 findings with the same top-level config) - not diff-specific
+SAP_VALIDATION=NOT_PERFORMED
+ABAP_UNIT_EXECUTION=NOT_PERFORMED (no local ABAP Unit runner available)
+PERFORMANCE_SCAN=PASS (see .memory/logs/performance_scan_variant_b_package_d_d1.md)
+PERFORMANCE_AUDIT=PASS_WITH_MINOR_FINDINGS (0 blocking, 1 documented minor
+  finding - see .memory/logs/performance_audit_variant_b_package_d_d1.md)
+REGRESSION=PASS_WITH_FINDINGS (static-only; see
+  .memory/logs/regression_variant_b_package_d_d1.md "Final local regression
+  confirmation")
+D1_STATUS=LOCAL_CHECKPOINT_READY_FOR_SAP_IMPORT
+D2_STATUS=NOT_STARTED
+BLOCKERS=NONE (no D2-owned concern touched: no change to
+  zcl_abapgit_ortec_obj_store.clas.abap, staged-visibility status='D' logic,
+  attempt/lock/transaction handling, or get_staged_delta_objects)
 ```
 
 Package C at `29199f629773c676e0eaa2f3a006f5167d304ae8` is the current productive SAP-validated baseline.
@@ -150,6 +192,8 @@ Package D scope:
   `.memory/reviews/variant_b_package_d_protocol_decision.md`
 - Package D0 performance design gate:
   `.memory/reviews/performance_design_variant_b_package_d.md`
+- Package D1 implementation handoff:
+  `.memory/handoffs/variant-b-package-d-d1-implementation.md`
 
 ## Deferred non-blocking performance work
 
@@ -187,9 +231,25 @@ These are optimization items, not Package C correctness blockers.
 
 ## Next action
 
-Start Package D1 in a new senior implementation chat.
+Package D1 implementation is complete (see Package D1 status block above) and
+handed off in `.memory/handoffs/variant-b-package-d-d1-implementation.md`.
 
-Read only the current compact state and the Package D0 links above. Do not
+Remaining before D1 can be marked SAP_VALIDATED_COMPLETE:
+- run `ortec-abapgit-regression` against the full existing REF/OFS/mixed/
+  external-base/missing-base test surface across
+  `zcl_abapgit_ortec_git_tests.clas.testclasses.abap`,
+  `zcl_abapgit_ortec_pack_dec.clas.testclasses.abap`, and
+  `zcl_abapgit_ortec_pack_stream.clas.testclasses.abap`, plus the new
+  `zcl_abapgit_ortec_delta.clas.testclasses.abap`;
+- import to IT8 and run live ABAP Unit + ATC;
+- performance scan/audit of the changed call paths.
+
+Do not start Package D2 (staged-visibility `status='D'` fix, attempt/lock/
+transaction changes, `get_staged_delta_objects`,
+`zcl_abapgit_ortec_obj_store.clas.abap`) until D1 is SAP-validated or the
+owner explicitly authorizes parallel work.
+
+Read only the current compact state and the Package D0/D1 links above. Do not
 repeat Package D0 discovery, design, reconciliation, or review — it is
 DESIGN_APPROVED with `PERFORMANCE_DESIGN_GATE=APPROVE_WITH_MINOR_REVISIONS`
 and `IMPLEMENTATION_AUTHORIZED=YES`. Do not repeat Package C discovery,

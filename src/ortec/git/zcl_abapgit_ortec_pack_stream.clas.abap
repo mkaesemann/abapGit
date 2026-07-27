@@ -184,6 +184,20 @@ CLASS zcl_abapgit_ortec_pack_stream DEFINITION
     CONSTANTS c_max_completion_attempts TYPE i VALUE 20.
     CLASS-DATA gv_completion_attempts TYPE i.
 
+    "! Approved bounded observability counter (Package D1 diff-audit
+    "! disposition, same as zcl_abapgit_ortec_delta=>gv_thin_fetch_calls -
+    "! see that class's doc for the full lifecycle/reset/concurrency/
+    "! production-semantics justification and why a pure counter-free test
+    "! seam was evaluated and rejected as impractical here). Counts calls
+    "! to resolve_one_meta's external-base on-demand fallback branch, which
+    "! resolve_streaming's own phase 1.5 bulk merge is designed to make
+    "! unreachable in the normal path. Private CLASS-DATA, incremented at
+    "! exactly one call site, reset only by the LOCAL FRIEND test class's
+    "! setup, never read or branched on by productive code - purely a
+    "! call-shape verification seam for D1's no_thin_fetch_for_ext_base
+    "! test (Package D design §16).
+    CLASS-DATA gv_thin_fetch_calls TYPE i.
+
     CLASS-METHODS build_pack_id
       IMPORTING iv_repo_key       TYPE ty_repo_key
       RETURNING VALUE(rv_pack_id) TYPE ty_pack_id.
@@ -550,9 +564,17 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
           RETURN. " Not yet resolvable in-pack; resolve_streaming's next sweep retries.
         ENDIF.
         " Genuinely external base (from a prior pack/pull) - or truly missing.
-        " PRELOAD_EXTERNAL_BASES has already bulk-loaded locally available
-        " candidates into both caches. GET_BASE_BYTES is therefore cache-only
-        " in the normal case and preserves retry-without-haves for a true miss.
+        " resolve_streaming's phase 1.5 already bulk-loads every genuinely
+        " external base BEFORE this final pass ever calls resolve_one_meta
+        " with iv_allow_thin_fetch = abap_true, merging it straight into
+        " ct_sha_idx so the READ TABLE above finds it directly - this branch
+        " is dead in the normal path. gv_thin_fetch_calls exists purely so
+        " D1's tests can assert it stays at zero (see this class's
+        " testclasses include). PRELOAD_EXTERNAL_BASES also still runs as a
+        " defense-in-depth cache warmer, so GET_BASE_BYTES remains
+        " cache-only in the rare case this branch is still reached, and
+        " preserves retry-without-haves for a true miss.
+        gv_thin_fetch_calls = gv_thin_fetch_calls + 1.
         TRY.
             lv_base_data = get_base_bytes(
               iv_repo_key = iv_repo_key
@@ -732,6 +754,10 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
     DATA lt_sha_idx         TYPE ty_sha_idx_tt.
     DATA lt_write_batch     TYPE zif_abapgit_definitions=>ty_objects_tt.
     DATA lt_delete_batch    TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_external_bases  TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_loaded_bases    TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lv_new_tabix       TYPE i.
+    DATA lx_bulk_missing    TYPE REF TO zcx_abapgit_exception.
 
     FIELD-SYMBOLS <ls_row>       TYPE ty_meta.
     "! Dedicated field symbol for the post-call progress check below - never
@@ -742,6 +768,8 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
     "! already mutates ct_meta in place at the same tabix via pass-by-
     "! reference).
     FIELD-SYMBOLS <ls_row_after> TYPE ty_meta.
+    FIELD-SYMBOLS <ls_pending>   TYPE ty_meta.
+    FIELD-SYMBOLS <ls_loaded>    TYPE zif_abapgit_definitions=>ty_object.
 
     LOOP AT ct_meta ASSIGNING <ls_row>.
       lv_tabix = sy-tabix.
@@ -797,6 +825,67 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
       ENDIF.
     ENDDO.
 
+    " Phase 1.5 (Package D / D1): pass 1's fixpoint has now converged - any
+    " row still unresolved with a declared delta_base and no lt_sha_idx entry
+    " is either genuinely external (a prior pack/pull) or truly missing.
+    " Bulk-load the full deduplicated set in ONE call via the shared
+    " zcl_abapgit_ortec_delta=>bulk_resolve_external_bases helper (also used
+    " by the non-streaming resolver, zcl_abapgit_ortec_delta=>resolve_all)
+    " instead of relying on pass 2's per-base get_base_bytes/get_object
+    " fallback (Package D design §4/§5.1). Every loaded base is merged as a
+    " new, already-resolved ct_meta row, indexed into lt_sha_idx so pass 2's
+    " ordinary REF_DELTA lookup finds it exactly like an in-pack base, and
+    " warmed into the Phase 1 LRU base cache so the base BYTES themselves
+    " (fetched via ct_write_batch-miss -> get_base_bytes in pass 2) are also
+    " a cache hit, never a second per-base DB read. preload_external_bases
+    " below still runs unmodified as a defense-in-depth cache warmer (its own
+    " it_sha_idx guard already skips anything this merge just indexed - see
+    " .memory/logs/variant_b_package_d_concurrent_commit_impact.md).
+    LOOP AT ct_meta ASSIGNING <ls_pending>
+        WHERE is_resolved = abap_false
+          AND delta_base IS NOT INITIAL.
+      READ TABLE lt_sha_idx WITH TABLE KEY sha1 = <ls_pending>-delta_base
+        TRANSPORTING NO FIELDS.
+      IF sy-subrc <> 0.
+        APPEND <ls_pending>-delta_base TO lt_external_bases.
+      ENDIF.
+    ENDLOOP.
+
+    IF lt_external_bases IS NOT INITIAL.
+      TRY.
+          lt_loaded_bases = zcl_abapgit_ortec_delta=>bulk_resolve_external_bases(
+            iv_repo_key = iv_repo_key
+            it_sha1s    = lt_external_bases ).
+        CATCH zcx_abapgit_exception INTO lx_bulk_missing.
+          " Preserve the existing recovery-tier contract (verified by
+          " ltcl_ortec_git~missing_base_no_http_retry): callers of
+          " resolve_streaming must still see zcx_abapgit_ortec_git with
+          " iv_retry_without_haves = abap_true, never the shared helper's
+          " own zcx_abapgit_exception type.
+          zcx_abapgit_ortec_git=>raise(
+            iv_text                = |{ lx_bulk_missing->get_text( ) }|
+            iv_retry_without_haves = abap_true ).
+      ENDTRY.
+
+      LOOP AT lt_loaded_bases ASSIGNING <ls_loaded>.
+        APPEND INITIAL LINE TO ct_meta ASSIGNING <ls_pending>.
+        lv_new_tabix             = sy-tabix.
+        <ls_pending>-obj_index   = lv_new_tabix.
+        <ls_pending>-obj_type    = <ls_loaded>-type.
+        <ls_pending>-sha1        = <ls_loaded>-sha1.
+        <ls_pending>-obj_size    = xstrlen( <ls_loaded>-data ).
+        <ls_pending>-is_resolved = abap_true.
+
+        ls_sha-sha1  = <ls_loaded>-sha1.
+        ls_sha-tabix = lv_new_tabix.
+        INSERT ls_sha INTO TABLE lt_sha_idx.
+
+        zcl_abapgit_ortec_base_cache=>get_instance( )->put(
+          iv_sha1 = <ls_loaded>-sha1
+          iv_data = <ls_loaded>-data ).
+      ENDLOOP.
+    ENDIF.
+
     " Pass 1 exhausted all currently in-pack-resolvable dependencies. Bulk
     " preload every locally available external REF_DELTA base before the final
     " pass; missing bases retain the existing retry-without-haves behavior.
@@ -843,6 +932,7 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
     DATA ls_commit_obj TYPE zif_abapgit_definitions=>ty_object.
     DATA lx_resolve    TYPE REF TO zcx_abapgit_ortec_git.
     DATA lx_missing    TYPE REF TO zcx_abapgit_ortec_git.
+    DATA lv_original_count TYPE i.
 
     " NOTE: the thin-pack completion budget (gv_completion_attempts) is
     " deliberately NOT reset here - decode_streaming is also called
@@ -859,6 +949,14 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
       EXPORTING iv_data     = iv_data
                 iv_repo_key = iv_repo_key
       IMPORTING ev_pack_id  = lv_pack_id ).
+
+    " Captured BEFORE resolve_streaming mutates ct_meta - its phase 1.5 can
+    " append externally-merged base rows (e.g. a thin REF_DELTA whose
+    " declared base is itself a prior commit object) strictly AFTER every
+    " row decode_and_persist_streaming actually produced for THIS pack. The
+    " commit-extraction loop below must never mistake such a merged row for
+    " one of this pack's own new commits.
+    lv_original_count = lines( lt_meta ).
 
     TRY.
         resolve_streaming(
@@ -878,6 +976,9 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
     ENDTRY.
 
     LOOP AT lt_meta INTO ls_meta WHERE obj_type = zif_abapgit_git_definitions=>c_type-commit.
+      IF sy-tabix > lv_original_count.
+        CONTINUE. " Externally-merged base row (phase 1.5) - not this pack's own commit.
+      ENDIF.
       TRY.
           ls_commit_obj = zcl_abapgit_ortec_obj_store=>get_object(
             iv_repo_key = iv_repo_key

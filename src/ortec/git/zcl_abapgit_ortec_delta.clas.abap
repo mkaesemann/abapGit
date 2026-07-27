@@ -139,7 +139,69 @@ CLASS zcl_abapgit_ortec_delta DEFINITION
       CHANGING  ct_objects    TYPE zif_abapgit_definitions=>ty_objects_tt
       RAISING   zcx_abapgit_exception.
 
+    "! Bulk-loads every genuinely external delta base in it_sha1s in ONE
+    "! zcl_abapgit_ortec_obj_store=>get_objects(iv_bulk_fetch = abap_true)
+    "! call, deduplicating first - never a per-base fetch. Shared by both
+    "! resolve_all's phase 1.5 (after its in-pack fixpoint converges) and
+    "! zcl_abapgit_ortec_pack_stream=>resolve_streaming's own phase 1.5, so
+    "! a pack's external-base cost is bounded by K (this pack's own distinct
+    "! external bases), never by repository size (Package D design §4/§5.1).
+    "! get_objects itself already raises if ANY requested SHA1 is missing -
+    "! this method adds two further checks get_objects does not perform:
+    "! a loaded base must not itself be an unresolved delta (REF_DELTA/
+    "! OFS_DELTA - the object store only ever stores fully-resolved content,
+    "! so this would indicate store corruption), and its content must
+    "! recompute to the SHA1 it was requested under.
+    "! @parameter it_sha1s |
+    "! Declared base SHA1s to load - duplicates and blank entries are
+    "! tolerated and ignored.
+    "! @parameter rt_objects |
+    "! One row per unique, non-blank requested SHA1. Empty if it_sha1s has
+    "! no non-blank entries (no call is made to the object store in that
+    "! case).
+    "! @raising zcx_abapgit_exception |
+    "! If any requested base is missing, is itself a delta type, or fails
+    "! content-hash verification.
+    CLASS-METHODS bulk_resolve_external_bases
+      IMPORTING iv_repo_key       TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
+                it_sha1s          TYPE zif_abapgit_git_definitions=>ty_sha1_tt
+      RETURNING VALUE(rt_objects) TYPE zif_abapgit_definitions=>ty_objects_tt
+      RAISING   zcx_abapgit_exception.
+
   PRIVATE SECTION.
+    "! Approved bounded observability counter (Package D1 diff-audit
+    "! disposition, .memory/logs/regression_variant_b_package_d_d1.md):
+    "! counts calls to bulk_resolve_external_bases, i.e. how many bulk
+    "! get_objects round trips this pack's delta resolution performed.
+    "! Lifecycle: private CLASS-DATA, incremented exactly once per
+    "! bulk_resolve_external_bases invocation, at most once per resolve_all
+    "! call (Phase 1.5 calls it at most once). Reset: only ever reset by the
+    "! LOCAL FRIEND test class's setup (see
+    "! zcl_abapgit_ortec_delta.clas.testclasses.abap) - production code
+    "! never resets or reads it, so it simply accumulates for the life of
+    "! the ABAP session/work process; this is safe because no productive
+    "! behavior ever branches on its value. Concurrency: CLASS-DATA is
+    "! session/work-process-local, not shared across users - never used for
+    "! cross-request coordination. Production semantics: a plain integer
+    "! increment, never persisted, never logged, never exposed via any
+    "! public API - purely a call-shape verification seam for D1's
+    "! bulk_base_one_call_only/no_sql_in_pack_phase tests (Package D design
+    "! §16). A pure test-seam alternative (spying on the call without any
+    "! productive field) was evaluated and rejected: get_objects/get_object
+    "! are static object-store methods with no injection point, and the
+    "! object store's own session cache means a DB-deletion trap cannot
+    "! reliably distinguish "the bulk call ran" from "a second call ran" -
+    "! see the diff-audit note in the D1 handoff for the full analysis.
+    CLASS-DATA gv_bulk_load_calls  TYPE i.
+    "! Approved bounded observability counter, same disposition as
+    "! gv_bulk_load_calls above: counts calls to resolve_one's on-demand
+    "! per-object thin-fetch fallback, which Phase 1.5's bulk load is
+    "! designed to make unreachable in the normal path. Lifecycle/reset/
+    "! concurrency/production semantics are identical to gv_bulk_load_calls
+    "! (private, test-reset only, session-local, never read productively).
+    "! Kept at zero in the normal path is the exact invariant D1's
+    "! no_sql_in_pack_phase test asserts.
+    CLASS-DATA gv_thin_fetch_calls TYPE i.
     "! Maps an object's stable pack "index" (ty_object-index) to its current
     "! PRIMARY table index in ct_objects. Built once, up front, in resolve_all
     "! (a plain, non-keyed LOOP AT, where sy-tabix IS the correct primary
@@ -358,9 +420,13 @@ CLASS zcl_abapgit_ortec_delta IMPLEMENTATION.
     DATA lv_tabix          TYPE i.
     DATA lt_tabix_by_index TYPE ty_tabix_by_index_tt.
     DATA lv_pass_progress  TYPE abap_bool.
+    DATA lt_external_bases TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_loaded_bases   TYPE zif_abapgit_definitions=>ty_objects_tt.
 
     FIELD-SYMBOLS <ls_object_init> TYPE zif_abapgit_definitions=>ty_object.
     FIELD-SYMBOLS <ls_sweep>       TYPE zif_abapgit_definitions=>ty_object.
+    FIELD-SYMBOLS <ls_unresolved>  TYPE zif_abapgit_definitions=>ty_object.
+    FIELD-SYMBOLS <ls_loaded_base> TYPE zif_abapgit_definitions=>ty_object.
 
     " Plain (non-keyed) loop over the primary table - sy-tabix here IS the
     " correct primary index. See ty_tabix_by_index for why this exists.
@@ -417,10 +483,45 @@ CLASS zcl_abapgit_ortec_delta IMPLEMENTATION.
       ENDIF.
     ENDDO.
 
+    " Phase 1.5 (Package D / D1): phase 1's fixpoint has now converged -
+    " any object still type = ref_d has no in-pack candidate (proved
+    " exhaustively by the repeated sweeps above), so it is either genuinely
+    " external (a prior pack/pull) or truly missing. OFS deltas never reach
+    " this point (their base is always physically earlier in the SAME pack,
+    " a format guarantee), so only ref_d rows are collected. The full
+    " deduplicated set is bulk-loaded in ONE call via the shared
+    " bulk_resolve_external_bases helper (also used by the streaming
+    " resolver, zcl_abapgit_ortec_pack_stream=>resolve_streaming) instead of
+    " a per-base fetch inside phase 2 (Package D design §4/§5.1). Every
+    " loaded base is merged with a freshly assigned unique index - the same
+    " "index = lines(ct_objects)+1" pattern resolve_one's own on-demand
+    " thin-fetch fallback already uses - and registered in
+    " lt_tabix_by_index so phase 2's ordinary in-pack sha1 lookup finds it
+    " directly; phase 2 below performs no per-base get_object() call of its
+    " own once this merge has run.
+    LOOP AT ct_objects ASSIGNING <ls_unresolved>
+        WHERE type = zif_abapgit_git_definitions=>c_type-ref_d.
+      APPEND <ls_unresolved>-sha1 TO lt_external_bases.
+    ENDLOOP.
+
+    IF lt_external_bases IS NOT INITIAL.
+      lt_loaded_bases = bulk_resolve_external_bases(
+        iv_repo_key = iv_repo_key
+        it_sha1s    = lt_external_bases ).
+
+      LOOP AT lt_loaded_bases ASSIGNING <ls_loaded_base>.
+        <ls_loaded_base>-index = lines( ct_objects ) + 1.
+        APPEND <ls_loaded_base> TO ct_objects.
+        INSERT VALUE #( obj_index = <ls_loaded_base>-index tabix = lines( ct_objects ) )
+          INTO TABLE lt_tabix_by_index.
+      ENDLOOP.
+    ENDIF.
+
     " Phase 2: one final ascending pass, now allowing the object-store fetch
     " and the precise "Delta base not found" raise - whatever remains
-    " unresolved after phase 1's fixpoint is either genuinely external
-    " (resolved via the object store) or truly missing.
+    " unresolved after phase 1.5's merge is truly missing (phase 1.5 always
+    " raises first in that case, so this fallback fetch is dead in the
+    " normal path and exists purely as a defensive backstop).
     lv_tabix = 0.
     WHILE lv_tabix < lines( ct_objects ).
       lv_tabix = lv_tabix + 1.
@@ -435,6 +536,56 @@ CLASS zcl_abapgit_ortec_delta IMPLEMENTATION.
           ct_objects        = ct_objects
           ct_tabix_by_index = lt_tabix_by_index ).
     ENDWHILE.
+  ENDMETHOD.
+
+
+  METHOD bulk_resolve_external_bases.
+    DATA lt_unique_set TYPE HASHED TABLE OF zif_abapgit_git_definitions=>ty_sha1
+      WITH UNIQUE KEY table_line.
+    DATA lt_request    TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_loaded     TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lv_recomputed TYPE zif_abapgit_git_definitions=>ty_sha1.
+
+    FIELD-SYMBOLS <lv_sha1>   TYPE zif_abapgit_git_definitions=>ty_sha1.
+    FIELD-SYMBOLS <ls_loaded> LIKE LINE OF lt_loaded.
+
+    LOOP AT it_sha1s ASSIGNING <lv_sha1> WHERE table_line IS NOT INITIAL.
+      INSERT <lv_sha1> INTO TABLE lt_unique_set.
+    ENDLOOP.
+
+    IF lt_unique_set IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    LOOP AT lt_unique_set ASSIGNING <lv_sha1>.
+      APPEND <lv_sha1> TO lt_request.
+    ENDLOOP.
+
+    gv_bulk_load_calls = gv_bulk_load_calls + 1.
+    TRY.
+        lt_loaded = zcl_abapgit_ortec_obj_store=>get_objects(
+          iv_repo_key   = iv_repo_key
+          it_sha1s      = lt_request
+          iv_bulk_fetch = abap_true ).
+      CATCH zcx_abapgit_ortec_git INTO DATA(lx_missing).
+        zcx_abapgit_exception=>raise( |Delta base bulk load failed: { lx_missing->get_text( ) }| ).
+    ENDTRY.
+
+    LOOP AT lt_loaded ASSIGNING <ls_loaded>.
+      IF <ls_loaded>-type = zif_abapgit_git_definitions=>c_type-ref_d
+          OR <ls_loaded>-type = c_type_ofs_d.
+        zcx_abapgit_exception=>raise(
+          |Delta base { <ls_loaded>-sha1 } is itself an unresolved delta (type { <ls_loaded>-type })| ).
+      ENDIF.
+
+      lv_recomputed = zcl_abapgit_hash=>sha1( iv_type = <ls_loaded>-type iv_data = <ls_loaded>-data ).
+      IF lv_recomputed <> <ls_loaded>-sha1.
+        zcx_abapgit_exception=>raise(
+          |Delta base { <ls_loaded>-sha1 } failed hash verification (recomputed { lv_recomputed })| ).
+      ENDIF.
+    ENDLOOP.
+
+    rt_objects = lt_loaded.
   ENDMETHOD.
 
 
@@ -526,7 +677,13 @@ CLASS zcl_abapgit_ortec_delta IMPLEMENTATION.
         " No already-resolved candidate exists anywhere in the pack, even
         " after every possible in-pack sweep - thin base (fetch from the
         " persistent object store), or a case this decoder cannot safely
-        " resolve from the current pack alone.
+        " resolve from the current pack alone. resolve_all's phase 1.5
+        " already bulk-loads every such base before phase 2 ever calls
+        " resolve_one with iv_allow_thin_fetch = abap_true, so this branch
+        " is dead in the normal path - gv_thin_fetch_calls exists purely so
+        " D1's tests can assert it stays at zero (see this class's
+        " testclasses include).
+        gv_thin_fetch_calls = gv_thin_fetch_calls + 1.
         TRY.
             ls_base_object = zcl_abapgit_ortec_obj_store=>get_object(
               iv_repo_key = iv_repo_key

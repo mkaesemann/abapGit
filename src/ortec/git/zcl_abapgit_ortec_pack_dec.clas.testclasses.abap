@@ -41,6 +41,12 @@ CLASS ltcl_pack_decoder DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHOR
     "! (never 0) for data too short/malformed to contain a header, so
     "! callers cannot mistake "can't tell yet" for "confirmed empty".
     METHODS peek_object_count_cases FOR TESTING RAISING cx_static_check.
+    "! Package D1 acceptance: resuming a crashed/active decode session (the
+    "! resume_decode -> resumable_decode entry point, not decode_and_persist)
+    "! whose pack contains a REF_DELTA against a genuinely external base
+    "! must still resolve correctly - phase 1.5's bulk external-base load
+    "! must fire on the RESUME path exactly as it does on the normal path.
+    METHODS partial_recovery_resumes FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 CLASS ltcl_pack_decoder IMPLEMENTATION.
   METHOD setup.
@@ -319,5 +325,82 @@ CLASS ltcl_pack_decoder IMPLEMENTATION.
       act = zcl_abapgit_ortec_pack_dec=>peek_object_count( lv_data )
       exp = -1
       msg = 'Data without the PACK magic must return -1, never 0' ).
+  ENDMETHOD.
+
+  METHOD partial_recovery_resumes.
+    DATA lv_base_data   TYPE xstring.
+    DATA lv_base_sha    TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_base_raw    TYPE x LENGTH 20.
+    DATA lv_delta       TYPE xstring.
+    DATA lv_compressed  TYPE xstring.
+    DATA lv_adler       TYPE zif_abapgit_git_definitions=>ty_adler32.
+    DATA lv_pack_magic  TYPE x LENGTH 4 VALUE '5041434B'.
+    DATA lv_version     TYPE x LENGTH 4 VALUE '00000002'.
+    DATA lv_obj_count   TYPE x LENGTH 4 VALUE '00000001'.
+    DATA lv_zlib_hdr    TYPE x LENGTH 2 VALUE '789C'.
+    DATA lv_type_len    TYPE x LENGTH 1 VALUE '76'. " ref_d (0x70) | length 6, no continuation
+    DATA lv_pack        TYPE xstring.
+    DATA lv_trailer_hex TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_trailer_raw TYPE x LENGTH 20.
+    DATA lt_res         TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lv_expect_sha  TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA ls_raw         TYPE zaog_raw_pack.
+    DATA ls_sess        TYPE zaog_fetch_sess.
+    DATA lv_ts          TYPE timestampl.
+
+    " External base "AAAA" - stored as if from a prior fetch, NOT included
+    " in this pack, forcing resumable_decode's D1 phase 1.5 bulk external-
+    " base load to fire when the session below is resumed.
+    lv_base_data = '41414141'.
+    lv_base_sha  = zcl_abapgit_hash=>sha1_blob( lv_base_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_base_sha iv_type = 'blob' iv_data = lv_base_data ).
+
+    " Single REF_DELTA entry: base-size(4) result-size(5), copy(off=0,len=4),
+    " insert(1,'!') -> "AAAA!".
+    lv_delta = '040590040121'.
+    cl_abap_gzip=>compress_binary( EXPORTING raw_in = lv_delta IMPORTING gzip_out = lv_compressed ).
+    lv_adler = zcl_abapgit_hash=>adler32( lv_delta ).
+    lv_base_raw = to_upper( lv_base_sha ).
+
+    CONCATENATE lv_pack_magic lv_version lv_obj_count INTO lv_pack IN BYTE MODE.
+    CONCATENATE lv_pack lv_type_len lv_base_raw lv_zlib_hdr lv_compressed lv_adler
+      INTO lv_pack IN BYTE MODE.
+
+    lv_trailer_hex = zcl_abapgit_hash=>sha1_raw( lv_pack ).
+    lv_trailer_raw = to_upper( lv_trailer_hex ).
+    CONCATENATE lv_pack lv_trailer_raw INTO lv_pack IN BYTE MODE.
+
+    " Simulate crash-state: raw pack stored + an ACTIVE session with zero
+    " objects done yet (resumable_decode has never run for this pack) -
+    " mirrors resume_after_partial's own crash-state shape, but this pack's
+    " sole object is a REF_DELTA against a genuinely external base.
+    ls_raw-repo_key = mc_repo. ls_raw-pack_id = mc_pack. ls_raw-raw_data = lv_pack.
+    MODIFY zaog_raw_pack FROM ls_raw.
+    GET TIME STAMP FIELD lv_ts.
+    ls_sess-session_id = 'RESSESTEST000000000000000000002B'.
+    ls_sess-repo_key   = mc_repo. ls_sess-pack_id    = mc_pack.
+    ls_sess-phase      = 'D'.     ls_sess-obj_done   = 0. ls_sess-obj_total = 1.
+    ls_sess-status     = 'A'.     ls_sess-created_at = lv_ts. ls_sess-updated_at = lv_ts.
+    INSERT zaog_fetch_sess FROM ls_sess.
+    COMMIT WORK.
+
+    lt_res = zcl_abapgit_ortec_pack_dec=>resume_decode( mc_repo ).
+
+    lv_expect_sha = zcl_abapgit_hash=>sha1_blob( '4141414121' ). " "AAAA!"
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_res ) exp = 1
+      msg = 'The resumed decode must produce exactly this pack''s own 1 object, not the ' &&
+            'merged external base too' ).
+    cl_abap_unit_assert=>assert_true(
+      act = zcl_abapgit_ortec_obj_store=>exists( iv_repo_key = mc_repo iv_sha1 = lv_expect_sha )
+      msg = 'The REF_DELTA resolved against its external base during resume must be persisted' ).
+
+    SELECT SINGLE * FROM zaog_fetch_sess INTO ls_sess WHERE repo_key = mc_repo AND status = 'C'.
+    cl_abap_unit_assert=>assert_subrc( msg = 'Session must be complete after resume' ).
+
+    DATA lv_raw_count TYPE i.
+    SELECT COUNT(*) FROM zaog_raw_pack INTO lv_raw_count WHERE repo_key = mc_repo.
+    cl_abap_unit_assert=>assert_equals( act = lv_raw_count exp = 0
+      msg = 'raw_pack cleaned up after resume even when phase 1.5 fired' ).
   ENDMETHOD.
 ENDCLASS.

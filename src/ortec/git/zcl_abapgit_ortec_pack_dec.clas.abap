@@ -748,12 +748,6 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD resumable_decode.
-    TYPES: BEGIN OF ty_base_row,
-             obj_sha1 TYPE zaog_obj_store-obj_sha1,
-             obj_type TYPE zaog_obj_store-obj_type,
-             obj_data TYPE zaog_obj_store-obj_data,
-           END OF ty_base_row.
-
     DATA lv_commit_interval TYPE i.
     DATA lv_obj_done        TYPE i.
     DATA lv_start_offset    TYPE i.
@@ -797,17 +791,11 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
     DATA lv_elapsed         TYPE decfloat34.
     DATA lv_len             TYPE i.
     DATA lv_sha1            TYPE zif_abapgit_git_definitions=>ty_sha1.
-    DATA lt_delta_bases     TYPE SORTED TABLE OF zif_abapgit_git_definitions=>ty_sha1 WITH UNIQUE KEY table_line.
-    DATA lt_pack_shas       TYPE HASHED TABLE OF zif_abapgit_git_definitions=>ty_sha1 WITH UNIQUE KEY table_line.
-    DATA lt_db_delta_bases  TYPE STANDARD TABLE OF zif_abapgit_git_definitions=>ty_sha1 WITH EMPTY KEY.
-    DATA lt_base_fetch      TYPE STANDARD TABLE OF ty_base_row WITH EMPTY KEY.
-    DATA ls_base_row        TYPE ty_base_row.
-    " SHA1 set of base objects to suppress re-persisting them in the final promote step.
-    DATA lt_base_shas       TYPE HASHED TABLE OF zif_abapgit_git_definitions=>ty_sha1 WITH UNIQUE KEY table_line.
     DATA lt_final_rows      TYPE STANDARD TABLE OF zaog_obj_store.
     DATA ls_idx_upd         TYPE zcl_abapgit_ortec_pack_index=>ty_index_entries_upd.
     DATA lt_idx_upd         TYPE zcl_abapgit_ortec_pack_index=>tty_index_entries_upd.
     DATA lv_final_count     TYPE i.
+    DATA lv_original_count  TYPE i.
     DATA ls_object          LIKE LINE OF rt_objects.
 
     lv_commit_interval = iv_commit_interval.
@@ -1227,78 +1215,26 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
       zcx_abapgit_exception=>raise( |SHA1 at end of pack doesn't match| ).
     ENDIF.
 
-    " ── Targeted delta-base prefetch ─────────────────────────────────────────
-    " Collect the SHA1s of every OBJ_REF_DELTA base referenced in this pack.
-    " Full packs contain no ref_delta objects so lt_delta_bases stays empty.
-    LOOP AT rt_objects INTO ls_object.
-      IF ls_object-type = zif_abapgit_git_definitions=>c_type-ref_d.
-        INSERT ls_object-sha1 INTO TABLE lt_delta_bases.
-      ENDIF.
-    ENDLOOP.
-
-    " FOR ALL ENTRIES crashes on an empty driving table — skip SELECT for full packs.
-    IF lt_delta_bases IS NOT INITIAL.
-      " Bases already materialized in this pack do not require any DB read.
-      " (REF_DELTA bases can point to objects included in the same pack.)
-      LOOP AT rt_objects INTO ls_object
-           WHERE type <> zif_abapgit_git_definitions=>c_type-ref_d
-             AND type <> zcl_abapgit_ortec_delta=>c_type_ofs_d.
-        INSERT ls_object-sha1 INTO TABLE lt_pack_shas.
-      ENDLOOP.
-
-      LOOP AT lt_delta_bases INTO DATA(lv_delta_base).
-        IF NOT line_exists( lt_pack_shas[ table_line = lv_delta_base ] ).
-          APPEND lv_delta_base TO lt_db_delta_bases.
-        ENDIF.
-      ENDLOOP.
-
-      IF lt_db_delta_bases IS NOT INITIAL.
-        SELECT obj_sha1, obj_type, obj_data
-          FROM zaog_obj_store
-          FOR ALL ENTRIES IN @lt_db_delta_bases
-          WHERE repo_key = @iv_repo_key
-            AND obj_sha1 = @lt_db_delta_bases-table_line
-            AND status   = 'R'
-          INTO TABLE @lt_base_fetch.
-      ENDIF.
-      LOOP AT lt_base_fetch INTO ls_base_row.
-        CLEAR ls_object.
-        ls_object-sha1  = ls_base_row-obj_sha1.
-        ls_object-type  = ls_base_row-obj_type.
-        ls_object-data  = ls_base_row-obj_data.
-        " This bulk prefetch never populated -index (only sha1/type/data
-        " were set above), so every prefetched base defaulted to index = 0.
-        " zcl_abapgit_ortec_delta=>resolve_all builds a HASHED TABLE keyed
-        " UNIQUE BY obj_index from every object's -index - with multiple
-        " bases all carrying index = 0, only the FIRST one actually got
-        " registered (INSERT into a hashed table silently no-ops on a
-        " duplicate key); resolve_one would then find the CORRECT base by
-        " SHA1, read its index (0, same for all), and look up that shared
-        " index - landing on whichever unrelated base was registered first
-        " instead of the one actually found. This is exactly the same class
-        " of bug already fixed for resolve_one's OWN on-demand thin-fetch
-        " (see two_thin_bases_do_not_collide) - this bulk prefetch is a
-        " separate code path that needed the identical fix: assign each
-        " merged object a real, unique index matching its actual position
-        " before it is added.
-        ls_object-index = lines( rt_objects ) + 1.
-        INSERT ls_object INTO TABLE rt_objects.
-        INSERT ls_object-sha1 INTO TABLE lt_base_shas.
-      ENDLOOP.
-
-      " No "missing base" pre-check here anymore. lt_pack_shas only records
-      " objects that are ALREADY non-delta at this raw-scan point, before any
-      " resolution has run - a base that is itself still an unresolved
-      " ref_d/ofs_d entry in this very pack (a delta chained onto another
-      " delta, extremely common in real packs) would be wrongly flagged as
-      " "missing" even though zcl_abapgit_ortec_delta=>resolve_all/resolve_one
-      " below can resolve it directly from the pack, regardless of pack
-      " order. resolve_one already raises a precise, per-object
-      " "Delta base not found, <sha1>" error (via its own on-demand thin
-      " fetch) for any base that turns out to be genuinely absent from both
-      " this pack and the object store - that is the single, correct place
-      " to detect and report an actually-missing base.
-    ENDIF.
+    " ── External delta-base loading ──────────────────────────────────────────
+    " Previously this method ran its own manual, lenient
+    " SELECT ... FOR ALL ENTRIES prefetch here, before resolve_all's own
+    " fixpoint had converged - that could not tell "genuinely external" apart
+    " from "resolvable purely in-pack via a delta chain" (see the removed
+    " comment history in git blame for the bug that fix required: shared
+    " index 0 collisions between multiple prefetched bases). D1 removes this
+    " duplicate step entirely: zcl_abapgit_ortec_delta=>resolve_all now
+    " performs the equivalent bulk load ITSELF, internally, as its own
+    " "phase 1.5" - strictly AFTER its in-pack fixpoint has exhausted every
+    " purely in-pack candidate, so only genuinely external bases are ever
+    " requested, in exactly one bulk call (Package D design §4/§15).
+    " lv_original_count captures this pack's own true object count BEFORE
+    " that call - resolve_all's phase 1.5 (like resolve_one's own on-demand
+    " thin-fetch fallback) always APPENDS merged external bases strictly
+    " after every originally-parsed row, never reordering rt_objects, so any
+    " row at a primary tabix beyond this count is guaranteed to be a merged
+    " external base, not this pack's own new content, when the promote loop
+    " below decides what to persist.
+    lv_original_count = lines( rt_objects ).
 
     zcl_abapgit_ortec_delta=>resolve_all(
       EXPORTING
@@ -1313,16 +1249,15 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
     " lv_commit_interval objects instead of accumulating a second full-size
     " copy of every new object's data (lt_final_rows) alongside rt_objects
     " for the whole method - that double-buffering was a major contributor
-    " to SYSTEM_NO_ROLL crashes on large packs. Skip base objects
-    " (lt_base_shas): they already exist in DB with status 'R' and have no
-    " entry in this pack's index.
+    " to SYSTEM_NO_ROLL crashes on large packs. Skip base objects merged by
+    " resolve_all's phase 1.5 for delta resolution only: they already exist
+    " in DB with status 'R' and have no entry in this pack's index.
     GET TIME STAMP FIELD lv_ts.
     LOOP AT rt_objects INTO ls_object.
-      " Skip base objects that were merged for delta resolution only.
-      IF lt_base_shas IS NOT INITIAL.
-        IF line_exists( lt_base_shas[ table_line = ls_object-sha1 ] ).
-          CONTINUE.
-        ENDIF.
+      " Skip external bases merged for delta resolution only - always
+      " appended strictly after this pack's own lv_original_count rows.
+      IF sy-tabix > lv_original_count.
+        CONTINUE.
       ENDIF.
 
       CLEAR ls_row.
