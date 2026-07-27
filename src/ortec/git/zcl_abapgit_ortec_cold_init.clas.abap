@@ -100,6 +100,7 @@ CLASS zcl_abapgit_ortec_cold_init DEFINITION
       IMPORTING iv_url        TYPE string
                 iv_repo_key   TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
                 iv_tip_commit TYPE zif_abapgit_git_definitions=>ty_sha1
+      EXPORTING et_tip_blob_sha1s TYPE zif_abapgit_git_definitions=>ty_sha1_tt
       RAISING   zcx_abapgit_ortec_git.
 
     "! Variant B / Package B checkpoints B2+B3 (combined per the design's
@@ -133,10 +134,11 @@ CLASS zcl_abapgit_ortec_cold_init DEFINITION
     "! failure. No SNAPSHOT_COMPLETE certificate is published unless every
     "! selected blob is verified present afterwards.
     CLASS-METHODS materialize_tip_snapshot
-      IMPORTING iv_url         TYPE string
-                iv_repo_key    TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
-                iv_branch_name TYPE string
-                iv_tip_commit  TYPE zif_abapgit_git_definitions=>ty_sha1
+      IMPORTING iv_url             TYPE string
+                iv_repo_key        TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
+                iv_branch_name     TYPE string
+                iv_tip_commit      TYPE zif_abapgit_git_definitions=>ty_sha1
+                it_tip_blob_sha1s  TYPE zif_abapgit_git_definitions=>ty_sha1_tt OPTIONAL
       RAISING   zcx_abapgit_ortec_git.
 
     "! Pure, HTTP-free chunking of a (possibly duplicate-containing)
@@ -372,7 +374,8 @@ CLASS zcl_abapgit_ortec_cold_init IMPLEMENTATION.
         iv_repo_key = iv_repo_key
         iv_url      = iv_url ).
 
-    zcl_abapgit_ortec_obj_store=>verify_tree_closure(
+    et_tip_blob_sha1s =
+      zcl_abapgit_ortec_obj_store=>get_tip_blob_sha1s(
         iv_repo_key = iv_repo_key
         iv_commit   = iv_tip_commit ).
 
@@ -423,10 +426,16 @@ CLASS zcl_abapgit_ortec_cold_init IMPLEMENTATION.
 
     " Independently verify the graph/tree closure and derive the complete,
     " unique set of blobs referenced by the selected tip.
-    lt_all_blob_sha1s =
-      zcl_abapgit_ortec_obj_store=>get_tip_blob_sha1s(
-        iv_repo_key = iv_repo_key
-        iv_commit   = iv_tip_commit ).
+    IF it_tip_blob_sha1s IS SUPPLIED
+        AND it_tip_blob_sha1s IS NOT INITIAL.
+      lt_all_blob_sha1s = deduplicate_sha1s( it_tip_blob_sha1s ).
+    ELSE.
+      " Compatibility path for independent callers and existing tests.
+      lt_all_blob_sha1s =
+        zcl_abapgit_ortec_obj_store=>get_tip_blob_sha1s(
+          iv_repo_key = iv_repo_key
+          iv_commit   = iv_tip_commit ).
+    ENDIF.
 
     " Presence-only lookup. GET_MISSING_SHA1S does not load OBJ_DATA.
     lt_missing =
@@ -988,3 +997,4 @@ CLASS zcl_abapgit_ortec_cold_init IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
+

@@ -58,6 +58,7 @@ CLASS ltcl_cold_init DEFINITION FINAL
     METHODS adaptive_zero_bytes_stable FOR TESTING RAISING cx_static_check.
     METHODS take_batch_respects_limit  FOR TESTING RAISING cx_static_check.
     METHODS deduplicate_keeps_order    FOR TESTING RAISING cx_static_check.
+    METHODS supplied_blob_set_skips_walk FOR TESTING RAISING cx_static_check.
 
 ENDCLASS.
 
@@ -472,6 +473,55 @@ CLASS ltcl_cold_init IMPLEMENTATION.
     cl_abap_unit_assert=>assert_false(
         act = lv_yes
         msg = 'A non-empty still-missing set must never gate publication' ).
+  ENDMETHOD.
+
+  METHOD supplied_blob_set_skips_walk.
+    DATA lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_blob_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_attempt_id TYPE zcl_abapgit_ortec_mat_state=>ty_attempt_id.
+    DATA lt_blob_sha1s TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA ls_state TYPE zcl_abapgit_ortec_mat_state=>ty_state.
+
+    build_tip_fixture(
+      IMPORTING
+        ev_commit_sha = lv_commit_sha
+        ev_blob_sha   = lv_blob_sha ).
+
+    lv_attempt_id = zcl_abapgit_ortec_mat_state=>begin_attempt(
+      iv_repo_key = mc_repo
+      iv_commit   = lv_commit_sha ).
+
+    zcl_abapgit_ortec_mat_state=>mark_graph_complete(
+      iv_repo_key   = mc_repo
+      iv_commit     = lv_commit_sha
+      iv_attempt_id = lv_attempt_id ).
+
+    APPEND lv_blob_sha TO lt_blob_sha1s.
+
+    " Remove the tree after the verified list has conceptually been produced.
+    " The call can only succeed if MATERIALIZE_TIP_SNAPSHOT uses the supplied
+    " list and does not perform a second commit/tree traversal.
+    DELETE FROM zaog_obj_store
+      WHERE repo_key = mc_repo
+        AND obj_type = zif_abapgit_git_definitions=>c_type-tree.
+    COMMIT WORK.
+    zcl_abapgit_ortec_obj_store=>invalidate_cache( ).
+
+    zcl_abapgit_ortec_cold_init=>materialize_tip_snapshot(
+      iv_url            = 'https://example.invalid/x.git'
+      iv_repo_key       = mc_repo
+      iv_branch_name    = mc_branch
+      iv_tip_commit     = lv_commit_sha
+      it_tip_blob_sha1s = lt_blob_sha1s ).
+
+    ls_state = zcl_abapgit_ortec_mat_state=>get_state(
+      iv_repo_key = mc_repo
+      iv_commit   = lv_commit_sha ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_state-snap_state
+      exp = zcl_abapgit_ortec_mat_state=>cs_snap_state-complete
+      msg = 'Supplied verified blob set avoids a duplicate tree walk' ).
   ENDMETHOD.
 
   METHOD adaptive_initial_size.

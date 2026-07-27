@@ -173,6 +173,7 @@ CLASS zcl_abapgit_ortec_porcelain IMPLEMENTATION.
     DATA lv_backfilled     TYPE abap_bool.
     DATA ls_seed_object    TYPE zif_abapgit_definitions=>ty_object.
     DATA lt_seed_objects   TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lt_tip_blob_sha1s TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
 
     lv_ortec_active = zcl_abapgit_ortec_git_switch=>is_active_for_repo( iv_url ).
 
@@ -255,15 +256,20 @@ CLASS zcl_abapgit_ortec_porcelain IMPLEMENTATION.
         " locally exactly like WARM_UNCHANGED - no separate cold
         " reconstruction implementation.
         TRY.
+            CLEAR lt_tip_blob_sha1s.
             zcl_abapgit_ortec_cold_init=>acquire_blobless_graph(
-              iv_url        = iv_url
-              iv_repo_key   = lv_ortec_repo_key
-              iv_tip_commit = lv_target_commit ).
+              EXPORTING
+                iv_url        = iv_url
+                iv_repo_key   = lv_ortec_repo_key
+                iv_tip_commit = lv_target_commit
+              IMPORTING
+                et_tip_blob_sha1s = lt_tip_blob_sha1s ).
             zcl_abapgit_ortec_cold_init=>materialize_tip_snapshot(
-              iv_url         = iv_url
-              iv_repo_key    = lv_ortec_repo_key
-              iv_branch_name = iv_branch_name
-              iv_tip_commit  = lv_target_commit ).
+              iv_url            = iv_url
+              iv_repo_key       = lv_ortec_repo_key
+              iv_branch_name    = iv_branch_name
+              iv_tip_commit     = lv_target_commit
+              it_tip_blob_sha1s = lt_tip_blob_sha1s ).
             ls_seed_object = zcl_abapgit_ortec_obj_store=>get_object(
               iv_repo_key = lv_ortec_repo_key
               iv_sha1     = lv_target_commit ).
@@ -608,3 +614,4 @@ CLASS zcl_abapgit_ortec_porcelain IMPLEMENTATION.
     ENDLOOP.
   ENDMETHOD.
 ENDCLASS.
+
