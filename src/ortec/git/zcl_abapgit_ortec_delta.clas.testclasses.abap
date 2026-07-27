@@ -156,7 +156,8 @@ CLASS ltcl_delta IMPLEMENTATION.
 
     DATA lt_merged_indexes TYPE HASHED TABLE OF i WITH UNIQUE KEY table_line.
     LOOP AT lt_objects INTO ls_object WHERE index > 2.
-      cl_abap_unit_assert=>assert_true( xsdbool( NOT line_exists( lt_merged_indexes[ table_line = ls_object-index ] ) )
+      cl_abap_unit_assert=>assert_true(
+        act = xsdbool( NOT line_exists( lt_merged_indexes[ table_line = ls_object-index ] ) )
         msg = 'Every merged external base must have a distinct index - no shared/defaulted index' ).
       INSERT ls_object-index INTO TABLE lt_merged_indexes.
     ENDLOOP.

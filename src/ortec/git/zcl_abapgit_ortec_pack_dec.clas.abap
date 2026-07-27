@@ -67,7 +67,7 @@ CLASS zcl_abapgit_ortec_pack_dec DEFINITION
     "! @parameter iv_repo_key |
     "! Repository key
     "! @parameter rt_objects |
-    "! Decoded objects (all, including already-stored ones)
+    "! Decoded objects for this pack only (excluding merged external delta bases)
     "! @raising zcx_abapgit_exception |
     "! On decode error
     CLASS-METHODS resume_decode
@@ -797,6 +797,7 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
     DATA lv_final_count     TYPE i.
     DATA lv_original_count  TYPE i.
     DATA ls_object          LIKE LINE OF rt_objects.
+    DATA lt_pack_objects    TYPE zif_abapgit_definitions=>ty_objects_tt.
 
     lv_commit_interval = iv_commit_interval.
     IF lv_commit_interval <= 0.
@@ -1244,10 +1245,21 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
       CHANGING
         ct_objects    = rt_objects ).
 
-    " Promote temp rows to resolved object store rows AND update pack index
-    " status to 'D' (decoded), in one merged pass, batched every
-    " lv_commit_interval objects instead of accumulating a second full-size
-    " copy of every new object's data (lt_final_rows) alongside rt_objects
+    " Trim the result set back to this pack's own objects. The external
+    " bases merged for delta resolution are needed only during resolution
+    " and must not be surfaced as if they were newly decoded payloads.
+    IF lv_original_count < lines( rt_objects ).
+      CLEAR lt_pack_objects.
+      LOOP AT rt_objects INTO ls_object FROM 1 TO lv_original_count.
+        APPEND ls_object TO lt_pack_objects.
+      ENDLOOP.
+      rt_objects = lt_pack_objects.
+    ENDIF.
+
+     " Promote temp rows to resolved object store rows AND update pack index
+     " status to 'D' (decoded), in one merged pass, batched every
+     " lv_commit_interval objects instead of accumulating a second full-size
+     " copy of every new object's data (lt_final_rows) alongside rt_objects
     " for the whole method - that double-buffering was a major contributor
     " to SYSTEM_NO_ROLL crashes on large packs. Skip base objects merged by
     " resolve_all's phase 1.5 for delta resolution only: they already exist
@@ -1454,3 +1466,4 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
     ev_decompressed = lcl_ungzip_handler=>get_data( ).
   ENDMETHOD.
 ENDCLASS.
+
