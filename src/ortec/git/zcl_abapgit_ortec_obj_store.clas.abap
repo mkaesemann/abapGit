@@ -78,6 +78,15 @@ CLASS zcl_abapgit_ortec_obj_store DEFINITION
       RETURNING VALUE(rt_objects) TYPE zif_abapgit_definitions=>ty_objects_tt
       RAISING   zcx_abapgit_ortec_git.
 
+    "! Bulk-read every locally READY object found for the supplied SHA1 set.
+    "! Missing SHA1 values are ignored. Input is deduplicated and read in
+    "! bounded packages; found rows warm the normal session cache.
+    CLASS-METHODS get_available_objects
+      IMPORTING iv_repo_key       TYPE ty_repo_key
+                it_sha1s          TYPE zif_abapgit_git_definitions=>ty_sha1_tt
+      RETURNING VALUE(rt_objects) TYPE zif_abapgit_definitions=>ty_objects_tt
+      RAISING   zcx_abapgit_ortec_git.
+
     CLASS-METHODS get_reachable_objects
       IMPORTING iv_repo_key       TYPE ty_repo_key
                 iv_commit         TYPE zif_abapgit_git_definitions=>ty_sha1
@@ -380,6 +389,89 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
     ENDIF.
 
     zcx_abapgit_ortec_git=>raise( |Object { iv_sha1 } not found in store| ).
+  ENDMETHOD.
+
+
+  METHOD get_available_objects.
+    DATA lt_unique_sha1s TYPE ty_sha1_set.
+    DATA lt_package TYPE ty_sha1_rows.
+    DATA lt_db_rows TYPE ty_obj_store_tt.
+    DATA ls_sha1 TYPE ty_sha1_row.
+    DATA ls_cache_entry TYPE ty_cache_entry.
+    DATA ls_object TYPE zif_abapgit_definitions=>ty_object.
+
+    FIELD-SYMBOLS <lv_sha1> LIKE LINE OF it_sha1s.
+    FIELD-SYMBOLS <ls_row> LIKE LINE OF lt_db_rows.
+
+    IF iv_repo_key IS INITIAL.
+      zcx_abapgit_ortec_git=>raise(
+        'Repository key missing for available-object read' ).
+    ENDIF.
+
+    LOOP AT it_sha1s ASSIGNING <lv_sha1>
+         WHERE table_line IS NOT INITIAL.
+      INSERT <lv_sha1> INTO TABLE lt_unique_sha1s.
+    ENDLOOP.
+
+    LOOP AT lt_unique_sha1s ASSIGNING <lv_sha1>.
+      READ TABLE mt_cache INTO ls_cache_entry
+        WITH TABLE KEY repo_key = iv_repo_key obj_sha1 = <lv_sha1>.
+
+      IF sy-subrc = 0 AND ls_cache_entry-status = 'R'.
+        CLEAR ls_object.
+        ls_object-sha1 = ls_cache_entry-obj_sha1.
+        ls_object-type = ls_cache_entry-obj_type.
+        ls_object-data = ls_cache_entry-obj_data.
+        APPEND ls_object TO rt_objects.
+        CONTINUE.
+      ENDIF.
+
+      ls_sha1-sha1 = <lv_sha1>.
+      APPEND ls_sha1 TO lt_package.
+      CLEAR ls_sha1.
+
+      IF lines( lt_package ) >= c_select_package_size.
+        CLEAR lt_db_rows.
+        lt_db_rows = read_object_rows(
+          iv_repo_key = iv_repo_key
+          it_sha1s    = lt_package ).
+
+        LOOP AT lt_db_rows ASSIGNING <ls_row>.
+          CLEAR ls_cache_entry.
+          MOVE-CORRESPONDING <ls_row> TO ls_cache_entry.
+          INSERT ls_cache_entry INTO TABLE mt_cache.
+
+          CLEAR ls_object.
+          ls_object-sha1 = <ls_row>-obj_sha1.
+          ls_object-type = <ls_row>-obj_type.
+          ls_object-data = <ls_row>-obj_data.
+          APPEND ls_object TO rt_objects.
+        ENDLOOP.
+
+        CLEAR lt_package.
+      ENDIF.
+    ENDLOOP.
+
+    IF lt_package IS NOT INITIAL.
+      CLEAR lt_db_rows.
+      lt_db_rows = read_object_rows(
+        iv_repo_key = iv_repo_key
+        it_sha1s    = lt_package ).
+
+      LOOP AT lt_db_rows ASSIGNING <ls_row>.
+        CLEAR ls_cache_entry.
+        MOVE-CORRESPONDING <ls_row> TO ls_cache_entry.
+        INSERT ls_cache_entry INTO TABLE mt_cache.
+
+        CLEAR ls_object.
+        ls_object-sha1 = <ls_row>-obj_sha1.
+        ls_object-type = <ls_row>-obj_type.
+        ls_object-data = <ls_row>-obj_data.
+        APPEND ls_object TO rt_objects.
+      ENDLOOP.
+    ENDIF.
+
+    mv_cache_repo_key = iv_repo_key.
   ENDMETHOD.
 
 
@@ -1299,3 +1391,4 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
+

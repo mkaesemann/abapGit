@@ -266,6 +266,21 @@ CLASS zcl_abapgit_ortec_pack_stream DEFINITION
     "! objects/superseded temp keys are appended to ct_write_batch/
     "! ct_delete_batch rather than written individually - resolve_streaming
     "! flushes these in bulk periodically and once more at the end.
+    "! Warm current-pack delta temp rows in bounded SQL packages before
+    "! resolution, avoiding one database round-trip per delta row.
+    CLASS-METHODS preload_delta_rows
+      IMPORTING iv_repo_key TYPE ty_repo_key
+                it_meta     TYPE ty_meta_tt
+      RAISING   zcx_abapgit_ortec_git.
+
+    "! Collect and bulk-read locally available external REF_DELTA bases.
+    "! Missing candidates remain the final resolver pass's responsibility.
+    CLASS-METHODS preload_external_bases
+      IMPORTING iv_repo_key TYPE ty_repo_key
+                it_meta     TYPE ty_meta_tt
+                it_sha_idx  TYPE ty_sha_idx_tt
+      RAISING   zcx_abapgit_ortec_git.
+
     CLASS-METHODS resolve_one_meta
       IMPORTING iv_tabix            TYPE i
                 iv_depth            TYPE i
@@ -411,6 +426,84 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
     ENDIF.
   ENDMETHOD.
 
+  METHOD preload_delta_rows.
+    DATA lt_temp_keys TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_unique TYPE HASHED TABLE OF zif_abapgit_git_definitions=>ty_sha1
+      WITH UNIQUE KEY table_line.
+    DATA lt_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
+
+    FIELD-SYMBOLS <ls_meta> TYPE ty_meta.
+
+    LOOP AT it_meta ASSIGNING <ls_meta>
+         WHERE is_resolved = abap_false
+           AND temp_key IS NOT INITIAL.
+      INSERT <ls_meta>-temp_key INTO TABLE lt_unique.
+      IF sy-subrc = 0.
+        APPEND <ls_meta>-temp_key TO lt_temp_keys.
+      ENDIF.
+    ENDLOOP.
+
+    IF lt_temp_keys IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    " Strict: current-pack temp rows must all exist. GET_OBJECTS reads them
+    " in bounded packages and warms the normal object-store session cache.
+    lt_objects = zcl_abapgit_ortec_obj_store=>get_objects(
+      iv_repo_key   = iv_repo_key
+      it_sha1s      = lt_temp_keys
+      iv_bulk_fetch = abap_false ).
+  ENDMETHOD.
+
+
+  METHOD preload_external_bases.
+    DATA lt_candidates TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_unique TYPE HASHED TABLE OF zif_abapgit_git_definitions=>ty_sha1
+      WITH UNIQUE KEY table_line.
+    DATA lt_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lo_cache TYPE REF TO zcl_abapgit_ortec_base_cache.
+
+    FIELD-SYMBOLS <ls_meta> TYPE ty_meta.
+    FIELD-SYMBOLS <ls_object> LIKE LINE OF lt_objects.
+
+    lo_cache = zcl_abapgit_ortec_base_cache=>get_instance( ).
+
+    LOOP AT it_meta ASSIGNING <ls_meta>
+         WHERE is_resolved = abap_false
+           AND delta_base IS NOT INITIAL.
+      READ TABLE it_sha_idx
+        WITH TABLE KEY sha1 = <ls_meta>-delta_base
+        TRANSPORTING NO FIELDS.
+      IF sy-subrc = 0.
+        CONTINUE.
+      ENDIF.
+
+      IF lo_cache->has( <ls_meta>-delta_base ) = abap_true.
+        CONTINUE.
+      ENDIF.
+
+      INSERT <ls_meta>-delta_base INTO TABLE lt_unique.
+      IF sy-subrc = 0.
+        APPEND <ls_meta>-delta_base TO lt_candidates.
+      ENDIF.
+    ENDLOOP.
+
+    IF lt_candidates IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    lt_objects = zcl_abapgit_ortec_obj_store=>get_available_objects(
+      iv_repo_key = iv_repo_key
+      it_sha1s    = lt_candidates ).
+
+    LOOP AT lt_objects ASSIGNING <ls_object>.
+      lo_cache->put(
+        iv_sha1 = <ls_object>-sha1
+        iv_data = <ls_object>-data ).
+    ENDLOOP.
+  ENDMETHOD.
+
+
   METHOD resolve_one_meta.
     DATA ls_delta_obj  TYPE zif_abapgit_definitions=>ty_object.
     DATA ls_base_obj   TYPE zif_abapgit_definitions=>ty_object.
@@ -457,55 +550,26 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
           RETURN. " Not yet resolvable in-pack; resolve_streaming's next sweep retries.
         ENDIF.
         " Genuinely external base (from a prior pack/pull) - or truly missing.
+        " PRELOAD_EXTERNAL_BASES has already bulk-loaded locally available
+        " candidates into both caches. GET_BASE_BYTES is therefore cache-only
+        " in the normal case and preserves retry-without-haves for a true miss.
         TRY.
+            lv_base_data = get_base_bytes(
+              iv_repo_key = iv_repo_key
+              iv_sha1     = <ls_row>-delta_base
+              iv_url      = iv_url ).
+
             ls_base_obj = zcl_abapgit_ortec_obj_store=>get_object(
               iv_repo_key = iv_repo_key
               iv_sha1     = <ls_row>-delta_base ).
           CATCH zcx_abapgit_ortec_git.
-            " Thin-pack completion: try fetching exactly this missing object
-            " before treating it as a hard failure - see
-            " complete_missing_base's doc (2026-07-20 incident): even a
-            " non-thin, deeply-widened fetch is not always guaranteed
-            " self-contained against a large, real repo's history.
-            IF complete_missing_base( iv_repo_key = iv_repo_key
-                                       iv_sha1     = <ls_row>-delta_base
-                                       iv_url      = iv_url ) = abap_true.
-              TRY.
-                  ls_base_obj = zcl_abapgit_ortec_obj_store=>get_object(
-                    iv_repo_key = iv_repo_key
-                    iv_sha1     = <ls_row>-delta_base ).
-                CATCH zcx_abapgit_ortec_git.
-                  zcx_abapgit_ortec_git=>raise(
-                    iv_text                = |Delta base not found, { <ls_row>-delta_base } - | &&
-                      |declaring obj_index { <ls_row>-obj_index } pack_offset { <ls_row>-pack_offset }, | &&
-                      |pack has { lines( ct_meta ) } objects, { count_unresolved( ct_meta ) } still unresolved|
-                    iv_retry_without_haves = abap_true ).
-              ENDTRY.
-            ELSE.
-              " retry_without_haves = true: a REF_DELTA declaring an external
-              " base that is neither in THIS pack nor in our own object store
-              " means our locally-tracked "verified have commits" claimed we
-              " already hold an object we actually don't - the server was
-              " therefore never asked to (re-)send it. A full/no-haves retry
-              " (see is_retry_without_haves/iv_force_full in
-              " zcl_abapgit_ortec_fastpath) is the correct recovery, not a
-              " hard failure.
-              " Diagnostic detail (obj_index/pack_offset/total pack size/still-
-              " unresolved count) added 2026-07-20: this same failure recurred
-              " even after the force_full (no haves, non-thin) retry tier, which
-              " should make external bases impossible in a correctly-behaving
-              " pack - so the remaining hypothesis is a genuine in-pack
-              " resolution bug, not a stale-haves issue. This detail is what
-              " the NEXT live failure needs to tell the two apart.
-              zcx_abapgit_ortec_git=>raise(
-                iv_text                = |Delta base not found, { <ls_row>-delta_base } - | &&
-                  |declaring obj_index { <ls_row>-obj_index } pack_offset { <ls_row>-pack_offset }, | &&
-                  |pack has { lines( ct_meta ) } objects, { count_unresolved( ct_meta ) } still unresolved|
-                iv_retry_without_haves = abap_true ).
-            ENDIF.
+            zcx_abapgit_ortec_git=>raise(
+              iv_text                = |Delta base not found, { <ls_row>-delta_base } - | &&
+                |declaring obj_index { <ls_row>-obj_index } pack_offset { <ls_row>-pack_offset }, | &&
+                |pack has { lines( ct_meta ) } objects, { count_unresolved( ct_meta ) } still unresolved|
+              iv_retry_without_haves = abap_true ).
         ENDTRY.
         lv_base_type = ls_base_obj-type.
-        lv_base_data = get_base_bytes( iv_repo_key = iv_repo_key iv_sha1 = <ls_row>-delta_base iv_url = iv_url ).
         lv_external  = abap_true.
         lv_base_sha_diag         = <ls_row>-delta_base.
         lv_base_pack_offset_diag = -1. " external - no in-pack offset
@@ -693,6 +757,12 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
       ENDIF.
     ENDLOOP.
 
+    " Warm every unresolved current-pack delta temp row before entering the
+    " fixpoint loop. Subsequent GET_OBJECT(temp_key) calls are cache hits.
+    preload_delta_rows(
+      iv_repo_key = iv_repo_key
+      it_meta     = ct_meta ).
+
     " Pass 1: repeated ascending sweeps, in-pack only (no object-store round-
     " trip, no raise on "not found yet") - converges on any delta-onto-later-
     " delta chain regardless of topological/SHA1/pack order. Bounded by the
@@ -726,6 +796,14 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
         EXIT.
       ENDIF.
     ENDDO.
+
+    " Pass 1 exhausted all currently in-pack-resolvable dependencies. Bulk
+    " preload every locally available external REF_DELTA base before the final
+    " pass; missing bases retain the existing retry-without-haves behavior.
+    preload_external_bases(
+      iv_repo_key = iv_repo_key
+      it_meta     = ct_meta
+      it_sha_idx  = lt_sha_idx ).
 
     " Pass 2: one final ascending pass, now allowing the object-store fetch
     " and the precise "Delta base not found" raise.
@@ -988,3 +1066,4 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
     ENDTRY.
   ENDMETHOD.
 ENDCLASS.
+

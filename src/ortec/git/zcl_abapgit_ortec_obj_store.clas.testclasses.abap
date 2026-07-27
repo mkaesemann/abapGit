@@ -6,6 +6,8 @@ CLASS ltcl_obj_store DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
     METHODS not_found FOR TESTING RAISING cx_static_check.
     METHODS get_objects_bulk FOR TESTING RAISING cx_static_check.
     METHODS get_objects_missing FOR TESTING RAISING cx_static_check.
+    METHODS available_ignores_missing FOR TESTING RAISING cx_static_check.
+    METHODS available_deduplicates FOR TESTING RAISING cx_static_check.
     METHODS reachable_objects_graph FOR TESTING RAISING cx_static_check.
     METHODS reachable_objects_missing_tree FOR TESTING RAISING cx_static_check.
     METHODS reachable_sha1s_graph FOR TESTING RAISING cx_static_check.
@@ -85,6 +87,65 @@ CLASS ltcl_obj_store IMPLEMENTATION.
       CATCH zcx_abapgit_ortec_git.
     ENDTRY.
   ENDMETHOD.
+  METHOD available_ignores_missing.
+    DATA lt_sha1s TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lv_data TYPE xstring VALUE '415641494C41424C45'.
+    CONSTANTS lc_present TYPE zif_abapgit_git_definitions=>ty_sha1
+      VALUE '3333333333333333333333333333333333333333'.
+    CONSTANTS lc_missing TYPE zif_abapgit_git_definitions=>ty_sha1
+      VALUE 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF'.
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lc_present
+      iv_type     = zif_abapgit_git_definitions=>c_type-blob
+      iv_data     = lv_data ).
+
+    APPEND lc_present TO lt_sha1s.
+    APPEND lc_missing TO lt_sha1s.
+
+    lt_objects = zcl_abapgit_ortec_obj_store=>get_available_objects(
+      iv_repo_key = mc_repo
+      it_sha1s    = lt_sha1s ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lines( lt_objects )
+      exp = 1
+      msg = 'Missing candidates are ignored rather than raised' ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lt_objects[ 1 ]-sha1
+      exp = lc_present ).
+  ENDMETHOD.
+
+  METHOD available_deduplicates.
+    DATA lt_sha1s TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lv_data TYPE xstring VALUE '4445445550'.
+    CONSTANTS lc_present TYPE zif_abapgit_git_definitions=>ty_sha1
+      VALUE '4444444444444444444444444444444444444444'.
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lc_present
+      iv_type     = zif_abapgit_git_definitions=>c_type-blob
+      iv_data     = lv_data ).
+
+    APPEND lc_present TO lt_sha1s.
+    APPEND lc_present TO lt_sha1s.
+    APPEND lc_present TO lt_sha1s.
+
+    lt_objects = zcl_abapgit_ortec_obj_store=>get_available_objects(
+      iv_repo_key = mc_repo
+      it_sha1s    = lt_sha1s ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lines( lt_objects )
+      exp = 1
+      msg = 'Duplicate candidate SHA1 values are returned once' ).
+  ENDMETHOD.
+
   METHOD reachable_objects_graph.
     DATA lt_nodes TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
     DATA ls_node LIKE LINE OF lt_nodes.
