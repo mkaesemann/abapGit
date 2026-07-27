@@ -2,9 +2,13 @@
 
 - Repository / branch: abapGit on `ortec/abapgit_1_133-opt-rework`
 - Topic: `variant-b-partial-clone`
-- Current phase: `Package D — not started`
-- Previous phase: `Package C — SAP_VALIDATED_COMPLETE`
-
+- Current phase: `Package D1 — implementation authorized, not started`
+- Previous checkpoint: `Package D0 — DESIGN_APPROVED`
+- Planned next phase: Package E — Snapshot Consumer Coherence and Adaptive Materialization
+- Planned following phase: Package F — Validated Legacy-Code Cleanup
+- Package sequence decision: OWNER_DECISION, 2026-07-24
+- Renumbering decision: .memory/decisions/variant_b_package_renumbering.md
+ 
 ## Validated baseline
 
 ```text
@@ -21,7 +25,21 @@ CACHE_ADMIN=PASS
 LARGE_REPO_FUNCTIONAL=PASS
 ```
 
+## Package D0 status
+
+```text
+PACKAGE_D_D0=APPROVED
+PACKAGE_D_SOURCE_BASELINE=5e5403546554dbe4f0f8e7a1eb2f07ab434dbe95
+CORRECTNESS_REVIEW=APPROVE
+PROTOCOL_PERSISTENCE_REVIEW=APPROVE
+PERFORMANCE_DESIGN_GATE=APPROVE_WITH_MINOR_REVISIONS
+IMPLEMENTATION_AUTHORIZED=YES
+BLOCKERS=NONE
+```
+
 Package C at `29199f629773c676e0eaa2f3a006f5167d304ae8` is the current productive SAP-validated baseline.
+
+Repository HEAD is at `1500755e5e9fc75cfe913ee605523a7c0f82ee19`  including some memory and agent updates.
 
 ## Completed work
 
@@ -73,6 +91,7 @@ Package D scope:
 - preserve all Package C certification, reconstruction and cache-management
   invariants;
 - do not reopen Package C without concrete regression evidence.
+- do not absorb the newly planned Package E scope into Package D.
 
 ## Binding constraints
 
@@ -91,7 +110,18 @@ Package D scope:
 - Standard abapGit behavior remains unchanged when ORTEC is disabled.
 - Package D1 owns generalized bounded external delta-base resolution.
 - Package D2 owns final attempt and transaction isolation.
-- Package E owns validated legacy-code removal.
+- Package E owns snapshot consumer coherence and adaptive materialization.
+- Package E owns the certified-snapshot repair contract for
+  CERTIFIED_BUT_MISSING.
+- Package E must prevent normal certified current-tip consumers from using
+  `ZCL_ABAPGIT_ORTEC_MISSING_OBJ=>ENSURE_AVAILABLE`.
+- Package E materialization discovers capabilities once per complete
+  materialization operation.
+- Package E materialization uses adaptive row- and response-byte-bounded blob
+  batches.
+- Package E final snapshot verification is metadata-only and never reloads
+  blob payloads merely to prove completeness.
+- Package F owns validated legacy-code removal.
 
 ## Active links
 
@@ -108,6 +138,18 @@ Package D scope:
   `.memory/reviews/performance_design_variant_b_package_c.md`
 - Package B final handoff:
   `.memory/handoffs/variant-b-package-b-b2b3-checkpoint.md`
+- Package D0 design:
+  `.memory/logs/variant_b_package_d_design.md`
+- Package D0 delta discovery:
+  `.memory/logs/variant_b_package_d_delta_discovery.md`
+- Package D0 concurrent-commit reconciliation:
+  `.memory/logs/variant_b_package_d_concurrent_commit_impact.md`
+- Package D0 correctness review decision:
+  `.memory/reviews/variant_b_package_d_correctness_decision.md`
+- Package D0 protocol/persistence review decision:
+  `.memory/reviews/variant_b_package_d_protocol_decision.md`
+- Package D0 performance design gate:
+  `.memory/reviews/performance_design_variant_b_package_d.md`
 
 ## Deferred non-blocking performance work
 
@@ -128,20 +170,29 @@ These are optimization items, not Package C correctness blockers.
 1. Package D shared design for Slices 7 and 8.
 2. Package D1 implementation and checkpoint validation.
 3. Package D2 implementation and checkpoint validation.
-4. Package E validated legacy-code cleanup.
-5. Final cross-package performance profiling and tuning.
-6. Final release validation.
+4. Package E focused discovery:
+  branch-switch-to-Stage consumer coherence and current materialization cost.
+5. Package E correctness, protocol/persistence and performance design reviews.
+6. Package E implementation:
+  - capability discovery once;
+  - adaptive materialization batches;
+  - metadata-only final verification;
+  - certified snapshot consumer coherence;
+  - one bounded CERTIFIED_BUT_MISSING repair.
+7. Package E implementation performance audit and regression validation.
+8. Package E live validation on the large repository.
+9. Package F validated legacy-code cleanup.
+10. Final cross-package performance profiling and tuning.
+11. Final release validation.
 
 ## Next action
 
-Start Package D design in a new orchestrator chat from the SAP-validated
-Package C baseline.
+Start Package D1 in a new senior implementation chat.
 
-Read only the current compact state, the final Package C handoff, the owner
-specification and the Package-D-relevant design context.
-
-Do not repeat Package C discovery, design review or implementation review
-unless Package D exposes a concrete regression.
-
-Do not perform speculative Package C performance work during Package D.
-Record new performance evidence for the final performance pass.
+Read only the current compact state and the Package D0 links above. Do not
+repeat Package D0 discovery, design, reconciliation, or review — it is
+DESIGN_APPROVED with `PERFORMANCE_DESIGN_GATE=APPROVE_WITH_MINOR_REVISIONS`
+and `IMPLEMENTATION_AUTHORIZED=YES`. Do not repeat Package C discovery,
+design review or implementation review unless Package D exposes a concrete
+regression. Do not perform speculative Package C performance work during
+Package D.
