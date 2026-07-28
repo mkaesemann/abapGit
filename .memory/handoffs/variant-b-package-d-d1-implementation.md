@@ -4,7 +4,18 @@
 PACKET=COMPACT_HANDOFF_V1
 TASK=D1-IMPLEMENTATION
 BASELINE=5a1171f24f0fe0664eeaa3a832fee1bc7076a2e3
-STATUS=IMPLEMENTED_LOCAL_VALIDATION_ONLY
+STATUS=SAP_VALIDATED_COMPLETE
+VALIDATED_HEAD=73cb519a
+SAP_SYSTEM=IT8
+ACTIVATION=PASS
+SYNTAX=PASS
+ABAP_UNIT=PASS
+ATC=PASS
+WARM_BRANCH=PASS
+COLD_BRANCH=PASS
+SLIN_WARNINGS=NONE
+D1_BLOCKERS=NONE
+D2_STATUS=AUTHORIZED_NOT_STARTED
 ```
 
 Baseline verification: `git rev-parse HEAD` = `5a1171f2...` (D0 design finalize,
@@ -167,4 +178,25 @@ required before D1 can be marked SAP_VALIDATED_COMPLETE): live SAP
 syntax/activation check, ABAP Unit execution (no local runner available),
 `ortec-abapgit-performance-scan`/`ortec-abapgit-performance-review`
 `IMPLEMENTATION_AUDIT`, and `ortec-abapgit-regression`.
+
+## SAP validation closeout
+
+Owner-executed live SAP validation in system IT8 on commit `73cb519a`
+confirmed: ACTIVATION=PASS, SYNTAX=PASS, ABAP_UNIT=PASS, ATC=PASS,
+WARM_BRANCH=PASS, COLD_BRANCH=PASS, SLIN_WARNINGS=NONE (the 3
+`ZCX_ABAPGIT_EXCEPTION is not caught or declared` warnings on
+`zcl_abapgit_ortec_pack_dec=>peek_object_count` and
+`zcl_abapgit_ortec_delta=>skip_size_header` were fixed in commit `73cb519a`
+and confirmed cleared on retest). D1_BLOCKERS=NONE. D2_STATUS is now
+AUTHORIZED_NOT_STARTED.
+
+The false `Local MODIFIED`/`Remote MODIFIED` indicator observed in a large
+repository is a non-D1 follow-up, classified `PACKAGE_E_CONSUMER_COHERENCE`
+and does not block this closeout (warm/cold branch acquisition succeed, ABAP
+Unit/ATC are clean, and no actual content delta is present). Full causal-chain
+evidence: [.memory/logs/variant_b_package_d_d1_modified_status_triage.md](.memory/logs/variant_b_package_d_d1_modified_status_triage.md).
+
+D1 is closed as `SAP_VALIDATED_COMPLETE`. See
+[.memory/logs/regression_variant_b_package_d_d1.md](.memory/logs/regression_variant_b_package_d_d1.md)
+for the full owner evidence record.
 

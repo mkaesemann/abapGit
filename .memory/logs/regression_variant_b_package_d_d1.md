@@ -205,3 +205,22 @@ SLIN_FILES=src/ortec/git/zcl_abapgit_ortec_pack_dec.clas.abap,src/ortec/git/zcl_
 MODIFIED_STATUS_CLASSIFICATION=PACKAGE_E_CONSUMER_COHERENCE
 D1_REGRESSION_FIX=NOT_REQUIRED
 ```
+
+## Final owner SAP retest (commit `73cb519a`, system IT8)
+
+```text
+OWNER_SAP_RETEST=PASS
+VALIDATED_HEAD=73cb519a
+SLIN_WARNINGS_CLEARED=YES
+ABAP_UNIT=PASS
+ATC=PASS
+WARM_BRANCH=PASS
+COLD_BRANCH=PASS
+FALSE_MODIFIED_STATUS=PACKAGE_E_CONSUMER_COHERENCE
+D1_VERDICT=SAP_VALIDATED_COMPLETE
+```
+
+This is the final Package D1 regression evidence. No further D1 regression
+work is open; the false-MODIFIED-status anomaly remains tracked, unchanged,
+as a Package E follow-up (see
+[.memory/logs/variant_b_package_d_d1_modified_status_triage.md](.memory/logs/variant_b_package_d_d1_modified_status_triage.md)).

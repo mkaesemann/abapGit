@@ -2,12 +2,14 @@
 
 - Repository / branch: abapGit on `ortec/abapgit_1_133-opt-rework`
 - Topic: `variant-b-partial-clone`
-- Current phase: `Package D1 — implementation complete, local checkpoint ready for SAP import`
-- Previous checkpoint: `Package D0 — DESIGN_APPROVED`
+- Current phase: `Package D2 — authorized, not started`
+- Previous checkpoint: `Package D1 — SAP_VALIDATED_COMPLETE`
 - Planned next phase: Package E — Snapshot Consumer Coherence and Adaptive Materialization
 - Planned following phase: Package F — Validated Legacy-Code Cleanup
 - Package sequence decision: OWNER_DECISION, 2026-07-24
 - Renumbering decision: .memory/decisions/variant_b_package_renumbering.md
+- Next action: Start Package D2 in a new senior implementation chat from the
+  approved Package D design and the SAP-validated D1 baseline.
  
 ## Validated baseline
 
@@ -72,16 +74,44 @@ PERFORMANCE_AUDIT=PASS_WITH_MINOR_FINDINGS (0 blocking, 1 documented minor
 REGRESSION=PASS_WITH_FINDINGS (static-only; see
   .memory/logs/regression_variant_b_package_d_d1.md "Final local regression
   confirmation")
-D1_STATUS=LOCAL_CHECKPOINT_READY_FOR_SAP_IMPORT
+D1_STATUS=OWNER_SAP_RETEST_PENDING
 D2_STATUS=NOT_STARTED
 BLOCKERS=NONE (no D2-owned concern touched: no change to
   zcl_abapgit_ortec_obj_store.clas.abap, staged-visibility status='D' logic,
   attempt/lock/transaction handling, or get_staged_delta_objects)
 ```
 
-Package C at `29199f629773c676e0eaa2f3a006f5167d304ae8` is the current productive SAP-validated baseline.
+## Package D1 final closeout — SAP_VALIDATED_COMPLETE
 
-Repository HEAD is at `1500755e5e9fc75cfe913ee605523a7c0f82ee19`  including some memory and agent updates.
+```text
+PACKAGE_D_D1=SAP_VALIDATED_COMPLETE
+PACKAGE_D_D1_HEAD=73cb519a
+SAP_SYSTEM=IT8
+ACTIVATION=PASS
+SYNTAX=PASS
+ABAP_UNIT=PASS
+ATC=PASS
+WARM_BRANCH=PASS
+COLD_BRANCH=PASS
+SLIN_WARNINGS=NONE
+PERFORMANCE_SCAN=PASS
+PERFORMANCE_AUDIT=PASS_WITH_MINOR_FINDINGS
+D1_BLOCKERS=NONE
+PACKAGE_E_FOLLOWUP=FALSE_MODIFIED_CONSUMER_COHERENCE
+PACKAGE_D_D2=AUTHORIZED_NOT_STARTED
+PUSHED=NO
+```
+
+See (not duplicated here): [.memory/logs/variant_b_package_d_design.md](.memory/logs/variant_b_package_d_design.md),
+[.memory/handoffs/variant-b-package-d-d1-implementation.md](.memory/handoffs/variant-b-package-d-d1-implementation.md),
+[.memory/logs/regression_variant_b_package_d_d1.md](.memory/logs/regression_variant_b_package_d_d1.md),
+[.memory/logs/performance_scan_variant_b_package_d_d1.md](.memory/logs/performance_scan_variant_b_package_d_d1.md),
+[.memory/logs/performance_audit_variant_b_package_d_d1.md](.memory/logs/performance_audit_variant_b_package_d_d1.md),
+[.memory/logs/variant_b_package_d_d1_modified_status_triage.md](.memory/logs/variant_b_package_d_d1_modified_status_triage.md).
+
+Package C at `29199f629773c676e0eaa2f3a006f5167d304ae8` remains the prior productive SAP-validated baseline; Package D1 at `73cb519a` is now also SAP-validated.
+
+Repository HEAD is at `73cb519a` (D1 SAP closeout commit), local only, not pushed.
 
 ## Completed work
 
