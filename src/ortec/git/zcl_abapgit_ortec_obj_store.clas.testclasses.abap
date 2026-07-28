@@ -1,8 +1,15 @@
+CLASS zcl_abapgit_ortec_obj_store DEFINITION LOCAL FRIENDS ltcl_obj_store.
 CLASS ltcl_obj_store DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
   PRIVATE SECTION.
     CONSTANTS mc_repo TYPE c LENGTH 12 VALUE 'ZAOG_TEST_01'.
     METHODS setup. METHODS teardown.
     METHODS store_and_get FOR TESTING RAISING cx_static_check.
+    METHODS bulk_fetch_dedups_input FOR TESTING RAISING cx_static_check.
+    METHODS bulk_fetch_uses_pkg_size FOR TESTING RAISING cx_static_check.
+    METHODS bulk_fetch_empty_no_sql FOR TESTING RAISING cx_static_check.
+    METHODS bulk_fetch_preserves_where FOR TESTING RAISING cx_static_check.
+    METHODS bulk_fetch_large_n_small_k FOR TESTING RAISING cx_static_check.
+    METHODS bulk_fetch_no_per_key_sql FOR TESTING RAISING cx_static_check.
     METHODS not_found FOR TESTING RAISING cx_static_check.
     METHODS get_objects_bulk FOR TESTING RAISING cx_static_check.
     METHODS get_objects_missing FOR TESTING RAISING cx_static_check.
@@ -22,7 +29,10 @@ CLASS ltcl_obj_store DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
     METHODS active_repo_key_fallback FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 CLASS ltcl_obj_store IMPLEMENTATION.
-  METHOD setup. DELETE FROM zaog_obj_store WHERE repo_key = mc_repo. ENDMETHOD.
+  METHOD setup.
+    DELETE FROM zaog_obj_store WHERE repo_key = mc_repo.
+    zcl_abapgit_ortec_obj_store=>gv_read_object_rows_calls = 0.
+  ENDMETHOD.
   METHOD teardown.
     DELETE FROM zaog_obj_store WHERE repo_key = mc_repo.
     ROLLBACK WORK.  "#EC CI_ROLLBACK
@@ -30,6 +40,192 @@ CLASS ltcl_obj_store IMPLEMENTATION.
     " set_active_repo_key( mc_repo ) call in one test cannot leak into an
     " unrelated test that relies on a blank/uninitialized active repo.
     zcl_abapgit_ortec_obj_store=>invalidate_cache( ).
+    zcl_abapgit_ortec_obj_store=>gv_read_object_rows_calls = 0.
+  ENDMETHOD.
+  METHOD bulk_fetch_dedups_input.
+    DATA lt_sha1s TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lv_data TYPE xstring VALUE '415641494C41424C45'.
+    CONSTANTS lc_sha1 TYPE zif_abapgit_git_definitions=>ty_sha1
+      VALUE '4444444444444444444444444444444444444444'.
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lc_sha1
+      iv_type     = zif_abapgit_git_definitions=>c_type-blob
+      iv_data     = lv_data ).
+
+    APPEND lc_sha1 TO lt_sha1s.
+    APPEND lc_sha1 TO lt_sha1s.
+    APPEND lc_sha1 TO lt_sha1s.
+
+    lt_objects = zcl_abapgit_ortec_obj_store=>get_objects(
+      iv_repo_key   = mc_repo
+      it_sha1s      = lt_sha1s
+      iv_bulk_fetch = abap_true ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lines( lt_objects )
+      exp = 1
+      msg = 'Duplicate input SHA1s must be deduplicated' ).
+  ENDMETHOD.
+  METHOD bulk_fetch_uses_pkg_size.
+    DATA lt_sha1s TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lv_data TYPE xstring VALUE '41'.
+    DATA lv_sha1 TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_i TYPE i.
+    CONSTANTS lc_count TYPE i VALUE 1500.
+
+    " 1500 > c_select_package_size (1000): must reproduce the bounded-
+    " package class of the DBSQL_STMNT_TOO_LARGE incident (40,891 entries)
+    " without requiring millions of real objects.
+    DO lc_count TIMES.
+      lv_i = sy-index.
+      lv_sha1 = |{ lv_i WIDTH = 40 ALIGN = RIGHT PAD = '0' }|.
+      zcl_abapgit_ortec_obj_store=>store_object(
+        iv_repo_key = mc_repo
+        iv_sha1     = lv_sha1
+        iv_type     = zif_abapgit_git_definitions=>c_type-blob
+        iv_data     = lv_data ).
+      APPEND lv_sha1 TO lt_sha1s.
+    ENDDO.
+
+    " Force a genuine cache miss for every SHA1 (as in the live incident,
+    " where the session cache was cold for the target repo/commit).
+    zcl_abapgit_ortec_obj_store=>invalidate_cache( ).
+
+    lt_objects = zcl_abapgit_ortec_obj_store=>get_objects(
+      iv_repo_key   = mc_repo
+      it_sha1s      = lt_sha1s
+      iv_bulk_fetch = abap_true ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lines( lt_objects )
+      exp = lc_count
+      msg = 'Complete result set must be preserved across package boundaries' ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = zcl_abapgit_ortec_obj_store=>gv_read_object_rows_calls
+      exp = 2
+      msg = '1500 entries at package size 1000 must use exactly 2 bounded SQL packages' ).
+  ENDMETHOD.
+  METHOD bulk_fetch_empty_no_sql.
+    DATA lt_sha1s TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
+
+    lt_objects = zcl_abapgit_ortec_obj_store=>get_objects(
+      iv_repo_key   = mc_repo
+      it_sha1s      = lt_sha1s
+      iv_bulk_fetch = abap_true ).
+
+    cl_abap_unit_assert=>assert_initial( lt_objects ).
+    cl_abap_unit_assert=>assert_equals(
+      act = zcl_abapgit_ortec_obj_store=>gv_read_object_rows_calls
+      exp = 0
+      msg = 'Empty input must execute zero SQL' ).
+  ENDMETHOD.
+  METHOD bulk_fetch_preserves_where.
+    DATA lt_sha1s TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lv_data TYPE xstring VALUE '41'.
+    CONSTANTS lc_sha1 TYPE zif_abapgit_git_definitions=>ty_sha1
+      VALUE '5555555555555555555555555555555555555555'.
+
+    " A staged ('D'-status) row with a matching SHA1 must remain invisible -
+    " read_object_rows is hard-coded to status = 'R' and chunking must not
+    " change that predicate.
+    INSERT zaog_obj_store FROM @( VALUE #(
+      repo_key = mc_repo
+      obj_sha1 = lc_sha1
+      obj_type = zif_abapgit_git_definitions=>c_type-blob
+      status   = 'D'
+      obj_data = lv_data ) ).
+    COMMIT WORK.
+
+    APPEND lc_sha1 TO lt_sha1s.
+
+    TRY.
+        lt_objects = zcl_abapgit_ortec_obj_store=>get_objects(
+          iv_repo_key   = mc_repo
+          it_sha1s      = lt_sha1s
+          iv_bulk_fetch = abap_true ).
+        cl_abap_unit_assert=>fail( 'Staged (D-status) row must not be visible' ).
+      CATCH zcx_abapgit_ortec_git.
+    ENDTRY.
+  ENDMETHOD.
+  METHOD bulk_fetch_large_n_small_k.
+    DATA lt_sha1s TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lv_data TYPE xstring VALUE '415641494C41424C45'.
+    CONSTANTS lc_other_repo TYPE c LENGTH 12 VALUE 'ZAOG_TEST_02'.
+    CONSTANTS lc_sha1 TYPE zif_abapgit_git_definitions=>ty_sha1
+      VALUE '6666666666666666666666666666666666666666'.
+    DATA lv_other_sha1 TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_i TYPE i.
+
+    " Simulate a large repository N under an UNRELATED repo_key.
+    DO 50 TIMES.
+      lv_i = sy-index.
+      lv_other_sha1 = |{ lv_i WIDTH = 40 ALIGN = RIGHT PAD = '0' }|.
+      zcl_abapgit_ortec_obj_store=>store_object(
+        iv_repo_key = lc_other_repo
+        iv_sha1     = lv_other_sha1
+        iv_type     = zif_abapgit_git_definitions=>c_type-blob
+        iv_data     = lv_data ).
+    ENDDO.
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lc_sha1
+      iv_type     = zif_abapgit_git_definitions=>c_type-blob
+      iv_data     = lv_data ).
+
+    APPEND lc_sha1 TO lt_sha1s.
+
+    lt_objects = zcl_abapgit_ortec_obj_store=>get_objects(
+      iv_repo_key   = mc_repo
+      it_sha1s      = lt_sha1s
+      iv_bulk_fetch = abap_true ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lines( lt_objects )
+      exp = 1
+      msg = 'A small K request must be unaffected by an unrelated large N' ).
+
+    DELETE FROM zaog_obj_store WHERE repo_key = lc_other_repo.
+    COMMIT WORK.  "#EC CI_ROLLBACK
+  ENDMETHOD.
+  METHOD bulk_fetch_no_per_key_sql.
+    DATA lt_sha1s TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lv_data TYPE xstring VALUE '41'.
+    DATA lv_sha1 TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_i TYPE i.
+    CONSTANTS lc_count TYPE i VALUE 250.
+
+    DO lc_count TIMES.
+      lv_i = sy-index.
+      lv_sha1 = |{ lv_i WIDTH = 40 ALIGN = RIGHT PAD = '0' }|.
+      zcl_abapgit_ortec_obj_store=>store_object(
+        iv_repo_key = mc_repo
+        iv_sha1     = lv_sha1
+        iv_type     = zif_abapgit_git_definitions=>c_type-blob
+        iv_data     = lv_data ).
+      APPEND lv_sha1 TO lt_sha1s.
+    ENDDO.
+
+    zcl_abapgit_ortec_obj_store=>invalidate_cache( ).
+
+    lt_objects = zcl_abapgit_ortec_obj_store=>get_objects(
+      iv_repo_key   = mc_repo
+      it_sha1s      = lt_sha1s
+      iv_bulk_fetch = abap_true ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = zcl_abapgit_ortec_obj_store=>gv_read_object_rows_calls
+      exp = 1
+      msg = 'A 250-entry set below package size must use exactly one SQL call, never per-key SQL' ).
   ENDMETHOD.
   METHOD store_and_get.
     DATA lv TYPE xstring. DATA ls TYPE zif_abapgit_definitions=>ty_object. lv = '48656C6C6F'.

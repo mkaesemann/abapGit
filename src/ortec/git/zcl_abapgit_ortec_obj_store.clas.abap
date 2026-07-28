@@ -71,6 +71,13 @@ CLASS zcl_abapgit_ortec_obj_store DEFINITION
     CLASS-METHODS set_active_repo_key
       IMPORTING iv_repo_key TYPE ty_repo_key.
 
+    "! Bulk, chunked object read with session-cache lookahead. Every SQL
+    "! fallback for cache-miss SHA1s is chunked at c_select_package_size
+    "! regardless of iv_bulk_fetch (see variant_b_d2_it8_dbsql_stmt_too_large
+    "! incident: an unchunked iv_bulk_fetch = abap_true path previously
+    "! caused DBSQL_STMNT_TOO_LARGE for a wide cache-miss set). iv_bulk_fetch
+    "! is retained for call-site compatibility only and no longer changes
+    "! chunking behavior.
     CLASS-METHODS get_objects
       IMPORTING iv_repo_key       TYPE ty_repo_key
                 it_sha1s          TYPE zif_abapgit_git_definitions=>ty_sha1_tt
@@ -159,10 +166,13 @@ CLASS zcl_abapgit_ortec_obj_store DEFINITION
     "! otherwise, which would incorrectly fail a perfectly valid blobless
     "! fetch.
     "! Uses iv_bulk_fetch = abap_false for every frontier read (design
-    "! decision INV-B-13, .memory/logs/variant_b_package_b_design.md §6):
-    "! get_objects' iv_bulk_fetch = abap_true branch does not chunk at
-    "! c_select_package_size, so abap_false is used to guarantee every bulk
-    "! read stays chunked regardless of how wide a real tree frontier is.
+    "! decision INV-B-13, .memory/logs/variant_b_package_b_design.md §6).
+    "! Historical note (variant_b_d2_it8_dbsql_stmt_too_large incident):
+    "! get_objects' iv_bulk_fetch = abap_true branch used to skip chunking
+    "! at c_select_package_size, which is why abap_false was originally
+    "! chosen here. Both branches now chunk identically, so this is no
+    "! longer a functional requirement for correctness here - kept as-is
+    "! for stability, since it was already correct and reviewed.
     "! @parameter iv_repo_key |
     "! Repository key
     "! @parameter iv_commit |
@@ -190,8 +200,11 @@ CLASS zcl_abapgit_ortec_obj_store DEFINITION
     "! be present, which is exactly backwards for a call whose entire
     "! purpose is to discover which of the tip's blobs are NOT yet present.
     "! Uses iv_bulk_fetch = abap_false for every frontier read (INV-B-13,
-    "! same rationale as verify_tree_closure - the iv_bulk_fetch = abap_true
-    "! branch of get_objects is not chunked at c_select_package_size).
+    "! same rationale as verify_tree_closure). Historical note
+    "! (variant_b_d2_it8_dbsql_stmt_too_large incident): get_objects'
+    "! iv_bulk_fetch = abap_true branch used to skip chunking at
+    "! c_select_package_size; both branches now chunk identically, so this
+    "! is kept as-is for stability rather than out of functional necessity.
     "! @parameter iv_repo_key |
     "! Repository key
     "! @parameter iv_commit |
@@ -306,6 +319,16 @@ CLASS zcl_abapgit_ortec_obj_store DEFINITION
                 WITH UNIQUE KEY repo_key obj_sha1.
     CLASS-DATA mv_cache_repo_key TYPE ty_repo_key.
     CLASS-DATA mv_full_cache_repo_key TYPE ty_repo_key.
+
+    "! Approved bounded observability counter (same disposition as
+    "! zcl_abapgit_ortec_delta=>gv_bulk_load_calls): counts calls to
+    "! read_object_rows, i.e. the number of bounded SQL packages a single
+    "! get_objects()/get_available_objects()/has_dangling_delta_base() call
+    "! actually issues. A plain integer increment, never persisted, never
+    "! logged, test-reset only (LOCAL FRIENDS) - purely a call-shape
+    "! verification seam for the variant_b_d2_it8_dbsql_stmt_too_large
+    "! incident's bulk_fetch_uses_pkg_size/bulk_fetch_no_per_key_sql tests.
+    CLASS-DATA gv_read_object_rows_calls TYPE i.
 
     CONSTANTS c_select_package_size TYPE i VALUE 1000.
 
@@ -537,34 +560,37 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
       ENDIF.
     ENDLOOP.
 
-    IF iv_bulk_fetch = abap_true.
-      LOOP AT lt_missing_sha1s ASSIGNING <lv_sha1>.
-        ls_sha1-sha1 = <lv_sha1>.
-        APPEND ls_sha1 TO lt_package.
-      ENDLOOP.
-
-      IF lt_package IS NOT INITIAL.
+    " INCIDENT variant_b_d2_it8_dbsql_stmt_too_large: iv_bulk_fetch = abap_true
+    " used to build the ENTIRE lt_missing_sha1s set into one lt_package and
+    " issue a single, unchunked read_object_rows call - unlike every other
+    " read_object_rows caller in this class (this method's own abap_false
+    " branch, get_available_objects, has_dangling_delta_base), which already
+    " chunk at c_select_package_size. For a wide-enough cache-miss set (a
+    " real cold branch's full blob frontier, confirmed live at 40,891
+    " entries), the resulting single "obj_sha1 IN <range>" statement exceeded
+    " HANA/DBSL's per-statement bind-marker ceiling (32,767), causing
+    " DBSQL_STMNT_TOO_LARGE. Both branches now chunk identically: for any
+    " set at or below c_select_package_size this still executes in exactly
+    " one SELECT (no regression for the common case); a set above it now
+    " correctly issues ceil(K / c_select_package_size) bounded SELECTs
+    " instead of one oversized statement. iv_bulk_fetch no longer has any
+    " observable effect on chunking (kept for signature/call-site
+    " compatibility - no caller needs to change).
+    LOOP AT lt_missing_sha1s ASSIGNING <lv_sha1>.
+      ls_sha1-sha1 = <lv_sha1>.
+      APPEND ls_sha1 TO lt_package.
+      IF lines( lt_package ) >= c_select_package_size.
         lt_db_rows = read_object_rows( iv_repo_key = iv_repo_key
                                        it_sha1s    = lt_package ).
         APPEND LINES OF lt_db_rows TO lt_rows.
+        CLEAR lt_package.
       ENDIF.
-    ELSE.
-      LOOP AT lt_missing_sha1s ASSIGNING <lv_sha1>.
-        ls_sha1-sha1 = <lv_sha1>.
-        APPEND ls_sha1 TO lt_package.
-        IF lines( lt_package ) >= c_select_package_size.
-          lt_db_rows = read_object_rows( iv_repo_key = iv_repo_key
-                                         it_sha1s    = lt_package ).
-          APPEND LINES OF lt_db_rows TO lt_rows.
-          CLEAR lt_package.
-        ENDIF.
-      ENDLOOP.
+    ENDLOOP.
 
-      IF lt_package IS NOT INITIAL.
-        lt_db_rows = read_object_rows( iv_repo_key = iv_repo_key
-                                       it_sha1s    = lt_package ).
-        APPEND LINES OF lt_db_rows TO lt_rows.
-      ENDIF.
+    IF lt_package IS NOT INITIAL.
+      lt_db_rows = read_object_rows( iv_repo_key = iv_repo_key
+                                     it_sha1s    = lt_package ).
+      APPEND LINES OF lt_db_rows TO lt_rows.
     ENDIF.
 
     mv_cache_repo_key = iv_repo_key.
@@ -1237,6 +1263,8 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
     IF it_sha1s IS INITIAL.
       RETURN.
     ENDIF.
+
+    gv_read_object_rows_calls = gv_read_object_rows_calls + 1.
 
     LOOP AT it_sha1s ASSIGNING <ls_sha1>.
       APPEND VALUE #( sign   = 'I'
