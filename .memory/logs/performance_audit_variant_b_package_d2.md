@@ -182,3 +182,19 @@ PERF-B-1, PERF-M-1, PERF-M-2) are confirmed resolved by direct source
 re-read in this pass and are not reopened. Package B/variant-b-partial-clone
 cold-init/materialize mechanics are out of D2 scope and untouched by this
 diff (confirmed via `git diff --stat` scope).
+
+## SAP validation closeout
+
+```text
+STATUS=SAP_VALIDATED_COMPLETE
+PACKAGE_D_D2_VALIDATED_HEAD=733bb30799886ef8659be7e293b82c3ccfcebbdd
+```
+
+AUDIT-M-1 (same-repo lock-contention latency) remains a documented,
+non-blocking, structurally-reviewed-only finding - no live contention was
+observed in the three subsequent IT8 incident retests (SYSTEM_NO_ROLL,
+TIME_OUT, DBSQL_STMNT_TOO_LARGE, all SAP_VALIDATED_RESOLVED) or in the
+follow-up SAT trace
+(`.memory/incidents/variant_b_d2_sat_warm_to_cold_o4h8794.md`), which found
+zero cost contribution from any D2-owned attempt/lock/transaction
+mechanism.

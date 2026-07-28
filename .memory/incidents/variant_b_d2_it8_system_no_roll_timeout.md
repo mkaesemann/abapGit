@@ -676,3 +676,31 @@ Finding #3 (orphan 'D' rows):
   modified method is the owner's next action (see final response NEXT
   field) and has not yet been performed.
 ```
+
+## 14. SAP validation closeout
+
+### SYSTEM_NO_ROLL
+
+```text
+STATUS=SAP_VALIDATED_RESOLVED
+FIX=remove unbounded POPULATE_CACHE preload from GET_REACHABLE_OBJECTS
+LIVE_RESULT=not reproduced after fix
+PACKAGE_D_D2_VALIDATED_HEAD=733bb30799886ef8659be7e293b82c3ccfcebbdd
+```
+
+### TIME_OUT
+
+```text
+STATUS=SAP_VALIDATED_RESOLVED
+FIX=bound ENSURE_AVAILABLE remote top-up to caller missing SHA set through adaptive MATERIALIZE_BLOBS batching
+LIVE_RESULT=not reproduced after fix
+PACKAGE_D_D2_VALIDATED_HEAD=733bb30799886ef8659be7e293b82c3ccfcebbdd
+```
+
+Both incidents were confirmed non-reproducing on the live IT8 system on the
+same retest that also confirmed `DBSQL_STMNT_TOO_LARGE` fixed - see
+[.memory/incidents/variant_b_d2_it8_dbsql_stmt_too_large.md](.memory/incidents/variant_b_d2_it8_dbsql_stmt_too_large.md)
+and the follow-up SAT trace,
+[.memory/incidents/variant_b_d2_sat_warm_to_cold_o4h8794.md](.memory/incidents/variant_b_d2_sat_warm_to_cold_o4h8794.md),
+which independently confirms neither fix's code path contributes any
+measurable cost on the warm/already-materialized case.

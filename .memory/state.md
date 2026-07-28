@@ -2,14 +2,15 @@
 
 - Repository / branch: abapGit on `ortec/abapgit_1_133-opt-rework`
 - Topic: `variant-b-partial-clone`
-- Current phase: `Package D2 — authorized, not started`
-- Previous checkpoint: `Package D1 — SAP_VALIDATED_COMPLETE`
+- Current phase: `Package E — authorized, not started`
+- Previous checkpoint: `Package D2 — SAP_VALIDATED_COMPLETE`
 - Planned next phase: Package E — Snapshot Consumer Coherence and Adaptive Materialization
 - Planned following phase: Package F — Validated Legacy-Code Cleanup
 - Package sequence decision: OWNER_DECISION, 2026-07-24
 - Renumbering decision: .memory/decisions/variant_b_package_renumbering.md
-- Next action: Start Package D2 in a new senior implementation chat from the
-  approved Package D design and the SAP-validated D1 baseline.
+- Next action: Start Package E in a new orchestrator chat, beginning with a
+  focused design and performance gate for OBJ_INDEX rebuild batching and the
+  existing certified snapshot consumer-coherence findings.
  
 ## Validated baseline
 
@@ -113,6 +114,68 @@ Package C at `29199f629773c676e0eaa2f3a006f5167d304ae8` remains the prior produc
 
 Repository HEAD is at `73cb519a` (D1 SAP closeout commit), local only, not pushed.
 
+## Package D2 final closeout — SAP_VALIDATED_COMPLETE
+
+```text
+PACKAGE_D_D2=SAP_VALIDATED_COMPLETE
+PACKAGE_D_D2_VALIDATED_HEAD=733bb30799886ef8659be7e293b82c3ccfcebbdd
+SAP_SYSTEM=IT8
+ACTIVATION=PASS
+ABAP_UNIT=PASS
+ATC=PASS_WITHOUT_SEVERE_FINDINGS
+SYSTEM_NO_ROLL_INCIDENT=SAP_VALIDATED_RESOLVED
+TIME_OUT_INCIDENT=SAP_VALIDATED_RESOLVED
+DBSQL_STMNT_TOO_LARGE_INCIDENT=SAP_VALIDATED_RESOLVED
+SAT_PERFORMANCE_CLASSIFICATION=PACKAGE_E_FOLLOWUP
+D2_BLOCKERS=NONE
+PACKAGE_E=AUTHORIZED_NOT_STARTED
+PUSHED=NO
+```
+
+`PACKAGE_D_D2_VALIDATED_HEAD` (`733bb307`) is the exact commit chain
+verified live-active in IT8 (confirmed by direct `SAPRead` of
+`ZCL_ABAPGIT_ORTEC_OBJ_STORE=>GET_OBJECTS`, matching the committed source
+byte-for-byte) after the DBSQL_STMNT_TOO_LARGE fix — it supersedes
+`2111b288`/`17513ba7` as the tested baseline; those two commits remain its
+ancestors (`cdc5caed` → `2111b288` → `17513ba7` → `733bb307`).
+
+Three live IT8 incidents are resolved and SAP-validated as not reproducing
+on this head: `SYSTEM_NO_ROLL` (fix: removed the unbounded `populate_cache`
+preload from `get_reachable_objects`), `TIME_OUT` (fix: bounded
+`ensure_available`'s remote top-up to the caller's missing SHA1 set via
+adaptive `MATERIALIZE_BLOBS` batching), and `DBSQL_STMNT_TOO_LARGE` (fix:
+chunked `get_objects`' bulk-fetch branch at `c_select_package_size`). A
+follow-up SAT trace (`95C45B828A9B11F1B129001DD8B728C2`) completed
+successfully with none of the three reproducing; its dominant cost
+(`ZCL_ABAPGIT_ORTEC_OBJ_INDEX=>REBUILD_INDEX`, ~9.39s of ~31.4s total) is
+classified `PACKAGE_E_FOLLOWUP`, not a D2 defect — see
+`.memory/incidents/variant_b_d2_sat_warm_to_cold_o4h8794.md`.
+
+See (not duplicated here):
+[.memory/incidents/variant_b_d2_it8_system_no_roll_timeout.md](.memory/incidents/variant_b_d2_it8_system_no_roll_timeout.md),
+[.memory/incidents/variant_b_d2_it8_dbsql_stmt_too_large.md](.memory/incidents/variant_b_d2_it8_dbsql_stmt_too_large.md),
+[.memory/incidents/variant_b_d2_sat_warm_to_cold_o4h8794.md](.memory/incidents/variant_b_d2_sat_warm_to_cold_o4h8794.md),
+[.memory/handoffs/variant-b-d2-timeout-fix.md](.memory/handoffs/variant-b-d2-timeout-fix.md),
+[.memory/handoffs/variant-b-package-d-d2-implementation.md](.memory/handoffs/variant-b-package-d-d2-implementation.md).
+
+Package E follow-ups recorded (not started):
+
+```text
+E-PERF-OBJINDEX-1: review/benchmark ZAOG_OBJ_INDEX bulk MODIFY package
+  sizing (measured: 41 packages at 1000 rows, 82 DB round trips). Candidate
+  sizes (5000/10000) require a Package E performance DESIGN_GATE and live
+  measurement before adoption.
+E-CONSUMER-COHERENCE-1: resolve the existing false Local/Remote MODIFIED
+  status for content-identical files (see
+  variant_b_package_d_d1_modified_status_triage.md).
+E-CACHE-ADMIN-F4-1: review Cache Admin repository F4 help, which derives
+  repository choices from ZAOG_REPO_STATE and may omit repositories
+  accessed only through partial filtered object materialization -
+  usability issue only, not a reason to publish false F/C certification.
+```
+
+Repository HEAD is at `733bb307`, local only, not pushed.
+
 ## Completed work
 
 - Slice 0: `COMPLETE`
@@ -125,6 +188,10 @@ Repository HEAD is at `73cb519a` (D1 SAP closeout commit), local only, not pushe
 - Package C C0: `APPROVED_WITH_RESOLVED_REVISIONS`
 - Package C C1: `SAP_VALIDATED_COMPLETE`
 - Package C C2 / Package C final: `SAP_VALIDATED_COMPLETE`
+- Package D1: `SAP_VALIDATED_COMPLETE`
+- Package D2: `SAP_VALIDATED_COMPLETE` (SYSTEM_NO_ROLL, TIME_OUT,
+  DBSQL_STMNT_TOO_LARGE incidents all SAP_VALIDATED_RESOLVED; SAT
+  warm-to-cold classification = PACKAGE_E_FOLLOWUP, non-blocking for D2)
 
 ## Package C closeout
 
@@ -153,17 +220,17 @@ Package C correctness blockers: `NONE`.
 
 ## Current objective
 
-Start Package D from the SAP-validated Package C baseline.
+Package D2 is `SAP_VALIDATED_COMPLETE` (see the Package D2 final closeout
+section above). Start Package E from the SAP-validated Package D2 baseline
+(`733bb307`).
 
-Package D scope:
+Package E scope (authorized, not started):
 
-- shared design for Slices 7 and 8;
-- D1: generalized bounded external delta-base resolution;
-- D2: final attempt and transaction isolation;
-- preserve all Package C certification, reconstruction and cache-management
-  invariants;
-- do not reopen Package C without concrete regression evidence.
-- do not absorb the newly planned Package E scope into Package D.
+- E-PERF-OBJINDEX-1, E-CONSUMER-COHERENCE-1, E-CACHE-ADMIN-F4-1 (see the
+  Package D2 final closeout section above for exact wording);
+- snapshot consumer coherence and adaptive materialization per the binding
+  constraints below;
+- do not reopen Package C/D1/D2 without concrete regression evidence.
 
 ## Binding constraints
 
@@ -224,6 +291,14 @@ Package D scope:
   `.memory/reviews/performance_design_variant_b_package_d.md`
 - Package D1 implementation handoff:
   `.memory/handoffs/variant-b-package-d-d1-implementation.md`
+- Package D2 implementation handoff:
+  `.memory/handoffs/variant-b-package-d-d2-implementation.md`
+- Package D2 SYSTEM_NO_ROLL/TIME_OUT incident:
+  `.memory/incidents/variant_b_d2_it8_system_no_roll_timeout.md`
+- Package D2 DBSQL_STMNT_TOO_LARGE incident:
+  `.memory/incidents/variant_b_d2_it8_dbsql_stmt_too_large.md`
+- Package D2 SAT warm-to-cold performance classification:
+  `.memory/incidents/variant_b_d2_sat_warm_to_cold_o4h8794.md`
 
 ## Deferred non-blocking performance work
 
@@ -241,11 +316,12 @@ These are optimization items, not Package C correctness blockers.
 
 ## Remaining roadmap
 
-1. Package D shared design for Slices 7 and 8.
-2. Package D1 implementation and checkpoint validation.
-3. Package D2 implementation and checkpoint validation.
+1. ~~Package D shared design for Slices 7 and 8.~~ DONE.
+2. ~~Package D1 implementation and checkpoint validation.~~ DONE (SAP_VALIDATED_COMPLETE).
+3. ~~Package D2 implementation and checkpoint validation.~~ DONE (SAP_VALIDATED_COMPLETE; SYSTEM_NO_ROLL, TIME_OUT, DBSQL_STMNT_TOO_LARGE all SAP_VALIDATED_RESOLVED).
 4. Package E focused discovery:
-  branch-switch-to-Stage consumer coherence and current materialization cost.
+  branch-switch-to-Stage consumer coherence and current materialization cost
+  (E-PERF-OBJINDEX-1, E-CONSUMER-COHERENCE-1, E-CACHE-ADMIN-F4-1).
 5. Package E correctness, protocol/persistence and performance design reviews.
 6. Package E implementation:
   - capability discovery once;
@@ -261,28 +337,20 @@ These are optimization items, not Package C correctness blockers.
 
 ## Next action
 
-Package D1 implementation is complete (see Package D1 status block above) and
-handed off in `.memory/handoffs/variant-b-package-d-d1-implementation.md`.
+Package D2 is `SAP_VALIDATED_COMPLETE` (see the Package D2 final closeout
+section above) - all three live IT8 incidents (`SYSTEM_NO_ROLL`,
+`TIME_OUT`, `DBSQL_STMNT_TOO_LARGE`) are `SAP_VALIDATED_RESOLVED`, and the
+follow-up SAT warm-to-cold trace is classified `PACKAGE_E_FOLLOWUP`
+(non-blocking for D2).
 
-Remaining before D1 can be marked SAP_VALIDATED_COMPLETE:
-- run `ortec-abapgit-regression` against the full existing REF/OFS/mixed/
-  external-base/missing-base test surface across
-  `zcl_abapgit_ortec_git_tests.clas.testclasses.abap`,
-  `zcl_abapgit_ortec_pack_dec.clas.testclasses.abap`, and
-  `zcl_abapgit_ortec_pack_stream.clas.testclasses.abap`, plus the new
-  `zcl_abapgit_ortec_delta.clas.testclasses.abap`;
-- import to IT8 and run live ABAP Unit + ATC;
-- performance scan/audit of the changed call paths.
+Start Package E in a new orchestrator chat, beginning with a focused design
+and performance gate for OBJ_INDEX rebuild batching
+(`E-PERF-OBJINDEX-1`) and the existing certified snapshot
+consumer-coherence findings (`E-CONSUMER-COHERENCE-1`,
+`E-CACHE-ADMIN-F4-1`).
 
-Do not start Package D2 (staged-visibility `status='D'` fix, attempt/lock/
-transaction changes, `get_staged_delta_objects`,
-`zcl_abapgit_ortec_obj_store.clas.abap`) until D1 is SAP-validated or the
-owner explicitly authorizes parallel work.
-
-Read only the current compact state and the Package D0/D1 links above. Do not
-repeat Package D0 discovery, design, reconciliation, or review — it is
-DESIGN_APPROVED with `PERFORMANCE_DESIGN_GATE=APPROVE_WITH_MINOR_REVISIONS`
-and `IMPLEMENTATION_AUTHORIZED=YES`. Do not repeat Package C discovery,
-design review or implementation review unless Package D exposes a concrete
-regression. Do not perform speculative Package C performance work during
-Package D.
+Read only the current compact state and the Package D2 final closeout
+section/linked artifacts above. Do not repeat Package D0-D2 discovery,
+design, reconciliation, review, or incident diagnosis - all are closed with
+no open blockers. Do not repeat Package C discovery, design review or
+implementation review unless Package E exposes a concrete regression.

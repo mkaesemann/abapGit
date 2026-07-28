@@ -94,3 +94,15 @@
 - Performance DESIGN_GATE verdict: APPROVE_WITH_MINOR_REVISIONS (conditions applied).
 - Performance IMPLEMENTATION_AUDIT verdict: PASS.
 - SAP validation: NOT RUN in this environment.
+
+## SAP validation closeout
+
+```text
+STATUS=SAP_VALIDATED_RESOLVED
+LIVE_RESULT=not reproduced after fix
+PACKAGE_D_D2_VALIDATED_HEAD=733bb30799886ef8659be7e293b82c3ccfcebbdd
+```
+
+Owner IT8 retest confirmed `TIME_OUT_REPRODUCED=NO`. See
+[.memory/incidents/variant_b_d2_it8_system_no_roll_timeout.md](.memory/incidents/variant_b_d2_it8_system_no_roll_timeout.md)
+for the full incident record.

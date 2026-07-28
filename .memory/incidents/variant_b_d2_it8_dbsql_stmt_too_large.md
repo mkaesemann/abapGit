@@ -534,3 +534,23 @@ unrelated deliverable.
   contributing cause - Package B/E's certification state machine is
   entirely unaffected by and unrelated to this incident's root cause.
 ```
+
+## 15. SAP validation closeout
+
+```text
+STATUS=SAP_VALIDATED_RESOLVED
+LIVE_RESULT=not reproduced after SQL-size fix
+FOLLOWUP_SAT=completed successfully
+PACKAGE_D_D2_VALIDATED_HEAD=733bb30799886ef8659be7e293b82c3ccfcebbdd
+```
+
+Live IT8 verification confirmed the fix is active (direct `SAPRead` of
+`ZCL_ABAPGIT_ORTEC_OBJ_STORE=>GET_OBJECTS` matched commit `733bb307`
+byte-for-byte) and the exact reproduction sequence (§13) completed
+successfully with `DBSQL_STMNT_TOO_LARGE_REPRODUCED=NO`, `ABAP_UNIT=PASS`,
+`ATC=PASS_WITHOUT_SEVERE_FINDINGS`. The resulting SAT trace was fully
+analyzed - see
+[.memory/incidents/variant_b_d2_sat_warm_to_cold_o4h8794.md](.memory/incidents/variant_b_d2_sat_warm_to_cold_o4h8794.md) -
+and its one measured hotspot was classified `PACKAGE_E_FOLLOWUP`, unrelated
+to this fix's own code path (zero `get_objects`/`read_object_rows`
+measurable cost in that trace).

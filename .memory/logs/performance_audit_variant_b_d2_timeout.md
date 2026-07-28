@@ -155,3 +155,16 @@ is strictly K-bounded (never N-bounded) for SQL and HTTP across all four
 mandated scale points, introduces no per-object SQL/HTTP, inherits all
 row/byte bounds unmodified, and leaves the certification/attempt/commit
 boundary, the SYSTEM_NO_ROLL fix, and D1/Package C entirely untouched.
+
+## SAP validation closeout
+
+```text
+STATUS=SAP_VALIDATED_RESOLVED
+PACKAGE_D_D2_VALIDATED_HEAD=733bb30799886ef8659be7e293b82c3ccfcebbdd
+```
+
+Live IT8 retest confirmed `TIME_OUT_REPRODUCED=NO`. The follow-up SAT trace
+(`.memory/incidents/variant_b_d2_sat_warm_to_cold_o4h8794.md`) independently
+confirms zero `materialize_missing_batches`/`ensure_available` cost on the
+warm/already-materialized case - this audit's PASS verdict is validated
+live, not only statically.

@@ -98,3 +98,19 @@ Oversized-object behavior                         - inherited unmodified (solo-o
 ORTEC-disabled standard behavior                  - unaffected (no src/git/** file touched)
 SYSTEM_NO_ROLL fix (commit 2111b288)              - untouched, confirmed via git diff --stat
 ```
+## SAP validation closeout
+
+```text
+STATUS=SAP_VALIDATED_RESOLVED
+FIX=bound ENSURE_AVAILABLE remote top-up to caller missing SHA set through adaptive MATERIALIZE_BLOBS batching
+LIVE_RESULT=not reproduced after fix
+PACKAGE_D_D2_VALIDATED_HEAD=733bb30799886ef8659be7e293b82c3ccfcebbdd
+```
+
+Owner IT8 retest confirmed `TIME_OUT_REPRODUCED=NO` together with
+`SYSTEM_NO_ROLL_REPRODUCED=NO` on the combined checkpoint. See
+[.memory/incidents/variant_b_d2_it8_system_no_roll_timeout.md](.memory/incidents/variant_b_d2_it8_system_no_roll_timeout.md)
+for the full incident record and
+[.memory/incidents/variant_b_d2_sat_warm_to_cold_o4h8794.md](.memory/incidents/variant_b_d2_sat_warm_to_cold_o4h8794.md)
+for the follow-up SAT trace confirming zero measurable cost from this fix's
+code path on the warm case.

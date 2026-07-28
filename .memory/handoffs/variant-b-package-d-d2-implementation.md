@@ -299,3 +299,27 @@ unauthorized/incorrect files via `git checkout HEAD -- <file>` (after
 confirming via `git diff`/`git status` that the target file had no other
 legitimate uncommitted change), and re-delegates with a narrower, corrected
 scope rather than attempting to salvage a partially-wrong diff.
+
+## D2 final closeout (SAP validation)
+
+```text
+STATUS=SAP_VALIDATED_COMPLETE
+PACKAGE_D_D2_VALIDATED_HEAD=733bb30799886ef8659be7e293b82c3ccfcebbdd
+SAP_SYSTEM=IT8
+ABAP_UNIT=PASS
+ATC=PASS_WITHOUT_SEVERE_FINDINGS
+```
+
+Three live IT8 incidents surfaced after this implementation (SYSTEM_NO_ROLL,
+TIME_OUT, DBSQL_STMNT_TOO_LARGE) were each root-caused and fixed in
+follow-up commits (`2111b288`, `17513ba7`, `733bb307`) and are all
+`SAP_VALIDATED_RESOLVED` - see
+[.memory/incidents/variant_b_d2_it8_system_no_roll_timeout.md](.memory/incidents/variant_b_d2_it8_system_no_roll_timeout.md)
+and
+[.memory/incidents/variant_b_d2_it8_dbsql_stmt_too_large.md](.memory/incidents/variant_b_d2_it8_dbsql_stmt_too_large.md).
+A follow-up SAT warm-to-cold trace
+(`.memory/incidents/variant_b_d2_sat_warm_to_cold_o4h8794.md`) classified
+its one measured hotspot (`ZCL_ABAPGIT_ORTEC_OBJ_INDEX=>REBUILD_INDEX`) as
+`PACKAGE_E_FOLLOWUP`, not a D2 defect. No D2-owned attempt/lock/transaction/
+staged-visibility mechanism was implicated by any of the three incidents or
+the SAT trace. D2 blockers: `NONE`.

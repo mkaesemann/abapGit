@@ -58,3 +58,22 @@
 - Blocking findings: 0.
 - Performance audit verdict: PASS_WITH_MINOR_FINDINGS.
 - SAP validation: NOT RUN in this environment.
+
+## SAP validation closeout
+
+```text
+STATUS=SAP_VALIDATED_COMPLETE
+PACKAGE_D_D2_VALIDATED_HEAD=733bb30799886ef8659be7e293b82c3ccfcebbdd
+ABAP_UNIT=PASS
+ATC=PASS_WITHOUT_SEVERE_FINDINGS
+```
+
+Live IT8 validation subsequently confirmed this regression scope: three
+incidents surfaced and were resolved (SYSTEM_NO_ROLL, TIME_OUT,
+DBSQL_STMNT_TOO_LARGE, all SAP_VALIDATED_RESOLVED), and a follow-up SAT
+trace found zero cost contribution from any D2-owned mechanism (see
+[.memory/incidents/variant_b_d2_sat_warm_to_cold_o4h8794.md](.memory/incidents/variant_b_d2_sat_warm_to_cold_o4h8794.md)).
+AUDIT-M-1 (same-repo lock-contention latency, documented in
+`performance_audit_variant_b_package_d2.md`) remains a non-blocking,
+structurally-reviewed-only finding - no live contention was observed or
+measured in any of the three incident retests or the SAT trace.

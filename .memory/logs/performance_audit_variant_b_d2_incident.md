@@ -121,3 +121,18 @@ superseded here.
   derived directly from the live SYSTEM_NO_ROLL dump's own measured
   `LT_ROWS[54226x280]` and memory-usage sections (see incident artifact §3.1),
   not from a controlled trace.
+
+## SAP validation closeout
+
+```text
+STATUS=SAP_VALIDATED_RESOLVED
+PACKAGE_D_D2_VALIDATED_HEAD=733bb30799886ef8659be7e293b82c3ccfcebbdd
+```
+
+The "not yet possible" post-fix SAT trace noted above was subsequently
+captured (`95C45B828A9B11F1B129001DD8B728C2`) after the DBSQL_STMNT_TOO_LARGE
+fix also landed - see
+[.memory/incidents/variant_b_d2_sat_warm_to_cold_o4h8794.md](.memory/incidents/variant_b_d2_sat_warm_to_cold_o4h8794.md).
+It confirms zero measurable cost from `get_reachable_objects`/`populate_cache`
+on the warm/already-materialized case, matching this audit's before/after
+model exactly.
