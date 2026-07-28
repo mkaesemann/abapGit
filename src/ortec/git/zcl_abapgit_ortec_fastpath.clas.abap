@@ -280,16 +280,6 @@ CLASS zcl_abapgit_ortec_fastpath DEFINITION
       IMPORTING iv_current       TYPE i
       RETURNING VALUE(rv_deepen) TYPE i.
 
-  PRIVATE SECTION.
-    "! Resolve repo key from URL. Creates new key if none found.
-    "! @parameter iv_url |
-    "! Remote URL
-    "! @parameter rv_key |
-    "! Repository key (always non-empty)
-    CLASS-METHODS resolve_repo_key
-      IMPORTING iv_url        TYPE string
-      RETURNING VALUE(rv_key) TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key.
-
     "! Package C C2: certification lifecycle extracted from PERSIST_PULL_RESULT
     "! so it is directly unit-testable without the URL-keyed
     "! IS_ACTIVE_FOR_REPO switch (backed by a shared, singleton, XML-serialized
@@ -321,6 +311,16 @@ CLASS zcl_abapgit_ortec_fastpath DEFINITION
                 iv_branch_name TYPE string
                 iv_attempt_id  TYPE zcl_abapgit_ortec_mat_state=>ty_attempt_id
       RAISING   zcx_abapgit_ortec_git.
+
+  PRIVATE SECTION.
+    "! Resolve repo key from URL. Creates new key if none found.
+    "! @parameter iv_url |
+    "! Remote URL
+    "! @parameter rv_key |
+    "! Repository key (always non-empty)
+    CLASS-METHODS resolve_repo_key
+      IMPORTING iv_url        TYPE string
+      RETURNING VALUE(rv_key) TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key.
 
     CLASS-METHODS upload_pack
       IMPORTING
