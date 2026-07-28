@@ -10,6 +10,7 @@ CLASS ltcl_obj_store DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
     METHODS available_deduplicates FOR TESTING RAISING cx_static_check.
     METHODS reachable_objects_graph FOR TESTING RAISING cx_static_check.
     METHODS reachable_objects_missing_tree FOR TESTING RAISING cx_static_check.
+    METHODS reachable_ignores_extra_ready FOR TESTING RAISING cx_static_check.
     METHODS reachable_sha1s_graph FOR TESTING RAISING cx_static_check.
     METHODS reachable_sha1s_missing_blob FOR TESTING RAISING cx_static_check.
     METHODS verify_closure_ok FOR TESTING RAISING cx_static_check.
@@ -233,6 +234,91 @@ CLASS ltcl_obj_store IMPLEMENTATION.
         cl_abap_unit_assert=>fail( 'Missing reachable tree must raise' ).
       CATCH zcx_abapgit_ortec_git.
     ENDTRY.
+  ENDMETHOD.
+  METHOD reachable_ignores_extra_ready.
+    " INCIDENT variant_b_d2_it8_system_no_roll_timeout regression: before the
+    " fix, get_reachable_objects called populate_cache(), which issued one
+    " unbounded SELECT * FROM zaog_obj_store WHERE repo_key = iv_repo_key AND
+    " status = 'R' - loading every READY row (including full blob payloads)
+    " ever stored for the repository, not just this commit's reachable set.
+    " This asserts the fix: with many unrelated READY rows already present
+    " for the same repo_key (simulating several other branches already
+    " buffered), get_reachable_objects still returns exactly the commit's
+    " own reachable set, proving the per-level get_objects walk alone -
+    " never a full-repo preload - drives the result.
+    DATA lt_nodes TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+    DATA ls_node LIKE LINE OF lt_nodes.
+    DATA ls_commit TYPE zcl_abapgit_git_pack=>ty_commit.
+    DATA lt_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lv_blob_data TYPE xstring.
+    DATA lv_blob_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_tree_data TYPE xstring.
+    DATA lv_tree_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_commit_data TYPE xstring.
+    DATA lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_extra_data TYPE xstring.
+    DATA lv_extra_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_idx TYPE i.
+    DATA lv_idx_c TYPE c LENGTH 4.
+
+    lv_blob_data = '48656C6C6F'.
+    lv_blob_sha = zcl_abapgit_hash=>sha1_blob( lv_blob_data ).
+
+    ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-file.
+    ls_node-name  = 'hello.txt'.
+    ls_node-sha1  = lv_blob_sha.
+    APPEND ls_node TO lt_nodes.
+
+    lv_tree_data = zcl_abapgit_git_pack=>encode_tree( lt_nodes ).
+    lv_tree_sha = zcl_abapgit_hash=>sha1_tree( lv_tree_data ).
+
+    ls_commit-tree = lv_tree_sha.
+    ls_commit-author = 'Test <test@example.com> 0 +0000'.
+    ls_commit-committer = 'Test <test@example.com> 0 +0000'.
+    ls_commit-body = 'reachable_ignores_extra_ready'.
+    lv_commit_data = zcl_abapgit_git_pack=>encode_commit( ls_commit ).
+    lv_commit_sha = zcl_abapgit_hash=>sha1_commit( lv_commit_data ).
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_commit_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-commit
+      iv_data     = lv_commit_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_tree_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-tree
+      iv_data     = lv_tree_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_blob_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-blob
+      iv_data     = lv_blob_data ).
+
+    " Simulate several other already-buffered branches: many unrelated READY
+    " blob rows for the SAME repo_key, none of them reachable from the
+    " commit above.
+    DO 50 TIMES.
+      lv_idx = sy-index.
+      lv_idx_c = lv_idx.
+      lv_extra_data = lv_blob_data && lv_idx_c.
+      lv_extra_sha = zcl_abapgit_hash=>sha1_blob( lv_extra_data ).
+      zcl_abapgit_ortec_obj_store=>store_object(
+        iv_repo_key = mc_repo
+        iv_sha1     = lv_extra_sha
+        iv_type     = zif_abapgit_git_definitions=>c_type-blob
+        iv_data     = lv_extra_data ).
+    ENDDO.
+
+    lt_objects = zcl_abapgit_ortec_obj_store=>get_reachable_objects(
+      iv_repo_key = mc_repo
+      iv_commit   = lv_commit_sha ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lines( lt_objects )
+      exp = 3
+      msg = 'get_reachable_objects must return exactly the reachable set, ' &&
+            'never the whole repo object store' ).
   ENDMETHOD.
   METHOD reachable_sha1s_graph.
     " get_reachable_sha1s must return the exact same commit+tree+blob SHA1

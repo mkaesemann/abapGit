@@ -708,10 +708,25 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
     FIELD-SYMBOLS <ls_blob_object> LIKE LINE OF lt_blob_objects.
     FIELD-SYMBOLS <ls_node> LIKE LINE OF lt_nodes.
 
-    " Pre-load all objects for this repo into the session cache in one SELECT,
-    " so every get_objects call below is a pure in-memory cache lookup.
-    populate_cache( iv_repo_key ).
-
+    " INCIDENT variant_b_d2_it8_system_no_roll_timeout: the prior pre-load-
+    " everything call ("populate_cache( iv_repo_key )") issued one unbounded
+    " SELECT * FROM zaog_obj_store WHERE repo_key = iv_repo_key AND status =
+    " 'R' - with no row/byte limit - loading every READY object (commits,
+    " trees AND full blob payloads) EVER stored for the whole repository
+    " into memory before the walk below even started. For a repository whose
+    " object store already holds many buffered branches (the normal,
+    " intended Package C/D shared-object-store outcome), this single call
+    " materializes far more data than this one commit's reachable set could
+    " ever need and was reproduced causing SYSTEM_NO_ROLL (see the incident
+    " artifact for dump evidence: LT_ROWS[54226x280], ~3.96 GB used memory).
+    " The walk below already performs its own correctly bounded, per-level
+    " get_objects( iv_bulk_fetch = abap_true ) calls (commit, then each
+    " tree level, then the blob set) - each one is a normal object-store
+    " read scoped to exactly that level's own SHA1 set, not the whole repo,
+    " and already falls back to its own DB read on any cache miss (no
+    " pre-warm required for correctness). This mirrors the sibling method
+    " get_reachable_sha1s, which never called populate_cache either. No
+    " other change was made to this method's tree-walk algorithm.
     APPEND iv_commit TO lt_commit_sha.
     lt_commit_objects = get_objects( iv_repo_key   = iv_repo_key
                                      it_sha1s      = lt_commit_sha
