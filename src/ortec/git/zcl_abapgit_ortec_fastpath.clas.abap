@@ -74,6 +74,14 @@ CLASS zcl_abapgit_ortec_fastpath DEFINITION
     "! persisted as the next fetch's starting baseline via
     "! zcl_abapgit_ortec_repo_state=>update_after_fetch. Defaults to 1 for
     "! callers that don't track this (matches the pre-existing behavior).
+    "! @parameter iv_attempt_id |
+    "! Optional attempt correlation id (ORTEC D2b2). When supplied (e.g. by
+    "! a caller that already holds the repo lock and minted its own
+    "! attempt via zcl_abapgit_ortec_mat_state=>begin_attempt), it is
+    "! forwarded as-is to persist_missing_objects/certify_fetched_commit -
+    "! no internal begin_attempt call happens. When blank/not supplied
+    "! (both pre-existing external callers), this method mints one
+    "! internally exactly once, preserving prior behavior.
     "! @raising zcx_abapgit_ortec_git |
     "! On error
     CLASS-METHODS persist_pull_result
@@ -83,11 +91,17 @@ CLASS zcl_abapgit_ortec_fastpath DEFINITION
                 it_objects     TYPE zif_abapgit_definitions=>ty_objects_tt
                 iv_repo_key    TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key OPTIONAL
                 iv_deepen_used TYPE i DEFAULT 1
+                iv_attempt_id  TYPE zcl_abapgit_ortec_mat_state=>ty_attempt_id OPTIONAL
       RAISING   zcx_abapgit_ortec_git.
 
+    "! @parameter iv_attempt_id |
+    "! Optional attempt correlation id (ORTEC D2b2), set on every newly
+    "! inserted ZAOG_OBJ_STORE row. Blank when not supplied - no behavior
+    "! change.
     CLASS-METHODS persist_missing_objects
-      IMPORTING iv_repo_key TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
-                it_objects  TYPE zif_abapgit_definitions=>ty_objects_tt
+      IMPORTING iv_repo_key   TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
+                it_objects    TYPE zif_abapgit_definitions=>ty_objects_tt
+                iv_attempt_id TYPE zcl_abapgit_ortec_mat_state=>ty_attempt_id OPTIONAL
       RAISING   zcx_abapgit_ortec_git.
 
     "! Fetch tip commit objects for branch metadata — read-only, no ORTEC fastpath routing.
@@ -284,14 +298,19 @@ CLASS zcl_abapgit_ortec_fastpath DEFINITION
     "! zcl_abapgit_persistence_ortec=>set_repo_use_cache/update_repo_config).
     "! Never called with an unresolved/blank iv_repo_key - PERSIST_PULL_RESULT
     "! already guarantees that before calling this method.
-    "! Idempotent-safe: begin_attempt/mark_graph_complete/mark_full_complete
-    "! never downgrade an existing, higher certification level.
+    "! Idempotent-safe: mark_graph_complete/mark_full_complete never
+    "! downgrade an existing, higher certification level. Never calls
+    "! begin_attempt itself (ORTEC D2b2) - the caller (persist_pull_result)
+    "! always supplies iv_attempt_id.
     "! @parameter iv_repo_key |
     "! Repository key (already resolved and non-initial)
     "! @parameter iv_commit |
     "! Fetched commit SHA1 to certify
     "! @parameter iv_branch_name |
     "! Branch whose materialized pointer is published on full completeness
+    "! @parameter iv_attempt_id |
+    "! Attempt correlation id, minted by the caller (persist_pull_result)
+    "! via begin_attempt or forwarded from its own caller
     "! @raising zcx_abapgit_ortec_git |
     "! On a genuine technical/persistence failure (not on expected local
     "! incompleteness, which is caught internally and simply skips
@@ -300,6 +319,7 @@ CLASS zcl_abapgit_ortec_fastpath DEFINITION
       IMPORTING iv_repo_key    TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
                 iv_commit      TYPE zif_abapgit_git_definitions=>ty_sha1
                 iv_branch_name TYPE string
+                iv_attempt_id  TYPE zcl_abapgit_ortec_mat_state=>ty_attempt_id
       RAISING   zcx_abapgit_ortec_git.
 
     CLASS-METHODS upload_pack
@@ -630,6 +650,9 @@ METHOD pull_by_branch.
     DATA lo_fp_timer    TYPE REF TO zcl_abapgit_timer.
     DATA lv_fp_duration TYPE string.
     DATA li_progress    TYPE REF TO zif_abapgit_progress.
+    DATA lv_lock_id     TYPE zcl_abapgit_ortec_pack_dec=>ty_session_id.
+    DATA lv_lock_held   TYPE abap_bool.
+    DATA lv_attempt_id  TYPE zcl_abapgit_ortec_mat_state=>ty_attempt_id.
 
     FIELD-SYMBOLS <ls_exp>  LIKE LINE OF lt_expanded.
     FIELD-SYMBOLS <ls_blob> LIKE LINE OF rs_result-objects.
@@ -664,11 +687,39 @@ METHOD pull_by_branch.
     IF ls_active_sess-session_id IS NOT INITIAL.
       IF    ls_active_sess-branch_name  = iv_branch_name
         AND ls_active_sess-deepen_level = lv_req_deepen.
+        " ORTEC D2b2: acquire the canonical repo lock and mint an attempt id
+        " BEFORE resume_decode, so the resume decode and the later
+        " persist_pull_result call (Phase 1b, below) run inside one
+        " unbroken locked/attempt-correlated span. Lock/attempt failures
+        " are non-critical here (mirrors the existing "Resume failed -
+        " continue normally" graceful-degrade pattern) - never a hard
+        " failure.
         TRY.
-            lt_resumed = zcl_abapgit_ortec_pack_dec=>resume_decode( lv_repo_key ).
-          CATCH zcx_abapgit_exception.
-            " Resume failed - continue normally
+            lv_lock_id = zcl_abapgit_ortec_pack_dec=>acquire_repo_lock( iv_repo_key = lv_repo_key ).
+            lv_lock_held = abap_true.
+            lv_attempt_id = zcl_abapgit_ortec_mat_state=>begin_attempt(
+                                iv_repo_key = lv_repo_key
+                                iv_commit   = lv_remote_sha ).
+          CATCH zcx_abapgit_exception zcx_abapgit_ortec_git.
+            " Lock or attempt-id acquisition failed - continue normally
+            CLEAR lv_attempt_id.
         ENDTRY.
+
+        IF lv_lock_held = abap_true AND lv_attempt_id IS NOT INITIAL.
+          TRY.
+              lt_resumed = zcl_abapgit_ortec_pack_dec=>resume_decode(
+                               iv_repo_key   = lv_repo_key
+                               iv_lock_held  = abap_true
+                               iv_attempt_id = lv_attempt_id ).
+            CATCH zcx_abapgit_exception.
+              " Resume failed - continue normally
+          ENDTRY.
+        ELSEIF lv_lock_held = abap_true.
+          " Lock acquired but attempt-id mint failed: release immediately,
+          " no resume attempted this round.
+          zcl_abapgit_ortec_pack_dec=>release_repo_lock( lv_lock_id ).
+          CLEAR lv_lock_held.
+        ENDIF.
       ELSE.
         " Partial decode belongs to a different request context: cleanup.
         zcl_abapgit_ortec_pack_raw=>cleanup_partial_session(
@@ -716,10 +767,16 @@ METHOD pull_by_branch.
                     iv_commit      = rs_result-commit
                     it_objects     = rs_result-objects
                     iv_repo_key    = lv_repo_key
-                    iv_deepen_used = lv_req_deepen ).
+                    iv_deepen_used = lv_req_deepen
+                    iv_attempt_id  = lv_attempt_id ).
               CATCH zcx_abapgit_ortec_git.
                 " State update non-critical
             ENDTRY.
+
+            IF lv_lock_held = abap_true.
+              zcl_abapgit_ortec_pack_dec=>release_repo_lock( lv_lock_id ).
+              CLEAR lv_lock_held.
+            ENDIF.
 
             lv_fp_duration = lo_fp_timer->end( ).
             li_progress = zcl_abapgit_progress=>get_instance( 1 ).
@@ -728,10 +785,25 @@ METHOD pull_by_branch.
               iv_text    = |Fastpath: { lines( rs_result-objects ) } git objects (resumed), { lv_fp_duration }| ).
             RETURN. " Success! Avoid redundant GET from remote.
           CATCH zcx_abapgit_exception.
+            IF lv_lock_held = abap_true.
+              zcl_abapgit_ortec_pack_dec=>release_repo_lock( lv_lock_id ).
+              CLEAR lv_lock_held.
+            ENDIF.
             CLEAR rs_result.
             RETURN.
         ENDTRY.
       ENDIF.
+    ENDIF.
+
+    " ORTEC D2b2: release the lock here if it is still held - covers the
+    " "resume completed but didn't match remote tip" and "resume itself
+    " failed/skipped" paths, both of which fall through to here without
+    " having reached persist_pull_result above. The lock must not extend
+    " into Phase 2 (stored-state reconstruction), which never calls
+    " resume_decode/persist_pull_result.
+    IF lv_lock_held = abap_true.
+      zcl_abapgit_ortec_pack_dec=>release_repo_lock( lv_lock_id ).
+      CLEAR lv_lock_held.
     ENDIF.
 
     " Phase 2: Check if remote tip matches stored state
@@ -1592,6 +1664,7 @@ METHOD upload_pack.
       ls_row-obj_size   = xstrlen( <ls_obj>-data ).
       ls_row-created_at = lv_ts.
       ls_row-status     = 'R'.
+      ls_row-attempt_id = iv_attempt_id.
       APPEND ls_row TO lt_new.
     ENDLOOP.
     IF lt_new IS NOT INITIAL.
@@ -1603,7 +1676,8 @@ METHOD upload_pack.
   ENDMETHOD.
 
   METHOD persist_pull_result.
-    DATA lv_repo_key TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key.
+    DATA lv_repo_key   TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key.
+    DATA lv_attempt_id TYPE zcl_abapgit_ortec_mat_state=>ty_attempt_id.
 
     IF zcl_abapgit_ortec_git_switch=>is_active_for_repo( iv_url ) = abap_false.
       RETURN.
@@ -1617,9 +1691,25 @@ METHOD upload_pack.
       RETURN.
     ENDIF.
 
+    " ORTEC D2b2: if the caller (e.g. fastpath's own pull_by_branch or
+    " porcelain's pull_by_branch) already holds the repo lock and minted
+    " its own attempt id, forward it as-is - never mint a second one for
+    " the same locked span. Otherwise (both pre-existing external callers,
+    " which pass nothing here), mint one internally exactly once, exactly
+    " as this method already did indirectly via certify_fetched_commit
+    " before this change.
+    IF iv_attempt_id IS NOT INITIAL.
+      lv_attempt_id = iv_attempt_id.
+    ELSE.
+      lv_attempt_id = zcl_abapgit_ortec_mat_state=>begin_attempt(
+                          iv_repo_key = lv_repo_key
+                          iv_commit   = iv_commit ).
+    ENDIF.
+
     persist_missing_objects(
-      iv_repo_key = lv_repo_key
-      it_objects  = it_objects ).
+      iv_repo_key   = lv_repo_key
+      it_objects    = it_objects
+      iv_attempt_id = lv_attempt_id ).
 
     " Package C C2: certification lifecycle - replaces the pre-Package-C raw
     " ZAOG_COMMIT_HIST INSERT, which never set hist_level/snap_state (see
@@ -1635,7 +1725,8 @@ METHOD upload_pack.
     certify_fetched_commit(
       iv_repo_key    = lv_repo_key
       iv_commit      = iv_commit
-      iv_branch_name = iv_branch_name ).
+      iv_branch_name = iv_branch_name
+      iv_attempt_id  = lv_attempt_id ).
 
     " Bookkeeping only (deepen level / last-fetch pointer for the thin ->
     " self-contained -> recovery cascade's own depth heuristics) - never a
@@ -1653,10 +1744,6 @@ METHOD upload_pack.
   ENDMETHOD.
 
   METHOD certify_fetched_commit.
-    DATA(lv_attempt_id) = zcl_abapgit_ortec_mat_state=>begin_attempt(
-      iv_repo_key = iv_repo_key
-      iv_commit   = iv_commit ).
-
     DATA(lv_graph_complete) = abap_false.
     TRY.
         zcl_abapgit_ortec_obj_store=>verify_tree_closure(
@@ -1677,7 +1764,7 @@ METHOD upload_pack.
     zcl_abapgit_ortec_mat_state=>mark_graph_complete(
       iv_repo_key   = iv_repo_key
       iv_commit     = iv_commit
-      iv_attempt_id = lv_attempt_id ).
+      iv_attempt_id = iv_attempt_id ).
 
     DATA(lt_tip_blob_sha1s) = zcl_abapgit_ortec_obj_store=>get_tip_blob_sha1s(
       iv_repo_key = iv_repo_key
@@ -1693,12 +1780,12 @@ METHOD upload_pack.
     zcl_abapgit_ortec_mat_state=>mark_full_complete(
       iv_repo_key   = iv_repo_key
       iv_commit     = iv_commit
-      iv_attempt_id = lv_attempt_id ).
+      iv_attempt_id = iv_attempt_id ).
     zcl_abapgit_ortec_mat_state=>publish_snapshot_complete(
       iv_repo_key    = iv_repo_key
       iv_branch_name = iv_branch_name
       iv_commit      = iv_commit
-      iv_attempt_id  = lv_attempt_id ).
+      iv_attempt_id  = iv_attempt_id ).
   ENDMETHOD.
 
   METHOD resolve_repo_key.

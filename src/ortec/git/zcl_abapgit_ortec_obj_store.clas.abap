@@ -78,6 +78,31 @@ CLASS zcl_abapgit_ortec_obj_store DEFINITION
       RETURNING VALUE(rt_objects) TYPE zif_abapgit_definitions=>ty_objects_tt
       RAISING   zcx_abapgit_ortec_git.
 
+    "! ORTEC D2 PERF-B-1/staged-visibility (target_design §5.3/§5.3.1): a
+    "! dedicated status-aware read for a pack's own delta temp-key rows
+    "! during that SAME pack's own resolution. Same chunked-bulk-read
+    "! contract and strict raise-on-any-missing-SHA1 behavior as
+    "! get_objects, but reads WHERE status IN ('D','R') instead of
+    "! status = 'R' (does not reuse read_object_rows, which is hard-coded
+    "! to 'R'). Callable ONLY by zcl_abapgit_ortec_pack_stream - a
+    "! 'D'-status row is a decoded-but-not-yet-resolved delta temp object
+    "! and must never be exposed via get_object/get_objects/
+    "! get_available_objects (those remain strictly status = 'R'-only,
+    "! unmodified by this method).
+    "! @parameter iv_repo_key |
+    "! Repository key
+    "! @parameter it_sha1s |
+    "! Temp-key (or real) SHA1s to read, deduplicated internally
+    "! @parameter rt_objects |
+    "! One object per requested SHA1
+    "! @raising zcx_abapgit_ortec_git |
+    "! If any requested SHA1 is not found with status 'D' or 'R'
+    CLASS-METHODS get_staged_delta_objects
+      IMPORTING iv_repo_key       TYPE ty_repo_key
+                it_sha1s          TYPE zif_abapgit_git_definitions=>ty_sha1_tt
+      RETURNING VALUE(rt_objects) TYPE zif_abapgit_definitions=>ty_objects_tt
+      RAISING   zcx_abapgit_ortec_git.
+
     "! Bulk-read every locally READY object found for the supplied SHA1 set.
     "! Missing SHA1 values are ignored. Input is deduplicated and read in
     "! bounded packages; found rows warm the normal session cache.
@@ -540,6 +565,106 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
                                        it_sha1s    = lt_package ).
         APPEND LINES OF lt_db_rows TO lt_rows.
       ENDIF.
+    ENDIF.
+
+    mv_cache_repo_key = iv_repo_key.
+
+    LOOP AT lt_rows ASSIGNING <ls_row>.
+      INSERT <ls_row>-obj_sha1 INTO TABLE lt_found_sha1s.
+      MOVE-CORRESPONDING <ls_row> TO ls_cache_entry.
+      INSERT ls_cache_entry INTO TABLE mt_cache.
+      CLEAR ls_object.
+      ls_object-sha1 = <ls_row>-obj_sha1.
+      ls_object-type = <ls_row>-obj_type.
+      ls_object-data = <ls_row>-obj_data.
+      APPEND ls_object TO rt_objects.
+    ENDLOOP.
+
+    LOOP AT lt_unique_sha1s ASSIGNING <lv_sha1>.
+      READ TABLE lt_found_sha1s WITH TABLE KEY table_line = <lv_sha1> TRANSPORTING NO FIELDS.
+      IF sy-subrc <> 0.
+        zcx_abapgit_ortec_git=>raise( |Object { <lv_sha1> } not found in store| ).
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
+
+  METHOD get_staged_delta_objects.
+    DATA lt_unique_sha1s TYPE ty_sha1_set.
+    DATA lt_missing_sha1s TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_package TYPE ty_sha1_rows.
+    DATA lt_db_rows TYPE ty_obj_store_tt.
+    DATA lt_rows TYPE ty_obj_store_tt.
+    DATA lt_found_sha1s TYPE ty_sha1_set.
+    DATA ls_cache_entry TYPE ty_cache_entry.
+    DATA ls_object TYPE zif_abapgit_definitions=>ty_object.
+    DATA ls_sha1 TYPE ty_sha1_row.
+    DATA lr_sha1s TYPE RANGE OF zaog_obj_store-obj_sha1.
+
+    FIELD-SYMBOLS <lv_sha1> LIKE LINE OF it_sha1s.
+    FIELD-SYMBOLS <ls_row> LIKE LINE OF lt_rows.
+    FIELD-SYMBOLS <ls_pkg> LIKE LINE OF lt_package.
+
+    IF iv_repo_key IS INITIAL.
+      zcx_abapgit_ortec_git=>raise( 'Repository key missing for object store read' ).
+    ENDIF.
+
+    LOOP AT it_sha1s ASSIGNING <lv_sha1>
+        WHERE table_line IS NOT INITIAL.
+      INSERT <lv_sha1> INTO TABLE lt_unique_sha1s.
+    ENDLOOP.
+
+    IF lt_unique_sha1s IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    " Own cache-hit check (PERF-M-2): admits 'D' as well as 'R', so a
+    " temp-key row already warmed by preload_delta_rows registers as a
+    " cache hit here, unlike get_objects'/get_available_objects' own
+    " status = 'R'-only check.
+    LOOP AT lt_unique_sha1s ASSIGNING <lv_sha1>.
+      READ TABLE mt_cache INTO ls_cache_entry
+           WITH TABLE KEY repo_key = iv_repo_key obj_sha1 = <lv_sha1>.
+      IF sy-subrc = 0 AND ( ls_cache_entry-status = 'D' OR ls_cache_entry-status = 'R' ).
+        APPEND ls_cache_entry TO lt_rows.
+      ELSE.
+        APPEND <lv_sha1> TO lt_missing_sha1s.
+      ENDIF.
+    ENDLOOP.
+
+    " Own SELECT (not read_object_rows, which is hard-coded to status = 'R')
+    " - chunked like get_objects' non-bulk branch.
+    LOOP AT lt_missing_sha1s ASSIGNING <lv_sha1>.
+      ls_sha1-sha1 = <lv_sha1>.
+      APPEND ls_sha1 TO lt_package.
+      IF lines( lt_package ) >= c_select_package_size.
+        CLEAR lr_sha1s.
+        LOOP AT lt_package ASSIGNING <ls_pkg>.
+          APPEND VALUE #( sign = 'I' option = 'EQ' low = <ls_pkg>-sha1 ) TO lr_sha1s.
+        ENDLOOP.
+        CLEAR lt_db_rows.
+        SELECT * FROM zaog_obj_store
+          INTO TABLE lt_db_rows
+          WHERE repo_key = iv_repo_key
+            AND obj_sha1 IN lr_sha1s
+            AND status   IN ( 'D', 'R' ).
+        APPEND LINES OF lt_db_rows TO lt_rows.
+        CLEAR lt_package.
+      ENDIF.
+    ENDLOOP.
+
+    IF lt_package IS NOT INITIAL.
+      CLEAR lr_sha1s.
+      LOOP AT lt_package ASSIGNING <ls_pkg>.
+        APPEND VALUE #( sign = 'I' option = 'EQ' low = <ls_pkg>-sha1 ) TO lr_sha1s.
+      ENDLOOP.
+      CLEAR lt_db_rows.
+      SELECT * FROM zaog_obj_store
+        INTO TABLE lt_db_rows
+        WHERE repo_key = iv_repo_key
+          AND obj_sha1 IN lr_sha1s
+          AND status   IN ( 'D', 'R' ).
+      APPEND LINES OF lt_db_rows TO lt_rows.
     ENDIF.
 
     mv_cache_repo_key = iv_repo_key.

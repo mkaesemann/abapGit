@@ -174,6 +174,9 @@ CLASS zcl_abapgit_ortec_porcelain IMPLEMENTATION.
     DATA ls_seed_object    TYPE zif_abapgit_definitions=>ty_object.
     DATA lt_seed_objects   TYPE zif_abapgit_definitions=>ty_objects_tt.
     DATA lt_tip_blob_sha1s TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lv_porc_lock_id   TYPE zcl_abapgit_ortec_pack_dec=>ty_session_id.
+    DATA lv_porc_lock_held TYPE abap_bool.
+    DATA lv_porc_attempt_id TYPE zcl_abapgit_ortec_mat_state=>ty_attempt_id.
 
     lv_ortec_active = zcl_abapgit_ortec_git_switch=>is_active_for_repo( iv_url ).
 
@@ -372,6 +375,30 @@ CLASS zcl_abapgit_ortec_porcelain IMPLEMENTATION.
     " full certification lifecycle (see
     " zcl_abapgit_ortec_fastpath=>persist_pull_result) - reached only by
     " this INCREMENTAL_UPDATE branch, never by WARM_UNCHANGED/COLD_BRANCH.
+    " ORTEC D2b2: acquire the canonical repo lock and mint an attempt id for
+    " this Publication Unit #2 span. The lock/attempt setup deliberately
+    " starts HERE (not before the preceding upload_pack_by_branch/pull(...)
+    " calls above) and wraps ONLY the persist_pull_result call below -
+    " lock/attempt failures are non-critical (graceful degrade, same
+    " pattern as the existing persist_pull_result TRY/CATCH one line down).
+    " Guarded on a non-initial repo key: never acquire the canonical lock
+    " with a blank/session-global key (invariant) - persist_pull_result
+    " itself already handles a blank key by returning early with no writes.
+    IF lv_ortec_repo_key IS NOT INITIAL.
+      TRY.
+          lv_porc_lock_id = zcl_abapgit_ortec_pack_dec=>acquire_repo_lock( iv_repo_key = lv_ortec_repo_key ).
+          lv_porc_lock_held = abap_true.
+          lv_porc_attempt_id = zcl_abapgit_ortec_mat_state=>begin_attempt(
+                                    iv_repo_key = lv_ortec_repo_key
+                                    iv_commit   = rs_result-commit ).
+        CATCH zcx_abapgit_exception zcx_abapgit_ortec_git.
+          " Lock or attempt-id acquisition failed - persist_pull_result below
+          " still runs (it mints its own attempt id internally when none is
+          " supplied), just without this caller's explicit correlation.
+          CLEAR lv_porc_attempt_id.
+      ENDTRY.
+    ENDIF.
+
     TRY.
         zcl_abapgit_ortec_fastpath=>persist_pull_result(
           iv_url         = iv_url
@@ -379,10 +406,19 @@ CLASS zcl_abapgit_ortec_porcelain IMPLEMENTATION.
           iv_commit      = rs_result-commit
           it_objects     = rs_result-objects
           iv_repo_key    = lv_ortec_repo_key
-          iv_deepen_used = lv_deepen_used ).
+          iv_deepen_used = lv_deepen_used
+          iv_attempt_id  = lv_porc_attempt_id ).
       CATCH zcx_abapgit_ortec_git.
         " ORTEC: persistence failure is non-critical, continue normally
     ENDTRY.
+
+    " Release unconditionally - covers both the success path above and the
+    " already-caught-exception path. Never spans back into
+    " upload_pack_by_branch/pull(...) (acquired only just above).
+    IF lv_porc_lock_held = abap_true.
+      zcl_abapgit_ortec_pack_dec=>release_repo_lock( lv_porc_lock_id ).
+      CLEAR lv_porc_lock_held.
+    ENDIF.
   ENDMETHOD.
 
   METHOD pull_by_commit.

@@ -14,6 +14,17 @@ CLASS ltcl_pack_stream DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT
     "! genuinely external REF_DELTA base up front - resolve_one_meta's own
     "! on-demand per-object thin-fetch fallback must never be reached.
     METHODS no_thin_fetch_for_ext_base FOR TESTING RAISING cx_static_check.
+    "! D2 staged-visibility fix (target_design §5.3/§5.3.1) - see each
+    "! method's own doc comment for what it covers.
+    METHODS delta_temp_row_status_d FOR TESTING RAISING cx_static_check.
+    METHODS temp_row_hidden_from_get FOR TESTING RAISING cx_static_check.
+    METHODS cleanup_removes_d_status FOR TESTING RAISING cx_static_check.
+    METHODS resolve_reads_own_d_row FOR TESTING RAISING cx_static_check.
+    METHODS staged_cache_hit_no_sql FOR TESTING RAISING cx_static_check.
+    "! D2B1 attempt-id correlation (target_design §9) - see each method's
+    "! own doc comment for what it covers.
+    METHODS attempt_id_on_obj_store FOR TESTING RAISING cx_static_check.
+    METHODS crash_before_resolve_ok FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 CLASS ltcl_pack_stream IMPLEMENTATION.
   METHOD setup.
@@ -143,9 +154,9 @@ CLASS ltcl_pack_stream IMPLEMENTATION.
       msg = 'An unresolved delta object must have a temporary store key' ).
 
     SELECT COUNT(*) FROM zaog_obj_store INTO lv_count
-      WHERE repo_key = mc_repo AND obj_sha1 = ls_meta-temp_key AND status = 'R'.
+      WHERE repo_key = mc_repo AND obj_sha1 = ls_meta-temp_key AND status = zcl_abapgit_ortec_pack_stream=>c_status_decoded.
     cl_abap_unit_assert=>assert_equals( act = lv_count exp = 1
-      msg = 'The temp-keyed delta row must exist and be promoted to R after a successful pass' ).
+      msg = 'The temp-keyed delta row must exist and be promoted to D (decoded-pending-resolution), not R, after a successful pass' ).
   ENDMETHOD.
 
   METHOD ext_base_resolve_after_preload.
@@ -413,5 +424,383 @@ CLASS ltcl_pack_stream IMPLEMENTATION.
     cl_abap_unit_assert=>assert_true(
       act = zcl_abapgit_ortec_obj_store=>exists( iv_repo_key = mc_repo iv_sha1 = lv_blob_sha )
       msg = 'The blob must still be fully available via the object store' ).
+  ENDMETHOD.
+
+  METHOD delta_temp_row_status_d.
+    " D2 staged-visibility fix (target_design §5.3): a REF_DELTA temp-key
+    " row must be promoted to the intermediate 'D' status by
+    " decode_and_persist_streaming, never straight to 'R', since it has
+    " not yet been resolved against its base.
+    DATA lv_base_data   TYPE xstring.
+    DATA lv_base_sha    TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_base_raw    TYPE x LENGTH 20.
+    DATA lv_delta       TYPE xstring.
+    DATA lv_compressed  TYPE xstring.
+    DATA lv_adler       TYPE zif_abapgit_git_definitions=>ty_adler32.
+    DATA lv_pack_magic  TYPE x LENGTH 4 VALUE '5041434B'.
+    DATA lv_version     TYPE x LENGTH 4 VALUE '00000002'.
+    DATA lv_obj_count   TYPE x LENGTH 4 VALUE '00000001'.
+    DATA lv_zlib_hdr    TYPE x LENGTH 2 VALUE '789C'.
+    DATA lv_type_len    TYPE x LENGTH 1 VALUE '76'. " ref_d (0x70) | length 6
+    DATA lv_pack        TYPE xstring.
+    DATA lv_trailer_hex TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_trailer_raw TYPE x LENGTH 20.
+    DATA lt_meta        TYPE zcl_abapgit_ortec_pack_stream=>ty_meta_tt.
+    DATA ls_meta        LIKE LINE OF lt_meta.
+    DATA lv_count       TYPE i.
+
+    lv_base_data = '41414141'. " "AAAA" - external base, never included in this pack
+    lv_base_sha = zcl_abapgit_hash=>sha1_blob( lv_base_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_base_sha iv_type = 'blob' iv_data = lv_base_data ).
+
+    lv_delta = '040590040121'.
+    cl_abap_gzip=>compress_binary( EXPORTING raw_in = lv_delta IMPORTING gzip_out = lv_compressed ).
+    lv_adler = zcl_abapgit_hash=>adler32( lv_delta ).
+    lv_base_raw = to_upper( lv_base_sha ).
+
+    CONCATENATE lv_pack_magic lv_version lv_obj_count INTO lv_pack IN BYTE MODE.
+    CONCATENATE lv_pack lv_type_len lv_base_raw lv_zlib_hdr lv_compressed lv_adler
+      INTO lv_pack IN BYTE MODE.
+
+    lv_trailer_hex = zcl_abapgit_hash=>sha1_raw( lv_pack ).
+    lv_trailer_raw = to_upper( lv_trailer_hex ).
+    CONCATENATE lv_pack lv_trailer_raw INTO lv_pack IN BYTE MODE.
+
+    lt_meta = zcl_abapgit_ortec_pack_stream=>decode_and_persist_streaming(
+      iv_data     = lv_pack
+      iv_repo_key = mc_repo ).
+
+    READ TABLE lt_meta INTO ls_meta INDEX 1.
+    cl_abap_unit_assert=>assert_equals( act = ls_meta-is_resolved exp = abap_false
+      msg = 'A ref-delta object must not be resolved by the streaming scan' ).
+
+    SELECT COUNT(*) FROM zaog_obj_store INTO lv_count
+      WHERE repo_key = mc_repo AND obj_sha1 = ls_meta-temp_key
+        AND status = zcl_abapgit_ortec_pack_stream=>c_status_decoded.
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 1
+      msg = 'An unresolved delta temp row must be promoted to D (decoded-pending-resolution), not R' ).
+  ENDMETHOD.
+
+  METHOD temp_row_hidden_from_get.
+    " D2 staged-visibility fix (target_design §5.3.1): a 'D'-status temp
+    " row must stay invisible to every generic status = 'R'-only read
+    " (get_object/get_objects) - only get_staged_delta_objects may see it.
+    DATA lv_base_data   TYPE xstring.
+    DATA lv_base_sha    TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_base_raw    TYPE x LENGTH 20.
+    DATA lv_delta       TYPE xstring.
+    DATA lv_compressed  TYPE xstring.
+    DATA lv_adler       TYPE zif_abapgit_git_definitions=>ty_adler32.
+    DATA lv_pack_magic  TYPE x LENGTH 4 VALUE '5041434B'.
+    DATA lv_version     TYPE x LENGTH 4 VALUE '00000002'.
+    DATA lv_obj_count   TYPE x LENGTH 4 VALUE '00000001'.
+    DATA lv_zlib_hdr    TYPE x LENGTH 2 VALUE '789C'.
+    DATA lv_type_len    TYPE x LENGTH 1 VALUE '76'.
+    DATA lv_pack        TYPE xstring.
+    DATA lv_trailer_hex TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_trailer_raw TYPE x LENGTH 20.
+    DATA lt_meta        TYPE zcl_abapgit_ortec_pack_stream=>ty_meta_tt.
+    DATA ls_meta        LIKE LINE OF lt_meta.
+    DATA lt_sha1s       TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lv_caught      TYPE abap_bool.
+
+    lv_base_data = '41414141'.
+    lv_base_sha = zcl_abapgit_hash=>sha1_blob( lv_base_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_base_sha iv_type = 'blob' iv_data = lv_base_data ).
+
+    lv_delta = '040590040121'.
+    cl_abap_gzip=>compress_binary( EXPORTING raw_in = lv_delta IMPORTING gzip_out = lv_compressed ).
+    lv_adler = zcl_abapgit_hash=>adler32( lv_delta ).
+    lv_base_raw = to_upper( lv_base_sha ).
+
+    CONCATENATE lv_pack_magic lv_version lv_obj_count INTO lv_pack IN BYTE MODE.
+    CONCATENATE lv_pack lv_type_len lv_base_raw lv_zlib_hdr lv_compressed lv_adler
+      INTO lv_pack IN BYTE MODE.
+    lv_trailer_hex = zcl_abapgit_hash=>sha1_raw( lv_pack ).
+    lv_trailer_raw = to_upper( lv_trailer_hex ).
+    CONCATENATE lv_pack lv_trailer_raw INTO lv_pack IN BYTE MODE.
+
+    lt_meta = zcl_abapgit_ortec_pack_stream=>decode_and_persist_streaming(
+      iv_data     = lv_pack
+      iv_repo_key = mc_repo ).
+
+    READ TABLE lt_meta INTO ls_meta INDEX 1.
+    APPEND ls_meta-temp_key TO lt_sha1s.
+
+    lv_caught = abap_false.
+    TRY.
+        zcl_abapgit_ortec_obj_store=>get_object(
+          iv_repo_key = mc_repo
+          iv_sha1     = ls_meta-temp_key ).
+      CATCH zcx_abapgit_ortec_git.
+        lv_caught = abap_true.
+    ENDTRY.
+    cl_abap_unit_assert=>assert_true( act = lv_caught
+      msg = 'get_object must not see a D-status temp row' ).
+
+    lv_caught = abap_false.
+    TRY.
+        zcl_abapgit_ortec_obj_store=>get_objects(
+          iv_repo_key = mc_repo
+          it_sha1s    = lt_sha1s ).
+      CATCH zcx_abapgit_ortec_git.
+        lv_caught = abap_true.
+    ENDTRY.
+    cl_abap_unit_assert=>assert_true( act = lv_caught
+      msg = 'get_objects must not see a D-status temp row' ).
+  ENDMETHOD.
+
+  METHOD cleanup_removes_d_status.
+    " D2 staged-visibility fix (target_design §5.3): cleanup_incomplete
+    " must delete both 'I' and 'D' status rows for a failed/abandoned
+    " pack, not only 'I' (existing 'I'-status coverage: see
+    " corrupt_trailer_no_rows).
+    DATA lv_sha1    TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_pack_id TYPE zcl_abapgit_ortec_pack_stream=>ty_pack_id.
+    DATA lv_count   TYPE i.
+
+    lv_sha1 = zcl_abapgit_hash=>sha1_blob( '41414242' ).
+    lv_pack_id = 'ZAOGT_CLEANUP_D_TEST'.
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_sha1
+      iv_type     = 'ref_d'
+      iv_data     = '41414242'
+      iv_pack_id  = lv_pack_id
+      iv_status   = zcl_abapgit_ortec_pack_stream=>c_status_decoded ).
+    COMMIT WORK.
+
+    zcl_abapgit_ortec_pack_stream=>cleanup_incomplete(
+      iv_repo_key = mc_repo
+      iv_pack_id  = lv_pack_id ).
+    COMMIT WORK.
+
+    SELECT COUNT(*) FROM zaog_obj_store INTO lv_count
+      WHERE repo_key = mc_repo AND pack_id = lv_pack_id.
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 0
+      msg = 'cleanup_incomplete must remove D-status rows, not only I-status' ).
+  ENDMETHOD.
+
+  METHOD resolve_reads_own_d_row.
+    " D2 staged-visibility fix (target_design §5.3.1): exercises
+    " resolve_streaming end-to-end (so it also exercises
+    " preload_delta_rows, not just resolve_one_meta in isolation) against
+    " a REF_DELTA whose own temp-key row is genuinely 'D'-status at the
+    " moment resolution begins - proving get_staged_delta_objects is
+    " correctly wired into both call sites.
+    DATA lv_base_data TYPE xstring VALUE '41414141'.
+    DATA lv_base_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_base_raw TYPE x LENGTH 20.
+    DATA lv_delta TYPE xstring VALUE '040590040121'.
+    DATA lv_compressed TYPE xstring.
+    DATA lv_adler TYPE zif_abapgit_git_definitions=>ty_adler32.
+    DATA lv_pack_magic TYPE x LENGTH 4 VALUE '5041434B'.
+    DATA lv_version TYPE x LENGTH 4 VALUE '00000002'.
+    DATA lv_obj_count TYPE x LENGTH 4 VALUE '00000001'.
+    DATA lv_zlib_hdr TYPE x LENGTH 2 VALUE '789C'.
+    DATA lv_type_len TYPE x LENGTH 1 VALUE '76'.
+    DATA lv_pack TYPE xstring.
+    DATA lv_trailer_hex TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_trailer_raw TYPE x LENGTH 20.
+    DATA lt_meta TYPE zcl_abapgit_ortec_pack_stream=>ty_meta_tt.
+    DATA ls_meta LIKE LINE OF lt_meta.
+    DATA lv_pack_id TYPE zcl_abapgit_ortec_pack_stream=>ty_pack_id.
+    DATA lv_expected_data TYPE xstring VALUE '4141414121'.
+    DATA lv_expected_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_count TYPE i.
+
+    lv_base_sha = zcl_abapgit_hash=>sha1_blob( lv_base_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_base_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-blob
+      iv_data     = lv_base_data ).
+
+    cl_abap_gzip=>compress_binary(
+      EXPORTING raw_in = lv_delta
+      IMPORTING gzip_out = lv_compressed ).
+    lv_adler = zcl_abapgit_hash=>adler32( lv_delta ).
+    lv_base_raw = to_upper( lv_base_sha ).
+
+    CONCATENATE lv_pack_magic lv_version lv_obj_count INTO lv_pack IN BYTE MODE.
+    CONCATENATE lv_pack lv_type_len lv_base_raw lv_zlib_hdr lv_compressed lv_adler
+      INTO lv_pack IN BYTE MODE.
+    lv_trailer_hex = zcl_abapgit_hash=>sha1_raw( lv_pack ).
+    lv_trailer_raw = to_upper( lv_trailer_hex ).
+    CONCATENATE lv_pack lv_trailer_raw INTO lv_pack IN BYTE MODE.
+
+    lt_meta = zcl_abapgit_ortec_pack_stream=>decode_and_persist_streaming(
+      EXPORTING
+        iv_data     = lv_pack
+        iv_repo_key = mc_repo
+      IMPORTING
+        ev_pack_id  = lv_pack_id ).
+
+    READ TABLE lt_meta INTO ls_meta INDEX 1.
+    SELECT COUNT(*) FROM zaog_obj_store INTO lv_count
+      WHERE repo_key = mc_repo AND obj_sha1 = ls_meta-temp_key
+        AND status = zcl_abapgit_ortec_pack_stream=>c_status_decoded.
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 1
+      msg = 'Precondition: the delta''s own temp row must be D-status before resolution' ).
+
+    zcl_abapgit_ortec_obj_store=>invalidate_cache( ).
+    zcl_abapgit_ortec_base_cache=>get_instance( )->clear( ).
+
+    zcl_abapgit_ortec_pack_stream=>resolve_streaming(
+      EXPORTING
+        iv_repo_key = mc_repo
+        iv_pack_id  = lv_pack_id
+      CHANGING
+        ct_meta     = lt_meta ).
+
+    lv_expected_sha = zcl_abapgit_hash=>sha1_blob( lv_expected_data ).
+    cl_abap_unit_assert=>assert_equals(
+      act = lt_meta[ 1 ]-sha1
+      exp = lv_expected_sha
+      msg = 'resolve_streaming must correctly resolve a delta by reading its own ' &&
+            'D-status temp row via get_staged_delta_objects' ).
+  ENDMETHOD.
+
+  METHOD staged_cache_hit_no_sql.
+    " D2 staged-visibility fix (PERF-M-2): get_staged_delta_objects' own
+    " cache-hit check must admit 'D' as well as 'R', so a second call for
+    " the same temp key (without an intervening invalidate_cache) is
+    " served correctly from the warm session cache. No call-counter
+    " instrumentation exists on this read path (unlike
+    " gv_thin_fetch_calls for resolve_one_meta's external-base fallback) -
+    " verified here via a direct correctness assertion on the repeated
+    " call's result instead.
+    DATA lv_base_data   TYPE xstring.
+    DATA lv_base_sha    TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_base_raw    TYPE x LENGTH 20.
+    DATA lv_delta       TYPE xstring.
+    DATA lv_compressed  TYPE xstring.
+    DATA lv_adler       TYPE zif_abapgit_git_definitions=>ty_adler32.
+    DATA lv_pack_magic  TYPE x LENGTH 4 VALUE '5041434B'.
+    DATA lv_version     TYPE x LENGTH 4 VALUE '00000002'.
+    DATA lv_obj_count   TYPE x LENGTH 4 VALUE '00000001'.
+    DATA lv_zlib_hdr    TYPE x LENGTH 2 VALUE '789C'.
+    DATA lv_type_len    TYPE x LENGTH 1 VALUE '76'.
+    DATA lv_pack        TYPE xstring.
+    DATA lv_trailer_hex TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_trailer_raw TYPE x LENGTH 20.
+    DATA lt_meta        TYPE zcl_abapgit_ortec_pack_stream=>ty_meta_tt.
+    DATA ls_meta        LIKE LINE OF lt_meta.
+    DATA lt_sha1s       TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_first       TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lt_second      TYPE zif_abapgit_definitions=>ty_objects_tt.
+
+    lv_base_data = '41414141'.
+    lv_base_sha = zcl_abapgit_hash=>sha1_blob( lv_base_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_base_sha iv_type = 'blob' iv_data = lv_base_data ).
+
+    lv_delta = '040590040121'.
+    cl_abap_gzip=>compress_binary( EXPORTING raw_in = lv_delta IMPORTING gzip_out = lv_compressed ).
+    lv_adler = zcl_abapgit_hash=>adler32( lv_delta ).
+    lv_base_raw = to_upper( lv_base_sha ).
+
+    CONCATENATE lv_pack_magic lv_version lv_obj_count INTO lv_pack IN BYTE MODE.
+    CONCATENATE lv_pack lv_type_len lv_base_raw lv_zlib_hdr lv_compressed lv_adler
+      INTO lv_pack IN BYTE MODE.
+    lv_trailer_hex = zcl_abapgit_hash=>sha1_raw( lv_pack ).
+    lv_trailer_raw = to_upper( lv_trailer_hex ).
+    CONCATENATE lv_pack lv_trailer_raw INTO lv_pack IN BYTE MODE.
+
+    lt_meta = zcl_abapgit_ortec_pack_stream=>decode_and_persist_streaming(
+      iv_data     = lv_pack
+      iv_repo_key = mc_repo ).
+
+    READ TABLE lt_meta INTO ls_meta INDEX 1.
+    APPEND ls_meta-temp_key TO lt_sha1s.
+
+    lt_first = zcl_abapgit_ortec_obj_store=>get_staged_delta_objects(
+      iv_repo_key = mc_repo
+      it_sha1s    = lt_sha1s ).
+    lt_second = zcl_abapgit_ortec_obj_store=>get_staged_delta_objects(
+      iv_repo_key = mc_repo
+      it_sha1s    = lt_sha1s ).
+
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_first ) exp = 1 ).
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_second ) exp = 1 ).
+    cl_abap_unit_assert=>assert_equals(
+      act = lt_second[ 1 ]-data
+      exp = lt_first[ 1 ]-data
+      msg = 'A second get_staged_delta_objects call for the same D-status sha1 ' &&
+            '(no invalidate_cache in between) must return identical, correct ' &&
+            'data - the cache-hit branch must admit D, not just R' ).
+  ENDMETHOD.
+
+  METHOD attempt_id_on_obj_store.
+    " D2B1 (target_design §9): decode_and_persist_streaming's optional
+    " iv_attempt_id must be written to every ZAOG_OBJ_STORE row this run
+    " persisted, so decoded objects can be correlated back to the owning
+    " ZAOG_COMMIT_HIST attempt.
+    DATA lt_obj      TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA ls_obj      TYPE zif_abapgit_definitions=>ty_object.
+    DATA lv_pack     TYPE xstring.
+    DATA lv_sha1     TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_attempt  TYPE zcl_abapgit_ortec_mat_state=>ty_attempt_id.
+    DATA lv_actual   TYPE zaog_obj_store-attempt_id.
+
+    ls_obj-data  = '48656C6C6F'. " "Hello"
+    ls_obj-type  = zif_abapgit_git_definitions=>c_type-blob.
+    ls_obj-sha1  = zcl_abapgit_hash=>sha1( iv_type = ls_obj-type iv_data = ls_obj-data ).
+    ls_obj-index = 1.
+    lv_sha1 = ls_obj-sha1.
+    APPEND ls_obj TO lt_obj.
+
+    lv_pack = zcl_abapgit_git_pack=>encode( lt_obj ).
+    lv_attempt = 'ATTEMPT_D2B1_OBJ_STORE_0001'.
+
+    zcl_abapgit_ortec_pack_stream=>decode_and_persist_streaming(
+      iv_data       = lv_pack
+      iv_repo_key   = mc_repo
+      iv_attempt_id = lv_attempt ).
+
+    SELECT SINGLE attempt_id FROM zaog_obj_store INTO lv_actual
+      WHERE repo_key = mc_repo AND obj_sha1 = lv_sha1.
+    cl_abap_unit_assert=>assert_equals( act = lv_actual exp = lv_attempt
+      msg = 'A supplied iv_attempt_id must be persisted onto the resulting ZAOG_OBJ_STORE row' ).
+  ENDMETHOD.
+
+  METHOD crash_before_resolve_ok.
+    " D2B1 (target_design §9): an interrupted run (crash between the
+    " initial decode and the later resolve step) must leave its 'D'-status
+    " temp rows tagged with the attempt id it was called with, and
+    " cleanup_incomplete must still remove them cleanly regardless.
+    DATA lv_sha1    TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_pack_id TYPE zcl_abapgit_ortec_pack_stream=>ty_pack_id.
+    DATA lv_attempt TYPE zcl_abapgit_ortec_mat_state=>ty_attempt_id.
+    DATA lv_count   TYPE i.
+
+    lv_sha1 = zcl_abapgit_hash=>sha1_blob( '41414343' ).
+    lv_pack_id = 'ZAOGT_CRASH_ATTEMPT_TEST'.
+    lv_attempt = 'ATTEMPT_D2B1_CRASH_0001'.
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_sha1
+      iv_type     = 'ref_d'
+      iv_data     = '41414343'
+      iv_pack_id  = lv_pack_id
+      iv_status   = zcl_abapgit_ortec_pack_stream=>c_status_decoded ).
+    UPDATE zaog_obj_store SET attempt_id = lv_attempt
+      WHERE repo_key = mc_repo AND pack_id = lv_pack_id.
+    COMMIT WORK.
+
+    " Simulated crash: resolve_streaming never runs for this pack_id.
+    zcl_abapgit_ortec_pack_stream=>cleanup_incomplete(
+      iv_repo_key = mc_repo
+      iv_pack_id  = lv_pack_id ).
+    COMMIT WORK.
+
+    SELECT COUNT(*) FROM zaog_obj_store INTO lv_count
+      WHERE repo_key = mc_repo AND pack_id = lv_pack_id.
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 0
+      msg = 'cleanup_incomplete must remove an attempt-tagged D-status row left behind by a simulated crash' ).
   ENDMETHOD.
 ENDCLASS.

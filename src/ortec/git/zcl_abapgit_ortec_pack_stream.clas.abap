@@ -14,6 +14,19 @@ CLASS zcl_abapgit_ortec_pack_stream DEFINITION
     "! invisible to every existing consumer with no further filtering needed.
     CONSTANTS c_status_incomplete TYPE c LENGTH 1 VALUE 'I'.
 
+    "! ORTEC D2 staged-visibility fix (target_design §5.3): promoted status
+    "! for a delta row (REF_DELTA/OFS_DELTA temp-key row) once its raw bytes
+    "! have been fully decoded, but BEFORE that delta has actually been
+    "! resolved against its base. Deliberately distinct from the final
+    "! status = 'R' (real, resolved content) - every existing object-store
+    "! read path already hardcodes status = 'R', so a 'D'-status row stays
+    "! invisible to every existing consumer with no further filtering
+    "! needed. Only zcl_abapgit_ortec_obj_store=>get_staged_delta_objects
+    "! (status IN ('D','R')) can see a 'D'-status row, and only this class
+    "! calls that method, to read a pack's own temp-key rows during that
+    "! same pack's own resolution.
+    CONSTANTS c_status_decoded TYPE c LENGTH 1 VALUE 'D'.
+
     "! One row per object in the pack. This is the ONLY per-object state kept
     "! in memory during/after a streaming decode - never the object's actual
     "! decompressed bytes, which are persisted and freed immediately.
@@ -58,6 +71,7 @@ CLASS zcl_abapgit_ortec_pack_stream DEFINITION
     CLASS-METHODS decode_and_persist_streaming
       IMPORTING iv_data        TYPE xstring
                 iv_repo_key    TYPE ty_repo_key
+                iv_attempt_id  TYPE zcl_abapgit_ortec_mat_state=>ty_attempt_id OPTIONAL
       EXPORTING ev_pack_id     TYPE ty_pack_id
       RETURNING VALUE(rt_meta) TYPE ty_meta_tt
       RAISING   zcx_abapgit_ortec_git.
@@ -202,7 +216,8 @@ CLASS zcl_abapgit_ortec_pack_stream DEFINITION
       IMPORTING iv_repo_key       TYPE ty_repo_key
       RETURNING VALUE(rv_pack_id) TYPE ty_pack_id.
 
-    "! Set-based cleanup of this run's own 'I'-status rows only - never
+    "! Set-based cleanup of this run's own 'I'-status AND 'D'-status
+    "! (decoded-pending-resolution, see c_status_decoded) rows only - never
     "! touches any other pack_id's rows, the old decoder's 'P' rows, or any
     "! of the old decoder's own bookkeeping tables (zaog_pack_meta,
     "! zaog_pack_idx, zaog_raw_pack, zaog_fetch_sess) - this streaming path
@@ -337,7 +352,8 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
     DELETE FROM zaog_obj_store
       WHERE repo_key = iv_repo_key
         AND pack_id  = iv_pack_id
-        AND status   = zcl_abapgit_ortec_pack_stream=>c_status_incomplete.
+        AND status   IN ( zcl_abapgit_ortec_pack_stream=>c_status_incomplete,
+                          zcl_abapgit_ortec_pack_stream=>c_status_decoded ).
   ENDMETHOD.
 
   METHOD get_base_bytes.
@@ -461,12 +477,13 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    " Strict: current-pack temp rows must all exist. GET_OBJECTS reads them
-    " in bounded packages and warms the normal object-store session cache.
-    lt_objects = zcl_abapgit_ortec_obj_store=>get_objects(
-      iv_repo_key   = iv_repo_key
-      it_sha1s      = lt_temp_keys
-      iv_bulk_fetch = abap_false ).
+    " Strict: current-pack temp rows must all exist. GET_STAGED_DELTA_OBJECTS
+    " reads them in bounded packages (status IN ('D','R')) and warms the
+    " normal object-store session cache - unlike GET_OBJECTS, it also sees
+    " this pack's own not-yet-resolved 'D'-status temp rows.
+    lt_objects = zcl_abapgit_ortec_obj_store=>get_staged_delta_objects(
+      iv_repo_key = iv_repo_key
+      it_sha1s    = lt_temp_keys ).
   ENDMETHOD.
 
 
@@ -533,6 +550,7 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
     DATA lx_missing    TYPE REF TO zcx_abapgit_ortec_git.
     DATA lv_base_sha_diag         TYPE zif_abapgit_git_definitions=>ty_sha1.
     DATA lv_base_pack_offset_diag TYPE i.
+    DATA lt_temp_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
 
     FIELD-SYMBOLS <ls_row>  TYPE ty_meta.
     FIELD-SYMBOLS <ls_base> TYPE ty_meta.
@@ -683,11 +701,15 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
     ENDIF.
 
     " Read the delta's own raw (pre-application) bytes, persisted under its
-    " temp key by decode_and_persist_streaming.
+    " temp key by decode_and_persist_streaming (status 'D' - staged, not yet
+    " resolved). GET_STAGED_DELTA_OBJECTS is used instead of GET_OBJECT,
+    " since a temp-key row is never visible to the generic status = 'R'-only
+    " read path (target_design §5.3.1).
     TRY.
-        ls_delta_obj = zcl_abapgit_ortec_obj_store=>get_object(
+        lt_temp_objects = zcl_abapgit_ortec_obj_store=>get_staged_delta_objects(
           iv_repo_key = iv_repo_key
-          iv_sha1     = <ls_row>-temp_key ).
+          it_sha1s    = VALUE #( ( <ls_row>-temp_key ) ) ).
+        READ TABLE lt_temp_objects INTO ls_delta_obj INDEX 1.
       CATCH zcx_abapgit_ortec_git INTO lx_missing.
         zcx_abapgit_ortec_git=>raise( |Delta temp data missing: { lx_missing->get_text( ) }| ).
     ENDTRY.
@@ -1148,10 +1170,37 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
           zcx_abapgit_ortec_git=>raise( |Streaming pack: trailer SHA1 doesn't match| ).
         ENDIF.
 
+        " Staged-visibility fix (target_design §5.3): delta temp-key rows
+        " are promoted to the intermediate 'D' status, never straight to
+        " 'R', since they are not yet resolved against their base. The
+        " delta-type UPDATE runs FIRST and is narrowed by obj_type, so the
+        " second, broader UPDATE (still scoped to status = c_status_incomplete)
+        " only ever matches the remaining non-delta rows.
+        UPDATE zaog_obj_store SET status = c_status_decoded
+          WHERE repo_key = iv_repo_key
+            AND pack_id  = lv_pack_id
+            AND status   = c_status_incomplete
+            AND obj_type IN ( zif_abapgit_git_definitions=>c_type-ref_d, zcl_abapgit_ortec_delta=>c_type_ofs_d ).
+
         UPDATE zaog_obj_store SET status = 'R'
           WHERE repo_key = iv_repo_key
             AND pack_id  = lv_pack_id
             AND status   = c_status_incomplete.
+
+        " D2B1: attempt-id correlation (target_design §9) - one additional
+        " set-based UPDATE covering every row this run just promoted (both
+        " 'D' and 'R' rows above), piggybacked onto the existing promotion
+        " statements rather than threaded per-row through lt_batch/
+        " flush_batch (which would require an obj_store signature change
+        " out of this slice's scope). Skipped entirely when the caller
+        " doesn't supply one, so a call with no iv_attempt_id costs nothing
+        " extra.
+        IF iv_attempt_id IS NOT INITIAL.
+          UPDATE zaog_obj_store SET attempt_id = iv_attempt_id
+            WHERE repo_key = iv_repo_key
+              AND pack_id  = lv_pack_id.
+        ENDIF.
+
         COMMIT WORK.
 
       CATCH zcx_abapgit_exception INTO lx_abapgit.

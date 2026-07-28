@@ -66,14 +66,46 @@ CLASS zcl_abapgit_ortec_pack_dec DEFINITION
     "! Returns an empty table if no active session exists.
     "! @parameter iv_repo_key |
     "! Repository key
+    "! @parameter iv_lock_held |
+    "! When abap_true, the caller already holds the repository lock (see
+    "! acquire_repo_lock) for this repo_key and this method must not
+    "! acquire or release it internally - it participates in the caller's
+    "! own lock span instead. Defaults to abap_false (this method's
+    "! long-standing self-contained lock ownership), so every existing
+    "! caller keeps compiling and behaving unchanged.
+    "! @parameter iv_attempt_id |
+    "! Optional attempt correlation id (target_design §9); threaded into
+    "! resumable_decode so its persisted ZAOG_OBJ_STORE rows can be
+    "! correlated with the owning ZAOG_COMMIT_HIST attempt for diagnostics/
+    "! cleanup. Blank when not supplied - no behavior change.
     "! @parameter rt_objects |
     "! Decoded objects for this pack only (excluding merged external delta bases)
     "! @raising zcx_abapgit_exception |
     "! On decode error
     CLASS-METHODS resume_decode
       IMPORTING iv_repo_key       TYPE ty_repo_key
+                iv_lock_held      TYPE abap_bool DEFAULT abap_false
+                iv_attempt_id     TYPE zcl_abapgit_ortec_mat_state=>ty_attempt_id OPTIONAL
       RETURNING VALUE(rt_objects) TYPE zif_abapgit_definitions=>ty_objects_tt
       RAISING   zcx_abapgit_exception.
+
+    "! Acquires the canonical per-repository enqueue lock
+    "! (ENQUEUE_EZAOG_REPO_LOCK). Moved to PUBLIC SECTION (target_design
+    "! §15, B-2 fix) so zcl_abapgit_ortec_fastpath can acquire/hold this
+    "! same lock across its own resume_decode + persist_pull_result span
+    "! and pass iv_lock_held = abap_true into resume_decode. No change to
+    "! this method's own body/behavior.
+    CLASS-METHODS acquire_repo_lock
+      IMPORTING iv_repo_key       TYPE ty_repo_key
+                iv_max_attempts   TYPE i DEFAULT 7
+                iv_base_wait_ms   TYPE i DEFAULT 50
+      RETURNING VALUE(rv_lock_id) TYPE ty_session_id
+      RAISING   zcx_abapgit_exception.
+
+    "! Releases the lock acquired by acquire_repo_lock. Moved to PUBLIC
+    "! SECTION alongside it (B-2 fix). No change to body/behavior.
+    CLASS-METHODS release_repo_lock
+      IMPORTING iv_lock_id TYPE ty_session_id.
 
     CLASS-METHODS decode_commits_only
       IMPORTING iv_data           TYPE xstring
@@ -162,6 +194,7 @@ CLASS zcl_abapgit_ortec_pack_dec DEFINITION
                 iv_pack_id         TYPE ty_pack_id
                 iv_session_id      TYPE ty_session_id
                 iv_commit_interval TYPE i DEFAULT 50
+                iv_attempt_id      TYPE zcl_abapgit_ortec_mat_state=>ty_attempt_id OPTIONAL
       RETURNING VALUE(rt_objects)  TYPE zif_abapgit_definitions=>ty_objects_tt
       RAISING   zcx_abapgit_exception.
 
@@ -169,20 +202,11 @@ CLASS zcl_abapgit_ortec_pack_dec DEFINITION
     CLASS-DATA gv_resume_branch TYPE string.
     CLASS-DATA gv_resume_deepen TYPE i.
 
-    CLASS-METHODS acquire_repo_lock
-      IMPORTING iv_repo_key       TYPE ty_repo_key
-                iv_max_attempts   TYPE i DEFAULT 7
-                iv_base_wait_ms   TYPE i DEFAULT 50
-      RETURNING VALUE(rv_lock_id) TYPE ty_session_id
-      RAISING   zcx_abapgit_exception.
-
-    CLASS-METHODS release_repo_lock
-      IMPORTING iv_lock_id TYPE ty_session_id.
-
     CLASS-METHODS create_session
       IMPORTING iv_repo_key          TYPE ty_repo_key
                 iv_obj_total         TYPE i
                 iv_pack_id           TYPE ty_pack_id
+                iv_attempt_id        TYPE zcl_abapgit_ortec_mat_state=>ty_attempt_id OPTIONAL
       RETURNING VALUE(rv_session_id) TYPE ty_session_id.
 
     CLASS-METHODS update_session_progress
@@ -211,6 +235,7 @@ CLASS zcl_abapgit_ortec_pack_dec DEFINITION
                 iv_session_id      TYPE ty_session_id
                 iv_skip_count      TYPE i DEFAULT 0
                 iv_commit_interval TYPE i DEFAULT 50
+                iv_attempt_id      TYPE zcl_abapgit_ortec_mat_state=>ty_attempt_id OPTIONAL
                 it_objects         TYPE zif_abapgit_definitions=>ty_objects_tt.
 
     CLASS-METHODS complete_pack
@@ -501,7 +526,9 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
     DATA lv_obj_done     TYPE i.
     DATA lv_raw          TYPE xstring.
 
-    lv_repo_lock_id = acquire_repo_lock( iv_repo_key = iv_repo_key ).
+    IF iv_lock_held = abap_false.
+      lv_repo_lock_id = acquire_repo_lock( iv_repo_key = iv_repo_key ).
+    ENDIF.
 
     TRY.
         " Find an active (incomplete) session for this repository
@@ -517,7 +544,9 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
           " TODO: variable is assigned but never used (ABAP cleaner)
             ev_deepen_level = DATA(lv_deepen_level) ).
         IF lv_session_id IS INITIAL.
-          release_repo_lock( lv_repo_lock_id ).
+          IF iv_lock_held = abap_false.
+            release_repo_lock( lv_repo_lock_id ).
+          ENDIF.
           RETURN. " Nothing to resume
         ENDIF.
 
@@ -530,7 +559,9 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
             " Raw pack was lost — cannot resume; mark session failed
             fail_session( iv_session_id = lv_session_id iv_obj_done = lv_obj_done ).
             COMMIT WORK.
-            release_repo_lock( lv_repo_lock_id ).
+            IF iv_lock_held = abap_false.
+              release_repo_lock( lv_repo_lock_id ).
+            ENDIF.
             RETURN.
         ENDTRY.
 
@@ -539,7 +570,8 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
                          iv_data       = lv_raw
                          iv_repo_key   = iv_repo_key
                          iv_pack_id    = lv_pack_id
-                         iv_session_id = lv_session_id ).
+                         iv_session_id = lv_session_id
+                         iv_attempt_id = iv_attempt_id ).
 
         complete_pack(
             iv_repo_key = iv_repo_key
@@ -553,9 +585,13 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
             iv_pack_id  = lv_pack_id ).
         COMMIT WORK.
 
-        release_repo_lock( lv_repo_lock_id ).
+        IF iv_lock_held = abap_false.
+          release_repo_lock( lv_repo_lock_id ).
+        ENDIF.
       CATCH zcx_abapgit_exception INTO DATA(lx_resume).
-        release_repo_lock( lv_repo_lock_id ).
+        IF iv_lock_held = abap_false.
+          release_repo_lock( lv_repo_lock_id ).
+        ENDIF.
         RAISE EXCEPTION lx_resume.
     ENDTRY.
 
@@ -656,6 +692,7 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
       ls_row-pack_id    = iv_pack_id.
       ls_row-created_at = lv_ts.
       ls_row-status     = 'R'. " R = resolved
+      ls_row-attempt_id = iv_attempt_id.
       APPEND ls_row TO lt_rows.
 
       " 2. Accumulate pack index entry (obj_index = sequential position in pack)
@@ -724,7 +761,8 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
                         iv_pack_id      = iv_pack_id
                         iv_obj_total    = iv_obj_total
                         iv_branch_name  = gv_resume_branch
-                        iv_deepen_level = gv_resume_deepen ).
+                        iv_deepen_level = gv_resume_deepen
+                        iv_attempt_id   = iv_attempt_id ).
   ENDMETHOD.
 
   METHOD update_session_progress.
@@ -1142,6 +1180,7 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
       ls_row-obj_size   = xstrlen( lv_decompressed ).
       ls_row-created_at = lv_ts.
       ls_row-status     = 'P'.
+      ls_row-attempt_id = iv_attempt_id.
       APPEND ls_row TO lt_obj_batch.
 
       CLEAR ls_idx.
@@ -1296,6 +1335,7 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
       ls_row-obj_size   = xstrlen( ls_object-data ).
       ls_row-created_at = lv_ts.
       ls_row-status     = 'R'.
+      ls_row-attempt_id = iv_attempt_id.
       APPEND ls_row TO lt_final_rows.
 
       CLEAR ls_idx_upd.

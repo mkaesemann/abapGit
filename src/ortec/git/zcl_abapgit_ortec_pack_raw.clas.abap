@@ -80,6 +80,10 @@ CLASS zcl_abapgit_ortec_pack_raw DEFINITION
     "! Branch name associated with the fetch request
     "! @parameter iv_deepen_level |
     "! Deepen level associated with the fetch request
+    "! @parameter iv_attempt_id |
+    "! Optional attempt correlation id (target_design §9), persisted into
+    "! ZAOG_FETCH_SESS.ATTEMPT_ID for diagnostics/cleanup correlation with
+    "! the owning ZAOG_COMMIT_HIST attempt. Blank when not supplied.
     "! @parameter rv_session_id |
     "! Created session identifier or INITIAL on UUID failure
     CLASS-METHODS create_session
@@ -88,6 +92,7 @@ CLASS zcl_abapgit_ortec_pack_raw DEFINITION
                 iv_obj_total         TYPE i
                 iv_branch_name       TYPE string OPTIONAL
                 iv_deepen_level      TYPE i DEFAULT 1
+                iv_attempt_id        TYPE zcl_abapgit_ortec_mat_state=>ty_attempt_id OPTIONAL
       RETURNING VALUE(rv_session_id) TYPE ty_session_id.
 
     "! Updates decode progress of an active session.
@@ -97,10 +102,15 @@ CLASS zcl_abapgit_ortec_pack_raw DEFINITION
     "! Number of decoded objects persisted so far
     "! @parameter iv_curr_offset |
     "! Optional byte offset checkpoint in the raw pack
+    "! @parameter iv_attempt_id |
+    "! Optional attempt correlation id; only written when the caller
+    "! explicitly supplies it, so a caller that doesn't know the attempt id
+    "! never blanks out a value already set by create_session.
     CLASS-METHODS update_session_progress
       IMPORTING iv_session_id  TYPE ty_session_id
                 iv_obj_done    TYPE i
-                iv_curr_offset TYPE i OPTIONAL.
+                iv_curr_offset TYPE i OPTIONAL
+                iv_attempt_id  TYPE zcl_abapgit_ortec_mat_state=>ty_attempt_id OPTIONAL.
 
     "! Marks a session as failed.
     "! @parameter iv_session_id |
@@ -238,6 +248,7 @@ CLASS zcl_abapgit_ortec_pack_raw IMPLEMENTATION.
     ls_sess-created_at = lv_ts.
     ls_sess-updated_at = lv_ts.
     ls_sess-changed_by = sy-uname.
+    ls_sess-attempt_id = iv_attempt_id.
     IF iv_deepen_level IS INITIAL.
       ls_sess-error_text = 'DEEPEN=1'.
     ELSE.
@@ -252,9 +263,17 @@ CLASS zcl_abapgit_ortec_pack_raw IMPLEMENTATION.
     DATA lv_ts TYPE timestampl.
 
     GET TIME STAMP FIELD lv_ts.
-    IF iv_curr_offset IS SUPPLIED.
+    IF iv_curr_offset IS SUPPLIED AND iv_attempt_id IS SUPPLIED.
+      UPDATE zaog_fetch_sess
+        SET obj_done = iv_obj_done curr_offset = iv_curr_offset attempt_id = iv_attempt_id updated_at = lv_ts
+        WHERE session_id = iv_session_id.
+    ELSEIF iv_curr_offset IS SUPPLIED.
       UPDATE zaog_fetch_sess
         SET obj_done = iv_obj_done curr_offset = iv_curr_offset updated_at = lv_ts
+        WHERE session_id = iv_session_id.
+    ELSEIF iv_attempt_id IS SUPPLIED.
+      UPDATE zaog_fetch_sess
+        SET obj_done = iv_obj_done attempt_id = iv_attempt_id updated_at = lv_ts
         WHERE session_id = iv_session_id.
     ELSE.
       UPDATE zaog_fetch_sess
