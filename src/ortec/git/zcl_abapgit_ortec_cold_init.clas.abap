@@ -141,6 +141,41 @@ CLASS zcl_abapgit_ortec_cold_init DEFINITION
                 it_tip_blob_sha1s  TYPE zif_abapgit_git_definitions=>ty_sha1_tt OPTIONAL
       RAISING   zcx_abapgit_ortec_git.
 
+    "! Variant B D2 TIME_OUT incident fix
+    "! (.memory/incidents/variant_b_d2_it8_system_no_roll_timeout.md,
+    "! .memory/logs/variant_b_d2_timeout_fix_design.md): fetches and
+    "! persists exactly the caller-supplied SHA1 set via one or more
+    "! adaptive, row- and byte-bounded MATERIALIZE_BLOBS batches - the
+    "! same primitive MATERIALIZE_TIP_SNAPSHOT's own WHILE loop already
+    "! used (extracted here unchanged, see that method's body), but
+    "! WITHOUT any BEGIN_ATTEMPT/VERIFY_READY_BLOBS/FINALIZE_SNAPSHOT
+    "! certification call. This method never publishes GRAPH_COMPLETE or
+    "! SNAPSHOT_COMPLETE and never writes ZAOG_COMMIT_HIST/ZAOG_REPO_STATE
+    "! - it is a pure "make these objects present" primitive, intended for
+    "! callers (e.g. ZCL_ABAPGIT_ORTEC_MISSING_OBJ=>ENSURE_AVAILABLE) that
+    "! need a bounded top-up of a specific, already-known-missing SHA1 set
+    "! without touching branch-level certification state.
+    "! @parameter iv_url |
+    "! Repository remote URL
+    "! @parameter iv_repo_key |
+    "! Repository key (already resolved by the caller)
+    "! @parameter it_sha1s |
+    "! Object SHA1s to fetch and persist (typically blob SHA1s - this
+    "! method places exactly these values on the wire as MATERIALIZE_BLOBS
+    "! want lines, nothing else). Deduplicated internally; a table that is
+    "! empty after deduplication results in no HTTP call at all.
+    "! @raising zcx_abapgit_ortec_git |
+    "! Missing arbitrary-object-want capability
+    "! (MV_UNSUPPORTED_CAPABILITY = ABAP_TRUE), an oversized batch that
+    "! cannot be split further, or a decode/persist failure. Propagated
+    "! unchanged so callers can distinguish a capability gap from any
+    "! other failure.
+    CLASS-METHODS materialize_missing_batches
+      IMPORTING iv_url      TYPE string
+                iv_repo_key TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
+                it_sha1s    TYPE zif_abapgit_git_definitions=>ty_sha1_tt
+      RAISING   zcx_abapgit_ortec_git.
+
     "! Pure, HTTP-free chunking of a (possibly duplicate-containing)
     "! candidate SHA1 list into batches of at most
     "! zcl_abapgit_ortec_fetch_req=>c_materialize_batch_max entries each,
@@ -395,19 +430,9 @@ CLASS zcl_abapgit_ortec_cold_init IMPLEMENTATION.
       zif_abapgit_git_definitions=>ty_sha1_tt.
     DATA lt_missing TYPE
       zif_abapgit_git_definitions=>ty_sha1_tt.
-    DATA lt_ordered_missing TYPE
-      zif_abapgit_git_definitions=>ty_sha1_tt.
-    DATA lt_batch TYPE
-      zif_abapgit_git_definitions=>ty_sha1_tt.
 
     DATA lv_attempt_id TYPE
       zcl_abapgit_ortec_mat_state=>ty_attempt_id.
-    DATA lo_client TYPE REF TO zcl_abapgit_http_client.
-    DATA lv_server_caps TYPE string.
-    DATA lv_batch_rows TYPE i.
-    DATA lv_next_index TYPE i.
-    DATA lv_response_bytes TYPE i.
-    DATA lv_split_used TYPE abap_bool.
 
     IF iv_repo_key IS INITIAL.
       zcx_abapgit_ortec_git=>raise(
@@ -450,85 +475,22 @@ CLASS zcl_abapgit_ortec_cold_init IMPLEMENTATION.
         iv_repo_key = iv_repo_key
         iv_commit   = iv_tip_commit ).
 
+    " Variant B D2 TIME_OUT incident fix
+    " (.memory/logs/variant_b_d2_timeout_fix_design.md §6.1): the adaptive
+    " multi-batch MATERIALIZE_BLOBS fetch+persist loop that used to be
+    " inline here is now MATERIALIZE_MISSING_BATCHES, shared with
+    " ZCL_ABAPGIT_ORTEC_MISSING_OBJ=>ENSURE_AVAILABLE. This is a pure
+    " extraction - identical client lifecycle, identical adaptive
+    " batching/oversize-split behavior. MATERIALIZE_MISSING_BATCHES already
+    " closes its own client on both success and failure, so no TRY/CATCH is
+    " needed here: any failure propagates directly, before
+    " VERIFY_READY_BLOBS/FINALIZE_SNAPSHOT ever run, exactly as before this
+    " extraction.
     IF lt_missing IS NOT INITIAL.
-
-      TRY.
-
-          " Create and authenticate exactly one operation-local HTTP client.
-          " The INFO/REFS response also supplies the advertised capabilities.
-          init_materialize_client(
-            EXPORTING
-              iv_url         = iv_url
-            IMPORTING
-              eo_client      = lo_client
-              ev_server_caps = lv_server_caps ).
-
-          " One reset for the complete top-level materialization attempt,
-          " not once per adaptive batch.
-          zcl_abapgit_ortec_pack_stream=>reset_completion_budget( ).
-
-          lt_ordered_missing = deduplicate_sha1s( lt_missing ).
-
-          lv_batch_rows = c_batch_rows_initial.
-          lv_next_index = 1.
-
-          WHILE lv_next_index <= lines( lt_ordered_missing ).
-
-            CLEAR:
-              lt_batch,
-              lv_response_bytes,
-              lv_split_used.
-
-            take_next_batch(
-              EXPORTING
-                it_sha1s       = lt_ordered_missing
-                iv_start_index = lv_next_index
-                iv_max_rows    = lv_batch_rows
-              IMPORTING
-                et_batch       = lt_batch
-                ev_next_index  = lv_next_index ).
-
-            IF lt_batch IS INITIAL.
-              EXIT.
-            ENDIF.
-
-            materialize_batch(
-              EXPORTING
-                iv_url           = iv_url
-                iv_repo_key      = iv_repo_key
-                it_batch         = lt_batch
-                iv_server_caps   = lv_server_caps
-                io_client        = lo_client
-                iv_splits_used   = 0
-              IMPORTING
-                ev_response_bytes = lv_response_bytes
-                ev_split_used     = lv_split_used ).
-
-            lv_batch_rows = calculate_next_batch_size(
-              iv_current_rows   = lines( lt_batch )
-              iv_response_bytes = lv_response_bytes
-              iv_split_used     = lv_split_used ).
-
-          ENDWHILE.
-
-        CATCH zcx_abapgit_ortec_git INTO DATA(lx_materialize).
-
-          " The operation owns the client and must close it on every failure.
-          IF lo_client IS BOUND.
-            lo_client->close( ).
-            CLEAR lo_client.
-          ENDIF.
-
-          RAISE EXCEPTION lx_materialize.
-
-      ENDTRY.
-
-      " Normal successful completion of all adaptive and split batches.
-      IF lo_client IS BOUND.
-        lo_client->close( ).
-        CLEAR lo_client.
-      ENDIF.
-
+      materialize_missing_batches(
+        iv_url      = iv_url
+        iv_repo_key = iv_repo_key
+        it_sha1s    = lt_missing ).
     ENDIF.
 
     " One metadata-only verification over the complete selected-tip blob set.
@@ -559,6 +521,105 @@ CLASS zcl_abapgit_ortec_cold_init IMPLEMENTATION.
       iv_attempt_id  = lv_attempt_id ).
 
     COMMIT WORK.
+
+  ENDMETHOD.
+
+  METHOD materialize_missing_batches.
+
+    DATA lt_ordered_missing TYPE
+      zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_batch TYPE
+      zif_abapgit_git_definitions=>ty_sha1_tt.
+
+    DATA lo_client TYPE REF TO zcl_abapgit_http_client.
+    DATA lv_server_caps TYPE string.
+    DATA lv_batch_rows TYPE i.
+    DATA lv_next_index TYPE i.
+    DATA lv_response_bytes TYPE i.
+    DATA lv_split_used TYPE abap_bool.
+
+    lt_ordered_missing = deduplicate_sha1s( it_sha1s ).
+
+    IF lt_ordered_missing IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    TRY.
+
+        " Create and authenticate exactly one operation-local HTTP client.
+        " The INFO/REFS response also supplies the advertised capabilities.
+        init_materialize_client(
+          EXPORTING
+            iv_url         = iv_url
+          IMPORTING
+            eo_client      = lo_client
+            ev_server_caps = lv_server_caps ).
+
+        " One reset for this complete top-level fetch attempt, not once per
+        " adaptive batch - mirrors MATERIALIZE_TIP_SNAPSHOT's own existing
+        " reset and every other top-level fetch entry point
+        " (UPLOAD_PACK/UPLOAD_PACK_BY_COMMIT/ACQUIRE_BLOBLESS_GRAPH).
+        zcl_abapgit_ortec_pack_stream=>reset_completion_budget( ).
+
+        lv_batch_rows = c_batch_rows_initial.
+        lv_next_index = 1.
+
+        WHILE lv_next_index <= lines( lt_ordered_missing ).
+
+          CLEAR:
+            lt_batch,
+            lv_response_bytes,
+            lv_split_used.
+
+          take_next_batch(
+            EXPORTING
+              it_sha1s       = lt_ordered_missing
+              iv_start_index = lv_next_index
+              iv_max_rows    = lv_batch_rows
+            IMPORTING
+              et_batch       = lt_batch
+              ev_next_index  = lv_next_index ).
+
+          IF lt_batch IS INITIAL.
+            EXIT.
+          ENDIF.
+
+          materialize_batch(
+            EXPORTING
+              iv_url           = iv_url
+              iv_repo_key      = iv_repo_key
+              it_batch         = lt_batch
+              iv_server_caps   = lv_server_caps
+              io_client        = lo_client
+              iv_splits_used   = 0
+            IMPORTING
+              ev_response_bytes = lv_response_bytes
+              ev_split_used     = lv_split_used ).
+
+          lv_batch_rows = calculate_next_batch_size(
+            iv_current_rows   = lines( lt_batch )
+            iv_response_bytes = lv_response_bytes
+            iv_split_used     = lv_split_used ).
+
+        ENDWHILE.
+
+      CATCH zcx_abapgit_ortec_git INTO DATA(lx_materialize).
+
+        " This operation owns the client and must close it on every failure.
+        IF lo_client IS BOUND.
+          lo_client->close( ).
+          CLEAR lo_client.
+        ENDIF.
+
+        RAISE EXCEPTION lx_materialize.
+
+    ENDTRY.
+
+    " Normal successful completion of all adaptive and split batches.
+    IF lo_client IS BOUND.
+      lo_client->close( ).
+      CLEAR lo_client.
+    ENDIF.
 
   ENDMETHOD.
 

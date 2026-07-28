@@ -58,6 +58,21 @@ CLASS ltcl_cold_init DEFINITION FINAL
     METHODS adaptive_zero_bytes_stable FOR TESTING RAISING cx_static_check.
     METHODS take_batch_respects_limit  FOR TESTING RAISING cx_static_check.
     METHODS deduplicate_keeps_order    FOR TESTING RAISING cx_static_check.
+
+    " Variant B D2 TIME_OUT incident fix - MATERIALIZE_MISSING_BATCHES is
+    " the new public entry point shared with
+    " zcl_abapgit_ortec_missing_obj=>ensure_available. Its non-empty branch
+    " needs a live HTTP round-trip (no mock seam exists in this test
+    " infrastructure, same limitation as ALL_PRESENT_NEEDS_NO_HTTP above);
+    " only the empty-after-dedup short-circuit (no HTTP call at all) is
+    " independently testable here. Row/byte bounding, oversize splitting,
+    " and adaptive sizing for the loop this method now runs are already
+    " covered by TAKE_BATCH_RESPECTS_LIMIT, OVERSIZE_ACTION_BYTE_LIMIT/
+    " OVERSIZE_ACTION_REPEATABLE (solo-oversized-object case),
+    " ADAPTIVE_*, and DEDUPLICATE_KEEPS_ORDER - MATERIALIZE_MISSING_BATCHES
+    " is a thin orchestration of exactly these already-tested primitives
+    " (see .memory/logs/variant_b_d2_timeout_fix_design.md §13).
+    METHODS materialize_missing_empty  FOR TESTING RAISING cx_static_check.
     METHODS supplied_blob_set_skips_walk FOR TESTING RAISING cx_static_check.
 
 ENDCLASS.
@@ -671,6 +686,19 @@ CLASS ltcl_cold_init IMPLEMENTATION.
       act = lt_unique[ 2 ]
       exp = '2222222222222222222222222222222222222222' ).
 
+  ENDMETHOD.
+
+  METHOD materialize_missing_empty.
+    " An empty (or all-blank) SHA1 set must return without any HTTP call -
+    " a real fetch attempt against this bogus URL would raise and fail the
+    " test, so a clean RETURN here proves the empty-set short-circuit runs
+    " before INIT_MATERIALIZE_CLIENT.
+    DATA lt_empty TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+
+    zcl_abapgit_ortec_cold_init=>materialize_missing_batches(
+      iv_url      = 'https://unit.example.invalid/materialize-empty.git'
+      iv_repo_key = mc_repo
+      it_sha1s    = lt_empty ).
   ENDMETHOD.
 
 ENDCLASS.

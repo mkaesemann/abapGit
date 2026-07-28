@@ -30,6 +30,7 @@ CLASS ltcl_fetch_req DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT F
     METHODS materialize_missing_capa_raise FOR TESTING RAISING cx_static_check.
     METHODS materialize_over_max_raises FOR TESTING RAISING cx_static_check.
     METHODS materialize_empty_raises FOR TESTING RAISING cx_static_check.
+    METHODS capability_intersection FOR TESTING RAISING cx_static_check.
 
     METHODS recovery_minimal_and_no_haves FOR TESTING RAISING cx_static_check.
 
@@ -267,6 +268,26 @@ CLASS ltcl_fetch_req IMPLEMENTATION.
       CATCH zcx_abapgit_ortec_git INTO DATA(lx_ortec).
         cl_abap_unit_assert=>assert_false( lx_ortec->mv_unsupported_capability ).
     ENDTRY.
+  ENDMETHOD.
+
+  METHOD capability_intersection.
+    " Variant B D2 TIME_OUT fix design §13: the existing suite only covers
+    " "both capabilities advertised" (materialize_wants_and_bounds) and
+    " "neither advertised" (materialize_missing_capa_raise) - this fills
+    " the one missing combination, allow-tip-sha1-in-want ONLY.
+    DATA lt_want TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    CONSTANTS lc_caps_tip_only TYPE string
+      VALUE 'multi_ack side-band-64k allow-tip-sha1-in-want'.
+    APPEND c_blob1 TO lt_want.
+
+    DATA(ls_request) = zcl_abapgit_ortec_fetch_req=>build_request(
+      iv_mode        = zcl_abapgit_ortec_fetch_req=>cs_fetch_mode-materialize_blobs
+      it_want_hashes = lt_want
+      iv_server_caps = lc_caps_tip_only ).
+
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_request-buffer CS |want { c_blob1 }| ) ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_request-buffer CS 'allow-tip-sha1-in-want' ) ).
+    cl_abap_unit_assert=>assert_false( xsdbool( ls_request-buffer CS 'allow-reachable-sha1-in-want' ) ).
   ENDMETHOD.
 
   METHOD recovery_minimal_and_no_haves.
