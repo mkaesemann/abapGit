@@ -231,7 +231,22 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
     ENDIF.
 
     lv_count_x = iv_data+8(4).
-    rv_count = zcl_abapgit_convert=>xstring_to_int( lv_count_x ).
+    TRY.
+        rv_count = zcl_abapgit_convert=>xstring_to_int( lv_count_x ).
+      CATCH zcx_abapgit_exception.
+        " zcl_abapgit_convert=>xstring_to_int is declared RAISING
+        " zcx_abapgit_exception (a plain X->I MOVE that never actually
+        " throws for a fixed 4-byte input) - caught here, not propagated,
+        " to preserve this method's long-standing no-exception, sentinel-
+        " result contract (see class-doc: -1 means "cannot be determined").
+        " Every productive caller (zcl_abapgit_ortec_fastpath=>upload_pack,
+        " zcl_abapgit_ortec_cold_init, ...) uses this as a plain inline
+        " "= 0" boolean check with no TRY/CATCH; adding RAISING here would
+        " be an invasive, unnecessary signature change for a call that can
+        " never really fail. A conversion failure is treated the same as
+        " any other malformed header.
+        rv_count = -1.
+    ENDTRY.
   ENDMETHOD.
 
   METHOD decode_commits_only.

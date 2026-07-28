@@ -161,3 +161,47 @@ branch: "keep a productive counter only when it is an approved bounded
 observability metric with defined lifecycle, reset, concurrency and
 production semantics" - all four are now stated explicitly in the doc
 comments.
+
+## D1 SAP closeout (owner validation of `8bfca36beffd27f405034426d917556fc7959564`)
+
+- Owner-executed live SAP validation results: Activation/syntax **PASS** except 3 SLIN
+  warnings; targeted ABAP Unit **PASS**; ATC **PASS** except the same 3 SLIN warnings;
+  warm-branch functional test **PASS**; cold-branch functional test **PASS**.
+- The 3 SLIN warnings ("ZCX_ABAPGIT_EXCEPTION is not caught or declared") were on:
+  - `zcl_abapgit_ortec_pack_dec=>peek_object_count` (line 234): the method's only
+    non-trivial operation, `zcl_abapgit_convert=>xstring_to_int(...)`, is declared
+    `RAISING zcx_abapgit_exception` by the standard helper even though it can never
+    actually throw for a fixed 4-byte input (a plain X->I MOVE). Fix: wrapped in a
+    local `TRY...CATCH zcx_abapgit_exception`, returning the existing `-1` sentinel
+    on catch - preserves the method's long-standing no-exception, sentinel-result
+    contract relied on by all 3 productive callers (`zcl_abapgit_ortec_fastpath`,
+    `zcl_abapgit_ortec_cold_init` x2), which use it as a plain inline `= 0` check
+    with no TRY/CATCH.
+  - `zcl_abapgit_ortec_delta=>skip_size_header` (lines 302, 312): this PRIVATE
+    method genuinely calls `zcx_abapgit_exception=>raise(...)` itself (truncated/
+    malformed delta size-header bytes) but its own signature declared no `RAISING`
+    clause at all. Fix: added `RAISING zcx_abapgit_exception` to the method
+    signature; its only caller, `apply`, already declares `RAISING
+    zcx_abapgit_exception`, so no further caller signature changes were needed.
+  - Neither fix changes observable runtime behavior (ABAP checked exceptions
+    propagate at runtime regardless of caller declaration; both fixes are pure
+    exception-contract/SLIN hygiene). Per the owner directive, no new/adjusted
+    ABAP Unit tests were added for these two fixes since no observable behavior
+    changed; existing coverage (`peek_object_count_cases` and the pre-existing
+    `apply`-based delta tests) remains valid and untouched.
+  - `get_errors` re-run after both edits: 0 errors in
+    `zcl_abapgit_ortec_pack_dec.clas.abap`, `zcl_abapgit_ortec_pack_dec.clas.testclasses.abap`,
+    `zcl_abapgit_ortec_delta.clas.abap`, `zcl_abapgit_ortec_delta.clas.testclasses.abap`.
+- False-MODIFIED-status anomaly: classified `PACKAGE_E_CONSUMER_COHERENCE` (not a D1
+  regression) - full causal-chain evidence in
+  [.memory/logs/variant_b_package_d_d1_modified_status_triage.md](.memory/logs/variant_b_package_d_d1_modified_status_triage.md).
+  No D1 productive fix was required or made for this anomaly.
+- `SAP_VALIDATION` updated from `NOT_RUN` to reflect the owner's real evidence:
+
+```text
+SAP_VALIDATION=ABAP_UNIT_PASS,ATC_PASS_EXCEPT_3_SLIN_NOW_FIXED,WARM_PASS,COLD_PASS
+SLIN_FIX=IMPLEMENTED
+SLIN_FILES=src/ortec/git/zcl_abapgit_ortec_pack_dec.clas.abap,src/ortec/git/zcl_abapgit_ortec_delta.clas.abap
+MODIFIED_STATUS_CLASSIFICATION=PACKAGE_E_CONSUMER_COHERENCE
+D1_REGRESSION_FIX=NOT_REQUIRED
+```

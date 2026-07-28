@@ -245,8 +245,11 @@ CLASS zcl_abapgit_ortec_delta DEFINITION
     "! git delta instruction stream begins with - neither value is needed by
     "! the copy/insert algorithm itself (identical semantics to standard
     "! zcl_abapgit_git_delta's private delta_header, duplicated per D-P5-3).
+    "! @raising zcx_abapgit_exception |
+    "! On truncated or malformed delta size-header bytes
     CLASS-METHODS skip_size_header
-      CHANGING cv_data TYPE xstring.
+      CHANGING cv_data TYPE xstring
+      RAISING  zcx_abapgit_exception.
 ENDCLASS.
 
 
