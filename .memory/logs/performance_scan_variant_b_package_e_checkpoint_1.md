@@ -53,12 +53,40 @@ literal-string implementation:
 - No DDIC change, no new table, no new index — no schema-level performance
   surface introduced.
 
+## Pre-import corrective audit (2026-07-29) — re-scanned
+
+Two source-level corrections were made after the original scan; both
+re-confirmed as zero production-scale impact:
+
+- `zcl_abapgit_ortec_cache_admin.clas.testclasses.abap` /
+  `f4_dedup_prefers_state`: replaced `FILTER #( lt_values WHERE repo_key =
+  c_repo )` (a real compile error on the keyless standard table type, not
+  a performance issue) with `LOOP AT lt_values TRANSPORTING NO FIELDS
+  WHERE repo_key = c_repo` (count) + `READ TABLE ... WITH KEY`. The
+  fixture is test-only, at most 2 repo keys — a linear scan is
+  performance-irrelevant at this scale, and this is test code that never
+  runs in a production request path regardless.
+- `zcl_abapgit_ortec_obj_index.clas.testclasses.abap` /
+  `build_commit`: added `zcx_abapgit_exception` to the `RAISING` clause.
+  A `RAISING` declaration is a compile-time checked-exception contract
+  with zero runtime cost — no behavior or performance change.
+- 3 placeholder test methods removed, 2 test assertions changed from
+  wildcard to exact-equality comparisons (`assert_char_cp` →
+  `assert_equals`) — both are O(1) string comparisons on short fixed
+  literals; no measurable cost difference either way.
+
+No production file (`zcl_abapgit_ortec_git_switch.clas.abap`,
+`zcl_abapgit_ortec_porcelain.clas.abap`) was touched by this corrective
+audit — the original scan's PASS verdict for production code stands
+unchanged.
+
 ## Verdict
 
 ```text
 PERFORMANCE_SCAN=PASS
 BLOCKING_FINDINGS=0
 DESIGN_GATE_REQUIRED=NO (no new production-scale loop/DB/HTTP pattern
-  introduced by this checkpoint's authorized scope)
+  introduced by this checkpoint's authorized scope, nor by the 2026-07-29
+  corrective audit)
 NEXT=none — E1-PERF remains a separate, not-yet-requested slice.
 ```

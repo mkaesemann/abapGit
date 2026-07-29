@@ -4,12 +4,42 @@
 PACKET=COMPACT_HANDOFF_V1
 TASK=E_CHECKPOINT_1_LOCAL_COMPLETE
 BASELINE=b6f019de865cd2c2d16769918a91b21b77d080ec
-STATUS=LOCAL_COMPLETE — implementation, local static validation, regression
-  review, and performance scan all done; NOT yet imported/activated/tested
-  on IT8. `.memory/state.md` intentionally NOT updated (per this
+CHECKPOINT_1_COMMIT=85b9a7acc4cee2fc166092b2f615f8662ca402ed
+STATUS=CORRECTED by a 2026-07-29 pre-import audit (see "Pre-import
+  corrective audit" section below) — 3 forbidden placeholder tests
+  removed, 2 real IT8-reported compile defects fixed, in a NEW follow-up
+  commit on top of 85b9a7ac (never amended). NOT yet imported/activated/
+  tested on IT8. `.memory/state.md` intentionally NOT updated (per this
   checkpoint's own instruction: "Do not update .memory/state.md before
   IT8 validation").
 ```
+
+## Pre-import corrective audit (2026-07-29)
+
+An owner audit found that the original checkpoint-1 report (below, left
+intact for change history) understated 3 defects:
+
+1. `dispatch_excl_not_appl`, `walk_retry_not_applicable`,
+   `walk_reraise_not_applicable` were `assert_true( abap_true )`
+   placeholders, not real tests — REMOVED from
+   `zcl_abapgit_ortec_porcelain.clas.testclasses.abap`; dispositions
+   (`NOT_APPLICABLE_WITH_EXACT_SOURCE_PROOF` / `BLOCKED_BY_MISSING_TEST_SEAM`)
+   now recorded only in the regression log.
+2. `walk_uses_shared_prefix` used a wildcard `assert_char_cp`; corrected
+   to an exact `assert_equals` against the complete literal
+   `'Walk, tree not found'`. `pull_retry_matches_walk` gained an
+   additional exact-text assertion alongside its existing `CS` check.
+3. Two REAL IT8-reported compile defects, both root-caused and fixed:
+   `ZCL_ABAPGIT_ORTEC_CACHE_ADMIN` line 922 (`FILTER` on a keyless
+   standard table — replaced with `LOOP ... WHERE` + `READ TABLE ... WITH
+   KEY`) and `ZCL_ABAPGIT_ORTEC_OBJ_INDEX`'s `build_commit` (missing
+   `zcx_abapgit_exception` in its `RAISING` clause — added additively).
+
+Full root-cause analysis, finding-to-fix matrix, and the independent
+scope-violation re-verification are in the regression log (link above).
+This handoff's own `CHECKPOINT_COMMIT` field below was also found to be
+stale/wrong (`2f31c0248393789c9219d72db85da09fa303ef9e` does not exist in
+`git log`) and is corrected to `85b9a7ac...` in the packet header above.
 
 Read this file first for this checkpoint. Detail lives in
 [regression_variant_b_package_e_checkpoint_1.md](../logs/regression_variant_b_package_e_checkpoint_1.md)
@@ -56,11 +86,12 @@ changed):
   `build_commit` helper + 4 `FOR TESTING` methods (E1-T-01..04).
 - `src/ortec/git/zcl_abapgit_ortec_cache_admin.clas.testclasses.abap` —
   3 new `FOR TESTING` methods (E3-T-01, E3-T-03, E3-T-04).
-- `src/ortec/git/zcl_abapgit_ortec_porcelain.clas.testclasses.abap` — 6
-  new `FOR TESTING` methods: 2 real E-HARDEN tests, 1 real hard-required
-  test (`status_after_cold_switch`, correctness-review MINOR-2), 3 honest
-  NOT_APPLICABLE placeholders (E4-D-01/02/04) citing the confirmed lack of
-  an HTTP transport mock seam.
+- `src/ortec/git/zcl_abapgit_ortec_porcelain.clas.testclasses.abap` — 3
+  real `FOR TESTING` methods after the corrective audit: 2 E-HARDEN tests
+  (now with exact-text assertions) and 1 hard-required test
+  (`status_after_cold_switch`, correctness-review MINOR-2). The 3
+  originally-added E4-D-01/02/04 placeholder methods were REMOVED by the
+  audit; their dispositions live only in the regression log.
 
 Full test-ID matrix, exact assertions, and per-file rationale: see the
 regression log linked above.
@@ -96,21 +127,30 @@ regression log linked above.
 - No live ABAP Unit/ATC run performed by the agent (established division
   of responsibility — owner runs this in IT8 after import).
 
-## Git commit
+## Git commits
 
-Selective commit staged exactly the 5 source files + this handoff + the 2
-new logs (never `git add .`/`-A`/`-a`). Commit hash recorded below once
-created.
+Original checkpoint-1 commit staged exactly the 5 source files + this
+handoff + the 2 new logs (never `git add .`/`-A`/`-a`). The corrective
+audit created a SEPARATE, NEW follow-up commit (never amending 85b9a7ac,
+since that SHA was already shared with the owner), staging only the 3
+corrected test files + the 3 rewritten memory artifacts.
 
 ```text
-CHECKPOINT_COMMIT=2f31c0248393789c9219d72db85da09fa303ef9e
+CHECKPOINT_1_COMMIT=85b9a7acc4cee2fc166092b2f615f8662ca402ed
+CORRECTION_COMMIT=<see `git log -1 --format=%H` on this branch tip, or the
+  final compact report of the 2026-07-29 corrective audit turn - this
+  field is intentionally not self-embedded to avoid a hash/content
+  chicken-and-egg mismatch>
 PUSHED=NO
 ```
 
 ## Next steps
 
-1. Owner imports this commit into IT8.
-2. Owner runs activation, ABAP Unit, and ATC there.
+1. Owner imports BOTH commits, in order (`85b9a7ac` then the correction
+   commit), into IT8.
+2. Owner runs activation, ABAP Unit, ATC, and a real syntax/SLIN recheck
+   of `ZCL_ABAPGIT_ORTEC_CACHE_ADMIN` and `ZCL_ABAPGIT_ORTEC_OBJ_INDEX`
+   there.
 3. Only after IT8 confirms PASS should `.memory/state.md` be updated to
    mark this checkpoint's slices `IT8_VALIDATED`.
 4. Do NOT start E1-PERF, E2-FIX, E4-FIX, or Package F as a follow-on to

@@ -919,14 +919,30 @@ CLASS ltcl_cache_admin IMPLEMENTATION.
     seed_repo( iv_repo_key = c_repo iv_with_state = abap_true ).
 
     DATA(lt_values) = zcl_abapgit_ortec_cache_admin=>get_repo_f4_values( ).
-    DATA(lt_matches) = FILTER #( lt_values WHERE repo_key = c_repo ).
+
+    " ty_repo_f4_tt is a STANDARD table WITH DEFAULT KEY (production type,
+    " out of scope to change here) - FILTER requires an explicit SORTED/
+    " HASHED key and is a real syntax error against this type (IT8 SLIN
+    " message GDY, confirmed 2026-07-29). The fixture is provably tiny
+    " (test-only rows for at most 2 repo keys), so a plain LOOP AT ... WHERE
+    " + READ TABLE ... WITH KEY (both valid on any standard table without a
+    " secondary key) is the narrowest correct fix.
+    DATA lv_match_count TYPE i.
+    LOOP AT lt_values TRANSPORTING NO FIELDS WHERE repo_key = c_repo.
+      lv_match_count = lv_match_count + 1.
+    ENDLOOP.
 
     cl_abap_unit_assert=>assert_equals(
-      act = lines( lt_matches )
+      act = lv_match_count
       exp = 1
       msg = 'A repo present in all three tiers must be deduplicated to exactly one F4 row' ).
+
+    READ TABLE lt_values INTO DATA(ls_match) WITH KEY repo_key = c_repo.
+    cl_abap_unit_assert=>assert_subrc(
+      exp = 0
+      msg = 'F4 row for the deduplicated repo must exist' ).
     cl_abap_unit_assert=>assert_equals(
-      act = lt_matches[ 1 ]-branch_name
+      act = ls_match-branch_name
       exp = 'main'
       msg = 'The real repo_state tier must win the dedup, not an orphan label' ).
   ENDMETHOD.

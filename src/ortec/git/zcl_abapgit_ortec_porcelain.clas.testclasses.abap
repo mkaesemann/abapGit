@@ -28,13 +28,16 @@ CLASS ltcl_porcelain DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT F
     METHODS walk_uses_shared_prefix     FOR TESTING RAISING cx_static_check.
     METHODS pull_retry_matches_walk     FOR TESTING RAISING cx_static_check.
 
-    " Package E E4-VERIFY (design §6/§9): regression coverage for the
-    " walk-error self-heal retry cascade and CR-10 outcome #9 (Diff/status
-    " calculation after a cold branch switch, correctness-review MINOR-2).
+    " Package E E4-VERIFY (design §6/§9): regression coverage for CR-10
+    " outcome #9 (Diff/status calculation after a cold branch switch,
+    " correctness-review MINOR-2). E4-D-01/02/04 have NO test method here
+    " (pre-import audit, 2026-07-29): they were previously always-passing
+    " `assert_true( abap_true )` placeholders, which is not a test and was
+    " removed. Their dispositions (NOT_APPLICABLE_WITH_EXACT_SOURCE_PROOF
+    " for E4-D-04, BLOCKED_BY_MISSING_TEST_SEAM for E4-D-01/02) are recorded
+    " in regression_variant_b_package_e_checkpoint_1.md, not as ABAP Unit
+    " methods.
     METHODS status_after_cold_switch    FOR TESTING RAISING cx_static_check.
-    METHODS dispatch_excl_not_appl      FOR TESTING RAISING cx_static_check.
-    METHODS walk_retry_not_applicable   FOR TESTING RAISING cx_static_check.
-    METHODS walk_reraise_not_applicable FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 
 CLASS ltcl_porcelain IMPLEMENTATION.
@@ -382,10 +385,16 @@ CLASS ltcl_porcelain IMPLEMENTATION.
         lv_caught_text = lx_walk->get_text( ).
     ENDTRY.
 
-    cl_abap_unit_assert=>assert_char_cp(
+    " Exact-text assertion (pre-import audit, 2026-07-29 - a wildcard-only
+    " assert_char_cp cannot prove the string-template interpolation adds no
+    " stray/missing characters). |{ c_walk_error_prefix } tree not found|
+    " with no WIDTH/ALIGN formatting option outputs the constant's value
+    " verbatim immediately followed by the literal ' tree not found' - byte-
+    " for-byte identical to the pre-OF-2 literal 'Walk, tree not found'.
+    cl_abap_unit_assert=>assert_equals(
       act = lv_caught_text
-      exp = |{ zcl_abapgit_ortec_git_switch=>c_walk_error_prefix }*|
-      msg = 'walk() must raise text starting with the shared c_walk_error_prefix constant' ).
+      exp = 'Walk, tree not found'
+      msg = 'walk() must raise the exact pre-OF-2 text via the shared c_walk_error_prefix constant' ).
   ENDMETHOD.
 
   METHOD pull_retry_matches_walk.
@@ -415,6 +424,13 @@ CLASS ltcl_porcelain IMPLEMENTATION.
         lv_walk_text = lx_walk->get_text( ).
     ENDTRY.
 
+    " Exact-text assertion first (pre-import audit, 2026-07-29), then the
+    " same CS operator/operand pull_by_branch itself uses, so both the
+    " literal text AND the actual production match expression are proven.
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_walk_text
+      exp = 'Walk, tree not found'
+      msg = 'walk() must raise the exact pre-OF-2 text' ).
     cl_abap_unit_assert=>assert_true(
       act = xsdbool( lv_walk_text CS zcl_abapgit_ortec_git_switch=>c_walk_error_prefix )
       msg = 'pull_by_branch''s own retry-trigger check must match the text walk() actually raises' ).
@@ -536,61 +552,29 @@ CLASS ltcl_porcelain IMPLEMENTATION.
       msg = 'The local copy itself did not change across the switch - only the remote branch tip did' ).
   ENDMETHOD.
 
-  METHOD dispatch_excl_not_appl.
-    " E4-D-04 (design doc test matrix section 6): NOT_APPLICABLE (structural)
-    " placeholder - confirmed by direct source inspection, not by a live/
-    " mocked call (a live call would need real HTTP for whichever branch
-    " is taken). zcl_abapgit_git_porcelain=>pull_by_branch's very first
-    " executable statement checks zcl_abapgit_ortec_git_switch=>
-    " is_active_for_repo( iv_url ); when that returns abap_true it calls
-    " zcl_abapgit_ortec_porcelain=>pull_by_branch and returns immediately,
-    " before any of the standard file's own embedded 'Walk,' retry logic
-    " further down the same method ever runs. This is an unconditional,
-    " unguarded early exit, so the two 'Walk,' retry blocks (ORTEC's own in
-    " this file, and the standard file's legacy copy) can never both
-    " execute for the same call: is_active_for_repo( iv_url ) = abap_true
-    " routes exclusively to THIS file's pull_by_branch; abap_false falls
-    " through to the standard file's OWN embedded logic instead. See
-    " src/git/zcl_abapgit_git_porcelain.clas.abap lines ~525-534 (verified
-    " this checkpoint).
-    cl_abap_unit_assert=>assert_true( abap_true ).
-  ENDMETHOD.
-
-  METHOD walk_retry_not_applicable.
-    " E4-D-01 (design §6 test matrix, INV-E4-D-1): NOT_APPLICABLE
-    " placeholder - pull_by_branch's self-heal retry-after-invalidate
-    " cascade requires a live/mocked zcl_abapgit_git_transport=>
-    " upload_pack_by_branch HTTP round-trip TWICE (initial fetch + the
-    " retry's own fetch). This test infrastructure has no such mock seam
-    " anywhere in the project (see the already-documented, honestly-
-    " labeled precedent at fresh_pull_unit_atomic in this file and
-    " zcl_abapgit_ortec_missing_obj.clas.testclasses.abap~
-    " missing_after_topup_raises). The two components this scenario
-    " exercises are independently covered elsewhere: the shared 'Walk,'
-    " prefix contract is pinned by walk_uses_shared_prefix/
-    " pull_retry_matches_walk (this file), and invalidate_all_history's
-    " own correctness is pinned by zcl_abapgit_ortec_repo_state.clas.
-    " testclasses.abap~invalidate_all_history_wide. Always-passing
-    " documentation test, consistent with established precedent - not a
-    " fabricated end-to-end check.
-    cl_abap_unit_assert=>assert_true( abap_true ).
-  ENDMETHOD.
-
-  METHOD walk_reraise_not_applicable.
-    " E4-D-02 (design §6 test matrix, INV-E4-D-2): NOT_APPLICABLE
-    " placeholder for the same HTTP-mock-seam reason as
-    " walk_retry_not_applicable - proving the SECOND failure re-raises
-    " lx_pull (the ORIGINAL exception, not the retry's own) requires
-    " driving pull_by_branch's full cascade twice via a live/mocked
-    " transport. Confirmed instead by direct source inspection
-    " (zcl_abapgit_ortec_porcelain.clas.abap's pull_by_branch CATCH
-    " block): both the CATCH zcx_abapgit_ortec_git and CATCH
-    " zcx_abapgit_exception branches around the retry's own
-    " upload_pack_by_branch/pull(...) calls execute "RAISE EXCEPTION
-    " lx_pull" - the ORIGINAL exception object saved before the retry
-    " began, never the retry's own new exception. Always-passing
-    " documentation test, consistent with established precedent.
-    cl_abap_unit_assert=>assert_true( abap_true ).
-  ENDMETHOD.
+  " E4-D-01, E4-D-02, E4-D-04 (design §6 test matrix): removed as ABAP Unit
+  " methods during the 2026-07-29 pre-import audit - they were always-
+  " passing `assert_true( abap_true )` stubs, which the audit's explicit
+  " rule disallows even when the surrounding comment documents a real
+  " scenario. Their dispositions are:
+  "   E4-D-04 = NOT_APPLICABLE_WITH_EXACT_SOURCE_PROOF - the dispatch-
+  "     exclusivity guarantee is fully provable by direct source read:
+  "     src/git/zcl_abapgit_git_porcelain.clas.abap lines 531-538 is an
+  "     unconditional `IF is_active_for_repo(...) = abap_true. ... RETURN.
+  "     ENDIF.` before the standard file's own embedded 'Walk,' block, so
+  "     the two 'Walk,' retry blocks can never both execute for one call.
+  "   E4-D-01/E4-D-02 = BLOCKED_BY_MISSING_TEST_SEAM - the full self-heal
+  "     retry cascade requires two live/mocked zcl_abapgit_git_transport=>
+  "     upload_pack_by_branch HTTP round-trips; no such mock seam exists in
+  "     this project (same class of limitation as fresh_pull_unit_atomic),
+  "     and adding one is out of scope for this correction. The two
+  "     sub-components the scenario depends on ARE independently, really
+  "     tested: the shared 'Walk,' prefix contract by
+  "     walk_uses_shared_prefix/pull_retry_matches_walk (this file), and
+  "     invalidate_all_history's own correctness by
+  "     zcl_abapgit_ortec_repo_state.clas.testclasses.abap~
+  "     invalidate_all_history_wide.
+  " See regression_variant_b_package_e_checkpoint_1.md for the full
+  " finding-to-fix record.
 ENDCLASS.
 

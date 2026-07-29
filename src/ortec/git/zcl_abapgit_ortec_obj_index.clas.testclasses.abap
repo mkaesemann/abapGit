@@ -12,7 +12,8 @@ CLASS ltcl_obj_index DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
         iv_filename          TYPE string
         iv_content            TYPE xstring
       RETURNING VALUE(rv_commit_sha) TYPE zif_abapgit_git_definitions=>ty_sha1
-      RAISING   zcx_abapgit_ortec_git.
+      RAISING   zcx_abapgit_exception
+                zcx_abapgit_ortec_git.
 
     METHODS index_no_cross_commit_leak FOR TESTING RAISING cx_static_check.
     METHODS ready_rejects_other_commit FOR TESTING RAISING cx_static_check.
