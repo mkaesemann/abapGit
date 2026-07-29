@@ -2,16 +2,18 @@
 
 ```text
 PACKET=COMPACT_HANDOFF_V1
-TASK=E_CHECKPOINT_1_LOCAL_COMPLETE
+TASK=E_CHECKPOINT_1_SAP_VALIDATED_COMPLETE
 BASELINE=b6f019de865cd2c2d16769918a91b21b77d080ec
-CHECKPOINT_1_COMMIT=85b9a7acc4cee2fc166092b2f615f8662ca402ed
-STATUS=CORRECTED by a 2026-07-29 pre-import audit (see "Pre-import
-  corrective audit" section below) — 3 forbidden placeholder tests
-  removed, 2 real IT8-reported compile defects fixed, in a NEW follow-up
-  commit on top of 85b9a7ac (never amended). NOT yet imported/activated/
-  tested on IT8. `.memory/state.md` intentionally NOT updated (per this
-  checkpoint's own instruction: "Do not update .memory/state.md before
-  IT8 validation").
+CHECKPOINT_1_BASE_COMMIT=85b9a7acc4cee2fc166092b2f615f8662ca402ed
+CHECKPOINT_1_VALIDATED_HEAD=3c77d898b62f3b0464e48cf59844e2e30c7b6e89
+STATUS=SAP_VALIDATED_COMPLETE (2026-07-29) — the 2026-07-29 pre-import
+  audit removed 3 forbidden placeholder tests and fixed 2 real
+  IT8-reported compile defects in commit 3c77d898 (on top of 85b9a7ac,
+  never amended after being shared); the owner then imported the full
+  chain (85b9a7ac + 3c77d898) into IT8 and reported ACTIVATION=PASS,
+  SYNTAX=PASS, ABAP_UNIT=PASS, ATC=PASS, SEVERE_ATC_FINDINGS=NONE. See
+  "IT8 validation closeout" section below. `.memory/state.md` updated
+  accordingly.
 ```
 
 ## Pre-import corrective audit (2026-07-29)
@@ -137,21 +139,70 @@ corrected test files + the 3 rewritten memory artifacts.
 
 ```text
 CHECKPOINT_1_COMMIT=85b9a7acc4cee2fc166092b2f615f8662ca402ed
-CORRECTION_COMMIT=<see `git log -1 --format=%H` on this branch tip, or the
-  final compact report of the 2026-07-29 corrective audit turn - this
-  field is intentionally not self-embedded to avoid a hash/content
-  chicken-and-egg mismatch>
-PUSHED=NO
+CORRECTION_COMMIT=3c77d898b62f3b0464e48cf59844e2e30c7b6e89
+PUSHED=YES (auto-pushed by the local VS Code Git integration immediately
+  after each commit on this branch, confirmed via `git reflog show
+  origin/ortec/abapgit_1_133-opt-rework` showing "update by push" entries
+  timed seconds after every local commit/amend in this branch's history;
+  the agent itself never ran `git push` explicitly this session)
+VALIDATION_CLOSEOUT_COMMIT=41c927ec
 ```
+
+## IT8 validation closeout (2026-07-29)
+
+Owner-reported, authoritative:
+
+```text
+SAP_SYSTEM=IT8
+IMPORTED_CHAIN=85b9a7ac (checkpoint-1 base) + 3c77d898 (pre-import
+  correction) — "current commit chain" per the owner's own wording,
+  confirmed to be this branch's exact HEAD at validation time
+ACTIVATION=PASS
+SYNTAX=PASS
+ABAP_UNIT=PASS
+ATC=PASS
+SEVERE_ATC_FINDINGS=NONE
+```
+
+No individual test-method-level IT8 execution detail was supplied by the
+owner beyond the aggregate ABAP_UNIT=PASS/ATC=PASS result — this handoff
+does not claim any specific test method was individually observed to run
+or pass in IT8 beyond that aggregate signal. Reconciliation against the 2
+original IT8 findings (finding-to-fix matrix, full detail in the
+regression log):
+
+| Original finding | Fix commit | Confirmed present in imported chain | IT8 result |
+| --- | --- | --- | --- |
+| `ZCL_ABAPGIT_ORTEC_CACHE_ADMIN` line 922, FILTER on keyless standard table | 3c77d898 | YES — `git show 3c77d898 -- src/ortec/git/zcl_abapgit_ortec_cache_admin.clas.testclasses.abap` re-verified this session | PASS (covered by owner's SYNTAX=PASS/ACTIVATION=PASS) |
+| `ZCL_ABAPGIT_ORTEC_OBJ_INDEX` `build_commit` undeclared `zcx_abapgit_exception` | 3c77d898 | YES — `git show 3c77d898 -- src/ortec/git/zcl_abapgit_ortec_obj_index.clas.testclasses.abap` re-verified this session | PASS (covered by owner's SYNTAX=PASS/ACTIVATION=PASS) |
+
+Placeholder disposition (final, no ABAP Unit method remains for any of the
+3):
+
+```text
+E4_D01=BLOCKED_BY_MISSING_TEST_SEAM (exact missing seam: a live/mocked
+  zcl_abapgit_git_transport=>upload_pack_by_branch HTTP double, needed
+  twice per test to drive pull_by_branch's self-heal retry cascade; none
+  exists in this project)
+E4_D02=BLOCKED_BY_MISSING_TEST_SEAM (same missing seam as E4-D-01)
+E4_D04=NOT_APPLICABLE_WITH_EXACT_SOURCE_PROOF (artifact section:
+  regression_variant_b_package_e_checkpoint_1.md, "Pre-import audit
+  corrections" §1, citing src/git/zcl_abapgit_git_porcelain.clas.abap
+  lines 531-538)
+```
+
+Since the owner's IT8 run covers 3c77d898 (the exact commit that removed
+the placeholders and applied both fixes), the earlier audit rule ("if IT8
+passed before a placeholder was removed, that pass does not count as
+coverage") does NOT apply here — the validated head already has the
+placeholders removed.
 
 ## Next steps
 
-1. Owner imports BOTH commits, in order (`85b9a7ac` then the correction
-   commit), into IT8.
-2. Owner runs activation, ABAP Unit, ATC, and a real syntax/SLIN recheck
-   of `ZCL_ABAPGIT_ORTEC_CACHE_ADMIN` and `ZCL_ABAPGIT_ORTEC_OBJ_INDEX`
-   there.
-3. Only after IT8 confirms PASS should `.memory/state.md` be updated to
-   mark this checkpoint's slices `IT8_VALIDATED`.
-4. Do NOT start E1-PERF, E2-FIX, E4-FIX, or Package F as a follow-on to
-   this checkpoint without a new explicit owner instruction.
+1. Checkpoint 1 is closed. Start Package E's next slice, **E1-PERF-A**
+   (contract already fixed — design §2: new constant
+   `c_index_write_chunk_size TYPE i VALUE 5000` in
+   `zcl_abapgit_ortec_obj_index`'s `rebuild_index`, replacing the bare
+   `1000` literal), in a new session/chat.
+2. Do NOT start E1-B/D/E, E2-DIAG, E2-FIX, E4-FIX, or Package F as a
+   follow-on to this checkpoint without a new explicit owner instruction.

@@ -4,13 +4,21 @@
 
 ```text
 TOPIC=variant-b-partial-clone
-CURRENT_PHASE=PACKAGE_E_E0_CORRECTIVE_DESIGN_COMPLETE
+CURRENT_PHASE=PACKAGE_E_CHECKPOINT_1_SAP_VALIDATED_COMPLETE
 PACKAGE_D2_STATUS=SAP_VALIDATED_COMPLETE
 PACKAGE_D2_VALIDATED_HEAD=733bb30799886ef8659be7e293b82c3ccfcebbdd
-PACKAGE_E_STATUS=E0_CORRECTIVE_DESIGN_COMPLETE, IMPLEMENTATION_PARTIAL_AUTHORIZED
-PRODUCTIVE_CHANGES_ALLOWED=NO (this phase is design/memory-only; per-slice
-  implementation authorization is recorded below and in the design doc §0,
-  but no implementation session has started yet)
+PACKAGE_E_STATUS=CHECKPOINT_1_SAP_VALIDATED_COMPLETE, next slice E1-PERF-A
+PACKAGE_E_CHECKPOINT_1=SAP_VALIDATED_COMPLETE
+PACKAGE_E_CHECKPOINT_1_VALIDATED_HEAD=3c77d898b62f3b0464e48cf59844e2e30c7b6e89
+PACKAGE_E_CHECKPOINT_1_SCOPE=E1-TEST, E3-TEST, E4-VERIFY, E-HARDEN OF-2
+PACKAGE_E_CHECKPOINT_1_VALIDATION=2026-07-29 (SAP_SYSTEM=IT8; ACTIVATION=PASS,
+  SYNTAX=PASS, ABAP_UNIT=PASS, ATC=PASS, SEVERE_ATC_FINDINGS=NONE — owner-
+  reported, covers the corrected head including the pre-import audit's
+  placeholder removal and the 2 IT8-reported syntax/exception-contract
+  fixes; detail in the checkpoint-1 handoff/regression log)
+PRODUCTIVE_CHANGES_ALLOWED=YES for E1-PERF-A only (contract fixed, design
+  §2/§0); all other Package E slices remain gated per their own
+  authorization state below
 ```
 
 Branch: `ortec/abapgit_1_133-opt-rework`. Package sequence decision:
@@ -50,7 +58,7 @@ the design document wins):
 
 ```text
 E1_OBJINDEX_CORRECTNESS=CONFIRMED_CURRENT (not a defect). Slice E1-TEST,
-  AUTHORIZED_NOW (test-only).
+  SAP_VALIDATED_COMPLETE (checkpoint 1, head 3c77d898, 2026-07-29).
 E1_OBJINDEX_PERFORMANCE=CORRECT_BUT_PERFORMANCE_OPEN (reclassified from the
   prior draft's ACCEPTABLE_AS_IMPLEMENTED — see design §2, CR-04). Slice
   E1-PERF, AUTHORIZED_NOW for candidate E1-A only; contract FIXED this pass
@@ -69,7 +77,7 @@ E2_CONSUMER_COHERENCE=NOT_VERIFIED root cause. Slice E2-DIAG, D0/D1
   bounded detection/repair design (see design §3) — not silently dropped.
 E3_CACHE_ADMIN_F4=CONFIRMED_CURRENT (not a defect); F4 already unions
   repo_state + obj_store + commit_hist orphans. Slice E3-TEST,
-  AUTHORIZED_NOW (test-only).
+  SAP_VALIDATED_COMPLETE (checkpoint 1, head 3c77d898, 2026-07-29).
 E4_CERTIFIED_REPAIR=E4_NOT_REQUIRED_CURRENTLY_COMPLETE for 7 of 9
   constructed scenarios (reclassified from a blanket NOT_REQUIRED — see
   design §6, CR-05). Scenario 8 (stale-but-wrong index content) is
@@ -77,15 +85,21 @@ E4_CERTIFIED_REPAIR=E4_NOT_REQUIRED_CURRENTLY_COMPLETE for 7 of 9
   deleted out-of-band, bypassing all ORTEC write APIs) is a genuine,
   evidence-based residual gap NOT reachable by normal operation — tracked
   below as E4-OOB-DELETION-RISK, requires explicit owner risk-acceptance.
-  Slice E4-VERIFY, AUTHORIZED_NOW (test-only). Slice E4-FIX NOT_REQUIRED
-  (no code; risk documented, not designed away).
+  Slice E4-VERIFY, SAP_VALIDATED_COMPLETE (checkpoint 1, head 3c77d898,
+  2026-07-29; E4-D-01/E4-D-02 disposed BLOCKED_BY_MISSING_TEST_SEAM,
+  E4-D-04 disposed NOT_APPLICABLE_WITH_EXACT_SOURCE_PROOF — no placeholder
+  ABAP Unit methods, see checkpoint-1 regression log). Slice E4-FIX
+  NOT_REQUIRED (no code; risk documented, not designed away).
 E-HARDEN (new this pass, CR-07)=OF-3 (RELAXED absent-strictness mode)
   ALREADY_ADEQUATELY_MITIGATED, closed, no action. OF-2 ('Walk,' string-
-  match duplication) DECIDED — AUTHORIZED_NOW for a shared-constant
-  extraction in the ORTEC-owned file only; the cross-file architecture
-  question it surfaced (why zcl_abapgit_git_porcelain carries embedded
-  ORTEC branching/duplicate logic) is tracked below as
-  E-HARDEN-STANDARD-FILE-COUPLING, NOT_AUTHORIZED to resolve unilaterally.
+  match duplication) SAP_VALIDATED_COMPLETE (checkpoint 1, head 3c77d898,
+  2026-07-29) — shared-constant extraction in the ORTEC-owned file only,
+  exact pre-existing text preserved ('Walk, tree not found'/'Walk, blob
+  not found', proven via ABAP string-template semantics and pinned by
+  exact-equality tests). The cross-file architecture question it surfaced
+  (why zcl_abapgit_git_porcelain carries embedded ORTEC branching/
+  duplicate logic) is tracked below as E-HARDEN-STANDARD-FILE-COUPLING,
+  NOT_AUTHORIZED to resolve unilaterally.
 ```
 
 ## Binding invariants
@@ -176,22 +190,21 @@ E-HARDEN-STANDARD-FILE-COUPLING (new this pass, CR-07): whether
 
 ## Next action
 
-Bootstrap consistency pass complete (2026-07-29): E1-A's implementation
-contract is now fully fixed (design §2), E4-OOB-DELETION-RISK has one
-fixed disposition (ACCEPTED_NON_BLOCKING_RISK, design §6), and both
-correctness-review MINOR findings are resolved (MINOR-1=ALREADY_APPLIED,
-MINOR-2=IMPLEMENTATION_PRECONDITION for E4-VERIFY). No `AUTHORIZED_NOW`
-slice depends on an unresolved open question. Audit note: the orchestrator
-read `/memories/repo/git-state-notes.md` in the immediately preceding turn
-(different task instructions); no design claim depends on its content, and
-the two `M`-flagged testclasses files were independently confirmed
-content-empty via `git diff` (see bootstrap handoff for full detail). No
-implementation has started. Next session: read this file, then the
-design's §0 per-slice authorization table, then begin only the
-`AUTHORIZED_NOW` slices in the order listed in
-`.memory/handoffs/variant-b-package-e-bootstrap.md` — starting with
-E1-TEST/E3-TEST/E4-VERIFY/E-HARDEN (mechanical, junior-routable), then
-E1-PERF and E2-DIAG D0/D1 (senior-routable). Re-read this file plus the
-Package E design/review artifacts before any code change; do not resume an
-unrelated backlog topic without checking this file's own active-topic
-status first.
+Package E checkpoint 1 (E1-TEST, E3-TEST, E4-VERIFY, E-HARDEN OF-2) is
+SAP_VALIDATED_COMPLETE as of 2026-07-29, head `3c77d898`
+(`.memory/handoffs/variant-b-package-e-checkpoint-1.md`,
+`.memory/logs/regression_variant_b_package_e_checkpoint_1.md`,
+`.memory/logs/performance_scan_variant_b_package_e_checkpoint_1.md`). A
+pre-import audit found and fixed 3 forbidden placeholder ABAP Unit tests
+and 2 real IT8-reported compile defects (`ZCL_ABAPGIT_ORTEC_CACHE_ADMIN`
+keyless-table `FILTER`; `ZCL_ABAPGIT_ORTEC_OBJ_INDEX` `build_commit`
+missing `zcx_abapgit_exception` in `RAISING`) before the owner's IT8 run;
+full finding-to-fix matrix is in the regression log. No placeholder ABAP
+Unit methods remain anywhere in this checkpoint's scope. Next session:
+read this file, then design §0/§2's E1-PERF authorization (contract
+already fixed: `c_index_write_chunk_size TYPE i VALUE 5000` replacing the
+bare `1000` literal in `rebuild_index`), then implement E1-A only — do NOT
+start E1-B/D/E, E2-DIAG, or Package F without a new explicit owner
+instruction. Re-read this file plus the Package E design/review artifacts
+before any code change; do not resume an unrelated backlog topic without
+checking this file's own active-topic status first.
