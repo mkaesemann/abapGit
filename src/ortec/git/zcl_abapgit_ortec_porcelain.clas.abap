@@ -317,7 +317,7 @@ CLASS zcl_abapgit_ortec_porcelain IMPLEMENTATION.
         lv_pull_error = lx_pull->get_text( ).
         IF     zcl_abapgit_ortec_git_switch=>is_active_for_repo( iv_url )  = abap_true
            AND lv_ortec_repo_key IS NOT INITIAL
-           AND lv_pull_error CS 'Walk,'.
+           AND lv_pull_error CS zcl_abapgit_ortec_git_switch=>c_walk_error_prefix.
           " The walk failed because the persistent store has some objects
           " but not every blob/tree reachable from the fetched commit, even
           " though ZAOG_COMMIT_HIST/ZAOG_REPO_STATE claim otherwise for at
@@ -515,11 +515,11 @@ CLASS zcl_abapgit_ortec_porcelain IMPLEMENTATION.
                                 iv_repo_key = iv_repo_key
                                 iv_sha1     = iv_sha1 ).
           IF ls_ortec_object-type <> zif_abapgit_git_definitions=>c_type-tree.
-            zcx_abapgit_exception=>raise( 'Walk, tree not found' ).
+            zcx_abapgit_exception=>raise( |{ zcl_abapgit_ortec_git_switch=>c_walk_error_prefix } tree not found| ).
           ENDIF.
           lt_nodes = zcl_abapgit_git_pack=>decode_tree( ls_ortec_object-data ).
         CATCH zcx_abapgit_ortec_git.
-          zcx_abapgit_exception=>raise( 'Walk, tree not found' ).
+          zcx_abapgit_exception=>raise( |{ zcl_abapgit_ortec_git_switch=>c_walk_error_prefix } tree not found| ).
       ENDTRY.
     ENDIF.
 
@@ -568,7 +568,7 @@ CLASS zcl_abapgit_ortec_porcelain IMPLEMENTATION.
                                 iv_repo_key = iv_repo_key
                                 iv_sha1     = <ls_node>-sha1 ).
           IF ls_ortec_object-type <> zif_abapgit_git_definitions=>c_type-blob.
-            zcx_abapgit_exception=>raise( 'Walk, blob not found' ).
+            zcx_abapgit_exception=>raise( |{ zcl_abapgit_ortec_git_switch=>c_walk_error_prefix } blob not found| ).
           ENDIF.
           ls_file-path = lv_file_path.
           ls_file-data = ls_ortec_object-data.
@@ -576,7 +576,7 @@ CLASS zcl_abapgit_ortec_porcelain IMPLEMENTATION.
           APPEND ls_file TO ct_files.
           CONTINUE.
         CATCH zcx_abapgit_ortec_git.
-          zcx_abapgit_exception=>raise( 'Walk, blob not found' ).
+          zcx_abapgit_exception=>raise( |{ zcl_abapgit_ortec_git_switch=>c_walk_error_prefix } blob not found| ).
       ENDTRY.
     ENDLOOP.
 

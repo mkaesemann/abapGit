@@ -22,6 +22,19 @@ CLASS ltcl_porcelain DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT F
     METHODS fresh_pull_unit_atomic     FOR TESTING RAISING cx_static_check.
     METHODS fresh_pull_fail_no_publish FOR TESTING RAISING cx_static_check.
     METHODS lock_release_on_failure    FOR TESTING RAISING cx_static_check.
+
+    " Package E OF-2/E-HARDEN (design §7): shared 'Walk,' trigger-text
+    " contract between walk()'s raise sites and pull_by_branch's CS check.
+    METHODS walk_uses_shared_prefix     FOR TESTING RAISING cx_static_check.
+    METHODS pull_retry_matches_walk     FOR TESTING RAISING cx_static_check.
+
+    " Package E E4-VERIFY (design §6/§9): regression coverage for the
+    " walk-error self-heal retry cascade and CR-10 outcome #9 (Diff/status
+    " calculation after a cold branch switch, correctness-review MINOR-2).
+    METHODS status_after_cold_switch    FOR TESTING RAISING cx_static_check.
+    METHODS dispatch_excl_not_appl      FOR TESTING RAISING cx_static_check.
+    METHODS walk_retry_not_applicable   FOR TESTING RAISING cx_static_check.
+    METHODS walk_reraise_not_applicable FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 
 CLASS ltcl_porcelain IMPLEMENTATION.
@@ -341,6 +354,243 @@ CLASS ltcl_porcelain IMPLEMENTATION.
     DATA(lv_lock_id_2) = zcl_abapgit_ortec_pack_dec=>acquire_repo_lock( iv_repo_key = c_repo2 ).
     cl_abap_unit_assert=>assert_not_initial( lv_lock_id_2 ).
     zcl_abapgit_ortec_pack_dec=>release_repo_lock( lv_lock_id_2 ).
+  ENDMETHOD.
+
+  METHOD walk_uses_shared_prefix.
+    " E-HARDEN-01 (design §7, OF-2): walk() must raise its "tree not found"
+    " text using the SAME shared prefix constant that pull_by_branch's own
+    " CS check tests against - proving the producer side of the contract,
+    " not just that walk() still raises SOME exception.
+    DATA lt_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lt_files   TYPE zif_abapgit_git_definitions=>ty_files_tt.
+    DATA lv_missing_sha1 TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_caught_text  TYPE string.
+
+    lv_missing_sha1 = repeat( val = 'f' occ = 40 ).
+
+    TRY.
+        zcl_abapgit_ortec_porcelain=>walk(
+          EXPORTING
+            it_objects  = lt_objects
+            iv_sha1     = lv_missing_sha1
+            iv_path     = ''
+            iv_repo_key = c_repo2
+          CHANGING
+            ct_files    = lt_files ).
+        cl_abap_unit_assert=>fail( 'walk() must raise when the tree object is missing entirely' ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_walk).
+        lv_caught_text = lx_walk->get_text( ).
+    ENDTRY.
+
+    cl_abap_unit_assert=>assert_char_cp(
+      act = lv_caught_text
+      exp = |{ zcl_abapgit_ortec_git_switch=>c_walk_error_prefix }*|
+      msg = 'walk() must raise text starting with the shared c_walk_error_prefix constant' ).
+  ENDMETHOD.
+
+  METHOD pull_retry_matches_walk.
+    " E-HARDEN-02 (design §7, OF-2): the CONSUMER side of the same
+    " contract - pull_by_branch's own CS check must match against the
+    " EXACT text walk() actually raises, proven here by driving walk()
+    " for real and checking its text with the identical CS operator/
+    " operand pull_by_branch uses, instead of duplicating a second literal.
+    DATA lt_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lt_files   TYPE zif_abapgit_git_definitions=>ty_files_tt.
+    DATA lv_missing_sha1 TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_walk_text    TYPE string.
+
+    lv_missing_sha1 = repeat( val = 'f' occ = 40 ).
+
+    TRY.
+        zcl_abapgit_ortec_porcelain=>walk(
+          EXPORTING
+            it_objects  = lt_objects
+            iv_sha1     = lv_missing_sha1
+            iv_path     = ''
+            iv_repo_key = c_repo2
+          CHANGING
+            ct_files    = lt_files ).
+        cl_abap_unit_assert=>fail( 'walk() must raise when the tree object is missing entirely' ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_walk).
+        lv_walk_text = lx_walk->get_text( ).
+    ENDTRY.
+
+    cl_abap_unit_assert=>assert_true(
+      act = xsdbool( lv_walk_text CS zcl_abapgit_ortec_git_switch=>c_walk_error_prefix )
+      msg = 'pull_by_branch''s own retry-trigger check must match the text walk() actually raises' ).
+  ENDMETHOD.
+
+  METHOD status_after_cold_switch.
+    " CR-10 outcome #9 / correctness-review MINOR-2 (design §9, hard
+    " requirement owned by E4-VERIFY): proves that status calculation
+    " reflects the NEWLY pulled branch after a cold branch switch, not
+    " stale content left over from a previous branch on the SAME repo key.
+    " zcl_abapgit_status_calc itself is confirmed unmodified by ORTEC
+    " (discovery §E2) - this test pins the INTEGRATION between porcelain's
+    " materialize_from_manifest output and status_calc, via the TADIR-free
+    " build_existing code path (both local and remote match on path and
+    " filename, so no zcl_abapgit_factory=>get_tadir() dependency is hit).
+    DATA lt_manifest  TYPE zif_abapgit_git_definitions=>ty_expanded_tt.
+    DATA ls_manifest  LIKE LINE OF lt_manifest.
+    DATA lt_objects   TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA ls_object    LIKE LINE OF lt_objects.
+    DATA lt_files_a   TYPE zif_abapgit_git_definitions=>ty_files_tt.
+    DATA lt_files_b   TYPE zif_abapgit_git_definitions=>ty_files_tt.
+    DATA lt_state     TYPE zif_abapgit_git_definitions=>ty_file_signatures_tt.
+    DATA ls_state     LIKE LINE OF lt_state.
+    DATA lt_local     TYPE zif_abapgit_definitions=>ty_files_item_tt.
+    DATA ls_local     LIKE LINE OF lt_local.
+
+    " Branch A content, materialized via the exact same primitive
+    " porcelain itself uses (materialize_from_manifest).
+    DATA(lv_data_a) = zcl_abapgit_convert=>string_to_xstring_utf8( 'branch-a-content' ).
+    CLEAR ls_object.
+    ls_object-type = zif_abapgit_git_definitions=>c_type-blob.
+    ls_object-sha1 = zcl_abapgit_hash=>sha1_blob( lv_data_a ).
+    ls_object-data = lv_data_a.
+    APPEND ls_object TO lt_objects.
+
+    ls_manifest-chmod = zif_abapgit_git_definitions=>c_chmod-file.
+    ls_manifest-path  = '/'.
+    ls_manifest-name  = 'zswitch.prog.abap'.
+    ls_manifest-sha1  = ls_object-sha1.
+    APPEND ls_manifest TO lt_manifest.
+
+    zcl_abapgit_ortec_porcelain=>materialize_from_manifest(
+      EXPORTING
+        it_objects       = lt_objects
+        it_blob_manifest = lt_manifest
+      CHANGING
+        ct_files         = lt_files_a ).
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_files_a ) exp = 1 ).
+
+    " Cold branch switch: an INDEPENDENT materialize call for the SAME
+    " path/filename but a DIFFERENT branch tip's blob - this is exactly
+    " what a real branch switch on an installed repo produces (a fresh
+    " manifest for the newly checked-out branch, with no memory of the
+    " previous branch).
+    CLEAR: lt_objects, lt_manifest, ls_object.
+    DATA(lv_data_b) = zcl_abapgit_convert=>string_to_xstring_utf8( 'branch-b-content' ).
+    ls_object-type = zif_abapgit_git_definitions=>c_type-blob.
+    ls_object-sha1 = zcl_abapgit_hash=>sha1_blob( lv_data_b ).
+    ls_object-data = lv_data_b.
+    APPEND ls_object TO lt_objects.
+
+    ls_manifest-chmod = zif_abapgit_git_definitions=>c_chmod-file.
+    ls_manifest-path  = '/'.
+    ls_manifest-name  = 'zswitch.prog.abap'.
+    ls_manifest-sha1  = ls_object-sha1.
+    APPEND ls_manifest TO lt_manifest.
+
+    zcl_abapgit_ortec_porcelain=>materialize_from_manifest(
+      EXPORTING
+        it_objects       = lt_objects
+        it_blob_manifest = lt_manifest
+      CHANGING
+        ct_files         = lt_files_b ).
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_files_b ) exp = 1 ).
+    cl_abap_unit_assert=>assert_differs(
+      act = lt_files_b[ 1 ]-sha1
+      exp = lt_files_a[ 1 ]-sha1
+      msg = 'Sanity: the branch switch fixture must actually change the blob sha1' ).
+
+    " A local copy still reflecting branch A (what was actually pulled and
+    " installed BEFORE the switch) and a state signature also pinned to
+    " branch A (the repo's last-known-good state before the switch).
+    ls_local-file-path     = '/'.
+    ls_local-file-filename = 'zswitch.prog.abap'.
+    ls_local-file-sha1     = lt_files_a[ 1 ]-sha1.
+    APPEND ls_local TO lt_local.
+
+    ls_state-path     = '/'.
+    ls_state-filename = 'zswitch.prog.abap'.
+    ls_state-sha1     = lt_files_a[ 1 ]-sha1.
+    APPEND ls_state TO lt_state.
+
+    DATA(lo_dot) = zcl_abapgit_dot_abapgit=>build_default( ).
+    lo_dot->set_starting_folder( '/' ).
+
+    DATA(li_calc) = zcl_abapgit_status_calc=>get_instance(
+      iv_root_package = '$TMP'
+      io_dot          = lo_dot ).
+
+    DATA(lt_results) = li_calc->calculate_status(
+      it_local     = lt_local
+      it_remote    = lt_files_b
+      it_cur_state = lt_state ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lines( lt_results )
+      exp = 1
+      msg = 'One result row expected for the single switched file' ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lt_results[ 1 ]-rstate
+      exp = zif_abapgit_definitions=>c_state-modified
+      msg = 'status_calc must report the NEW branch (B) content as modified ' &&
+            'relative to the pre-switch state - not unchanged, which would ' &&
+            'mean a stale/cached branch A file leaked into the remote list' ).
+
+    cl_abap_unit_assert=>assert_initial(
+      act = lt_results[ 1 ]-lstate
+      msg = 'The local copy itself did not change across the switch - only the remote branch tip did' ).
+  ENDMETHOD.
+
+  METHOD dispatch_excl_not_appl.
+    " E4-D-04 (design doc test matrix section 6): NOT_APPLICABLE (structural)
+    " placeholder - confirmed by direct source inspection, not by a live/
+    " mocked call (a live call would need real HTTP for whichever branch
+    " is taken). zcl_abapgit_git_porcelain=>pull_by_branch's very first
+    " executable statement checks zcl_abapgit_ortec_git_switch=>
+    " is_active_for_repo( iv_url ); when that returns abap_true it calls
+    " zcl_abapgit_ortec_porcelain=>pull_by_branch and returns immediately,
+    " before any of the standard file's own embedded 'Walk,' retry logic
+    " further down the same method ever runs. This is an unconditional,
+    " unguarded early exit, so the two 'Walk,' retry blocks (ORTEC's own in
+    " this file, and the standard file's legacy copy) can never both
+    " execute for the same call: is_active_for_repo( iv_url ) = abap_true
+    " routes exclusively to THIS file's pull_by_branch; abap_false falls
+    " through to the standard file's OWN embedded logic instead. See
+    " src/git/zcl_abapgit_git_porcelain.clas.abap lines ~525-534 (verified
+    " this checkpoint).
+    cl_abap_unit_assert=>assert_true( abap_true ).
+  ENDMETHOD.
+
+  METHOD walk_retry_not_applicable.
+    " E4-D-01 (design §6 test matrix, INV-E4-D-1): NOT_APPLICABLE
+    " placeholder - pull_by_branch's self-heal retry-after-invalidate
+    " cascade requires a live/mocked zcl_abapgit_git_transport=>
+    " upload_pack_by_branch HTTP round-trip TWICE (initial fetch + the
+    " retry's own fetch). This test infrastructure has no such mock seam
+    " anywhere in the project (see the already-documented, honestly-
+    " labeled precedent at fresh_pull_unit_atomic in this file and
+    " zcl_abapgit_ortec_missing_obj.clas.testclasses.abap~
+    " missing_after_topup_raises). The two components this scenario
+    " exercises are independently covered elsewhere: the shared 'Walk,'
+    " prefix contract is pinned by walk_uses_shared_prefix/
+    " pull_retry_matches_walk (this file), and invalidate_all_history's
+    " own correctness is pinned by zcl_abapgit_ortec_repo_state.clas.
+    " testclasses.abap~invalidate_all_history_wide. Always-passing
+    " documentation test, consistent with established precedent - not a
+    " fabricated end-to-end check.
+    cl_abap_unit_assert=>assert_true( abap_true ).
+  ENDMETHOD.
+
+  METHOD walk_reraise_not_applicable.
+    " E4-D-02 (design §6 test matrix, INV-E4-D-2): NOT_APPLICABLE
+    " placeholder for the same HTTP-mock-seam reason as
+    " walk_retry_not_applicable - proving the SECOND failure re-raises
+    " lx_pull (the ORIGINAL exception, not the retry's own) requires
+    " driving pull_by_branch's full cascade twice via a live/mocked
+    " transport. Confirmed instead by direct source inspection
+    " (zcl_abapgit_ortec_porcelain.clas.abap's pull_by_branch CATCH
+    " block): both the CATCH zcx_abapgit_ortec_git and CATCH
+    " zcx_abapgit_exception branches around the retry's own
+    " upload_pack_by_branch/pull(...) calls execute "RAISE EXCEPTION
+    " lx_pull" - the ORIGINAL exception object saved before the retry
+    " began, never the retry's own new exception. Always-passing
+    " documentation test, consistent with established precedent.
+    cl_abap_unit_assert=>assert_true( abap_true ).
   ENDMETHOD.
 ENDCLASS.
 

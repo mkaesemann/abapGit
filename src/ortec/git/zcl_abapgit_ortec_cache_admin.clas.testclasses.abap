@@ -74,6 +74,23 @@ CLASS ltcl_cache_admin DEFINITION
       FOR TESTING
       RAISING cx_static_check.
 
+    " Package E E3-TEST (design doc §5, INV-E3-T-1/2/3): CONFIRMED_CURRENT
+    " regression coverage - no defect found. E3-T-02 (obj_store tier
+    " precedence) is already adequately covered by f4_includes_orphan
+    " above; these three add isolated single-tier fixtures not covered by
+    " the existing seed_repo-based tests.
+    METHODS f4_repo_state_only
+      FOR TESTING
+      RAISING cx_static_check.
+
+    METHODS f4_commit_hist_only
+      FOR TESTING
+      RAISING cx_static_check.
+
+    METHODS f4_dedup_prefers_state
+      FOR TESTING
+      RAISING cx_static_check.
+
 ENDCLASS.
 
 
@@ -815,5 +832,102 @@ CLASS ltcl_cache_admin IMPLEMENTATION.
         AND ls_overview-pack_mb_disk < 2862 )
       msg = 'Pack byte sum must exceed INT4 without overflow' ).
 
+  ENDMETHOD.
+
+  METHOD f4_repo_state_only.
+    " E3-T-01 (design §5): isolated fixture - ONLY ZAOG_REPO_STATE seeded
+    " for c_repo (no obj_store/obj_index/commit_hist rows), unlike
+    " seed_repo which always creates all of them. Proves tier 1
+    " (repo_state) alone produces a correct, non-orphan F4 row with the
+    " refs/heads/ prefix stripped.
+    DATA ls_state TYPE zaog_repo_state.
+    DATA lv_ts    TYPE timestampl.
+
+    GET TIME STAMP FIELD lv_ts.
+
+    ls_state-repo_key     = c_repo.
+    ls_state-branch_name  = c_branch.
+    ls_state-remote_url   = c_url.
+    ls_state-url_hash     = zcl_abapgit_hash=>sha1_string( c_url ).
+    ls_state-curr_commit  = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'.
+    ls_state-fetch_commit = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'.
+    ls_state-fetch_ts     = lv_ts.
+    ls_state-is_shallow   = abap_false.
+    ls_state-deepen_lvl   = 0.
+    ls_state-changed_by   = sy-uname.
+    ls_state-changed_at   = lv_ts.
+    ls_state-snap_state   = zcl_abapgit_ortec_mat_state=>cs_snap_state-complete.
+
+    MODIFY zaog_repo_state FROM ls_state.
+    cl_abap_unit_assert=>assert_subrc(
+      exp = 0
+      msg = 'Failed to seed ZAOG_REPO_STATE' ).
+
+    DATA(lt_values) = zcl_abapgit_ortec_cache_admin=>get_repo_f4_values( ).
+
+    READ TABLE lt_values INTO DATA(ls_value) WITH KEY repo_key = c_repo.
+    cl_abap_unit_assert=>assert_subrc(
+      exp = 0
+      msg = 'F4 must include the repo_state-only repository' ).
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_value-branch_name
+      exp = 'main'
+      msg = 'refs/heads/ prefix must be stripped for a real repo_state tier row' ).
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_value-remote_url
+      exp = c_url ).
+  ENDMETHOD.
+
+  METHOD f4_commit_hist_only.
+    " E3-T-03 (design §5): isolated fixture - ONLY ZAOG_COMMIT_HIST seeded
+    " (no repo_state, no obj_store) - proves tier 3's distinct
+    " '<orphaned certificate>' label (which differs from tier 2's
+    " '<orphaned cache>' label).
+    DATA ls_commit TYPE zaog_commit_hist.
+    DATA lv_ts     TYPE timestampl.
+
+    GET TIME STAMP FIELD lv_ts.
+
+    ls_commit-repo_key    = c_repo.
+    ls_commit-commit_sha1 = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'.
+    ls_commit-branch_name = c_branch.
+    ls_commit-fetched_at  = lv_ts.
+    ls_commit-hist_level  = zcl_abapgit_ortec_mat_state=>cs_hist_level-full_complete.
+    ls_commit-snap_state  = zcl_abapgit_ortec_mat_state=>cs_snap_state-complete.
+
+    MODIFY zaog_commit_hist FROM ls_commit.
+    cl_abap_unit_assert=>assert_subrc(
+      exp = 0
+      msg = 'Failed to seed ZAOG_COMMIT_HIST' ).
+
+    DATA(lt_values) = zcl_abapgit_ortec_cache_admin=>get_repo_f4_values( ).
+
+    READ TABLE lt_values INTO DATA(ls_value) WITH KEY repo_key = c_repo.
+    cl_abap_unit_assert=>assert_subrc(
+      exp = 0
+      msg = 'F4 must include a commit-hist-only orphaned certificate' ).
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_value-branch_name
+      exp = '<orphaned certificate>'
+      msg = 'Tier 3 label must be distinct from tier 2''s <orphaned cache>' ).
+  ENDMETHOD.
+
+  METHOD f4_dedup_prefers_state.
+    " E3-T-04 (design §5): seed_repo populates ALL three tiers for the SAME
+    " repo_key - dedup logic must produce exactly ONE row (the real
+    " repo_state tier wins, not an orphan label).
+    seed_repo( iv_repo_key = c_repo iv_with_state = abap_true ).
+
+    DATA(lt_values) = zcl_abapgit_ortec_cache_admin=>get_repo_f4_values( ).
+    DATA(lt_matches) = FILTER #( lt_values WHERE repo_key = c_repo ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lines( lt_matches )
+      exp = 1
+      msg = 'A repo present in all three tiers must be deduplicated to exactly one F4 row' ).
+    cl_abap_unit_assert=>assert_equals(
+      act = lt_matches[ 1 ]-branch_name
+      exp = 'main'
+      msg = 'The real repo_state tier must win the dedup, not an orphan label' ).
   ENDMETHOD.
 ENDCLASS.

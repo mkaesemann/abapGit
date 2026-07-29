@@ -56,6 +56,16 @@ CLASS zcl_abapgit_ortec_git_switch DEFINITION
         mode         TYPE string VALUE 'STRICT',
       END OF cs_absent_strictness.
 
+    "! Shared trigger-text prefix for the porcelain 'walk' self-heal
+    "! contract (Package E design doc §7, OF-2): zcl_abapgit_ortec_porcelain
+    "! =>walk raises every "tree/blob not found" exception with a text
+    "! starting with this exact prefix, and its OWN pull_by_branch's CS
+    "! check (which decides whether to invalidate all history and retry
+    "! once) matches against this same constant - both producer and
+    "! consumer must always agree on one literal instead of two independent
+    "! copies of the string 'Walk,'.
+    CONSTANTS c_walk_error_prefix TYPE string VALUE 'Walk,'.
+
     "! Check if ORTEC fast path is active for repository URL.
     "! @parameter iv_url |
     "! Repository URL
