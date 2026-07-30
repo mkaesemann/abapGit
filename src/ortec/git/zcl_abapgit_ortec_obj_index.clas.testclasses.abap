@@ -19,6 +19,25 @@ CLASS ltcl_obj_index DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
     METHODS ready_rejects_other_commit FOR TESTING RAISING cx_static_check.
     METHODS ready_accepts_exact_commit FOR TESTING RAISING cx_static_check.
     METHODS index_chunk_boundary_ok    FOR TESTING RAISING cx_static_check.
+
+    " E1-PERF-A (design doc §2, run-brief test matrix): coverage for the
+    " new 5000-row write-chunk boundary. build_bulk_commit is a dedicated
+    " fixture helper (kept separate from build_commit/index_chunk_boundary_ok
+    " to avoid touching already-validated checkpoint-1 test code).
+    METHODS build_bulk_commit
+      IMPORTING
+        iv_file_count TYPE i
+      EXPORTING
+        ev_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1
+        et_filter     TYPE zif_abapgit_definitions=>ty_tadir_tt
+      RAISING
+        zcx_abapgit_exception
+        zcx_abapgit_ortec_git.
+
+    METHODS index_chunk_below_boundary FOR TESTING RAISING cx_static_check.
+    METHODS index_chunk_at_boundary    FOR TESTING RAISING cx_static_check.
+    METHODS index_chunk_above_boundary FOR TESTING RAISING cx_static_check.
+    METHODS index_empty_no_match       FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 CLASS ltcl_obj_index IMPLEMENTATION.
   METHOD setup.
@@ -425,5 +444,269 @@ CLASS ltcl_obj_index IMPLEMENTATION.
     cl_abap_unit_assert=>assert_true(
       act = zcl_abapgit_ortec_obj_index=>is_index_ready( iv_repo_key = mc_repo iv_commit = lv_commit_sha )
       msg = 'Completion marker must be written after a multi-chunk rebuild' ).
+  ENDMETHOD.
+
+  METHOD build_bulk_commit.
+    " Shared fixture for E1-PERF-A boundary tests: iv_file_count files under
+    " /src/, each independently PROG/ZBULKnnnnnn-mapped, bulk-stored in one
+    " store_objects call (never a per-row DB loop), per the project's own
+    " documented per-row-DB-loop performance lesson.
+    DATA lt_nodes          TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+    DATA ls_node           LIKE LINE OF lt_nodes.
+    DATA lt_objects        TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA ls_object         LIKE LINE OF lt_objects.
+    DATA ls_filter         LIKE LINE OF et_filter.
+    DATA ls_commit         TYPE zcl_abapgit_git_pack=>ty_commit.
+    DATA lv_src_tree_data  TYPE xstring.
+    DATA lv_src_tree_sha   TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_root_tree_data TYPE xstring.
+    DATA lv_root_tree_sha  TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_commit_data    TYPE xstring.
+    DATA lv_name           TYPE string.
+    DATA lv_obj_name       TYPE string.
+    DATA lv_blob_data      TYPE xstring.
+    DATA lv_blob_sha       TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_index          TYPE i.
+
+    CLEAR et_filter.
+    CLEAR lt_nodes.
+    CLEAR lt_objects.
+
+    DO iv_file_count TIMES.
+      lv_index    = sy-index.
+      lv_name     = |zbulk{ lv_index WIDTH = 6 ALIGN = RIGHT PAD = '0' }|.
+      lv_obj_name = |ZBULK{ lv_index WIDTH = 6 ALIGN = RIGHT PAD = '0' }|.
+      lv_blob_data = zcl_abapgit_convert=>string_to_xstring_utf8( |content { lv_index }| ).
+      lv_blob_sha = zcl_abapgit_hash=>sha1_blob( lv_blob_data ).
+
+      CLEAR ls_object.
+      ls_object-type = zif_abapgit_git_definitions=>c_type-blob.
+      ls_object-sha1 = lv_blob_sha.
+      ls_object-data = lv_blob_data.
+      APPEND ls_object TO lt_objects.
+
+      CLEAR ls_node.
+      ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-file.
+      ls_node-name  = |{ lv_name }.prog.abap|.
+      ls_node-sha1  = lv_blob_sha.
+      APPEND ls_node TO lt_nodes.
+
+      CLEAR ls_filter.
+      ls_filter-object   = 'PROG'.
+      ls_filter-obj_name = lv_obj_name.
+      APPEND ls_filter TO et_filter.
+    ENDDO.
+
+    lv_src_tree_data = zcl_abapgit_git_pack=>encode_tree( lt_nodes ).
+    lv_src_tree_sha = zcl_abapgit_hash=>sha1_tree( lv_src_tree_data ).
+
+    CLEAR lt_nodes.
+    CLEAR ls_node.
+    ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-dir.
+    ls_node-name  = 'src'.
+    ls_node-sha1  = lv_src_tree_sha.
+    APPEND ls_node TO lt_nodes.
+    lv_root_tree_data = zcl_abapgit_git_pack=>encode_tree( lt_nodes ).
+    lv_root_tree_sha = zcl_abapgit_hash=>sha1_tree( lv_root_tree_data ).
+
+    ls_commit-tree = lv_root_tree_sha.
+    ls_commit-author = 'Test <test@example.com> 0 +0000'.
+    ls_commit-committer = 'Test <test@example.com> 0 +0000'.
+    ls_commit-body = |bulk { iv_file_count }|.
+    lv_commit_data = zcl_abapgit_git_pack=>encode_commit( ls_commit ).
+    ev_commit_sha = zcl_abapgit_hash=>sha1_commit( lv_commit_data ).
+
+    CLEAR ls_object.
+    ls_object-type = zif_abapgit_git_definitions=>c_type-commit.
+    ls_object-sha1 = ev_commit_sha.
+    ls_object-data = lv_commit_data.
+    APPEND ls_object TO lt_objects.
+
+    ls_object-type = zif_abapgit_git_definitions=>c_type-tree.
+    ls_object-sha1 = lv_root_tree_sha.
+    ls_object-data = lv_root_tree_data.
+    APPEND ls_object TO lt_objects.
+
+    ls_object-sha1 = lv_src_tree_sha.
+    ls_object-data = lv_src_tree_data.
+    APPEND ls_object TO lt_objects.
+
+    zcl_abapgit_ortec_obj_store=>store_objects( iv_repo_key = mc_repo it_objects = lt_objects ).
+  ENDMETHOD.
+
+  METHOD index_chunk_below_boundary.
+    " E1-PERF-A (design §2 contract, run-brief test matrix): one row BELOW
+    " the new 5000-row chunk boundary. The in-loop chunk check never
+    " triggers (4999 < 5000); only the final "IF lt_rows IS NOT INITIAL"
+    " flush persists these rows - it must still do so correctly.
+    DATA lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lt_filter TYPE zif_abapgit_definitions=>ty_tadir_tt.
+
+    build_bulk_commit(
+      EXPORTING iv_file_count = 4999
+      IMPORTING ev_commit_sha = lv_commit_sha et_filter = lt_filter ).
+
+    DATA(lo_dot) = zcl_abapgit_dot_abapgit=>build_default( ).
+    DATA(lo_filter) = NEW zcl_abapgit_object_filter_obj( it_filter = lt_filter ).
+
+    DATA(lt_files) = zcl_abapgit_ortec_obj_index=>get_files_for_filter(
+      iv_repo_key   = mc_repo
+      iv_commit     = lv_commit_sha
+      ii_obj_filter = lo_filter
+      io_dot        = lo_dot
+      iv_devclass   = '$PACK' ).
+
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_files ) exp = 4999
+      msg = 'All rows below the chunk boundary must survive via the final flush' ).
+    cl_abap_unit_assert=>assert_true(
+      act = zcl_abapgit_ortec_obj_index=>is_index_ready( iv_repo_key = mc_repo iv_commit = lv_commit_sha )
+      msg = 'Completion marker must be written when the walk never crosses the in-loop chunk check' ).
+  ENDMETHOD.
+
+  METHOD index_chunk_at_boundary.
+    " E1-PERF-A: EXACTLY at the new 5000-row chunk boundary. The in-loop
+    " flush fires exactly once and clears lt_rows; the final "IF lt_rows IS
+    " NOT INITIAL" check must then correctly do nothing (no empty MODIFY,
+    " no lost/duplicated rows).
+    DATA lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lt_filter TYPE zif_abapgit_definitions=>ty_tadir_tt.
+
+    build_bulk_commit(
+      EXPORTING iv_file_count = 5000
+      IMPORTING ev_commit_sha = lv_commit_sha et_filter = lt_filter ).
+
+    DATA(lo_dot) = zcl_abapgit_dot_abapgit=>build_default( ).
+    DATA(lo_filter) = NEW zcl_abapgit_object_filter_obj( it_filter = lt_filter ).
+
+    DATA(lt_files) = zcl_abapgit_ortec_obj_index=>get_files_for_filter(
+      iv_repo_key   = mc_repo
+      iv_commit     = lv_commit_sha
+      ii_obj_filter = lo_filter
+      io_dot        = lo_dot
+      iv_devclass   = '$PACK' ).
+
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_files ) exp = 5000
+      msg = 'All rows at the exact chunk boundary must be indexed exactly once' ).
+    cl_abap_unit_assert=>assert_true(
+      act = zcl_abapgit_ortec_obj_index=>is_index_ready( iv_repo_key = mc_repo iv_commit = lv_commit_sha )
+      msg = 'Completion marker must be written when the single in-loop flush lands exactly on the boundary' ).
+
+    SELECT COUNT(*) FROM zaog_obj_index INTO @DATA(lv_count)
+      WHERE repo_key = @mc_repo AND commit_sha1 = @lv_commit_sha AND obj_type = 'PROG'.
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 5000
+      msg = 'The exact-boundary in-loop flush must not duplicate or drop rows' ).
+  ENDMETHOD.
+
+  METHOD index_chunk_above_boundary.
+    " E1-PERF-A: one row ABOVE the new 5000-row chunk boundary. This
+    " exercises TWO separate MODIFY flushes for one commit (the in-loop
+    " 5000-row chunk plus a 1-row final flush) - the case most likely to
+    " reveal a duplicate-row or lost-row defect in the chunking logic.
+    DATA lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lt_filter TYPE zif_abapgit_definitions=>ty_tadir_tt.
+
+    build_bulk_commit(
+      EXPORTING iv_file_count = 5001
+      IMPORTING ev_commit_sha = lv_commit_sha et_filter = lt_filter ).
+
+    DATA(lo_dot) = zcl_abapgit_dot_abapgit=>build_default( ).
+    DATA(lo_filter) = NEW zcl_abapgit_object_filter_obj( it_filter = lt_filter ).
+
+    DATA(lt_files) = zcl_abapgit_ortec_obj_index=>get_files_for_filter(
+      iv_repo_key   = mc_repo
+      iv_commit     = lv_commit_sha
+      ii_obj_filter = lo_filter
+      io_dot        = lo_dot
+      iv_devclass   = '$PACK' ).
+
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_files ) exp = 5001
+      msg = 'All rows across two chunk flushes must survive' ).
+    cl_abap_unit_assert=>assert_true(
+      act = zcl_abapgit_ortec_obj_index=>is_index_ready( iv_repo_key = mc_repo iv_commit = lv_commit_sha )
+      msg = 'Completion marker must be written after both the in-loop and final flush' ).
+
+    SELECT COUNT(*) FROM zaog_obj_index INTO @DATA(lv_count)
+      WHERE repo_key = @mc_repo AND commit_sha1 = @lv_commit_sha AND obj_type = 'PROG'.
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 5001
+      msg = 'Two separate chunk flushes for one commit must not duplicate or drop any row' ).
+  ENDMETHOD.
+
+  METHOD index_empty_no_match.
+    " E1-PERF-A: the zero-relevant-rows path must remain correct at the new
+    " chunk size - lt_rows never reaches the in-loop chunk check nor the
+    " final "IF lt_rows IS NOT INITIAL" flush, yet the completion marker
+    " must still be written unconditionally (see rebuild_index's own
+    " comment on this exact invariant). A filename with no "." segment
+    " (e.g. "readme") maps to an empty obj_type via file_to_object, which
+    " rebuild_index skips via its own "obj_type IS INITIAL ... CONTINUE"
+    " guard - a real, reachable zero-relevant-rows case (rebuild_index has
+    " no filter parameter of its own; ALL resolvable objects in the tree
+    " are indexed, so this is not merely a filter mismatch).
+    DATA lt_nodes          TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+    DATA ls_node           LIKE LINE OF lt_nodes.
+    DATA lt_objects        TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA ls_object         LIKE LINE OF lt_objects.
+    DATA ls_commit         TYPE zcl_abapgit_git_pack=>ty_commit.
+    DATA lv_root_tree_data TYPE xstring.
+    DATA lv_root_tree_sha  TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_commit_data    TYPE xstring.
+    DATA lv_commit_sha     TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_blob_data      TYPE xstring.
+    DATA lv_blob_sha       TYPE zif_abapgit_git_definitions=>ty_sha1.
+
+    lv_blob_data = zcl_abapgit_convert=>string_to_xstring_utf8( 'not abap' ).
+    lv_blob_sha = zcl_abapgit_hash=>sha1_blob( lv_blob_data ).
+
+    CLEAR ls_object.
+    ls_object-type = zif_abapgit_git_definitions=>c_type-blob.
+    ls_object-sha1 = lv_blob_sha.
+    ls_object-data = lv_blob_data.
+    APPEND ls_object TO lt_objects.
+
+    CLEAR ls_node.
+    ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-file.
+    ls_node-name  = 'readme'.
+    ls_node-sha1  = lv_blob_sha.
+    APPEND ls_node TO lt_nodes.
+    lv_root_tree_data = zcl_abapgit_git_pack=>encode_tree( lt_nodes ).
+    lv_root_tree_sha = zcl_abapgit_hash=>sha1_tree( lv_root_tree_data ).
+
+    ls_commit-tree = lv_root_tree_sha.
+    ls_commit-author = 'Test <test@example.com> 0 +0000'.
+    ls_commit-committer = 'Test <test@example.com> 0 +0000'.
+    ls_commit-body = 'empty no match'.
+    lv_commit_data = zcl_abapgit_git_pack=>encode_commit( ls_commit ).
+    lv_commit_sha = zcl_abapgit_hash=>sha1_commit( lv_commit_data ).
+
+    CLEAR ls_object.
+    ls_object-type = zif_abapgit_git_definitions=>c_type-commit.
+    ls_object-sha1 = lv_commit_sha.
+    ls_object-data = lv_commit_data.
+    APPEND ls_object TO lt_objects.
+
+    ls_object-type = zif_abapgit_git_definitions=>c_type-tree.
+    ls_object-sha1 = lv_root_tree_sha.
+    ls_object-data = lv_root_tree_data.
+    APPEND ls_object TO lt_objects.
+
+    zcl_abapgit_ortec_obj_store=>store_objects( iv_repo_key = mc_repo it_objects = lt_objects ).
+
+    DATA(lo_dot) = zcl_abapgit_dot_abapgit=>build_default( ).
+    DATA(lo_filter) = NEW zcl_abapgit_object_filter_obj(
+      it_filter = VALUE #( ( object = 'PROG' obj_name = 'ZPROGRAM' ) ) ).
+
+    DATA(lt_files) = zcl_abapgit_ortec_obj_index=>get_files_for_filter(
+      iv_repo_key   = mc_repo
+      iv_commit     = lv_commit_sha
+      ii_obj_filter = lo_filter
+      io_dot        = lo_dot
+      iv_devclass   = '$PACK' ).
+
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_files ) exp = 0
+      msg = 'A tree with no ABAP-resolvable objects must index zero rows' ).
+    cl_abap_unit_assert=>assert_true(
+      act = zcl_abapgit_ortec_obj_index=>is_index_ready( iv_repo_key = mc_repo iv_commit = lv_commit_sha )
+      msg = 'The completion marker must be written even when zero rows were found - ' &&
+            'the final flush check must not gate the unconditional marker write' ).
   ENDMETHOD.
 ENDCLASS.
