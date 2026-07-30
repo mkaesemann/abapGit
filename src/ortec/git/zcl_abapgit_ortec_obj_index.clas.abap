@@ -65,10 +65,14 @@ CLASS zcl_abapgit_ortec_obj_index DEFINITION
     CONSTANTS c_marker_obj_name TYPE tadir-obj_name VALUE '__READY__'.
     CONSTANTS c_marker_path_hash TYPE zif_abapgit_git_definitions=>ty_sha1
       VALUE '0000000000000000000000000000000000000000'.
-    " E1-PERF-A (design doc §2): bulk MODIFY chunk size for rebuild_index's
-    " index-row persistence. All zaog_obj_index fields are fixed-width CHAR
-    " (~730 bytes/row), so 5000 rows is a bounded ~3.65 MB peak buffer.
-    CONSTANTS c_index_write_chunk_size TYPE i VALUE 5000.
+    " E1-PERF-A (design doc §2, revised): bulk MODIFY chunk size for
+    " rebuild_index's index-row persistence. All zaog_obj_index fields are
+    " fixed-width CHAR (~730 bytes/row), so 30000 rows is a bounded
+    " ~21.9 MB row-payload buffer (row payload only; see the E1-A
+    " performance audit for the full peak-memory risk assessment). Raised
+    " from an initial, more conservative 5000-row candidate after owner
+    " review of measured DB round-trip/array-DML setup cost at 1000 rows.
+    CONSTANTS c_index_write_chunk_size TYPE i VALUE 30000.
 
     TYPES ty_index_rows_tt TYPE STANDARD TABLE OF zaog_obj_index WITH DEFAULT KEY.
 

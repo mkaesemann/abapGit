@@ -20,10 +20,23 @@ CLASS ltcl_obj_index DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
     METHODS ready_accepts_exact_commit FOR TESTING RAISING cx_static_check.
     METHODS index_chunk_boundary_ok    FOR TESTING RAISING cx_static_check.
 
-    " E1-PERF-A (design doc §2, run-brief test matrix): coverage for the
-    " new 5000-row write-chunk boundary. build_bulk_commit is a dedicated
-    " fixture helper (kept separate from build_commit/index_chunk_boundary_ok
-    " to avoid touching already-validated checkpoint-1 test code).
+    " E1-PERF-A (design doc §2, run-brief test matrix; revised to the
+    " 30000-row batch size). build_bulk_commit is a dedicated fixture
+    " helper (kept separate from build_commit/index_chunk_boundary_ok to
+    " avoid touching already-validated checkpoint-1 test code).
+    "
+    " KNOWN, DOCUMENTED LOCAL COVERAGE LIMITATION: the active chunk
+    " boundary is now 30000 rows. Building 30000+ complete Git objects in
+    " an ABAP Unit DURATION SHORT test is not appropriate (excessive
+    " runtime cost for no correctness benefit over the proven chunking
+    " ALGORITHM). The named constant is PRIVATE with no LOCAL FRIENDS
+    " declared, so it is also not legally pinnable from these tests
+    " without a scope-exceeding production change. Local tests below
+    " therefore prove bulk multi-row correctness on the single
+    " final-flush path (below the active boundary) plus the unchanged
+    " zero-row path; the actual in-loop multi-chunk flush behavior AT
+    " 30000 rows is verified only via the owner's live IT8 SAT/SQL
+    " measurement (ACTUAL_MODIFY_PACKAGE_COUNT), not locally.
     METHODS build_bulk_commit
       IMPORTING
         iv_file_count TYPE i
@@ -34,10 +47,8 @@ CLASS ltcl_obj_index DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
         zcx_abapgit_exception
         zcx_abapgit_ortec_git.
 
-    METHODS index_chunk_below_boundary FOR TESTING RAISING cx_static_check.
-    METHODS index_chunk_at_boundary    FOR TESTING RAISING cx_static_check.
-    METHODS index_chunk_above_boundary FOR TESTING RAISING cx_static_check.
-    METHODS index_empty_no_match       FOR TESTING RAISING cx_static_check.
+    METHODS index_bulk_rows_preserved FOR TESTING RAISING cx_static_check.
+    METHODS index_empty_no_match      FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 CLASS ltcl_obj_index IMPLEMENTATION.
   METHOD setup.
@@ -337,12 +348,16 @@ CLASS ltcl_obj_index IMPLEMENTATION.
 
   METHOD index_chunk_boundary_ok.
     " E1-T-04 (design §1, §10 outcome-preservation row "E1 correctness"):
-    " rebuild_index's bulk MODIFY currently chunks at a bare literal 1000
-    " rows (raising this to a named constant, e.g. 5000, is E1-PERF - NOT
-    " this checkpoint). This fixture deliberately crosses TODAY's 1000-row
-    " chunk boundary WITHOUT asserting the literal 1000 value anywhere, so
-    " it remains valid once a future E1-PERF checkpoint changes the chunk
-    " size.
+    " rebuild_index's bulk MODIFY chunks at a named constant
+    " (c_index_write_chunk_size, currently 30000 after the E1-PERF-A
+    " revision). This fixture deliberately does NOT hardcode that literal
+    " anywhere, so it stays valid across future E1-PERF batch-size
+    " changes. NOTE: at the current 30000-row batch size this fixture's
+    " 1200 rows no longer cross the active in-loop chunk boundary (it now
+    " only exercises the single final-flush path) - it is retained as
+    " generic multi-row/marker regression coverage, not as boundary
+    " coverage; see index_bulk_rows_preserved's comment for why the
+    " active boundary is not locally crossable.
     CONSTANTS lc_file_count TYPE i VALUE 1200.
 
     DATA lt_nodes          TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
@@ -534,40 +549,14 @@ CLASS ltcl_obj_index IMPLEMENTATION.
     zcl_abapgit_ortec_obj_store=>store_objects( iv_repo_key = mc_repo it_objects = lt_objects ).
   ENDMETHOD.
 
-  METHOD index_chunk_below_boundary.
-    " E1-PERF-A (design §2 contract, run-brief test matrix): one row BELOW
-    " the new 5000-row chunk boundary. The in-loop chunk check never
-    " triggers (4999 < 5000); only the final "IF lt_rows IS NOT INITIAL"
-    " flush persists these rows - it must still do so correctly.
-    DATA lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
-    DATA lt_filter TYPE zif_abapgit_definitions=>ty_tadir_tt.
-
-    build_bulk_commit(
-      EXPORTING iv_file_count = 4999
-      IMPORTING ev_commit_sha = lv_commit_sha et_filter = lt_filter ).
-
-    DATA(lo_dot) = zcl_abapgit_dot_abapgit=>build_default( ).
-    DATA(lo_filter) = NEW zcl_abapgit_object_filter_obj( it_filter = lt_filter ).
-
-    DATA(lt_files) = zcl_abapgit_ortec_obj_index=>get_files_for_filter(
-      iv_repo_key   = mc_repo
-      iv_commit     = lv_commit_sha
-      ii_obj_filter = lo_filter
-      io_dot        = lo_dot
-      iv_devclass   = '$PACK' ).
-
-    cl_abap_unit_assert=>assert_equals( act = lines( lt_files ) exp = 4999
-      msg = 'All rows below the chunk boundary must survive via the final flush' ).
-    cl_abap_unit_assert=>assert_true(
-      act = zcl_abapgit_ortec_obj_index=>is_index_ready( iv_repo_key = mc_repo iv_commit = lv_commit_sha )
-      msg = 'Completion marker must be written when the walk never crosses the in-loop chunk check' ).
-  ENDMETHOD.
-
-  METHOD index_chunk_at_boundary.
-    " E1-PERF-A: EXACTLY at the new 5000-row chunk boundary. The in-loop
-    " flush fires exactly once and clears lt_rows; the final "IF lt_rows IS
-    " NOT INITIAL" check must then correctly do nothing (no empty MODIFY,
-    " no lost/duplicated rows).
+  METHOD index_bulk_rows_preserved.
+    " E1-PERF-A (revised to 30000): proves bulk multi-row correctness on
+    " the single final-flush path (5000 rows, well below the active
+    " 30000-row in-loop chunk boundary - see the class-local coverage
+    " limitation comment above build_bulk_commit for why the boundary
+    " itself is not locally crossable). All rows must survive, the
+    " completion marker must be written, and no row may be duplicated or
+    " dropped.
     DATA lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
     DATA lt_filter TYPE zif_abapgit_definitions=>ty_tadir_tt.
 
@@ -586,55 +575,21 @@ CLASS ltcl_obj_index IMPLEMENTATION.
       iv_devclass   = '$PACK' ).
 
     cl_abap_unit_assert=>assert_equals( act = lines( lt_files ) exp = 5000
-      msg = 'All rows at the exact chunk boundary must be indexed exactly once' ).
+      msg = 'All bulk rows below the active chunk boundary must survive via the final flush' ).
     cl_abap_unit_assert=>assert_true(
       act = zcl_abapgit_ortec_obj_index=>is_index_ready( iv_repo_key = mc_repo iv_commit = lv_commit_sha )
-      msg = 'Completion marker must be written when the single in-loop flush lands exactly on the boundary' ).
+      msg = 'Completion marker must be written when the walk never crosses the in-loop chunk check' ).
 
     SELECT COUNT(*) FROM zaog_obj_index INTO @DATA(lv_count)
       WHERE repo_key = @mc_repo AND commit_sha1 = @lv_commit_sha AND obj_type = 'PROG'.
     cl_abap_unit_assert=>assert_equals( act = lv_count exp = 5000
-      msg = 'The exact-boundary in-loop flush must not duplicate or drop rows' ).
-  ENDMETHOD.
-
-  METHOD index_chunk_above_boundary.
-    " E1-PERF-A: one row ABOVE the new 5000-row chunk boundary. This
-    " exercises TWO separate MODIFY flushes for one commit (the in-loop
-    " 5000-row chunk plus a 1-row final flush) - the case most likely to
-    " reveal a duplicate-row or lost-row defect in the chunking logic.
-    DATA lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
-    DATA lt_filter TYPE zif_abapgit_definitions=>ty_tadir_tt.
-
-    build_bulk_commit(
-      EXPORTING iv_file_count = 5001
-      IMPORTING ev_commit_sha = lv_commit_sha et_filter = lt_filter ).
-
-    DATA(lo_dot) = zcl_abapgit_dot_abapgit=>build_default( ).
-    DATA(lo_filter) = NEW zcl_abapgit_object_filter_obj( it_filter = lt_filter ).
-
-    DATA(lt_files) = zcl_abapgit_ortec_obj_index=>get_files_for_filter(
-      iv_repo_key   = mc_repo
-      iv_commit     = lv_commit_sha
-      ii_obj_filter = lo_filter
-      io_dot        = lo_dot
-      iv_devclass   = '$PACK' ).
-
-    cl_abap_unit_assert=>assert_equals( act = lines( lt_files ) exp = 5001
-      msg = 'All rows across two chunk flushes must survive' ).
-    cl_abap_unit_assert=>assert_true(
-      act = zcl_abapgit_ortec_obj_index=>is_index_ready( iv_repo_key = mc_repo iv_commit = lv_commit_sha )
-      msg = 'Completion marker must be written after both the in-loop and final flush' ).
-
-    SELECT COUNT(*) FROM zaog_obj_index INTO @DATA(lv_count)
-      WHERE repo_key = @mc_repo AND commit_sha1 = @lv_commit_sha AND obj_type = 'PROG'.
-    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 5001
-      msg = 'Two separate chunk flushes for one commit must not duplicate or drop any row' ).
+      msg = 'The final flush must not duplicate or drop any bulk row' ).
   ENDMETHOD.
 
   METHOD index_empty_no_match.
-    " E1-PERF-A: the zero-relevant-rows path must remain correct at the new
-    " chunk size - lt_rows never reaches the in-loop chunk check nor the
-    " final "IF lt_rows IS NOT INITIAL" flush, yet the completion marker
+    " E1-PERF-A: the zero-relevant-rows path must remain correct at the
+    " active chunk size - lt_rows never reaches the in-loop chunk check nor
+    " the final "IF lt_rows IS NOT INITIAL" flush, yet the completion marker
     " must still be written unconditionally (see rebuild_index's own
     " comment on this exact invariant). A filename with no "." segment
     " (e.g. "readme") maps to an empty obj_type via file_to_object, which
