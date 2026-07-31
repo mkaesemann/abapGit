@@ -315,6 +315,11 @@ CLASS zcl_abapgit_ortec_ser_pref_oo IMPLEMENTATION.
       RETURN.
     ENDIF.
 
+    " CLEAR first: a parallel RFC worker session can be reused across many
+    " unrelated dispatches over its lifetime, and INSERT INTO a UNIQUE-keyed
+    " table silently no-ops if a prior invocation already cached that same
+    " key - without clearing, a worker would serve stale data forever.
+    CLEAR: mt_classtx, mt_compotx, mt_subcotx.
     LOOP AT lt_classtx INTO DATA(ls_classtx).
       INSERT ls_classtx INTO TABLE mt_classtx.
     ENDLOOP.

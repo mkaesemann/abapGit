@@ -308,7 +308,12 @@ CLASS zcl_abapgit_ortec_ser_pref IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    " Merge into session-local caches
+    " Merge into session-local caches. CLEAR first: a parallel RFC worker
+    " session can be reused across many unrelated dispatches over its
+    " lifetime, and INSERT INTO a UNIQUE-keyed table silently no-ops if a
+    " prior invocation already cached that same key - without clearing,
+    " a worker would serve stale data for that object forever.
+    CLEAR: mt_msag, mt_dokil.
     LOOP AT lt_msag INTO DATA(ls_msag).
       INSERT ls_msag INTO TABLE mt_msag.
     ENDLOOP.
