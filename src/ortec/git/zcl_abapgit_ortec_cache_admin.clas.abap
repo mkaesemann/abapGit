@@ -39,6 +39,7 @@ CLASS zcl_abapgit_ortec_cache_admin DEFINITION
              remote_url  TYPE c LENGTH 255,
            END OF ty_repo_f4.
     TYPES ty_repo_f4_tt TYPE STANDARD TABLE OF ty_repo_f4 WITH DEFAULT KEY.
+    TYPES ty_repo_key_tt TYPE STANDARD TABLE OF zcl_abapgit_ortec_repo_state=>ty_repo_key WITH EMPTY KEY.
 
     TYPES:
       BEGIN OF ty_clear_result,
@@ -473,3 +474,4 @@ CLASS zcl_abapgit_ortec_cache_admin IMPLEMENTATION.
 
   ENDMETHOD.
 ENDCLASS.
+

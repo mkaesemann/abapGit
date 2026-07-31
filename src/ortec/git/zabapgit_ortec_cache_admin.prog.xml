@@ -12,11 +12,6 @@
    </PROGDIR>
    <TPOOL>
     <item>
-     <ID>R</ID>
-     <ENTRY>ORTEC Git Cache Admin</ENTRY>
-     <LENGTH>21</LENGTH>
-    </item>
-    <item>
      <ID>I</ID>
      <KEY>001</KEY>
      <ENTRY>Repository</ENTRY>
@@ -29,6 +24,11 @@
      <LENGTH>12</LENGTH>
     </item>
     <item>
+     <ID>R</ID>
+     <ENTRY>ORTEC Git Cache Admin</ENTRY>
+     <LENGTH>21</LENGTH>
+    </item>
+    <item>
      <ID>S</ID>
      <KEY>P_CLEAR</KEY>
      <ENTRY>Clear repository cache</ENTRY>
@@ -36,9 +36,9 @@
     </item>
     <item>
      <ID>S</ID>
-     <KEY>P_REPO</KEY>
-     <ENTRY>Repository key</ENTRY>
-     <LENGTH>22</LENGTH>
+     <KEY>S_REPO</KEY>
+     <ENTRY>Repository Keys</ENTRY>
+     <LENGTH>23</LENGTH>
     </item>
    </TPOOL>
   </asx:values>
