@@ -401,7 +401,8 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
       append_json_field( EXPORTING iv_name = 'displayName' iv_value = lv_filename CHANGING cv_json = lv_row ).
       append_json_field( EXPORTING iv_name = 'diffAction' iv_value = lv_diff_action CHANGING cv_json = lv_row ).
       append_json_field( EXPORTING iv_name = 'changedBy' iv_value = ls_changed_by-name CHANGING cv_json = lv_row ).
-      append_json_field( EXPORTING iv_name = 'changedByHtml' iv_value = lv_changed_by_html CHANGING cv_json = lv_row ).
+      " Do not embed this SAP event anchor in JavaScript data: WebGUI rewrites it
+      " after JSON escaping and corrupts the surrounding script.
       append_json_field( EXPORTING iv_name = 'userAction' iv_value = lv_user_action CHANGING cv_json = lv_row ).
       append_json_field( EXPORTING iv_name = 'transport' iv_value = ls_transport-trkorr CHANGING cv_json = lv_row ).
       append_json_field( EXPORTING iv_name = 'lstate' iv_value = <ls_status>-lstate CHANGING cv_json = lv_row ).
@@ -467,7 +468,8 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
       append_json_field( EXPORTING iv_name = 'displayName' iv_value = lv_filename CHANGING cv_json = lv_row ).
       append_json_field( EXPORTING iv_name = 'diffAction' iv_value = lv_diff_action CHANGING cv_json = lv_row ).
       append_json_field( EXPORTING iv_name = 'changedBy' iv_value = ls_changed_by-name CHANGING cv_json = lv_row ).
-      append_json_field( EXPORTING iv_name = 'changedByHtml' iv_value = lv_changed_by_html CHANGING cv_json = lv_row ).
+      " Do not embed this SAP event anchor in JavaScript data: WebGUI rewrites it
+      " after JSON escaping and corrupts the surrounding script.
       append_json_field( EXPORTING iv_name = 'userAction' iv_value = lv_user_action CHANGING cv_json = lv_row ).
       append_json_field( EXPORTING iv_name = 'transport' iv_value = ls_transport-trkorr CHANGING cv_json = lv_row ).
       append_json_field( EXPORTING iv_name = 'lstate' iv_value = <ls_status>-lstate CHANGING cv_json = lv_row ).
@@ -762,7 +764,10 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
     ri_html->add( '      var input = id(gStageParams.ids.objectSearch);' ).
     ri_html->add( '      var form = document.createElement("form");' ).
     ri_html->add( '      var field = document.createElement("input");' ).
-    ri_html->add( '      form.method = "post"; form.action = "sapevent:" + (gStageParams.virtualFilterAction || "stage_virtual_filter");' ).
+    " WebGUI rewrites a literal SAP event URI even inside JavaScript strings and
+    " injects HTML attributes, producing invalid JavaScript. Build the scheme at
+    " runtime; do not simplify this expression back to one literal URI string.
+    ri_html->add( '      form.method = "post"; form.action = ["sap", "event:"].join("") + (gStageParams.virtualFilterAction || "stage_virtual_filter");' ).
     ri_html->add( '      field.type = "hidden"; field.name = "filterValue"; field.value = input ? input.value : "";' ).
     ri_html->add( '      form.appendChild(field); document.body.appendChild(form); form.submit();' ).
     ri_html->add( '    }' ).
@@ -839,16 +844,24 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
     ri_html->add( '        var typeCell = document.createElement("td"); typeCell.className = "type"; typeCell.appendChild(document.createTextNode(data.objType || "")); row.appendChild(typeCell);' ).
     ri_html->add( '        var nameCell = document.createElement("td"); nameCell.className = "name";' ).
     ri_html->add( '        if (data.context === "local" && data.diffAction) {' ).
-    ri_html->add( '          var nLink = document.createElement("a"); nLink.href = "sapevent:" + data.diffAction;' ).
+    " WebGUI rewrites a literal SAP event URI even inside JavaScript strings and
+    " injects HTML attributes, producing invalid JavaScript. Build the scheme at
+    " runtime; do not simplify this expression back to one literal URI string.
+    ri_html->add( '          var nLink = document.createElement("a"); nLink.href = ["sap", "event:"].join("") + data.diffAction;' ).
     ri_html->add( '          nLink.appendChild(document.createTextNode(data.displayName || "")); nameCell.appendChild(nLink);' ).
     ri_html->add( '        } else { nameCell.appendChild(document.createTextNode(data.displayName || "")); }' ).
     ri_html->add( '        row.appendChild(nameCell);' ).
     ri_html->add( '        var userCell = document.createElement("td"); userCell.className = "user"; userCell.style.whiteSpace = "nowrap";' ).
-    ri_html->add( '        userCell.innerHTML = data.changedByHtml || data.changedBy || "";' ).
+    " Keep this value as text in the virtual UI; embedding its SAP event anchor
+    " lets WebGUI modify the surrounding JavaScript after serialization.
+    ri_html->add( '        userCell.textContent = data.changedBy || "";' ).
     ri_html->add( '        if (data.userAction) { userCell.style.cursor = "pointer";' ).
     ri_html->add( '          (function(cell, act) { cell.onclick = function(e) {' ).
     ri_html->add( '            e = e || window.event; if (e.stopPropagation) { e.stopPropagation(); }' ).
-    ri_html->add( '            e.cancelBubble = true; window.location.href = "sapevent:" + act; return false;' ).
+    " WebGUI rewrites a literal SAP event URI even inside JavaScript strings and
+    " injects HTML attributes, producing invalid JavaScript. Build the scheme at
+    " runtime; do not simplify this expression back to one literal URI string.
+    ri_html->add( '            e.cancelBubble = true; window.location.href = ["sap", "event:"].join("") + act; return false;' ).
     ri_html->add( '          }; })(userCell, data.userAction); }' ).
     ri_html->add( '        row.appendChild(userCell);' ).
     "ri_html->add( '        var transportCell = document.createElement("td"); transportCell.className = "transport"; transportCell.style.whiteSpace = "nowrap"; transportCell.innerHTML = data.transportHtml || data.transport || ""; row.appendChild(transpor
@@ -882,7 +895,10 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
     ri_html->add( '        }' ).
     ri_html->add( '      }' ).
     ri_html->add( '      if (!n) { alert("No files selected"); return; }' ).
-    ri_html->add( '      form.setAttribute("action", "sapevent:" + action); form.submit();' ).
+    " WebGUI rewrites a literal SAP event URI even inside JavaScript strings and
+    " injects HTML attributes, producing invalid JavaScript. Build the scheme at
+    " runtime; do not simplify this expression back to one literal URI string.
+    ri_html->add( '      form.setAttribute("action", ["sap", "event:"].join("") + action); form.submit();' ).
     ri_html->add( '    }' ).
     ri_html->add( '    function markFilteredAndSubmit() {' ).
     ri_html->add( '      for (var i = 0; i < filtered.length; i++) { state[filtered[i].key] = filtered[i].defaultMethod; }' ).
@@ -953,7 +969,10 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
     ri_html->add( '          query = input;' ).
     ri_html->add( '        }' ).
     ri_html->add( '        var form = document.createElement("form");' ).
-    ri_html->add( '        form.method = "post"; form.action = "sapevent:" + pageMeta.jumpAction;' ).
+    " WebGUI rewrites a literal SAP event URI even inside JavaScript strings and
+    " injects HTML attributes, producing invalid JavaScript. Build the scheme at
+    " runtime; do not simplify this expression back to one literal URI string.
+    ri_html->add( '        form.method = "post"; form.action = ["sap", "event:"].join("") + pageMeta.jumpAction;' ).
     ri_html->add( '        var fOffset = document.createElement("input");' ).
     ri_html->add( '        fOffset.type = "hidden"; fOffset.name = "pageOffset"; fOffset.value = offset;' ).
     ri_html->add( '        var fQuery = document.createElement("input");' ).
