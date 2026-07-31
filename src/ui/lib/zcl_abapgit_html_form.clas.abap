@@ -441,10 +441,22 @@ CLASS zcl_abapgit_html_form IMPLEMENTATION.
 
     " Add hidden button that triggers main command when pressing enter
     LOOP AT mt_commands ASSIGNING <ls_cmd> WHERE cmd_type = zif_abapgit_html_form=>c_cmd_type-input_main.
-      ri_html->add( |<button type="submit" formaction="sapevent:{ <ls_cmd>-action }" class="hidden-submit"|
+      ri_html->add( |<button type="submit" formaction="sapevent:{ <ls_cmd>-action }" id="{
+                    mv_form_id }-btn-{ <ls_cmd>-action }" class="hidden-submit"|
                  && | aria-hidden="true" tabindex="-1"></button>| ).
       EXIT.
     ENDLOOP.
+
+    IF mv_webgui = abap_true.
+      " WebGUI can only submit the form via a real submit button (see
+      " render_command_link) - give every other submittable command its
+      " own hidden one for the visible link to click
+      LOOP AT mt_commands ASSIGNING <ls_cmd> WHERE cmd_type = zif_abapgit_html_form=>c_cmd_type-input.
+        ri_html->add( |<button type="submit" formaction="sapevent:{ <ls_cmd>-action }" id="{
+                      mv_form_id }-btn-{ <ls_cmd>-action }" class="hidden-submit"|
+                   && | aria-hidden="true" tabindex="-1"></button>| ).
+      ENDLOOP.
+    ENDIF.
 
     lv_autofocus = abap_true.
     LOOP AT mt_fields ASSIGNING <ls_field>.
@@ -465,7 +477,10 @@ CLASS zcl_abapgit_html_form IMPLEMENTATION.
           lv_hint = ''.
         ENDIF.
         lv_cur_group = <ls_field>-name.
-        ri_html->add( |<fieldset name="{ <ls_field>-name }">| ).
+        " id, not name: WebGUI's own form-submit JS scans theForm.elements
+        " (which includes <fieldset>) and crashes on fieldset.value being
+        " undefined unless the element has an empty name attribute
+        ri_html->add( |<fieldset id="{ <ls_field>-name }">| ).
         ri_html->add( |<legend{ lv_hint }>{ <ls_field>-label }</legend>| ).
         ri_html->add( |<ul>| ).
         CONTINUE.
@@ -555,15 +570,33 @@ CLASS zcl_abapgit_html_form IMPLEMENTATION.
 
   METHOD render_command_link.
 
-    DATA lv_class TYPE string VALUE 'dialog-commands'.
+    DATA lv_class  TYPE string VALUE 'dialog-commands'.
+    DATA lv_act    TYPE string.
+    DATA lv_typ    TYPE c LENGTH 1.
 
     IF is_cmd-cmd_type = zif_abapgit_html_form=>c_cmd_type-input_main.
       lv_class = lv_class && ' main'.
     ENDIF.
 
+    IF is_cmd-cmd_type = zif_abapgit_html_form=>c_cmd_type-input
+        OR is_cmd-cmd_type = zif_abapgit_html_form=>c_cmd_type-input_main.
+      " WebGUI renders every command as a plain link (see render_command);
+      " a plain sapevent link does not POST the form body, so all field
+      " values would be lost. Click the matching hidden real submit
+      " button instead (added in RENDER), so the browser performs a
+      " genuine form submission - calling form.submit() directly here
+      " conflicts with WebGUI's own form-submission handling.
+      lv_typ = zif_abapgit_html=>c_action_type-onclick.
+      lv_act = |document.getElementById('{ mv_form_id }-btn-{ is_cmd-action }').click();return false;|.
+    ELSE.
+      lv_typ = zif_abapgit_html=>c_action_type-sapevent.
+      lv_act = is_cmd-action.
+    ENDIF.
+
     ii_html->add_a(
       iv_txt   = is_cmd-label
-      iv_act   = is_cmd-action
+      iv_act   = lv_act
+      iv_typ   = lv_typ
       iv_class = lv_class ).
 
   ENDMETHOD.
