@@ -336,12 +336,14 @@ METHOD get_form_schema.
 
   METHOD is_customizing_included.
 
-    DATA lt_files TYPE zif_abapgit_definitions=>ty_files_item_tt.
+    DATA lo_data_config TYPE REF TO zif_abapgit_data_config.
+    DATA lt_configs TYPE zif_abapgit_data_config=>ty_config_tt.
 
-    lt_files = mi_repo->get_files_local( ).
+    lo_data_config = mi_repo->get_data_config( ).
+    lt_configs = lo_data_config->get_configs( ).
 
-    READ TABLE lt_files TRANSPORTING NO FIELDS
-      WITH KEY item-obj_type = zif_abapgit_data_config=>c_data_type-tabu. "todo
+    READ TABLE lt_configs TRANSPORTING NO FIELDS
+      WITH KEY type = zif_abapgit_data_config=>c_data_type-tabu.
     IF sy-subrc = 0.
       rv_result = abap_true.
     ENDIF.
