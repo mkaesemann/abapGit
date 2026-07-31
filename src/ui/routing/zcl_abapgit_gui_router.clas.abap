@@ -748,8 +748,10 @@ METHOD jump_display_user.
         rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
       WHEN 'clear_cache'.                                                     " ORTEC clear repository cache
         TRY.
+            DATA(lv_ortec_repo_key) = zcl_abapgit_ortec_repo_state=>get_or_create_repo_key_for_url(
+              li_repo->get_url( ) ).
             ls_clear_result = zcl_abapgit_ortec_cache_admin=>clear_repo(
-              li_repo->get_key( ) ).
+              lv_ortec_repo_key ).
             MESSAGE zcl_abapgit_ortec_cache_admin=>format_clear_result( ls_clear_result ) TYPE 'S'.
           CATCH zcx_abapgit_ortec_git INTO DATA(lx_ortec).
             MESSAGE lx_ortec->get_text( ) TYPE 'E'.

@@ -601,7 +601,8 @@ CLASS zcl_abapgit_gui_page_sett_repo IMPLEMENTATION.
 
       WHEN c_event-clear_cache.
         TRY.
-            DATA(ls_clear) = zcl_abapgit_ortec_cache_admin=>clear_repo( mi_repo->get_key( ) ).
+            DATA(lv_repo_key) = zcl_abapgit_ortec_repo_state=>get_or_create_repo_key_for_url( mi_repo->ms_data-url ).
+            DATA(ls_clear) = zcl_abapgit_ortec_cache_admin=>clear_repo( lv_repo_key ).
             DATA(lv_msg)   = zcl_abapgit_ortec_cache_admin=>format_clear_result( ls_clear ).
             MESSAGE s000(oo) WITH lv_msg.
           CATCH zcx_abapgit_ortec_git INTO DATA(lx_error).
