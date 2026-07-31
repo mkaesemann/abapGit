@@ -337,6 +337,7 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
     DATA lv_key TYPE string.
     DATA lv_filename TYPE string.
     DATA lv_diff_action TYPE string.
+    DATA lv_diff_bridge_action TYPE string.
     DATA lv_state_html TYPE string.
     DATA lv_transport_html TYPE string.
     DATA lv_user_action TYPE string.
@@ -357,7 +358,8 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
     li_event_html = zcl_abapgit_html=>create( ).
 
     LOOP AT it_files-local ASSIGNING <ls_local>.
-      CLEAR: ls_changed_by, ls_transport, lv_diff_action, lv_transport_html, lv_user_action, lv_diff_event_id, lv_user_event_id.
+      CLEAR: ls_changed_by, ls_transport, lv_diff_action, lv_diff_bridge_action,
+             lv_transport_html, lv_user_action, lv_diff_event_id, lv_user_event_id.
       READ TABLE it_files-status ASSIGNING <ls_status>
         WITH TABLE KEY path = <ls_local>-file-path filename = <ls_local>-file-filename.
       ASSERT sy-subrc = 0.
@@ -373,6 +375,13 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
       lv_filename = lv_key.
       lv_diff_action = |{ zif_abapgit_definitions=>c_action-go_file_diff }?| &&
         zcl_abapgit_html_action_utils=>file_encode( iv_key = ii_repo->get_key( ) ig_file = <ls_local>-file ).
+      " The regular action is URL-encoded for abapGit routing. The real WebGUI
+      " bridge anchor must receive raw values because ITS encodes it exactly once;
+      " reusing lv_diff_action leaves namespace '#' characters encoded as '%23'.
+      lv_diff_bridge_action = |{ zif_abapgit_definitions=>c_action-go_file_diff }| &&
+        |?KEY={ ii_repo->get_key( ) }| &&
+        |&PATH={ <ls_local>-file-path }| &&
+        |&FILENAME={ <ls_local>-file-filename }|.
       lv_state_html = zcl_abapgit_gui_chunk_lib=>render_item_state(
         iv_lstate = <ls_status>-lstate iv_rstate = <ls_status>-rstate ).
       IF ls_changed_by-name IS NOT INITIAL.
@@ -387,7 +396,11 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
       " Real HTML bridge anchors are transformed safely by WebGUI; do not move them into JavaScript data.
       lv_event_index = lv_event_index + 1.
       lv_diff_event_id = |stageVirtualEvent{ lv_event_index }|.
-      li_event_html->add_a( iv_txt = 'event' iv_act = lv_diff_action iv_typ = zif_abapgit_html=>c_action_type-sapevent iv_id = lv_diff_event_id ).
+      li_event_html->add_a(
+        iv_txt = 'event'
+        iv_act = lv_diff_bridge_action
+        iv_typ = zif_abapgit_html=>c_action_type-sapevent
+        iv_id  = lv_diff_event_id ).
       IF lv_user_action IS NOT INITIAL.
         lv_event_index = lv_event_index + 1.
         lv_user_event_id = |stageVirtualEvent{ lv_event_index }|.
@@ -431,7 +444,9 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
     ENDLOOP.
 
     LOOP AT it_files-remote ASSIGNING <ls_remote>.
-      CLEAR: ls_changed_by, ls_transport, ls_item_remote, lv_diff_action, lv_transport_html, lv_user_action, lv_diff_event_id, lv_user_event_id.
+      CLEAR: ls_changed_by, ls_transport, ls_item_remote, lv_diff_action,
+             lv_diff_bridge_action, lv_transport_html, lv_user_action,
+             lv_diff_event_id, lv_user_event_id.
       READ TABLE it_files-status ASSIGNING <ls_status>
         WITH TABLE KEY path = <ls_remote>-path filename = <ls_remote>-filename.
       ASSERT sy-subrc = 0.
