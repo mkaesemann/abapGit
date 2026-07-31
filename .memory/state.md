@@ -7,7 +7,11 @@ TOPIC=variant-b-partial-clone
 CURRENT_PHASE=PACKAGE_E_CHECKPOINT_1_SAP_VALIDATED_COMPLETE
 PACKAGE_D2_STATUS=SAP_VALIDATED_COMPLETE
 PACKAGE_D2_VALIDATED_HEAD=733bb30799886ef8659be7e293b82c3ccfcebbdd
-PACKAGE_E_STATUS=CHECKPOINT_1_SAP_VALIDATED_COMPLETE, next slice E1-PERF-A
+PACKAGE_E_STATUS=CHECKPOINT_1_SAP_VALIDATED_COMPLETE; E1_OBJINDEX_PERFORMANCE
+  and E2_CONSUMER_COHERENCE POSTPONED 2026-07-31 (owner decision — working
+  hypotheses only, not to be touched right now); E3_CACHE_ADMIN_F4 COMPLETED
+  2026-07-31 (owner-confirmed, manually fixed/verified in the productive
+  system)
 PACKAGE_E_CHECKPOINT_1=SAP_VALIDATED_COMPLETE
 PACKAGE_E_CHECKPOINT_1_VALIDATED_HEAD=3c77d898b62f3b0464e48cf59844e2e30c7b6e89
 PACKAGE_E_CHECKPOINT_1_SCOPE=E1-TEST, E3-TEST, E4-VERIFY, E-HARDEN OF-2
@@ -16,9 +20,9 @@ PACKAGE_E_CHECKPOINT_1_VALIDATION=2026-07-29 (SAP_SYSTEM=IT8; ACTIVATION=PASS,
   reported, covers the corrected head including the pre-import audit's
   placeholder removal and the 2 IT8-reported syntax/exception-contract
   fixes; detail in the checkpoint-1 handoff/regression log)
-PRODUCTIVE_CHANGES_ALLOWED=YES for E1-PERF-A only (contract fixed, design
-  §2/§0); all other Package E slices remain gated per their own
-  authorization state below
+PRODUCTIVE_CHANGES_ALLOWED=NO for E1/E2 (POSTPONED, see below); E3 is
+  COMPLETED, no further change; all other Package E slices remain gated per
+  their own authorization state below
 ```
 
 Branch: `ortec/abapgit_1_133-opt-rework`. Package sequence decision:
@@ -68,6 +72,14 @@ E1_OBJINDEX_PERFORMANCE=CORRECT_BUT_PERFORMANCE_OPEN (reclassified from the
   literal `1000` — no implementation-time choice remains open. E1-B/D/E
   remain NOT_AUTHORIZED, own design/review cycles required; E1-D is PROVEN
   UNSAFE as a bare tree-SHA1 key (see design §2).
+  POSTPONED 2026-07-31 (owner decision): E1-A was separately found
+  live-implemented at `VALUE 30000` (not the documented 5000 above —
+  undiffed discrepancy, see
+  `.memory/logs/variant_b_package_e_false_modified_os4_d1.md`). No further
+  E1 work (contract reconciliation or E1-B/D/E) is authorized right now;
+  this remains a working hypothesis only. PRODUCTIVE_CHANGES_ALLOWED=NO
+  until the owner resumes after Package E is fully complete and the full
+  situation is verified in the productive development system.
 E2_CONSUMER_COHERENCE=NOT_VERIFIED root cause. Slice E2-DIAG, D0/D1
   AUTHORIZED_NOW (D0=owner reproduction packet, no code; D1=read-only
   single-row comparison tool, no persistence); D2/D3
@@ -75,9 +87,28 @@ E2_CONSUMER_COHERENCE=NOT_VERIFIED root cause. Slice E2-DIAG, D0/D1
   a live D1/D2-confirmed mismatch. OF-1 (stale-but-present index row) is
   KEPT ACTIVE as the leading candidate root cause with a concrete,
   bounded detection/repair design (see design §3) — not silently dropped.
+  2026-07-30: the earlier small-repo (abapGit-testing) D0/D1 reproduction is
+  RETRACTED (stale local clone; branches actually differ — see
+  `.memory/handoffs/variant-b-package-e-e2-diagnostic.md`,
+  STATUS=SUPERSEDED_INVALID_REPRODUCTION). Active incident is now OS4
+  (large repo, DTEL /LOT/GC_GEOLAT, overview+Full-Stage show MODIFIED,
+  Diff shows no differences) — D0/D1 static trace complete, WAITING_FOR_
+  OWNER_DEBUG_CAPTURE; see
+  `.memory/handoffs/variant-b-package-e-e2-os4-diagnostic.md`.
+  POSTPONED 2026-07-31 (owner decision): the OS4 investigation has since
+  produced multiple candidate root causes and partially-implemented fixes
+  (parallel-worker stale-cache injection, FUGR get_includes flag, a
+  near-empty checksum baseline) with CONTRADICTORY phase status across
+  the D0/D1/handoff files above — all working hypotheses, none
+  owner-validated end-to-end yet. No further E2 work is authorized right
+  now. PRODUCTIVE_CHANGES_ALLOWED=NO until the owner resumes after
+  Package E is fully complete and the full situation is verified in the
+  productive development system.
 E3_CACHE_ADMIN_F4=CONFIRMED_CURRENT (not a defect); F4 already unions
   repo_state + obj_store + commit_hist orphans. Slice E3-TEST,
   SAP_VALIDATED_COMPLETE (checkpoint 1, head 3c77d898, 2026-07-29).
+  COMPLETED 2026-07-31 (owner-confirmed, manually fixed/verified in the
+  productive system — no further action).
 E4_CERTIFIED_REPAIR=E4_NOT_REQUIRED_CURRENTLY_COMPLETE for 7 of 9
   constructed scenarios (reclassified from a blanket NOT_REQUIRED — see
   design §6, CR-05). Scenario 8 (stale-but-wrong index content) is
@@ -167,7 +198,15 @@ E1-TREE-REUSE: tree-SHA1-keyed or incremental-diff zaog_obj_index row reuse
 E2-REPRODUCTION: false-MODIFIED root cause. Entry condition: owner supplies
   one concrete reproduction packet (repo, branch, exact file path, both
   SHA1s, believed-current commit — D0 in design §3) or the E2-DIAG D1 tool
-  (once implemented) captures one live occurrence.
+  (once implemented) captures one live occurrence. 2026-07-30: OS4 (large
+  repo) reproduction packet received, D0/D1 STATIC trace complete (source-
+  confirmed candidate PC-1: overview/Full-Stage use the cached
+  `mt_remote`/`get_files_remote` path, single-object Diff uses the ORTEC
+  filtered-walk facade which independently revalidates the live branch tip
+  via `ZAOG_REPO_STATE`/`ZAOG_OBJ_INDEX`, bypassing that cache). Entry
+  condition for D2/E2-FIX: owner executes the bounded debugger worksheet in
+  `.memory/logs/variant_b_package_e_false_modified_os4_d1.md` §5 and
+  confirms a live mismatch.
 E4-OOB-DELETION-RISK (new this pass, CR-05; DISPOSITION FIXED this
   consistency pass = ACCEPTED_NON_BLOCKING_RISK, see design §6 and
   bootstrap handoff): a certified/complete snapshot tip whose blob is
@@ -186,6 +225,14 @@ E-HARDEN-STANDARD-FILE-COUPLING (new this pass, CR-07): whether
   duplicate 'Walk,' retry logic should be refactored into a single clean
   hook. Entry condition: explicit owner input on whether/how to touch
   standard abapGit's own source for this.
+SYSTEM_NO_ROLL-OS4-STAGE-AFTER-OVERVIEW (new, discovered during the E2 OS4
+  diagnosis, explicitly NOT part of E2): a `SYSTEM_NO_ROLL` runtime dump
+  observed in IT8 when Full Stage is triggered immediately after a full
+  Overview serialize of the OS4 repo (17321 objects). Owner's working
+  theory: cache/memory not released between the two back-to-back
+  large-repo computations. Not investigated. Entry condition: a dedicated
+  Package E or F backlog slice is scheduled for it; see
+  `.memory/logs/variant_b_package_e_false_modified_os4_d1.md` §11.
 ```
 
 ## Next action
@@ -200,11 +247,19 @@ and 2 real IT8-reported compile defects (`ZCL_ABAPGIT_ORTEC_CACHE_ADMIN`
 keyless-table `FILTER`; `ZCL_ABAPGIT_ORTEC_OBJ_INDEX` `build_commit`
 missing `zcx_abapgit_exception` in `RAISING`) before the owner's IT8 run;
 full finding-to-fix matrix is in the regression log. No placeholder ABAP
-Unit methods remain anywhere in this checkpoint's scope. Next session:
-read this file, then design §0/§2's E1-PERF authorization (contract
-already fixed: `c_index_write_chunk_size TYPE i VALUE 5000` replacing the
-bare `1000` literal in `rebuild_index`), then implement E1-A only — do NOT
-start E1-B/D/E, E2-DIAG, or Package F without a new explicit owner
-instruction. Re-read this file plus the Package E design/review artifacts
-before any code change; do not resume an unrelated backlog topic without
-checking this file's own active-topic status first.
+Unit methods remain anywhere in this checkpoint's scope.
+
+2026-07-31 owner decision: E1_OBJINDEX_PERFORMANCE and
+E2_CONSUMER_COHERENCE are POSTPONED — do NOT touch either (no contract
+reconciliation, no E1-B/D/E, no E2 fix work) until the owner resumes after
+Package E is fully complete and has verified the full situation in the
+productive development system. E3_CACHE_ADMIN_F4 is COMPLETED (owner-
+confirmed, manually fixed/verified). The remaining open Package E item
+needing owner input is E-HARDEN-STANDARD-FILE-COUPLING (see Deferred
+topics); E4 remains SAP_VALIDATED_COMPLETE with its one accepted residual
+risk (E4-OOB-DELETION-RISK). No Package E slice is currently authorized
+for implementation. Do not resume E1/E2 work or start Package F without a
+new explicit owner instruction. Re-read this file plus the Package E
+design/review artifacts before any code change; do not resume an
+unrelated backlog topic without checking this file's own active-topic
+status first.
