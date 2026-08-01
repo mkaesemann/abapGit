@@ -7,6 +7,7 @@ agents:
 - ortec-abapgit-archaeology
 - ortec-abapgit-design
 - ortec-abapgit-design-review
+- ortec-abapgit-adversarial-design-review
 - ortec-abapgit-protocol-persistence
 - ortec-abapgit-performance-scan
 - ortec-abapgit-performance-review
@@ -454,3 +455,17 @@ After every coherent, independently importable, and gate-clean checkpoint:
 
 Do not create a checkpoint commit while a blocking correctness or performance
 finding remains.
+
+## Convergent adversarial design protocol
+
+Use only when explicitly requested or for high-risk identity, persistence, publication, transaction, cross-commit reuse, or silent-false-positive designs. The balanced reviewer remains the default.
+
+- Review the complete design and evidence matrix.
+- Keep stable finding IDs and a ledger with cycle, severity, status, changed sections, and closure evidence.
+- Return every BLOCKER/MAJOR to the design agent; require `ACCEPTED_AND_FIXED` or `REJECTED_WITH_PROOF`.
+- Re-review the complete revised design, not only the patch.
+- Run at most three complete cycles; never weaken or silently downgrade gates.
+- After cycle three, unresolved BLOCKER/MAJOR means `OWNER_DECISION_REQUIRED` and no implementation.
+- After approval, still run correctness, protocol/persistence when applicable, performance DESIGN_GATE, and implementation-readiness audit.
+
+Implementation readiness requires exact objects, methods, signatures, anchors, DDIC/migration, canonical identities, locking/LUW/publication/rollback, SQL/index/batch/memory model, failure/concurrency cases, exact tests, IT8 validation, checkpoints, non-goals, and stop conditions. Reject `TBD`, placeholders, guessed constants, unresolved alternatives, or wording that leaves architecture to the coding agent.

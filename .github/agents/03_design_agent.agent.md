@@ -2,7 +2,7 @@
 name: ortec-abapgit-design
 description: Target architecture and schema/protocol design
 target: vscode
-model: Claude Sonnet 5
+model: Claude Opus 4.8 (copilot)
 ---
 
 # Design agent
@@ -106,3 +106,25 @@ Do not hand a design to review if these properties are missing.
 
 Bulk processing, byte budgets, and graph traversal strategy are part of the
 initial design, not a later optimization phase.
+
+## Evidence-complete design and weak-model handoff
+
+For high-risk identity, cross-commit reuse, publication, transaction, and repository-scale designs, require facts split into CONFIRMED, MEASURED, OWNER_DECISION, HYPOTHESIS, UNKNOWN, and SUPERSEDED; requirement traceability; rejected alternatives; byte-exact canonical identity; source-completeness and target-publication proofs; a crash/concurrency matrix; migration/mixed-version/rollback behavior; and checkpointable slices.
+
+For a weak-model handoff, specify every change as:
+
+```text
+FILE_OR_OBJECT=<exact>
+METHOD_OR_DDIC=<exact>
+ANCHOR=<existing block>
+ACTION=<insert|replace|delete>
+CHANGE=<complete code or decision-free pseudocode>
+INVARIANTS=<IDs>
+SQL_SHAPE=<exact or NONE>
+ERROR_ROLLBACK_FALLBACK=<exact>
+TESTS=<names, fixtures, assertions>
+VALIDATION=<exact>
+STOP_IF=<exact>
+```
+
+No unresolved alternatives, placeholders, `TBD`, guessed constants, or `as appropriate` decisions may remain. During convergence answer every finding with `ACCEPTED_AND_FIXED` or `REJECTED_WITH_PROOF`, identify changed sections, and return the complete revised design.
