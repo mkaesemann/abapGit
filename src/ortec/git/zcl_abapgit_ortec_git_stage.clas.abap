@@ -340,6 +340,8 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
     DATA lv_diff_bridge_action TYPE string.
     DATA lv_state_html TYPE string.
     DATA lv_transport_html TYPE string.
+    DATA lv_transport_action TYPE string.
+    DATA lv_transport_event_id TYPE string.
     DATA lv_user_action TYPE string.
     DATA lv_diff_event_id TYPE string.
     DATA lv_user_event_id TYPE string.
@@ -359,7 +361,8 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
 
     LOOP AT it_files-local ASSIGNING <ls_local>.
       CLEAR: ls_changed_by, ls_transport, lv_diff_action, lv_diff_bridge_action,
-             lv_transport_html, lv_user_action, lv_diff_event_id, lv_user_event_id.
+             lv_transport_html, lv_transport_action, lv_transport_event_id,
+             lv_user_action, lv_diff_event_id, lv_user_event_id.
       READ TABLE it_files-status ASSIGNING <ls_status>
         WITH TABLE KEY path = <ls_local>-file-path filename = <ls_local>-file-filename.
       ASSERT sy-subrc = 0.
@@ -401,16 +404,23 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
         iv_act = lv_diff_bridge_action
         iv_typ = zif_abapgit_html=>c_action_type-sapevent
         iv_id  = lv_diff_event_id ).
-      IF lv_user_action IS NOT INITIAL.
+      IF ls_transport-trkorr IS NOT INITIAL.
+        lv_transport_action = |{ zif_abapgit_definitions=>c_action-jump_transport }?transport={ ls_transport-trkorr }|.
+        IF <ls_local>-item-obj_type IS NOT INITIAL AND <ls_local>-item-obj_name IS NOT INITIAL.
+          lv_transport_action = lv_transport_action &&
+            |&type={ <ls_local>-item-obj_type }&name={ <ls_local>-item-obj_name }|.
+        ENDIF.
         lv_event_index = lv_event_index + 1.
-        lv_user_event_id = |stageVirtualEvent{ lv_event_index }|.
-        li_event_html->add_a( iv_txt = 'event' iv_act = lv_user_action iv_typ = zif_abapgit_html=>c_action_type-sapevent iv_id = lv_user_event_id ).
+        lv_transport_event_id = |stageVirtualEvent{ lv_event_index }|.
+        " WebGUI mangles sapevent hrefs embedded in JSON; bridge via a real hidden anchor instead.
+        li_event_html->add_a( iv_txt = 'event' iv_act = lv_transport_action iv_typ = zif_abapgit_html=>c_action_type-sapevent iv_id = lv_transport_event_id ).
       ENDIF.
       TRY.
           lv_transport_html = zcl_abapgit_gui_chunk_lib=>render_transport(
-            iv_transport = ls_transport-trkorr
-            iv_obj_type  = <ls_local>-item-obj_type
-            iv_obj_name  = <ls_local>-item-obj_name )->render( ).
+            iv_transport   = ls_transport-trkorr
+            iv_obj_type    = <ls_local>-item-obj_type
+            iv_obj_name    = <ls_local>-item-obj_name
+            iv_interactive = abap_false )->render( ).
         CATCH zcx_abapgit_exception ##NO_HANDLER.
       ENDTRY.
 
@@ -438,6 +448,7 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
       append_json_field( EXPORTING iv_name = 'rstate' iv_value = <ls_status>-rstate CHANGING cv_json = lv_row ).
       append_json_field( EXPORTING iv_name = 'stateHtml' iv_value = lv_state_html CHANGING cv_json = lv_row ).
       append_json_field( EXPORTING iv_name = 'transportHtml' iv_value = lv_transport_html CHANGING cv_json = lv_row ).
+      append_json_field( EXPORTING iv_name = 'transportEventId' iv_value = lv_transport_event_id CHANGING cv_json = lv_row ).
       append_json_field( EXPORTING iv_name = 'defaultMethod' iv_value = zif_abapgit_definitions=>c_method-add iv_last = abap_true CHANGING cv_json = lv_row ).
       lv_row = lv_row && '}'.
       APPEND lv_row TO lt_rows.
@@ -445,7 +456,8 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
 
     LOOP AT it_files-remote ASSIGNING <ls_remote>.
       CLEAR: ls_changed_by, ls_transport, ls_item_remote, lv_diff_action,
-             lv_diff_bridge_action, lv_transport_html, lv_user_action,
+             lv_diff_bridge_action, lv_transport_html, lv_transport_action,
+             lv_transport_event_id, lv_user_action,
              lv_diff_event_id, lv_user_event_id.
       READ TABLE it_files-status ASSIGNING <ls_status>
         WITH TABLE KEY path = <ls_remote>-path filename = <ls_remote>-filename.
@@ -471,11 +483,28 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
       IF ls_changed_by-name IS NOT INITIAL.
         lv_user_action = |{ zif_abapgit_definitions=>c_action-jump_user }?user={ ls_changed_by-name }|.
       ENDIF.
+      IF lv_user_action IS NOT INITIAL.
+        lv_event_index = lv_event_index + 1.
+        lv_user_event_id = |stageVirtualEvent{ lv_event_index }|.
+        li_event_html->add_a( iv_txt = 'event' iv_act = lv_user_action iv_typ = zif_abapgit_html=>c_action_type-sapevent iv_id = lv_user_event_id ).
+      ENDIF.
+      IF ls_transport-trkorr IS NOT INITIAL.
+        lv_transport_action = |{ zif_abapgit_definitions=>c_action-jump_transport }?transport={ ls_transport-trkorr }|.
+        IF ls_item_remote-obj_type IS NOT INITIAL AND ls_item_remote-obj_name IS NOT INITIAL.
+          lv_transport_action = lv_transport_action &&
+            |&type={ ls_item_remote-obj_type }&name={ ls_item_remote-obj_name }|.
+        ENDIF.
+        lv_event_index = lv_event_index + 1.
+        lv_transport_event_id = |stageVirtualEvent{ lv_event_index }|.
+        " WebGUI mangles sapevent hrefs embedded in JSON; bridge via a real hidden anchor instead.
+        li_event_html->add_a( iv_txt = 'event' iv_act = lv_transport_action iv_typ = zif_abapgit_html=>c_action_type-sapevent iv_id = lv_transport_event_id ).
+      ENDIF.
       TRY.
           lv_transport_html = zcl_abapgit_gui_chunk_lib=>render_transport(
-            iv_transport = ls_transport-trkorr
-            iv_obj_type  = ls_item_remote-obj_type
-            iv_obj_name  = ls_item_remote-obj_name )->render( ).
+            iv_transport   = ls_transport-trkorr
+            iv_obj_type    = ls_item_remote-obj_type
+            iv_obj_name    = ls_item_remote-obj_name
+            iv_interactive = abap_false )->render( ).
         CATCH zcx_abapgit_exception ##NO_HANDLER.
       ENDTRY.
 
@@ -503,6 +532,7 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
       append_json_field( EXPORTING iv_name = 'rstate' iv_value = <ls_status>-rstate CHANGING cv_json = lv_row ).
       append_json_field( EXPORTING iv_name = 'stateHtml' iv_value = lv_state_html CHANGING cv_json = lv_row ).
       append_json_field( EXPORTING iv_name = 'transportHtml' iv_value = lv_transport_html CHANGING cv_json = lv_row ).
+      append_json_field( EXPORTING iv_name = 'transportEventId' iv_value = lv_transport_event_id CHANGING cv_json = lv_row ).
       append_json_field( EXPORTING iv_name = 'defaultMethod' iv_value = zif_abapgit_definitions=>c_method-rm iv_last = abap_true CHANGING cv_json = lv_row ).
       lv_row = lv_row && '}'.
       APPEND lv_row TO lt_rows.
@@ -902,6 +932,12 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
                && ' transportCell.style.whiteSpace = "nowrap";'
                && ' transportCell.innerHTML = data.transportHtml || data.transport || "";'
                && ' row.appendChild(transportCell);' ).
+    " Keep the transport jump target in real HTML, not serialized JavaScript.
+    ri_html->add( '        if (data.transportEventId) { transportCell.style.cursor = "pointer";' ).
+    ri_html->add( '          (function(cell, eventId) { cell.onclick = function(e) {' ).
+    ri_html->add( '            e = e || window.event; if (e.stopPropagation) { e.stopPropagation(); }' ).
+    ri_html->add( '            e.cancelBubble = true; return submitEvent(eventId);' ).
+    ri_html->add( '          }; })(transportCell, data.transportEventId); }' ).
     ri_html->add( '        var status = document.createElement("td"); status.className = "status"; row.appendChild(status);' ).
     ri_html->add( '        var cmd = document.createElement("td"); cmd.className = "cmd"; row.appendChild(cmd);' ).
     ri_html->add( '        paintRowSelection(row, data);' ).
@@ -914,19 +950,25 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
     ri_html->add( '      updateButtons();' ).
     ri_html->add( '    }' ).
     ri_html->add( '    function submit(action) {' ).
-    ri_html->add( '      var form = id("form_" + gStageParams.formAction);' ).
+    " Each action has its own static hidden form; never mutate .action (breaks WebGUI's rewrite).
+    ri_html->add( '      var form = id("form_" + action);' ).
     ri_html->add( '      if (!form) { return; }' ).
-    ri_html->add( '      form.innerHTML = "";' ).
+    " Only remove our own previous fields; WebGUI may inject its own hidden control inputs here.
+    ri_html->add( '      var stale = form.querySelectorAll(".ortecStageField");' ).
+    ri_html->add( '      for (var si = 0; si < stale.length; si++) { stale[si].parentNode.removeChild(stale[si]); }' ).
     ri_html->add( '      var n = 0, key;' ).
     ri_html->add( '      for (key in state) {' ).
     ri_html->add( '        if (state.hasOwnProperty(key)) {' ).
     ri_html->add( '          var input = document.createElement("input");' ).
-    ri_html->add( '          input.type = "hidden"; input.name = key; input.value = state[key];' ).
+    ri_html->add( '          input.type = "hidden"; input.name = key; input.value = state[key]; input.className = "ortecStageField";' ).
     ri_html->add( '          form.appendChild(input); n++;' ).
     ri_html->add( '        }' ).
     ri_html->add( '      }' ).
-    ri_html->add( '      if (!n) { alert("No files selected"); return; }' ).
-    " Preserve the existing real form's WebGUI-transformed action.
+    ri_html->add( '      if (!n) {' ).
+    ri_html->add( '        if (action === gStageParams.patchAction) { alert("Mark at least one file with Add or Remove before creating a patch."); }' ).
+    ri_html->add( '        else { alert("No files selected. Mark at least one file with Add, Remove, or Ignore first."); }' ).
+    ri_html->add( '        return;' ).
+    ri_html->add( '      }' ).
     ri_html->add( '      form.submit();' ).
     ri_html->add( '    }' ).
     ri_html->add( '    function markFilteredAndSubmit() {' ).
