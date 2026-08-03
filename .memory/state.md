@@ -7,11 +7,12 @@ TOPIC=variant-b-partial-clone
 CURRENT_PHASE=PACKAGE_E_CHECKPOINT_1_SAP_VALIDATED_COMPLETE
 PACKAGE_D2_STATUS=SAP_VALIDATED_COMPLETE
 PACKAGE_D2_VALIDATED_HEAD=733bb30799886ef8659be7e293b82c3ccfcebbdd
-PACKAGE_E_STATUS=CHECKPOINT_1_SAP_VALIDATED_COMPLETE; E1_OBJINDEX_PERFORMANCE
-  and E2_CONSUMER_COHERENCE POSTPONED 2026-07-31 (owner decision — working
-  hypotheses only, not to be touched right now); E3_CACHE_ADMIN_F4 COMPLETED
-  2026-07-31 (owner-confirmed, manually fixed/verified in the productive
-  system)
+PACKAGE_E_STATUS=CHECKPOINT_1_SAP_VALIDATED_COMPLETE; E1-A
+  (OBJ_INDEX write batching) live-implemented with chunk size 30000; E1-TREE-REUSE
+  design APPROVED but PARKED_MEASUREMENT_PENDING by owner decision 2026-07-20;
+  E2_CONSUMER_COHERENCE remains POSTPONED (working hypotheses only, not to
+  be touched right now); E3_CACHE_ADMIN_F4 COMPLETED 2026-07-31
+  (owner-confirmed, manually fixed/verified in the productive system)
 PACKAGE_E_CHECKPOINT_1=SAP_VALIDATED_COMPLETE
 PACKAGE_E_CHECKPOINT_1_VALIDATED_HEAD=3c77d898b62f3b0464e48cf59844e2e30c7b6e89
 PACKAGE_E_CHECKPOINT_1_SCOPE=E1-TEST, E3-TEST, E4-VERIFY, E-HARDEN OF-2
@@ -63,23 +64,25 @@ the design document wins):
 ```text
 E1_OBJINDEX_CORRECTNESS=CONFIRMED_CURRENT (not a defect). Slice E1-TEST,
   SAP_VALIDATED_COMPLETE (checkpoint 1, head 3c77d898, 2026-07-29).
-E1_OBJINDEX_PERFORMANCE=CORRECT_BUT_PERFORMANCE_OPEN (reclassified from the
-  prior draft's ACCEPTABLE_AS_IMPLEMENTED — see design §2, CR-04). Slice
-  E1-PERF, AUTHORIZED_NOW for candidate E1-A only; contract FIXED this pass
-  (bootstrap consistency review): new constant
-  `c_index_write_chunk_size TYPE i VALUE 5000` in
-  `zcl_abapgit_ortec_obj_index`'s `rebuild_index`, replacing the bare
-  literal `1000` — no implementation-time choice remains open. E1-B/D/E
-  remain NOT_AUTHORIZED, own design/review cycles required; E1-D is PROVEN
-  UNSAFE as a bare tree-SHA1 key (see design §2).
-  POSTPONED 2026-07-31 (owner decision): E1-A was separately found
-  live-implemented at `VALUE 30000` (not the documented 5000 above —
-  undiffed discrepancy, see
-  `.memory/logs/variant_b_package_e_false_modified_os4_d1.md`). No further
-  E1 work (contract reconciliation or E1-B/D/E) is authorized right now;
-  this remains a working hypothesis only. PRODUCTIVE_CHANGES_ALLOWED=NO
-  until the owner resumes after Package E is fully complete and the full
-  situation is verified in the productive development system.
+E1_OBJINDEX_PERFORMANCE=CORRECT_BUT_PERFORMANCE_OPEN. E1-A
+  (write batching) is live-implemented with
+  `c_index_write_chunk_size TYPE i VALUE 30000`; 20000 was previously tested
+  without issue, while 50000 has not yet been tested. Do not revert this value
+  to the obsolete design value 5000 without a new owner decision and comparable
+  IT8 measurement.
+  E1-TREE-REUSE (formerly E1-D/E1-E) now has a completed, adversarially reviewed
+  design with correctness, protocol/persistence and performance design gates
+  approved. The design is preserved in the dedicated E1-TREE-REUSE discovery,
+  design, review and bootstrap artifacts. Implementation remains NOT_AUTHORIZED:
+  owner decision 2026-07-20 is PARKED_MEASUREMENT_PENDING because the initial
+  aggregated IT8 SAT traces do not show tree/index rebuild as a dominant cost.
+  The traces show approximately 161-200 s local serialization per Full Stage;
+  warm and near-identical cold-branch remote paths are approximately 19.1 s and
+  21.2 s respectively, while the direct REBUILD_INDEX cost could not be isolated.
+  Resume only if a focused, preferably non-aggregated trace proves a material,
+  repeated REBUILD_INDEX tree-decode/mapping cost after 30000-row write batching.
+  No E1-TREE-REUSE DDIC or productive implementation is authorized before that
+  evidence and a new explicit owner GO decision.
 E2_CONSUMER_COHERENCE=NOT_VERIFIED root cause. Slice E2-DIAG, D0/D1
   AUTHORIZED_NOW (D0=owner reproduction packet, no code; D1=read-only
   single-row comparison tool, no persistence); D2/D3
@@ -189,12 +192,21 @@ AUDIT-M-1: same-repo lock-contention latency under concurrent resumed
 FINAL-SAT-PROFILING: final ST05/SAT profiling of very large unfiltered
   repositories, active-window/payload-byte-budget tuning, remaining legacy
   cache-population path review. Entry condition: after Package F cleanup.
-E1-TREE-REUSE: tree-SHA1-keyed or incremental-diff zaog_obj_index row reuse
-  across commits (E1-D/E1-E). PROVEN UNSAFE as a bare tree-SHA1 key this
-  corrective pass (design §2) — any future attempt needs a composite key of
-  at minimum (tree_sha1, hash-of-.abapgit-content, devclass). Entry
-  condition: owner approves an additive secondary-index DDIC change and a
-  dedicated design + performance DESIGN_GATE for it.
+E1-TREE-REUSE: APPROVED_DESIGN, PARKED_MEASUREMENT_PENDING,
+  IMPLEMENTATION_NOT_AUTHORIZED (owner decision 2026-07-20). A bare tree-SHA1
+  key remains forbidden. The approved design uses an additive, context-bound,
+  versioned tree memo with explicit completeness/publication semantics, bounded
+  processing, concurrency handling, rollback/fallback behavior and dedicated
+  DDIC (`ZAOG_TREE_MAP`, `ZAOG_TREE_CHILD`). Initial aggregated IT8 SAT evidence
+  does not justify implementation yet: Full Stage is dominated by local
+  serialization (approximately 161-200 s), and warm versus near-identical cold
+  remote handling differs by only approximately 2.1 s; direct REBUILD_INDEX
+  tree-decode/mapping cost was not isolated. Entry condition: a focused trace
+  proves material repeated REBUILD_INDEX compute cost after active chunk size
+  30000, followed by an explicit owner GO. Until then preserve the design and
+  prioritize measured serialization, object-existence and parallel-worker
+  hotspots. Do not reopen design convergence unless new source or measurement
+  evidence contradicts the approved design.
 E2-REPRODUCTION: false-MODIFIED root cause. Entry condition: owner supplies
   one concrete reproduction packet (repo, branch, exact file path, both
   SHA1s, believed-current commit — D0 in design §3) or the E2-DIAG D1 tool
@@ -249,17 +261,18 @@ missing `zcx_abapgit_exception` in `RAISING`) before the owner's IT8 run;
 full finding-to-fix matrix is in the regression log. No placeholder ABAP
 Unit methods remain anywhere in this checkpoint's scope.
 
-2026-07-31 owner decision: E1_OBJINDEX_PERFORMANCE and
-E2_CONSUMER_COHERENCE are POSTPONED — do NOT touch either (no contract
-reconciliation, no E1-B/D/E, no E2 fix work) until the owner resumes after
-Package E is fully complete and has verified the full situation in the
-productive development system. E3_CACHE_ADMIN_F4 is COMPLETED (owner-
+Current owner decision: E1-A remains at the live value 30000.
+E1-TREE-REUSE has an approved design but is PARKED_MEASUREMENT_PENDING and must
+not be implemented until a focused REBUILD_INDEX measurement demonstrates
+material benefit and the owner gives an explicit GO. E2_CONSUMER_COHERENCE
+remains POSTPONED; do not start E2 fix work without a new explicit owner
+instruction. E3_CACHE_ADMIN_F4 is COMPLETED (owner-
 confirmed, manually fixed/verified). The remaining open Package E item
 needing owner input is E-HARDEN-STANDARD-FILE-COUPLING (see Deferred
 topics); E4 remains SAP_VALIDATED_COMPLETE with its one accepted residual
-risk (E4-OOB-DELETION-RISK). No Package E slice is currently authorized
-for implementation. Do not resume E1/E2 work or start Package F without a
-new explicit owner instruction. Re-read this file plus the Package E
+risk (E4-OOB-DELETION-RISK). No additional Package E slice is currently authorized for
+implementation. Do not implement E1-TREE-REUSE, resume E2 work, or start
+Package F without a new explicit owner instruction. Re-read this file plus the Package E
 design/review artifacts before any code change; do not resume an
 unrelated backlog topic without checking this file's own active-topic
 status first.
