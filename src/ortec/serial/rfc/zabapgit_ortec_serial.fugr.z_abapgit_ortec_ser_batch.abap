@@ -24,10 +24,92 @@ FUNCTION Z_ABAPGIT_ORTEC_SER_BATCH.
 *"  EXCEPTIONS
 *"      ERROR
 *"----------------------------------------------------------------------
-* SER-SLICE-2 Phase 1 (contract definition only): signature matches
-* serialization_adaptive_batch_design.md &sect;2 exactly. Worker body
-* (prefetch injection, per-object serialize loop, ET_RESULT population)
-* is implemented in SER-SLICE-2 Phase 2 - see
-* .memory/handoffs/serialization-slice-2.md for status.
+* SER-SLICE-2 Phase 2: worker body per
+* serialization_adaptive_batch_design.md &sect;2 (decision-free
+* pseudocode), mirroring the exact prefetch-injection/serialize() pattern
+* of the existing single-object Z_ABAPGIT_SERIALIZE_PARALLEL
+* (LZABAPGIT_PARALLELU02). One object's exception is caught INSIDE the
+* loop, never aborting the batch - this is the structural guarantee for
+* partial-success preservation.
+*
+* IV_PATH is accepted for signature symmetry with the single-object
+* worker but is intentionally NOT used here: unlike that worker (one
+* object, one path per call), this batch worker's IT_TADIR can carry
+* several different paths in one call. Per-object path assignment is
+* done by the caller (ZCL_ABAPGIT_ORTEC_SER_ORCH) during result merge,
+* from its own already-known TADIR data - exactly mirroring how the
+* standard path's ADD_TO_RETURN assigns EV_PATH after the fact.
+*
+* IV_PREFETCH_BUFFER_DD is reserved for the SER-SLICE-3 DOMA/DTEL
+* provider, which does not exist yet - no caller populates it today, so
+* it is intentionally never injected here.
+
+  DATA: ls_result       TYPE zaog_ser_batch_result,
+        ls_item         TYPE zif_abapgit_definitions=>ty_item,
+        ls_i18n_params  TYPE zif_abapgit_definitions=>ty_i18n_params,
+        ls_serialization TYPE zif_abapgit_objects=>ty_serialization,
+        lx_error        TYPE REF TO zcx_abapgit_exception,
+        lv_t0           TYPE i,
+        lv_t1           TYPE i.
+
+  IF iv_prefetch_buffer IS NOT INITIAL.
+    zcl_abapgit_ortec_ser_pref=>inject_from_buffer( iv_prefetch_buffer ).
+  ENDIF.
+  IF iv_prefetch_buffer_ext IS NOT INITIAL.
+    zcl_abapgit_ortec_ser_pref_ext=>inject_from_buffer( iv_prefetch_buffer_ext ).
+  ENDIF.
+  IF iv_prefetch_buffer_oo IS NOT INITIAL.
+    zcl_abapgit_ortec_ser_pref_oo=>inject_from_buffer( iv_prefetch_buffer_oo ).
+  ENDIF.
+
+  ls_i18n_params-main_language         = iv_language.
+  ls_i18n_params-main_language_only    = iv_main_language_only.
+  ls_i18n_params-suppress_po_comments  = iv_suppress_po_comments.
+  ls_i18n_params-use_lxe               = iv_use_lxe.
+  ls_i18n_params-translation_languages = it_translation_langs.
+
+  LOOP AT it_tadir INTO DATA(ls_tadir).
+    CLEAR ls_result.
+    ls_result-obj_type = ls_tadir-object.
+    ls_result-obj_name = ls_tadir-obj_name.
+
+    GET RUN TIME FIELD lv_t0.
+
+    TRY.
+        CLEAR ls_item.
+        ls_item-obj_type              = ls_tadir-object.
+        ls_item-obj_name              = ls_tadir-obj_name.
+        ls_item-devclass              = ls_tadir-devclass.
+        ls_item-srcsystem             = ls_tadir-srcsystem.
+        ls_item-origlang              = ls_tadir-masterlang.
+        ls_item-abap_language_version = iv_abap_language_vers.
+
+        ls_serialization = zcl_abapgit_objects=>serialize(
+          is_item        = ls_item
+          io_i18n_params = zcl_abapgit_i18n_params=>new( is_params = ls_i18n_params ) ).
+
+        EXPORT data = ls_serialization TO DATA BUFFER ls_result-files_xstring.
+
+        ls_result-rc                = 0.
+        ls_result-output_bytes      = xstrlen( ls_result-files_xstring ).
+        ls_result-output_file_count = lines( ls_serialization-files ).
+
+      CATCH zcx_abapgit_exception INTO lx_error.
+        ls_result-rc    = 4.
+        ls_result-msgid = lx_error->if_t100_message~t100key-msgid.
+        ls_result-msgno = lx_error->if_t100_message~t100key-msgno.
+        ls_result-msgv1 = lx_error->msgv1.
+        ls_result-msgv2 = lx_error->msgv2.
+        ls_result-msgv3 = lx_error->msgv3.
+        ls_result-msgv4 = lx_error->msgv4.
+    ENDTRY.
+
+    GET RUN TIME FIELD lv_t1.
+    ls_result-elapsed_ms = ( lv_t1 - lv_t0 ) / 1000.
+
+    APPEND ls_result TO et_result.
+  ENDLOOP.
+
+  ev_output_row_count = lines( et_result ).
 
 ENDFUNCTION.
