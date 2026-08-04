@@ -65,16 +65,14 @@
 "! for this run) is routed to the existing standard sequential/parallel
 "! path - this class never invents a new fallback mechanism.
 CLASS zcl_abapgit_ortec_ser_orch DEFINITION
-  PUBLIC
-  FINAL
+  PUBLIC FINAL
   CREATE PRIVATE.
 
   PUBLIC SECTION.
-
     "! Dispatch is awaiting its RFC callback.
-    CONSTANTS c_state_awaiting TYPE c LENGTH 1 VALUE 'A'.
+    CONSTANTS c_state_awaiting         TYPE c LENGTH 1 VALUE 'A'.
     "! Callback received; result successfully merged.
-    CONSTANTS c_state_received TYPE c LENGTH 1 VALUE 'R'.
+    CONSTANTS c_state_received         TYPE c LENGTH 1 VALUE 'R'.
     "! Callback received, but the batch's own confirmed RFC-level failure
     "! (not an individual object's failure) - always leads to deterministic
     "! bisection or single-object fallback, never a retry of the identical
@@ -83,10 +81,10 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! Wait budget exceeded without a callback - LOGICAL ABANDONMENT, not
     "! cancellation (see class-level documentation). The work is always
     "! resubmitted/falls back; this state never blocks run completion.
-    CONSTANTS c_state_timed_out TYPE c LENGTH 1 VALUE 'T'.
+    CONSTANTS c_state_timed_out        TYPE c LENGTH 1 VALUE 'T'.
     "! This run's own rows for a terminal dispatch have been purged
     "! (retained only until PURGE_RUN_STATE runs for this RUN_ID).
-    CONSTANTS c_state_drained TYPE c LENGTH 1 VALUE 'D'.
+    CONSTANTS c_state_drained          TYPE c LENGTH 1 VALUE 'D'.
 
     "! One outstanding or historical RFC dispatch. Retained metadata is
     "! deliberately small and TADIR-key-shaped only - see class-level
@@ -149,7 +147,7 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! Windowed (see serialization_adaptive_batch_design.md &sect;5.8) PER
     "! RUN_ID - a systemic outage in one run can never trip or influence
     "! another run's breaker.
-    TYPES ty_outcome_tt TYPE STANDARD TABLE OF ty_outcome WITH EMPTY KEY.
+    TYPES ty_outcome_tt     TYPE STANDARD TABLE OF ty_outcome WITH EMPTY KEY.
 
     "! The set of RUN_IDs whose circuit breaker has tripped and not yet
     "! been purged. Replaces a single shared broken/not-broken flag so
@@ -158,21 +156,21 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
 
     "! Sliding-window size (confirmed task outcomes) for the per-run
     "! circuit breaker.
-    CONSTANTS c_breaker_window_size TYPE i VALUE 10.
+    CONSTANTS c_breaker_window_size         TYPE i                     VALUE 10.
     "! Minimum confirmed outcomes before the breaker ratio is evaluated at
     "! all (avoids tripping on a tiny, non-representative early sample).
-    CONSTANTS c_breaker_min_sample TYPE i VALUE 5.
+    CONSTANTS c_breaker_min_sample          TYPE i                     VALUE 5.
     "! Failure ratio (of the last C_BREAKER_WINDOW_SIZE outcomes) that
     "! trips the breaker for a run.
-    CONSTANTS c_breaker_failure_ratio TYPE p LENGTH 4 DECIMALS 2 VALUE '0.70'.
+    CONSTANTS c_breaker_failure_ratio       TYPE p LENGTH 4 DECIMALS 2 VALUE '0.70'.
     "! Per-run cap on undrained LOGICALLY_ABANDONED dispatches before the
     "! oldest are force-purged (bounded retained-metadata guarantee).
-    CONSTANTS c_max_abandoned_tasks_per_run TYPE i VALUE 50.
+    CONSTANTS c_max_abandoned_tasks_per_run TYPE i                     VALUE 50.
     "! Session-wide cap across ALL runs' undrained abandoned dispatches.
-    CONSTANTS c_max_abandoned_tasks_sess TYPE i VALUE 200.
+    CONSTANTS c_max_abandoned_tasks_sess    TYPE i                     VALUE 200.
     "! Session-wide cap on distinct runs each holding >=1 undrained
     "! abandoned dispatch before the OLDEST such run is force-purged.
-    CONSTANTS c_max_abandoned_runs_sess TYPE i VALUE 20.
+    CONSTANTS c_max_abandoned_runs_sess     TYPE i                     VALUE 20.
 
     "! Serializes a set of objects using the adaptive batch path when
     "! eligible, falling back to the existing standard sequential/parallel
@@ -180,39 +178,36 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! point the standard-abapGit hook (ZCL_ABAPGIT_SERIALIZE~SERIALIZE)
     "! calls - all ORTEC planning/registry/dispatch/callback/retry/
     "! telemetry logic stays behind this one call.
-    "! @parameter it_tadir | Objects to serialize, already filtered by the
+    "! @parameter it_tadir              | Objects to serialize, already filtered by the
     "!   caller's own unsupported/ignored-object logic (same list shape
     "!   the standard sequential/parallel path already receives)
-    "! @parameter iv_max_processes | Parallel worker budget for this run,
+    "! @parameter iv_max_processes      | Parallel worker budget for this run,
     "!   as already determined by the caller's own
     "!   DETERMINE_MAX_PROCESSES (mirrored, not recomputed, here)
-    "! @parameter iv_group | RFC server group for
+    "! @parameter iv_group              | RFC server group for
     "!   "DESTINATION IN GROUP", as already resolved by the caller
     "!   (mirrors the standard path's own MV_GROUP)
-    "! @parameter is_i18n_params | The caller's own resolved i18n
+    "! @parameter is_i18n_params        | The caller's own resolved i18n
     "!   parameters (main language, translation languages, LXE flag,
     "!   PO-comment suppression) - unchanged, reused as-is
-    "! @parameter ii_log | The caller's own log sink for per-object
+    "! @parameter ii_log                | The caller's own log sink for per-object
     "!   warnings/errors, reused as-is
-    "! @parameter rt_files | Serialized files for every object in
+    "! @parameter rt_files              | Serialized files for every object in
     "!   IT_TADIR, in the SAME shape the standard path returns - output
     "!   parity with the standard path is a hard design requirement, not
     "!   an implementation detail
-    "! @raising zcx_abapgit_exception | Only for a batch-level failure
+    "! @raising   zcx_abapgit_exception | Only for a batch-level failure
     "!   that could not be resolved even by falling back to the standard
     "!   path (expected to be rare to never in practice, since the whole
     "!   design point is to fall back rather than fail)
     CLASS-METHODS serialize
-      IMPORTING
-        !it_tadir            TYPE zif_abapgit_definitions=>ty_tadir_tt
-        !iv_max_processes    TYPE i
-        !iv_group            TYPE rfcpdest OPTIONAL
-        !is_i18n_params      TYPE zif_abapgit_definitions=>ty_i18n_params
-        !ii_log              TYPE REF TO zif_abapgit_log OPTIONAL
-      RETURNING
-        VALUE(rt_files)      TYPE zif_abapgit_definitions=>ty_files_item_tt
-      RAISING
-        zcx_abapgit_exception.
+      IMPORTING it_tadir         TYPE zif_abapgit_definitions=>ty_tadir_tt
+                iv_max_processes TYPE i
+                iv_group         TYPE rzlli_apcl             OPTIONAL
+                is_i18n_params   TYPE zif_abapgit_definitions=>ty_i18n_params
+                ii_log           TYPE REF TO zif_abapgit_log OPTIONAL
+      RETURNING VALUE(rt_files)  TYPE zif_abapgit_definitions=>ty_files_item_tt
+      RAISING   zcx_abapgit_exception.
 
     "! aRFC callback target for "CALLING on_end_of_batch ON END OF TASK".
     "! MUST be PUBLIC (the ABAP runtime invokes it directly) but is NOT
@@ -233,24 +228,21 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! @parameter p_task | Task name supplied by the ABAP runtime; matched
     "!   against TY_DISPATCH-TASK_NAME
     CLASS-METHODS on_end_of_batch
-      IMPORTING
-        !p_task TYPE clike.
+      IMPORTING p_task TYPE clike.
 
-  PROTECTED SECTION.
   PRIVATE SECTION.
-
     "! All in-flight and not-yet-purged dispatches, this session-wide.
     "! See TY_DISPATCH_TT and the class-level "WHAT MAY BE RETAINED"
     "! documentation.
-    CLASS-DATA mt_dispatch TYPE ty_dispatch_tt.
+    CLASS-DATA mt_dispatch      TYPE ty_dispatch_tt.
     "! Objects already resolved (merged or terminally failed), keyed by
     "! run, this session-wide. See TY_RESOLVED_TT.
-    CLASS-DATA mt_resolved TYPE ty_resolved_tt.
+    CLASS-DATA mt_resolved      TYPE ty_resolved_tt.
     "! Sliding-window confirmed task outcomes, keyed by run, this
     "! session-wide. See TY_OUTCOME_TT.
     CLASS-DATA mt_task_outcomes TYPE ty_outcome_tt.
     "! Runs whose circuit breaker has tripped and not yet been purged.
-    CLASS-DATA mt_broken_runs TYPE ty_broken_runs_tt.
+    CLASS-DATA mt_broken_runs   TYPE ty_broken_runs_tt.
 
     "! Dispatches one bounded batch via
     "! "CALL FUNCTION 'Z_ABAPGIT_ORTEC_SER_BATCH' STARTING NEW TASK", after
@@ -259,21 +251,20 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! records the dispatch in MT_DISPATCH (state C_STATE_AWAITING) BEFORE
     "! the CALL FUNCTION statement, so a callback can never arrive before
     "! its own row exists.
-    "! @parameter iv_run_id | Owning run - stamped into the new
+    "! @parameter iv_run_id      | Owning run - stamped into the new
     "!   MT_DISPATCH row; every downstream read of that row relies on this
     "!   being correct at insert time
     "! @parameter it_object_keys | Exact TADIR rows for this one dispatch
-    "! @parameter iv_attempt | 1 for a group's first dispatch, +1 per
+    "! @parameter iv_attempt     | 1 for a group's first dispatch, +1 per
     "!   retry/bisection
-    "! @parameter iv_batch_id | Logical grouping id, stable across retries
+    "! @parameter iv_batch_id    | Logical grouping id, stable across retries
+    "! @raising zcx_abapgit_exception |
     CLASS-METHODS dispatch_batch
-      IMPORTING
-        !iv_run_id      TYPE sysuuid_x16
-        !it_object_keys TYPE zif_abapgit_definitions=>ty_tadir_tt
-        !iv_attempt     TYPE i
-        !iv_batch_id    TYPE char32
-      RAISING
-        zcx_abapgit_exception.
+      IMPORTING iv_run_id      TYPE sysuuid_x16
+                it_object_keys TYPE zif_abapgit_definitions=>ty_tadir_tt
+                iv_attempt     TYPE i
+                iv_batch_id    TYPE char32
+      RAISING   zcx_abapgit_exception.
 
     "! Scans MT_DISPATCH for this run's C_STATE_AWAITING rows whose wait
     "! budget has expired and marks them C_STATE_TIMED_OUT (logical
@@ -283,8 +274,7 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! @parameter iv_run_id | Run to check; other runs' dispatches are
     "!   never touched by this call
     CLASS-METHODS check_timeouts
-      IMPORTING
-        !iv_run_id TYPE sysuuid_x16.
+      IMPORTING iv_run_id TYPE sysuuid_x16.
 
     "! Handles a confirmed RFC-level RECEIVE failure (communication/
     "! system/resource failure - the whole call did not complete, as
@@ -292,40 +282,37 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! one dispatch: always deterministically bisects down toward single
     "! objects before ever falling back to in-process sequential handling
     "! for an object that still fails alone.
-    "! @parameter iv_run_id | Owning run
+    "! @parameter iv_run_id   | Owning run
     "! @parameter is_dispatch | The failed dispatch row
+    "! @raising zcx_abapgit_exception |
     CLASS-METHODS handle_receive_failure
-      IMPORTING
-        !iv_run_id    TYPE sysuuid_x16
-        !is_dispatch  TYPE ty_dispatch
-      RAISING
-        zcx_abapgit_exception.
+      IMPORTING iv_run_id   TYPE sysuuid_x16
+                is_dispatch TYPE ty_dispatch
+      RAISING   zcx_abapgit_exception.
 
     "! Serializes the given objects in-process, sequentially, exactly like
     "! the existing standard fallback path - the last-resort, always-safe
     "! path for any object this class cannot successfully batch for this
     "! run (bisected down to a single object, breaker open, or unsafe
     "! type). Marks each object resolved (MT_RESOLVED) as it completes.
-    "! @parameter iv_run_id | Owning run
+    "! @parameter iv_run_id      | Owning run
     "! @parameter it_object_keys | Objects to serialize sequentially
+    "! @raising zcx_abapgit_exception |
     CLASS-METHODS route_to_sequential_fallback
-      IMPORTING
-        !iv_run_id      TYPE sysuuid_x16
-        !it_object_keys TYPE zif_abapgit_definitions=>ty_tadir_tt
-      RAISING
-        zcx_abapgit_exception.
+      IMPORTING iv_run_id      TYPE sysuuid_x16
+                it_object_keys TYPE zif_abapgit_definitions=>ty_tadir_tt
+      RAISING   zcx_abapgit_exception.
 
     "! Folds one CONFIRMED task outcome (a real success or a real,
     "! confirmed failure - never a mere timeout by itself) into this run's
     "! sliding window and trips MT_BROKEN_RUNS for IV_RUN_ID if the
     "! failure ratio threshold is met. See
     "! serialization_adaptive_batch_design.md &sect;5.8.
-    "! @parameter iv_run_id | Run this outcome belongs to
+    "! @parameter iv_run_id  | Run this outcome belongs to
     "! @parameter iv_success | Whether the confirmed outcome was a success
     CLASS-METHODS record_task_outcome
-      IMPORTING
-        !iv_run_id  TYPE sysuuid_x16
-        !iv_success TYPE abap_bool.
+      IMPORTING iv_run_id  TYPE sysuuid_x16
+                iv_success TYPE abap_bool.
 
     "! Removes IV_RUN_ID's own rows from MT_DISPATCH/MT_RESOLVED/
     "! MT_TASK_OUTCOMES/MT_BROKEN_RUNS once every dispatch for that run has
@@ -335,15 +322,12 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! resolve against.
     "! @parameter iv_run_id | Run to purge
     CLASS-METHODS purge_run_state
-      IMPORTING
-        !iv_run_id TYPE sysuuid_x16.
+      IMPORTING iv_run_id TYPE sysuuid_x16.
 
 ENDCLASS.
 
 
-
 CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
-
   METHOD serialize.
     " SER-SLICE-2 Phase 2: implement the full run flow per
     " serialization_adaptive_batch_design.md &sect;5.0 (9-step flow) -
@@ -386,5 +370,4 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     " SER-SLICE-2 Phase 2: implement per
     " serialization_adaptive_batch_design.md &sect;5.0 step 8.
   ENDMETHOD.
-
 ENDCLASS.

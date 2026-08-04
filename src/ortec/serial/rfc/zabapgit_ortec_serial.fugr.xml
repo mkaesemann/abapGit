@@ -53,7 +53,7 @@
       </RSIMP>
       <RSIMP>
        <PARAMETER>IT_TADIR</PARAMETER>
-       <TYP>\TYPE=ZIF_ABAPGIT_DEFINITIONS=>TY_TADIR_TT</TYP>
+       <TYP>ZAOG_SER_TADIR_TT</TYP>
       </RSIMP>
       <RSIMP>
        <PARAMETER>IV_PREFETCH_BUFFER</PARAMETER>
@@ -89,7 +89,7 @@
      <EXPORT>
       <RSEXP>
        <PARAMETER>ET_RESULT</PARAMETER>
-       <TYP>\TYPE=ZAOG_SER_BATCH_RESULT_TT</TYP>
+       <TYP>ZAOG_SER_BATCH_RESULT_TT</TYP>
       </RSEXP>
       <RSEXP>
        <PARAMETER>EV_OUTPUT_ROW_COUNT</PARAMETER>
@@ -101,110 +101,141 @@
        <EXCEPTION>ERROR</EXCEPTION>
       </RSEXC>
      </EXCEPTION>
-     <DOCUMENTATION>Multi-object batch serialization worker for the ORTEC adaptive
-serialization orchestrator (ZCL_ABAPGIT_ORTEC_SER_ORCH).
-
-INTENDED USE: called ONLY by ZCL_ABAPGIT_ORTEC_SER_ORCH via
-&quot;CALL FUNCTION 'Z_ABAPGIT_ORTEC_SER_BATCH' STARTING NEW TASK ...&quot;.
-Not intended for direct use by any other caller.
-
-PARAMETERS:
-IV_BATCH_ID - logical grouping id for this dispatch, stable across a
-  batch's own retries/bisections (telemetry/correlation only - the
-  caller's callback resolves results by RFC task name, never by this id).
-IV_ATTEMPT - 1 for a group's first dispatch, incremented by the caller for
-  each retry/bisection of the same logical group; carried through purely
-  for telemetry/log correlation, has no effect on this worker's own logic.
-IV_ABAP_LANGUAGE_VERS - ABAP language version to serialize objects under,
-  same meaning and type as the existing single-object
-  Z_ABAPGIT_SERIALIZE_PARALLEL's own IV_ABAP_LANGUAGE_VERS parameter.
-IV_LANGUAGE - main serialization language (SY-LANGU), applied to every
-  object in this batch.
-IV_PATH - target repository path, passed through unchanged to each
-  object's own serialize() call, exactly like the existing single-object
-  worker's IV_PATH.
-IV_MAIN_LANGUAGE_ONLY - X = skip translation-language texts for every
-  object in this batch (matches the existing single-object worker's flag
-  of the same name).
-IV_SUPPRESS_PO_COMMENTS - X = suppress PO-file comments for every object
-  in this batch (matches the existing single-object worker's flag).
-IV_USE_LXE - X = use the LXE translation environment instead of the
-  classic per-language text serialization path, for every object in this
-  batch (matches the existing single-object worker's flag).
-IT_TRANSLATION_LANGS - languages to serialize translation texts for, when
-  IV_MAIN_LANGUAGE_ONLY is not set; same meaning as the existing single-
-  object worker's parameter of the same name.
-IT_TADIR - the bounded set of objects to serialize in this ONE dispatch
-  (never the whole repository - the caller/planner is responsible for
-  row/byte budgeting before dispatch). Every row produces exactly one
-  ET_RESULT row.
-IV_PREFETCH_BUFFER / IV_PREFETCH_BUFFER_EXT / IV_PREFETCH_BUFFER_OO -
-  optional EXPORT-to-buffer prefetch data for the existing
-  ZCL_ABAPGIT_ORTEC_SER_PREF/_EXT/_OO caches, injected into THIS worker
-  session before any object is serialized (mirrors the existing single-
-  object worker's own injection pattern) - initial/omitted means that
-  provider family has nothing prefetched for this batch (normal per-
-  object serialization is used instead, never an error).
-IV_PREFETCH_BUFFER_DD - reserved for the SER-SLICE-3 DOMA/DTEL provider;
-  always initial/unused in SER-SLICE-2 - no SER-SLICE-3 provider logic is
-  implemented by this function module yet.
-IV_INPUT_ROW_COUNT - number of rows the caller intended to send in
-  IT_TADIR, for a cross-check that the worker received exactly the batch
-  the caller dispatched.
-IV_INPUT_VERSION - version of the caller/worker contract this call was
-  built against; must match between caller and worker code generations
-  (see INPUT/RESULT VERSION COMPATIBILITY below).
-ET_RESULT - one row per IT_TADIR object, success or failure, in the same
-  order objects were processed; see ZAOG_SER_BATCH_RESULT field-level
-  documentation for the exact result shape.
-EV_OUTPUT_ROW_COUNT - number of rows actually returned in ET_RESULT,
-  letting the caller cross-check it received a result for the complete
-  batch it dispatched (always equal to the number of rows in IT_TADIR when
-  ERROR was not raised).
-
-One call processes a BOUNDED batch of objects (IT_TADIR), never the whole
-repository - the caller (the planner) is responsible for row/byte
-budgeting before dispatch. Every object in IT_TADIR produces exactly one
-ET_RESULT row (success or failure) - a single object's failure never
-discards or hides another object's successful result in the same batch.
-
-WORKER-SESSION LIFECYCLE: this function module may serialize MULTIPLE
-DIFFERENT objects, one after another, inside the SAME RFC work-process
-session (unlike the existing single-object Z_ABAPGIT_SERIALIZE_PARALLEL,
-which always processes exactly one). The OD-14 static-state audit
-(.memory/logs/serialization_slice_2_od14_audit.md) confirms no unmitigated
-unsafe cross-object state for the object types this worker is used for.
-
-INPUT/RESULT VERSION COMPATIBILITY: IV_INPUT_VERSION and the ET_RESULT row
-shape are versioned together - a caller and worker built from different
-code generations must not be mixed; IV_INPUT_ROW_COUNT lets the worker
-cross-check it received exactly the batch the caller intended to send.
-
-No WAPA object is ever processed by this function module in SER-SLICE-2 -
-WAPA remains on its existing, unchanged, single-object serialization path.
-
-TRANSACTION: no explicit COMMIT WORK/ROLLBACK WORK is issued here beyond
-whatever the underlying per-object serialize() call already does today;
-see serialization_performance_design.md &#167;3a for the accepted implicit-
-commit-cadence analysis.
-
-FAILURE HANDLING: system/communication/resource failures (the whole RFC
-call not completing) are NOT represented inside ET_RESULT - they surface
-to the caller as a failed RECEIVE, and are handled entirely by the
-orchestrator's own retry/bisection/fallback logic, never inside this
-function module. The ERROR exception here is reserved for a batch-level
-failure that prevents this worker from even attempting any object in the
-batch (for example, prefetch-buffer injection itself failing) - it is
-never raised for an individual object's own serialization failure, which
-is always represented as a normal (non-exceptional) ET_RESULT row with
-RC &lt;&gt; 0 instead.
-
-No scheduling/cost statistics are persisted anywhere by this function
-module - ET_RESULT's ELAPSED_MS/OUTPUT_BYTES fields are read back by the
-orchestrator's run-local (in-memory only) adaptive cost estimator and
-never written to any database table.</DOCUMENTATION>
+     <DOCUMENTATION>
+      <RSFDO>
+       <PARAMETER>IV_BATCH_ID</PARAMETER>
+       <KIND>P</KIND>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>IV_ATTEMPT</PARAMETER>
+       <KIND>P</KIND>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>IV_ABAP_LANGUAGE_VERS</PARAMETER>
+       <KIND>P</KIND>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>IV_LANGUAGE</PARAMETER>
+       <KIND>P</KIND>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>IV_PATH</PARAMETER>
+       <KIND>P</KIND>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>IV_MAIN_LANGUAGE_ONLY</PARAMETER>
+       <KIND>P</KIND>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>IV_SUPPRESS_PO_COMMENTS</PARAMETER>
+       <KIND>P</KIND>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>IV_USE_LXE</PARAMETER>
+       <KIND>P</KIND>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>IT_TRANSLATION_LANGS</PARAMETER>
+       <KIND>P</KIND>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>IT_TADIR</PARAMETER>
+       <KIND>P</KIND>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>IV_PREFETCH_BUFFER</PARAMETER>
+       <KIND>P</KIND>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>IV_PREFETCH_BUFFER_EXT</PARAMETER>
+       <KIND>P</KIND>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>IV_PREFETCH_BUFFER_OO</PARAMETER>
+       <KIND>P</KIND>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>IV_PREFETCH_BUFFER_DD</PARAMETER>
+       <KIND>P</KIND>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>IV_INPUT_ROW_COUNT</PARAMETER>
+       <KIND>P</KIND>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>IV_INPUT_VERSION</PARAMETER>
+       <KIND>P</KIND>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>ET_RESULT</PARAMETER>
+       <KIND>P</KIND>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>EV_OUTPUT_ROW_COUNT</PARAMETER>
+       <KIND>P</KIND>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>ERROR</PARAMETER>
+       <KIND>X</KIND>
+      </RSFDO>
+     </DOCUMENTATION>
     </item>
    </FUNCTIONS>
+   <LONGTEXTS_Z_ABAPGIT_ORTEC_SER_BATCH>
+    <item>
+     <DOKIL>
+      <ID>FU</ID>
+      <OBJECT>Z_ABAPGIT_ORTEC_SER_BATCH</OBJECT>
+      <LANGU>E</LANGU>
+      <TYP>T</TYP>
+      <VERSION>0001</VERSION>
+      <MASTERLANG>X</MASTERLANG>
+      <TXTLINES>00005</TXTLINES>
+      <DOKSTATE>A</DOKSTATE>
+     </DOKIL>
+     <HEAD>
+      <TDOBJECT>DOKU</TDOBJECT>
+      <TDNAME>Z_ABAPGIT_ORTEC_SER_BATCH</TDNAME>
+      <TDID>FU</TDID>
+      <TDSPRAS>E</TDSPRAS>
+      <TDFORM>S_DOCU_SHOW</TDFORM>
+      <TDSTYLE>S_DOCUS1</TDSTYLE>
+      <TDVERSION>00001</TDVERSION>
+      <TDLINESIZE>072</TDLINESIZE>
+     </HEAD>
+     <LINES>
+      <TLINE>
+       <TDFORMAT>U4</TDFORMAT>
+       <TDLINE>&amp;FUNCTIONALITY&amp;</TDLINE>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+       <TDLINE>&lt;&lt;Documentation&gt;&gt;</TDLINE>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>U4</TDFORMAT>
+       <TDLINE>&amp;EXAMPLE&amp;</TDLINE>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>U4</TDFORMAT>
+       <TDLINE>&amp;HINTS&amp;</TDLINE>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>U4</TDFORMAT>
+       <TDLINE>&amp;FURTHER_SOURCES_OF_INF&amp;</TDLINE>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+      </TLINE>
+     </LINES>
+    </item>
+   </LONGTEXTS_Z_ABAPGIT_ORTEC_SER_BATCH>
   </asx:values>
  </asx:abap>
 </abapGit>

@@ -6,7 +6,7 @@
     <NAME>Z_ABAPGIT_ORTEC_SER_BATCH</NAME>
     <TYPE>RF</TYPE>
     <DISPLAY_NAME>Z_ABAPGIT_ORTEC_SER_BATCH</DISPLAY_NAME>
-    <STEXT>Batch Serializer</STEXT>
+    <STEXT>ORTEC: serialize a bounded batch of objects (aRFC worker)</STEXT>
    </HEAD>
   </asx:values>
  </asx:abap>

@@ -11,7 +11,7 @@ FUNCTION Z_ABAPGIT_ORTEC_SER_BATCH.
 *"     VALUE(IV_SUPPRESS_PO_COMMENTS) TYPE  CHAR1
 *"     VALUE(IV_USE_LXE) TYPE  CHAR1
 *"     VALUE(IT_TRANSLATION_LANGS) TYPE  TFPLAISO
-*"     VALUE(IT_TADIR) TYPE  ZIF_ABAPGIT_DEFINITIONS=>TY_TADIR_TT
+*"     VALUE(IT_TADIR) TYPE  ZAOG_SER_TADIR_TT
 *"     VALUE(IV_PREFETCH_BUFFER) TYPE  XSTRING OPTIONAL
 *"     VALUE(IV_PREFETCH_BUFFER_EXT) TYPE  XSTRING OPTIONAL
 *"     VALUE(IV_PREFETCH_BUFFER_OO) TYPE  XSTRING OPTIONAL
@@ -24,7 +24,6 @@ FUNCTION Z_ABAPGIT_ORTEC_SER_BATCH.
 *"  EXCEPTIONS
 *"      ERROR
 *"----------------------------------------------------------------------
-
 * SER-SLICE-2 Phase 1 (contract definition only): signature matches
 * serialization_adaptive_batch_design.md &sect;2 exactly. Worker body
 * (prefetch injection, per-object serialize loop, ET_RESULT population)
