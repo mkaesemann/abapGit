@@ -580,6 +580,24 @@ CLASS zcl_abapgit_git_porcelain IMPLEMENTATION.
 
   METHOD push.
 
+    " Keep the standard porcelain implementation independent from ORTEC
+    " internals - same integration boundary as PULL_BY_BRANCH/PULL_BY_COMMIT.
+    " An ORTEC-enabled repository's PULL can return a sparse object set
+    " (WARM_UNCHANGED/COLD_BRANCH seed only the commit object, relying on
+    " ZAOG_OBJ_STORE for the rest), which the plain FULL_TREE/WALK_TREE below
+    " cannot see - only ZCL_ABAPGIT_ORTEC_PORCELAIN's own buffer-aware tree
+    " walker can safely reconstruct the base tree in that case.
+    IF zcl_abapgit_ortec_git_switch=>is_active_for_repo( iv_url ) = abap_true.
+      rs_result = zcl_abapgit_ortec_porcelain=>push(
+        is_comment     = is_comment
+        io_stage       = io_stage
+        it_old_objects = it_old_objects
+        iv_parent      = iv_parent
+        iv_url         = iv_url
+        iv_branch_name = iv_branch_name ).
+      RETURN.
+    ENDIF.
+
     DATA: lt_expanded TYPE zif_abapgit_git_definitions=>ty_expanded_tt,
           lt_blobs    TYPE zif_abapgit_git_definitions=>ty_files_tt,
           lv_sha1     TYPE zif_abapgit_git_definitions=>ty_sha1,

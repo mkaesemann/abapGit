@@ -26,7 +26,82 @@ CLASS zcl_abapgit_ortec_porcelain DEFINITION
       RETURNING VALUE(rs_result) TYPE ty_pull_result
       RAISING   zcx_abapgit_exception.
 
+    "! Buffer-aware equivalent of ZCL_ABAPGIT_GIT_PORCELAIN=>full_tree - reads
+    "! the parent commit from IT_OBJECTS if present, otherwise ZAOG_OBJ_STORE,
+    "! then walks its tree via the existing buffer-aware WALK_TREE. This is
+    "! the fix for the "tree not found" push/commit failure: a PULL that took
+    "! ORTEC's WARM_UNCHANGED/COLD_BRANCH path only seeds the commit object
+    "! itself (not the full tree/blob graph) into IT_OBJECTS, which the plain
+    "! ZCL_ABAPGIT_GIT_PORCELAIN=>full_tree cannot see past.
+    CLASS-METHODS full_tree
+      IMPORTING it_objects         TYPE zif_abapgit_definitions=>ty_objects_tt    OPTIONAL
+                iv_parent          TYPE zif_abapgit_git_definitions=>ty_sha1
+                iv_url             TYPE string                                    OPTIONAL
+                iv_repo_key        TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key OPTIONAL
+      RETURNING VALUE(rt_expanded) TYPE zif_abapgit_git_definitions=>ty_expanded_tt
+      RAISING   zcx_abapgit_exception.
+
+    "! ORTEC-aware equivalent of ZCL_ABAPGIT_GIT_PORCELAIN=>push - identical
+    "! stage-merge/tree-build/network-push orchestration, routed here so an
+    "! ORTEC-active repo never falls through to the plain FULL_TREE/WALK_TREE
+    "! (see FULL_TREE doc). Uses this class's own BUILD_TREES/
+    "! RECEIVE_PACK_PUSH clones (private, below) instead of the standard
+    "! class's - kept as a deliberate duplicate rather than widening the
+    "! standard class's visibility, to minimize the diff against upstream
+    "! abapGit and keep future updates to it low-friction.
+    CLASS-METHODS push
+      IMPORTING is_comment       TYPE zif_abapgit_git_definitions=>ty_comment
+                io_stage         TYPE REF TO zcl_abapgit_stage
+                it_old_objects   TYPE zif_abapgit_definitions=>ty_objects_tt
+                iv_parent        TYPE zif_abapgit_git_definitions=>ty_sha1
+                iv_url           TYPE string
+                iv_branch_name   TYPE string
+      RETURNING VALUE(rs_result) TYPE zcl_abapgit_git_porcelain=>ty_push_result
+      RAISING   zcx_abapgit_exception.
+
   PRIVATE SECTION.
+    " Clones of ZCL_ABAPGIT_GIT_PORCELAIN's own private TY_TREE/TY_TREES_TT/
+    " FIND_FOLDERS/BUILD_TREES/RECEIVE_PACK_PUSH (unchanged logic - pure
+    " tree-encoding/pack-transport, no object-graph dependency) - duplicated
+    " here rather than widened to PUBLIC on the standard class, to keep the
+    " diff against upstream abapGit minimal.
+    TYPES:
+      BEGIN OF ty_tree,
+        path TYPE string,
+        data TYPE xstring,
+        sha1 TYPE zif_abapgit_git_definitions=>ty_sha1,
+      END OF ty_tree.
+    TYPES ty_trees_tt TYPE STANDARD TABLE OF ty_tree WITH DEFAULT KEY.
+    TYPES:
+      BEGIN OF ty_folder,
+        path  TYPE string,
+        count TYPE i,
+        sha1  TYPE zif_abapgit_git_definitions=>ty_sha1,
+      END OF ty_folder.
+    TYPES ty_folders_tt TYPE STANDARD TABLE OF ty_folder WITH DEFAULT KEY.
+
+    CLASS-METHODS find_folders
+      IMPORTING it_expanded       TYPE zif_abapgit_git_definitions=>ty_expanded_tt
+      RETURNING VALUE(rt_folders) TYPE ty_folders_tt.
+
+    CLASS-METHODS build_trees
+      IMPORTING it_expanded     TYPE zif_abapgit_git_definitions=>ty_expanded_tt
+      RETURNING VALUE(rt_trees) TYPE ty_trees_tt
+      RAISING   zcx_abapgit_exception.
+
+    CLASS-METHODS receive_pack_push
+      IMPORTING is_comment     TYPE zif_abapgit_git_definitions=>ty_comment
+                it_trees       TYPE ty_trees_tt
+                it_blobs       TYPE zif_abapgit_git_definitions=>ty_files_tt
+                iv_parent      TYPE zif_abapgit_git_definitions=>ty_sha1
+                iv_parent2     TYPE zif_abapgit_git_definitions=>ty_sha1 OPTIONAL
+                iv_url         TYPE string
+                iv_branch_name TYPE string
+      EXPORTING ev_new_commit  TYPE zif_abapgit_git_definitions=>ty_sha1
+                et_new_objects TYPE zif_abapgit_definitions=>ty_objects_tt
+                ev_new_tree    TYPE zif_abapgit_git_definitions=>ty_sha1
+      RAISING   zcx_abapgit_exception.
+
     CLASS-METHODS pull
       IMPORTING iv_commit         TYPE zif_abapgit_git_definitions=>ty_sha1
                 it_objects        TYPE zif_abapgit_definitions=>ty_objects_tt
@@ -532,6 +607,318 @@ CLASS zcl_abapgit_ortec_porcelain IMPLEMENTATION.
 
     report_progress( ii_progress = li_progress iv_current = 1
       iv_text = |Git: completed ({ lines( rs_result-files ) } files)| ).
+  ENDMETHOD.
+
+  METHOD full_tree.
+    DATA lv_repo_key TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key.
+    DATA ls_object   TYPE zif_abapgit_definitions=>ty_object.
+    DATA ls_commit   TYPE zcl_abapgit_git_pack=>ty_commit.
+
+    lv_repo_key = iv_repo_key.
+    IF lv_repo_key IS INITIAL AND iv_url IS NOT INITIAL.
+      lv_repo_key = zcl_abapgit_ortec_repo_state=>get_repo_key_for_url( iv_url ).
+    ENDIF.
+
+    READ TABLE it_objects INTO ls_object
+         WITH KEY type COMPONENTS type = zif_abapgit_git_definitions=>c_type-commit
+                                  sha1 = iv_parent.
+    IF sy-subrc <> 0.
+      TRY.
+          ls_object = zcl_abapgit_ortec_obj_store=>get_object(
+                          iv_repo_key = lv_repo_key
+                          iv_sha1     = iv_parent ).
+          IF ls_object-type <> zif_abapgit_git_definitions=>c_type-commit.
+            zcx_abapgit_exception=>raise( 'commit not found' ).
+          ENDIF.
+        CATCH zcx_abapgit_ortec_git INTO DATA(lx_commit).
+          zcx_abapgit_exception=>raise_with_text( lx_commit ).
+      ENDTRY.
+    ENDIF.
+
+    ls_commit = zcl_abapgit_git_pack=>decode_commit( ls_object-data ).
+
+    rt_expanded = walk_tree( it_objects  = it_objects
+                             iv_tree     = ls_commit-tree
+                             iv_base     = '/'
+                             iv_repo_key = lv_repo_key ).
+  ENDMETHOD.
+
+  METHOD push.
+    DATA lv_repo_key   TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key.
+    DATA lt_expanded   TYPE zif_abapgit_git_definitions=>ty_expanded_tt.
+    DATA lt_blobs      TYPE zif_abapgit_git_definitions=>ty_files_tt.
+    DATA lv_sha1       TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lt_stage      TYPE zif_abapgit_definitions=>ty_stage_tt.
+    DATA lv_new_tree   TYPE zif_abapgit_git_definitions=>ty_sha1.
+
+    FIELD-SYMBOLS <ls_stage>   LIKE LINE OF lt_stage.
+    FIELD-SYMBOLS <ls_updated> LIKE LINE OF rs_result-updated_files.
+    FIELD-SYMBOLS <ls_exp>     LIKE LINE OF lt_expanded.
+
+    lv_repo_key = zcl_abapgit_ortec_repo_state=>get_repo_key_for_url( iv_url ).
+
+    lt_expanded = full_tree( it_objects  = it_old_objects
+                             iv_parent   = iv_parent
+                             iv_repo_key = lv_repo_key ).
+
+    lt_stage = io_stage->get_all( ).
+    LOOP AT lt_stage ASSIGNING <ls_stage>.
+
+      APPEND INITIAL LINE TO rs_result-updated_files ASSIGNING <ls_updated>.
+      MOVE-CORRESPONDING <ls_stage>-file TO <ls_updated>.
+
+      CASE <ls_stage>-method.
+        WHEN zif_abapgit_definitions=>c_method-add.
+
+          APPEND <ls_stage>-file TO lt_blobs.
+
+          READ TABLE lt_expanded ASSIGNING <ls_exp> WITH TABLE KEY path_name COMPONENTS
+            name = <ls_stage>-file-filename
+            path = <ls_stage>-file-path.
+          IF sy-subrc <> 0. " new files
+            APPEND INITIAL LINE TO lt_expanded ASSIGNING <ls_exp>.
+            <ls_exp>-name  = <ls_stage>-file-filename.
+            <ls_exp>-path  = <ls_stage>-file-path.
+            <ls_exp>-chmod = zif_abapgit_git_definitions=>c_chmod-file.
+          ENDIF.
+
+          lv_sha1 = zcl_abapgit_hash=>sha1_blob( <ls_stage>-file-data ).
+          IF <ls_exp>-sha1 <> lv_sha1.
+            <ls_exp>-sha1 = lv_sha1.
+          ENDIF.
+
+          <ls_updated>-sha1 = lv_sha1.   "New sha1
+
+        WHEN zif_abapgit_definitions=>c_method-rm.
+          READ TABLE lt_expanded ASSIGNING <ls_exp> WITH TABLE KEY path_name COMPONENTS
+            name = <ls_stage>-file-filename
+            path = <ls_stage>-file-path.
+          ASSERT sy-subrc = 0.
+
+          CLEAR <ls_exp>-sha1.           " Mark as deleted
+          CLEAR <ls_updated>-sha1.       " Mark as deleted
+
+        WHEN OTHERS.
+          zcx_abapgit_exception=>raise( 'stage method not supported, todo' ).
+      ENDCASE.
+    ENDLOOP.
+
+    DELETE lt_expanded WHERE sha1 IS INITIAL.
+
+    DATA(lt_trees) = build_trees( lt_expanded ).
+
+    receive_pack_push(
+      EXPORTING
+        is_comment     = is_comment
+        it_trees       = lt_trees
+        iv_branch_name = iv_branch_name
+        iv_url         = iv_url
+        iv_parent      = iv_parent
+        iv_parent2     = io_stage->get_merge_source( )
+        it_blobs       = lt_blobs
+      IMPORTING
+        ev_new_commit  = rs_result-branch
+        et_new_objects = rs_result-new_objects
+        ev_new_tree    = lv_new_tree ).
+
+    IF rs_result IS SUPPLIED.
+      APPEND LINES OF it_old_objects TO rs_result-new_objects.
+
+      " Buffer-aware WALK (not the plain one) - the new tree only carries
+      " NEWLY created tree/blob objects (see RECEIVE_PACK_PUSH); every
+      " unchanged sibling file's blob still only exists in ZAOG_OBJ_STORE
+      " when the base tree came from FULL_TREE's buffer fallback above.
+      walk( EXPORTING it_objects  = rs_result-new_objects
+                      iv_sha1     = lv_new_tree
+                      iv_path     = '/'
+                      iv_repo_key = lv_repo_key
+            CHANGING  ct_files    = rs_result-new_files ).
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD find_folders.
+
+    DATA: lt_paths TYPE TABLE OF string,
+          lv_split TYPE string,
+          lv_path  TYPE string.
+
+    FIELD-SYMBOLS: <ls_folder> LIKE LINE OF rt_folders,
+                   <ls_new>    LIKE LINE OF rt_folders,
+                   <ls_exp>    LIKE LINE OF it_expanded.
+
+    LOOP AT it_expanded ASSIGNING <ls_exp>.
+      READ TABLE rt_folders WITH KEY path = <ls_exp>-path TRANSPORTING NO FIELDS.
+      IF sy-subrc <> 0.
+        APPEND INITIAL LINE TO rt_folders ASSIGNING <ls_folder>.
+        <ls_folder>-path = <ls_exp>-path.
+      ENDIF.
+    ENDLOOP.
+
+* add empty folders
+    LOOP AT rt_folders ASSIGNING <ls_folder>.
+      SPLIT <ls_folder>-path AT '/' INTO TABLE lt_paths.
+
+      CLEAR lv_path.
+      LOOP AT lt_paths INTO lv_split.
+        CONCATENATE lv_path lv_split '/' INTO lv_path.
+        READ TABLE rt_folders WITH KEY path = lv_path TRANSPORTING NO FIELDS.
+        IF sy-subrc <> 0.
+          APPEND INITIAL LINE TO rt_folders ASSIGNING <ls_new>.
+          <ls_new>-path = lv_path.
+        ENDIF.
+      ENDLOOP.
+    ENDLOOP.
+
+    LOOP AT rt_folders ASSIGNING <ls_folder>.
+      FIND ALL OCCURRENCES OF '/' IN <ls_folder>-path MATCH COUNT <ls_folder>-count.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD build_trees.
+    DATA: lt_nodes   TYPE zcl_abapgit_git_pack=>ty_nodes_tt,
+          ls_tree    LIKE LINE OF rt_trees,
+          lv_len     TYPE i,
+          lt_folders TYPE ty_folders_tt.
+
+    FIELD-SYMBOLS: <ls_folder> LIKE LINE OF lt_folders,
+                   <ls_node>   LIKE LINE OF lt_nodes,
+                   <ls_sub>    LIKE LINE OF lt_folders,
+                   <ls_exp>    LIKE LINE OF it_expanded.
+
+    lt_folders = find_folders( it_expanded ).
+
+* start with the deepest folders
+    SORT lt_folders BY count DESCENDING.
+
+    LOOP AT lt_folders ASSIGNING <ls_folder>.
+      CLEAR lt_nodes.
+
+* files
+      LOOP AT it_expanded ASSIGNING <ls_exp> USING KEY path_name WHERE path = <ls_folder>-path.
+        APPEND INITIAL LINE TO lt_nodes ASSIGNING <ls_node>.
+        <ls_node>-chmod = <ls_exp>-chmod.
+        <ls_node>-name  = <ls_exp>-name.
+        <ls_node>-sha1  = <ls_exp>-sha1.
+      ENDLOOP.
+
+* folders
+      LOOP AT lt_folders ASSIGNING <ls_sub> WHERE count = <ls_folder>-count + 1.
+        lv_len = strlen( <ls_folder>-path ).
+        IF strlen( <ls_sub>-path ) > lv_len AND <ls_sub>-path(lv_len) = <ls_folder>-path.
+          APPEND INITIAL LINE TO lt_nodes ASSIGNING <ls_node>.
+          <ls_node>-chmod = zif_abapgit_git_definitions=>c_chmod-dir.
+
+* extract folder name, this can probably be done easier using regular expressions
+          <ls_node>-name = <ls_sub>-path+lv_len.
+          lv_len = strlen( <ls_node>-name ) - 1.
+          <ls_node>-name = <ls_node>-name(lv_len).
+
+          <ls_node>-sha1 = <ls_sub>-sha1.
+        ENDIF.
+      ENDLOOP.
+
+      CLEAR ls_tree.
+      ls_tree-path = <ls_folder>-path.
+      ls_tree-data = zcl_abapgit_git_pack=>encode_tree( lt_nodes ).
+      ls_tree-sha1 = zcl_abapgit_hash=>sha1_tree( ls_tree-data ).
+      APPEND ls_tree TO rt_trees.
+
+      <ls_folder>-sha1 = ls_tree-sha1.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD receive_pack_push.
+    DATA: lv_time   TYPE zcl_abapgit_git_time=>ty_unixtime,
+          lv_commit TYPE xstring,
+          lv_pack   TYPE xstring,
+          ls_object LIKE LINE OF et_new_objects,
+          ls_commit TYPE zcl_abapgit_git_pack=>ty_commit,
+          lv_uindex TYPE sy-index.
+
+    FIELD-SYMBOLS: <ls_tree> LIKE LINE OF it_trees,
+                   <ls_blob> LIKE LINE OF it_blobs.
+
+    lv_time = zcl_abapgit_git_time=>get_unix( ).
+
+    READ TABLE it_trees ASSIGNING <ls_tree> WITH KEY path = '/'.
+    ASSERT sy-subrc = 0.
+
+* new commit
+    ls_commit-committer = |{ is_comment-committer-name
+      } <{ is_comment-committer-email }> { lv_time }|.
+    IF is_comment-author-name IS NOT INITIAL.
+      ls_commit-author = |{ is_comment-author-name
+        } <{ is_comment-author-email }> { lv_time }|.
+    ELSE.
+      ls_commit-author = ls_commit-committer.
+    ENDIF.
+
+    ls_commit-tree      = <ls_tree>-sha1.
+    ls_commit-parent    = iv_parent.
+    ls_commit-parent2   = iv_parent2.
+    ls_commit-body      = is_comment-comment.
+    lv_commit = zcl_abapgit_git_pack=>encode_commit( ls_commit ).
+
+    ls_object-sha1 = zcl_abapgit_hash=>sha1_commit( lv_commit ).
+    ls_object-type = zif_abapgit_git_definitions=>c_type-commit.
+    ls_object-data = lv_commit.
+    APPEND ls_object TO et_new_objects.
+
+    LOOP AT it_trees ASSIGNING <ls_tree>.
+      CLEAR ls_object.
+      ls_object-sha1 = <ls_tree>-sha1.
+
+      READ TABLE et_new_objects
+        WITH KEY type COMPONENTS
+          type = zif_abapgit_git_definitions=>c_type-tree
+          sha1 = ls_object-sha1
+        TRANSPORTING NO FIELDS.
+      IF sy-subrc = 0.
+* two identical trees added at the same time, only add one to the pack
+        CONTINUE.
+      ENDIF.
+
+      ls_object-type = zif_abapgit_git_definitions=>c_type-tree.
+      ls_object-data = <ls_tree>-data.
+      lv_uindex = lv_uindex + 1.
+      ls_object-index = lv_uindex.
+      APPEND ls_object TO et_new_objects.
+    ENDLOOP.
+
+    LOOP AT it_blobs ASSIGNING <ls_blob>.
+      CLEAR ls_object.
+      ls_object-sha1 = zcl_abapgit_hash=>sha1_blob( <ls_blob>-data ).
+
+      READ TABLE et_new_objects
+        WITH KEY type COMPONENTS
+          type = zif_abapgit_git_definitions=>c_type-blob
+          sha1 = ls_object-sha1
+        TRANSPORTING NO FIELDS.
+      IF sy-subrc = 0.
+* two identical files added at the same time, only add one blob to the pack
+        CONTINUE.
+      ENDIF.
+
+      ls_object-type = zif_abapgit_git_definitions=>c_type-blob.
+* note <ls_blob>-data can be empty, #1857 allow empty files - some more checks needed?
+      ls_object-data = <ls_blob>-data.
+      lv_uindex = lv_uindex + 1.
+      ls_object-index = lv_uindex.
+      APPEND ls_object TO et_new_objects.
+    ENDLOOP.
+
+    lv_pack = zcl_abapgit_git_pack=>encode( et_new_objects ).
+
+    ev_new_commit = zcl_abapgit_hash=>sha1_commit( lv_commit ).
+
+    zcl_abapgit_git_transport=>receive_pack(
+      iv_url         = iv_url
+      iv_old         = iv_parent
+      iv_new         = ev_new_commit
+      iv_branch_name = iv_branch_name
+      iv_pack        = lv_pack ).
+
+    ev_new_tree = ls_commit-tree.
   ENDMETHOD.
 
   METHOD materialize_from_manifest.

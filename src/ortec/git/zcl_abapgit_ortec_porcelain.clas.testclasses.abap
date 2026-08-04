@@ -38,6 +38,14 @@ CLASS ltcl_porcelain DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT F
     " in regression_variant_b_package_e_checkpoint_1.md, not as ABAP Unit
     " methods.
     METHODS status_after_cold_switch    FOR TESTING RAISING cx_static_check.
+
+    " "tree not found" push/commit regression (2026-08-04): a PULL that
+    " classified WARM_UNCHANGED/COLD_BRANCH seeds IT_OBJECTS with only the
+    " commit object, relying on ZAOG_OBJ_STORE for the rest - FULL_TREE
+    " must reconstruct the base tree from the buffer in that case instead
+    " of raising, exactly like WALK_TREE already does.
+    METHODS full_tree_sparse_seed       FOR TESTING RAISING cx_static_check.
+    METHODS full_tree_uses_it_objects   FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 
 CLASS ltcl_porcelain IMPLEMENTATION.
@@ -552,6 +560,102 @@ CLASS ltcl_porcelain IMPLEMENTATION.
       msg = 'The local copy itself did not change across the switch - only the remote branch tip did' ).
   ENDMETHOD.
 
+  METHOD full_tree_sparse_seed.
+    " Regression for the "tree not found" push/commit bug: the parent
+    " commit, its tree and its one blob are persisted ONLY in
+    " ZAOG_OBJ_STORE - IT_OBJECTS mirrors WARM_UNCHANGED/COLD_BRANCH's
+    " sparse seed (the commit object alone, nothing else).
+    DATA lt_nodes    TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+    DATA ls_node     LIKE LINE OF lt_nodes.
+    DATA ls_commit   TYPE zcl_abapgit_git_pack=>ty_commit.
+    DATA lt_store    TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lt_sparse   TYPE zif_abapgit_definitions=>ty_objects_tt.
+
+    DATA(lv_blob_data) = zcl_abapgit_convert=>string_to_xstring_utf8( 'content' ).
+    DATA(lv_blob_sha)  = zcl_abapgit_hash=>sha1_blob( lv_blob_data ).
+
+    ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-file.
+    ls_node-name  = 'a.txt'.
+    ls_node-sha1  = lv_blob_sha.
+    APPEND ls_node TO lt_nodes.
+    DATA(lv_tree_data) = zcl_abapgit_git_pack=>encode_tree( lt_nodes ).
+    DATA(lv_tree_sha)  = zcl_abapgit_hash=>sha1_tree( lv_tree_data ).
+
+    ls_commit-tree      = lv_tree_sha.
+    ls_commit-committer = 'A <a@b.com> 0 +0000'.
+    ls_commit-author    = ls_commit-committer.
+    ls_commit-body      = 'msg'.
+    DATA(lv_commit_data) = zcl_abapgit_git_pack=>encode_commit( ls_commit ).
+    DATA(lv_commit_sha)  = zcl_abapgit_hash=>sha1_commit( lv_commit_data ).
+
+    APPEND VALUE #( type = zif_abapgit_git_definitions=>c_type-commit
+                     sha1 = lv_commit_sha data = lv_commit_data ) TO lt_store.
+    APPEND VALUE #( type = zif_abapgit_git_definitions=>c_type-tree
+                     sha1 = lv_tree_sha   data = lv_tree_data )   TO lt_store.
+    APPEND VALUE #( type = zif_abapgit_git_definitions=>c_type-blob
+                     sha1 = lv_blob_sha   data = lv_blob_data )   TO lt_store.
+    zcl_abapgit_ortec_obj_store=>store_objects( iv_repo_key = c_repo2 it_objects = lt_store ).
+    COMMIT WORK.
+
+    APPEND VALUE #( type = zif_abapgit_git_definitions=>c_type-commit
+                     sha1 = lv_commit_sha data = lv_commit_data ) TO lt_sparse.
+
+    DATA(lt_expanded) = zcl_abapgit_ortec_porcelain=>full_tree(
+                             it_objects  = lt_sparse
+                             iv_parent   = lv_commit_sha
+                             iv_repo_key = c_repo2 ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lines( lt_expanded )
+      exp = 1
+      msg = 'full_tree must reconstruct the base tree from ZAOG_OBJ_STORE when IT_OBJECTS only seeds the commit' ).
+    cl_abap_unit_assert=>assert_equals( act = lt_expanded[ 1 ]-name exp = 'a.txt' ).
+    cl_abap_unit_assert=>assert_equals( act = lt_expanded[ 1 ]-sha1 exp = lv_blob_sha ).
+  ENDMETHOD.
+
+  METHOD full_tree_uses_it_objects.
+    " Cheap path: when IT_OBJECTS already carries the commit/tree (e.g.
+    " right after INCREMENTAL_UPDATE), full_tree must use them directly -
+    " no ZAOG_OBJ_STORE row exists for this repo key at all, so any buffer
+    " fallback attempt would raise.
+    DATA lt_nodes  TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+    DATA ls_node   LIKE LINE OF lt_nodes.
+    DATA ls_commit TYPE zcl_abapgit_git_pack=>ty_commit.
+    DATA lt_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
+
+    DATA(lv_blob_data) = zcl_abapgit_convert=>string_to_xstring_utf8( 'content2' ).
+    DATA(lv_blob_sha)  = zcl_abapgit_hash=>sha1_blob( lv_blob_data ).
+
+    ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-file.
+    ls_node-name  = 'b.txt'.
+    ls_node-sha1  = lv_blob_sha.
+    APPEND ls_node TO lt_nodes.
+    DATA(lv_tree_data) = zcl_abapgit_git_pack=>encode_tree( lt_nodes ).
+    DATA(lv_tree_sha)  = zcl_abapgit_hash=>sha1_tree( lv_tree_data ).
+
+    ls_commit-tree      = lv_tree_sha.
+    ls_commit-committer = 'A <a@b.com> 0 +0000'.
+    ls_commit-author    = ls_commit-committer.
+    ls_commit-body      = 'msg2'.
+    DATA(lv_commit_data) = zcl_abapgit_git_pack=>encode_commit( ls_commit ).
+    DATA(lv_commit_sha)  = zcl_abapgit_hash=>sha1_commit( lv_commit_data ).
+
+    APPEND VALUE #( type = zif_abapgit_git_definitions=>c_type-commit
+                     sha1 = lv_commit_sha data = lv_commit_data ) TO lt_objects.
+    APPEND VALUE #( type = zif_abapgit_git_definitions=>c_type-tree
+                     sha1 = lv_tree_sha   data = lv_tree_data )   TO lt_objects.
+    APPEND VALUE #( type = zif_abapgit_git_definitions=>c_type-blob
+                     sha1 = lv_blob_sha   data = lv_blob_data )   TO lt_objects.
+
+    DATA(lt_expanded) = zcl_abapgit_ortec_porcelain=>full_tree(
+                             it_objects  = lt_objects
+                             iv_parent   = lv_commit_sha
+                             iv_repo_key = c_repo2 ).
+
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_expanded ) exp = 1 ).
+    cl_abap_unit_assert=>assert_equals( act = lt_expanded[ 1 ]-name exp = 'b.txt' ).
+  ENDMETHOD.
+
   " E4-D-01, E4-D-02, E4-D-04 (design §6 test matrix): removed as ABAP Unit
   " methods during the 2026-07-29 pre-import audit - they were always-
   " passing `assert_true( abap_true )` stubs, which the audit's explicit
@@ -577,4 +681,3 @@ CLASS ltcl_porcelain IMPLEMENTATION.
   " See regression_variant_b_package_e_checkpoint_1.md for the full
   " finding-to-fix record.
 ENDCLASS.
-
