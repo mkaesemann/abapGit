@@ -44,16 +44,14 @@ IT8_GATE:
   RFC_FUNCTION_MODULE_ACTIVATION=PASS (owner-confirmed)
   RFC_INTERFACE_TYPE_REFERENCE=PASS (owner-confirmed, via the new
     ZAOG_SER_TADIR_TT DDIC type, not the original interface-type syntax)
-  ATC=FAIL_THEN_FIXED_LOCALLY_UNVERIFIED - 6 real findings found via a
-    live SAPDiagnose(action="atc") run against the corrected (c13943be)
-    active objects; all fixed in f9d0a070 but NOT yet re-verified live
-    (owner must import/activate f9d0a070 and re-run ATC for a confirmed
-    clean gate)
+  ATC=PASS - the 6 findings found via a live SAPDiagnose(action="atc")
+    run were fixed in f9d0a070; owner imported/activated it and this
+    agent independently re-ran ATC live on ZCL_ABAPGIT_ORTEC_SER_ORCH,
+    ZCL_ABAPGIT_ORTEC_SER_COST, and ZCL_ABAPGIT_ORTEC_SER_PLANNER -
+    all three return zero findings (2026-08-04).
   FOCUSED_ABAP_UNIT=NOT_APPLICABLE (no test classes exist yet for these
     Phase-1 contract-only objects; bodies are stubs except PROV_GEN)
-NEXT_OWNER_ACTION=Import/activate commit f9d0a070, then re-run ATC on
-  ZCL_ABAPGIT_ORTEC_SER_ORCH/_COST/_PLANNER to confirm a clean pass
-  before Phase 2 behavior implementation begins.
+PHASE_1_IT8_GATE=PASS (all gate criteria met; Phase 2 may begin)
 ```
 
 ## Completed this pass (safe, achievable without the missing objects)
@@ -136,9 +134,10 @@ PHASE_1_COMMITS=93b814dc, 46f77304, c13943be (owner IT8 fixes), f9d0a070
 IT8_ACTIVATION=PASS (DDIC, class contracts, function group, RFC function
   module, RFC interface-type reference via ZAOG_SER_TADIR_TT - all
   owner-confirmed on IT8, 2026-08-04)
-ATC=FAIL_THEN_FIXED_LOCALLY_UNVERIFIED (6 real priority-3 findings found
-  via live SAPDiagnose(action="atc"), fixed in f9d0a070, awaiting owner
-  import/activate + re-run to confirm clean)
+ATC=PASS (6 real priority-3 findings found via live SAPDiagnose
+  (action="atc"), fixed in f9d0a070, owner imported/activated it, and
+  this agent independently re-confirmed a clean live ATC pass on all
+  three affected classes, 2026-08-04)
 FOCUSED_ABAP_UNIT=NOT_APPLICABLE (no test classes yet for Phase-1
   contract-only objects)
 RUN_REGISTRY=CONTRACT_ONLY (types/constants/static-DATA declared on
@@ -154,12 +153,10 @@ PROV_GEN=FULLY_IMPLEMENTED (permanent no-op provider, final not a stub)
 WAPA_PATH=UNCHANGED_EXCLUDED (structurally already true today; planner-
   level explicit exclusion is a confirmed C6 requirement for when the
   planner is implemented)
-NEXT=Owner: import/activate f9d0a070 and re-run ATC on ORCH/COST/PLANNER
-  to confirm a clean pass. Once confirmed, Phase 2 behavior
-  implementation (standard-abapGit hook insertion into
-  zcl_abapgit_serialize.clas.abap, ORCH/PLANNER/COST bodies, FM worker
-  body - now converting to/from ZAOG_SER_TADIR_TT at the RFC boundary,
-  T-DRAIN test seam, all required unit tests, and the 4 required Phase-2
-  reviews: correctness, regression, adversarial, performance) — NOT
-  STARTED.
+NEXT=Phase 1 gate fully PASSED - begin Phase 2 behavior implementation
+  (standard-abapGit hook insertion into zcl_abapgit_serialize.clas.abap,
+  ORCH/PLANNER/COST bodies, FM worker body - converting to/from
+  ZAOG_SER_TADIR_TT at the RFC boundary, T-DRAIN test seam, all required
+  unit tests, and the 4 required Phase-2 reviews: correctness,
+  regression, adversarial, performance).
 ```
