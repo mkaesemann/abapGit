@@ -1,0 +1,14 @@
+CLASS zcl_abapgit_ortec_ser_prov_gen DEFINITION
+  PUBLIC
+  FINAL
+  CREATE PUBLIC .
+
+  PUBLIC SECTION.
+  PROTECTED SECTION.
+  PRIVATE SECTION.
+ENDCLASS.
+
+
+
+CLASS zcl_abapgit_ortec_ser_prov_gen IMPLEMENTATION.
+ENDCLASS.

@@ -1,0 +1,3 @@
+FUNCTION-POOL ZABAPGIT_ORTEC_SERIAL.        "MESSAGE-ID ..
+
+* INCLUDE LZABAPGIT_ORTEC_SERIALD...         " Local class definition
