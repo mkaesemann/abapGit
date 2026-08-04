@@ -3,9 +3,10 @@
 ```text
 PACKET=COMPACT_HANDOFF_V1
 TASK=SERIALIZATION_SER_SLICE_0
-STATUS=LOCAL_COMPLETE (bulk-exists fixed after a real IT8 short-dump
-  incident, see below; WAPA partially pinned, T-WAPA-2..5
-  BLOCKED_MISSING_PRODUCTION_SEAM, reported not silently skipped)
+STATUS=IT8_VALIDATED_COMPLETE (bulk-exists fixed after a real IT8
+  short-dump incident, then confirmed clean on IT8; WAPA partially
+  pinned, T-WAPA-2..5 BLOCKED_MISSING_PRODUCTION_SEAM, reported not
+  silently skipped)
 DETAIL=.memory/logs/serialization_slice_0_regression.md
 PRODUCTIVE_CODE_CHANGED=NO
 STATE_MD_CHANGED=NO
@@ -98,10 +99,11 @@ regression review (delegated)    PASS twice: once against the original
                                   the DDIC-catalog-doubling defect was a
                                   real-system-only failure mode neither
                                   local review caught the first time)
-IT8 (owner-executed)             FAIL then FAIL again on the ORIGINAL
-                                  design (t1_exists_clas short-dump,
-                                  reproducible); NOT YET RE-RUN on the
-                                  fixed design
+IT8 (owner-executed)             FAIL, FAIL (reproducible) on the ORIGINAL
+                                  design (t1_exists_clas short-dump) ->
+                                  fix committed -> PASS, all 16 test
+                                  methods clean, ATC clean (owner-confirmed
+                                  2026-08-04)
 ```
 
 ## Changed files
@@ -115,15 +117,15 @@ src/ortec/zcl_abapgit_ortec_wapa.clas.xml                       (MODIFIED)
 .memory/handoffs/serialization-slice-0.md                       (NEW, then UPDATED with incident/fix, this file)
 ```
 
-## IT8 validation still required
+## IT8 validation
 
 ```text
-YES — real-system ABAP Unit run + ATC for ZCL_ABAPGIT_ORTEC_BULK_EXISTS
-(fixed test file, 13 methods) and ZCL_ABAPGIT_ORTEC_WAPA (unchanged, 3
-methods). The ORIGINAL test file FAILED on IT8 twice (t1_exists_clas
-short-dump, root-caused and fixed - see "IT8 incident and fix" above).
-The FIXED test file has been reviewed statically and its new fixtures
-confirmed to exist on IT8 via live read-only queries, but has NOT yet
-been executed as ABAP Unit on IT8 - that run is the next required step
-before this slice can be considered DONE.
+COMPLETE — owner-confirmed 2026-08-04: "All unit test now run and are
+clean." Covers all 13 ZCL_ABAPGIT_ORTEC_BULK_EXISTS methods (fixed test
+file) and all 3 ZCL_ABAPGIT_ORTEC_WAPA methods (T-WAPA-1, unchanged by
+the fix) = 16 total. ATC clean (no productive/ATC-relevant code changed
+since the earlier clean ATC report). SER-SLICE-0 is DONE for its
+actually-implemented scope; T-WAPA-2..5 remain a disclosed, reviewed
+residual scope gap (BLOCKED_MISSING_PRODUCTION_SEAM), not an open defect
+or a pending validation item.
 ```
