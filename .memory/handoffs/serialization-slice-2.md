@@ -3,30 +3,57 @@
 ```text
 PACKET=COMPACT_HANDOFF_V1
 TASK=SERIALIZATION_SER_SLICE_2
-STATUS=PHASE_1_CONTRACTS_COMPLETE
-REASON=Phase 1 (DDIC/class/RFC contract definitions + ABAP Doc) is
-  fully written, reviewed (ortec-abapgit-design-review, 2 rounds), fixed,
-  and committed. ZAOG_SER_BATCH_RESULT (13 fields), ZAOG_SER_BATCH_RESULT_TT
-  (KEYDEF=G/KEYKIND=G, confirmed via live DD07T lookup: both mean "Not
-  specified", matching the WITH EMPTY KEY semantics with 315/315 live
-  precedent), 4 class contracts (COST, PLANNER, PROV_GEN implemented,
-  ORCH registry/state-machine signatures), and the
-  Z_ABAPGIT_ORTEC_SER_BATCH RFC signature (now with full per-parameter
-  documentation) are all committed at 93b814dc "ORTEC: Define adaptive
-  serialization batch contracts" on ortec/abapgit_1_133-opt-rework.
-  Phase 2 (behavior implementation) has NOT started.
-PRODUCTIVE_CODE_CHANGED=YES (contract-only: signatures/types/constants/
-  docs; PROV_GEN bodies are final no-ops; COST/PLANNER/ORCH bodies remain
-  empty Phase-2 stubs)
+STATUS=PHASE_1_IT8_RECONCILED_PHASE_2_READY
+REASON=Owner activated Phase 1 contracts on IT8 (2026-08-04), found and
+  fixed real activation defects the local tooling could not detect
+  (commit c13943be "Syntax Fixes for Serialization Harness"): DD03P
+  DDTEXT length/COMPTYPE=E override rules, TTYP KEYDEF/KEYKIND corrected
+  from G/G to D/N (WITH DEFAULT KEY, matching ty_tadir_tt's own working
+  encoding), ORCH's iv_group corrected to TYPE rzlli_apcl (verified
+  against the real zcl_abapgit_serialize mv_group declaration), and a
+  new ZAOG_SER_TADIR/_TT DDIC pair created because RFC function modules
+  cannot reference an interface-scoped type (confirms the previously
+  flagged \TYPE=ZIF_*=>... risk was real). Pushed and pulled back; all
+  corrections reconciled and classified in
+  .memory/logs/serialization_slice_2_documentation.md. This agent then
+  ran a live SAPDiagnose(action="atc") gate check and found 6 real
+  priority-3 findings (empty @raising ABAP Doc tags, and ABAP Doc
+  incorrectly attached to chained TYPES: BEGIN OF blocks) across ORCH/
+  COST/PLANNER, plus restored FM long-text documentation that had been
+  silently reduced to an SE37 empty skeleton during the owner's fix pass
+  (the FUGR <DOCUMENTATION> element is a structured per-parameter RSFDO
+  list, not free text - real prose lives in a separate LONGTEXTS DOKU
+  block). All fixed locally and committed as f9d0a070 "SER-SLICE-2: fix
+  ATC findings on corrected Phase 1 contracts" - NOT YET re-verified live
+  (ATC reads the system's active version; needs owner import/activate
+  first).
+PRODUCTIVE_CODE_CHANGED=YES (contract-only, same scope as before; no
+  approved semantics changed by any correction - all are
+  SYNTAX_ONLY/DDIC_OR_RFC_COMPATIBILITY/SIGNATURE_CHANGE (RFC-boundary
+  type only)/DOCUMENTATION_CORRECTION per the classification table)
 STATE_MD_CHANGED=NO
-COMMITS_CREATED=93b814dc (Phase 1 contracts)
-PUSHED=NO
-IT8_ACTIVATION_OF_PHASE_1=NOT_YET_CONFIRMED — owner has not reported an
-  import/activation/compile result for this commit yet. Treat as an open
-  risk (2 encodings were flagged as previously-unprecedented-in-this-repo:
-  TTYP empty-key KEYDEF/KEYKIND, now resolved via live DDIC evidence; and
-  the \TYPE=ZIF_*=>... interface-scoped RFC parameter type reference,
-  still CANNOT_VERIFY until a real activation attempt).
+COMMITS_CREATED=93b814dc (Phase 1 contracts), 46f77304 (Phase 1 handoff/
+  doc log), c13943be (OWNER: IT8 activation fixes), f9d0a070 (ATC-finding
+  fixes on the corrected contracts, this agent)
+PUSHED=NO (f9d0a070 only; c13943be was already pushed+pulled by the owner
+  before this agent started)
+IT8_GATE:
+  DDIC_ACTIVATION=PASS (owner-confirmed)
+  CLASS_CONTRACT_ACTIVATION=PASS (owner-confirmed)
+  FUNCTION_GROUP_ACTIVATION=PASS (owner-confirmed)
+  RFC_FUNCTION_MODULE_ACTIVATION=PASS (owner-confirmed)
+  RFC_INTERFACE_TYPE_REFERENCE=PASS (owner-confirmed, via the new
+    ZAOG_SER_TADIR_TT DDIC type, not the original interface-type syntax)
+  ATC=FAIL_THEN_FIXED_LOCALLY_UNVERIFIED - 6 real findings found via a
+    live SAPDiagnose(action="atc") run against the corrected (c13943be)
+    active objects; all fixed in f9d0a070 but NOT yet re-verified live
+    (owner must import/activate f9d0a070 and re-run ATC for a confirmed
+    clean gate)
+  FOCUSED_ABAP_UNIT=NOT_APPLICABLE (no test classes exist yet for these
+    Phase-1 contract-only objects; bodies are stubs except PROV_GEN)
+NEXT_OWNER_ACTION=Import/activate commit f9d0a070, then re-run ATC on
+  ZCL_ABAPGIT_ORTEC_SER_ORCH/_COST/_PLANNER to confirm a clean pass
+  before Phase 2 behavior implementation begins.
 ```
 
 ## Completed this pass (safe, achievable without the missing objects)
@@ -98,17 +125,27 @@ exist.
 ## SER-SLICE-2 status summary
 
 ```text
-SLICE_2_STATUS=PHASE_1_CONTRACTS_COMPLETE_PHASE_2_NOT_STARTED
+SLICE_2_STATUS=PHASE_1_IT8_RECONCILED_PHASE_2_READY
 MANUAL_OBJECT_VERIFICATION=PASS (all 11 objects match manifest exactly)
 OD14_STATIC_STATE_AUDIT=PASS
 PHASE_1_CONTRACT_REVIEW=PASS (ortec-abapgit-design-review, round 2, both
   findings from round 1 fixed and re-confirmed: TTYP KEYDEF/KEYKIND, RFC
   per-parameter documentation)
-PHASE_1_COMMIT=93b814dc
+PHASE_1_COMMITS=93b814dc, 46f77304, c13943be (owner IT8 fixes), f9d0a070
+  (ATC-finding fixes on the corrected contracts)
+IT8_ACTIVATION=PASS (DDIC, class contracts, function group, RFC function
+  module, RFC interface-type reference via ZAOG_SER_TADIR_TT - all
+  owner-confirmed on IT8, 2026-08-04)
+ATC=FAIL_THEN_FIXED_LOCALLY_UNVERIFIED (6 real priority-3 findings found
+  via live SAPDiagnose(action="atc"), fixed in f9d0a070, awaiting owner
+  import/activate + re-run to confirm clean)
+FOCUSED_ABAP_UNIT=NOT_APPLICABLE (no test classes yet for Phase-1
+  contract-only objects)
 RUN_REGISTRY=CONTRACT_ONLY (types/constants/static-DATA declared on
   ZCL_ABAPGIT_ORTEC_SER_ORCH; state-machine method bodies NOT implemented)
 BATCH_RFC=CONTRACT_ONLY (Z_ABAPGIT_ORTEC_SER_BATCH signature + docs
-  complete; worker body NOT implemented)
+  complete, now using ZAOG_SER_TADIR_TT at the RFC boundary; worker body
+  NOT implemented)
 ADAPTIVE_PLANNER=CONTRACT_ONLY (ZCL_ABAPGIT_ORTEC_SER_PLANNER signature +
   docs complete; LPT/refill-sizing bodies NOT implemented)
 COST_MODEL=CONTRACT_ONLY (ZCL_ABAPGIT_ORTEC_SER_COST signature + docs
@@ -117,10 +154,12 @@ PROV_GEN=FULLY_IMPLEMENTED (permanent no-op provider, final not a stub)
 WAPA_PATH=UNCHANGED_EXCLUDED (structurally already true today; planner-
   level explicit exclusion is a confirmed C6 requirement for when the
   planner is implemented)
-NEXT=Phase 2 behavior implementation (standard-abapGit hook insertion
-  into zcl_abapgit_serialize.clas.abap, ORCH/PLANNER/COST bodies, FM
-  worker body, T-DRAIN test seam, all required unit tests, and the 4
-  required Phase-2 reviews: correctness, regression, adversarial,
-  performance) — NOT STARTED. Recommend owner confirms IT8
-  activation/compile of commit 93b814dc before Phase 2 begins.
+NEXT=Owner: import/activate f9d0a070 and re-run ATC on ORCH/COST/PLANNER
+  to confirm a clean pass. Once confirmed, Phase 2 behavior
+  implementation (standard-abapGit hook insertion into
+  zcl_abapgit_serialize.clas.abap, ORCH/PLANNER/COST bodies, FM worker
+  body - now converting to/from ZAOG_SER_TADIR_TT at the RFC boundary,
+  T-DRAIN test seam, all required unit tests, and the 4 required Phase-2
+  reviews: correctness, regression, adversarial, performance) — NOT
+  STARTED.
 ```
