@@ -64,25 +64,44 @@ Generic/no-prefetch      -> a trivial ZCL_ABAPGIT_ORTEC_SER_PROV_GEN whose
 ### New DOMA coverage (the one genuinely new prefetch surface)
 
 ```text
-TABLES READ   dd01l (domain header), dd01v (version-specific texts/
-              attributes), dd07l/dd07t (fixed values + their texts, FOR
-              ALL ENTRIES keyed by domname).
-VERSION_SEMANTICS  CORRECTED per correctness review DR-003: the original
-              text incorrectly borrowed DTEL's EXISTENCE-check version
-              filter ('0'/'1', ser0_audit_ortec.md §1) as if it were an
-              established DOMA precedent — it is not; no DOMA-specific
-              version convention is documented anywhere in the SER-0
-              audits, and ZCL_ABAPGIT_OBJECT_DOMA's own serialize()-path
-              version semantics were never traced by this design. This is
-              an OPEN, NOT-YET-RESOLVED implementation precondition, not a
-              design decision made here: before writing the new DOMA
-              provider, read ZCL_ABAPGIT_OBJECT_DOMA's existing serialize()
-              method and state explicitly which DD01L/DD01V/DD07L/DD07T
-              version value(s) it reads TODAY, then cite that (not any
-              DTEL rule) as the new provider's target semantics. This is
-              added to the SLICE 3 implementation-readiness checklist
-              (see the bootstrap handoff) as a mandatory first step, before
-              any DDIC/provider code is written.
+TABLES READ   dd01l (domain header, WHERE as4local = 'A' AND as4vers =
+              '0000'), dd01t (domain description text, SAME filter — NOT
+              dd01v, see VERSION_SEMANTICS below), dd07l/dd07t (fixed
+              values + their texts, WHERE as4local = 'A' AND as4vers =
+              '0000', FOR ALL ENTRIES keyed by domname).
+VERSION_SEMANTICS  RESOLVED per SER-SLICE-1 (see
+              .memory/logs/serialization_slice_1_doma_semantics.md §2 for
+              full evidence). `ZCL_ABAPGIT_OBJECT_DOMA~serialize()` reads
+              ONLY the active version, for every language: the main-
+              language call passes `DDIF_DOMA_GET( state = 'A' )`
+              explicitly, and every translation-language call omits
+              `state` entirely, relying on `DDIF_DOMA_GET`'s own default
+              (`DEFAULT 'A'`, confirmed by reading the function module's
+              live signature) — there is no DOMA code path that ever reads
+              an inactive version.
+              **CRITICAL, newly-discovered constraint for THIS bulk
+              provider specifically:** `DD01V` is a DATABASE VIEW joining
+              `DD01L`+`DD01T` on `DOMNAME` ONLY — it does not project
+              `AS4LOCAL`/`AS4VERS` and has NO version predicate in its own
+              view definition (confirmed live via `DD28S`). A bulk
+              `SELECT * FROM DD01V` would silently mix active AND inactive
+              rows with no way to tell them apart — a real parity bug the
+              original "TABLES READ" list above would have introduced.
+              The provider MUST instead read the BASE tables `DD01L`/
+              `DD01T` directly with an explicit `WHERE as4local = 'A' AND
+              as4vers = '0000'` filter, mirroring
+              `ZCL_ABAPGIT_OBJECT_DTEL`'s own already-correct `DD04L`/
+              `DD04T` pattern. `DD07V`, by contrast, DOES bake in
+              `AS4LOCAL = 'A'` at the view-definition level (also
+              confirmed via `DD28S`) and would be safe to read directly,
+              but for consistency the provider should still prefer
+              `DD07L`/`DD07T WHERE as4local = 'A' AND as4vers = '0000'`
+              (the same tables the header read already needs).
+              A domain with no active version (never existed, or exists
+              only inactively) is OBSERVATIONALLY IDENTICAL from
+              `serialize()`'s own perspective (silent empty payload, no
+              exception) — the future provider's "miss" contract does not
+              need to distinguish these two cases either.
 PARITY PROOF  Required before this is authorized for implementation: a
               side-by-side comparison of ZCL_ABAPGIT_OBJECT_DOMA's existing
               SAP-API-based serialize() output (unchanged) against the SAME
