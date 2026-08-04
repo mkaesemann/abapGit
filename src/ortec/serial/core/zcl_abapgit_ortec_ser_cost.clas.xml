@@ -5,7 +5,7 @@
    <VSEOCLASS>
     <CLSNAME>ZCL_ABAPGIT_ORTEC_SER_COST</CLSNAME>
     <LANGU>E</LANGU>
-    <DESCRIPT>Cost</DESCRIPT>
+    <DESCRIPT>ORTEC serialization: run-local adaptive cost estimator</DESCRIPT>
     <STATE>1</STATE>
     <CLSCCINCL>X</CLSCCINCL>
     <FIXPT>X</FIXPT>

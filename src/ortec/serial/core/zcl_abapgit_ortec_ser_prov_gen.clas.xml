@@ -5,7 +5,7 @@
    <VSEOCLASS>
     <CLSNAME>ZCL_ABAPGIT_ORTEC_SER_PROV_GEN</CLSNAME>
     <LANGU>E</LANGU>
-    <DESCRIPT>Provider</DESCRIPT>
+    <DESCRIPT>ORTEC serialization: trivial no-op generic provider</DESCRIPT>
     <STATE>1</STATE>
     <CLSCCINCL>X</CLSCCINCL>
     <FIXPT>X</FIXPT>
