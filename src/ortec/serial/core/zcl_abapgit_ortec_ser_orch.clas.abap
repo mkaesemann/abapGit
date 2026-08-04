@@ -90,32 +90,32 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! deliberately small and TADIR-key-shaped only - see class-level
     "! "WHAT MAY BE RETAINED" documentation. Never carries a serialized
     "! payload.
-    TYPES: BEGIN OF ty_dispatch,
-             "! Globally unique (for the whole internal session) task name
-             "! used in "STARTING NEW TASK" / "RECEIVE RESULTS FROM
-             "! FUNCTION" - formatted |SER-{run_id}-{dispatch_seq}|, always
-             "! within the SAP task-ID length limit. Never reused, even
-             "! for a retry of the same logical work (a retry gets a NEW
-             "! task name and a NEW row).
-             task_name   TYPE char40,
-             "! Immutable run identity - see class-level "RUN IDENTITY"
-             "! documentation. MUST be set on every insert; every reader
-             "! MUST filter by it.
-             run_id      TYPE sysuuid_x16,
-             "! Logical grouping id, stable across an original dispatch
-             "! and its retries/bisections (telemetry/correlation only -
-             "! callback resolution always uses TASK_NAME, never this).
-             batch_id    TYPE char32,
-             "! 1 for a group's first dispatch, +1 per retry/bisection.
-             attempt     TYPE i,
-             "! Exact TADIR rows sent in this one dispatch.
-             object_keys TYPE zif_abapgit_definitions=>ty_tadir_tt,
-             "! Current lifecycle state - one of the C_STATE_* constants.
-             state       TYPE c LENGTH 1,
-             "! Timestamp this dispatch was issued, used to detect wait-
-             "! budget expiry (logical abandonment).
-             dispatch_ts TYPE timestampl,
-           END OF ty_dispatch.
+    TYPES BEGIN OF ty_dispatch.
+      "! Globally unique (for the whole internal session) task name
+      "! used in "STARTING NEW TASK" / "RECEIVE RESULTS FROM
+      "! FUNCTION" - formatted |SER-{run_id}-{dispatch_seq}|, always
+      "! within the SAP task-ID length limit. Never reused, even
+      "! for a retry of the same logical work (a retry gets a NEW
+      "! task name and a NEW row).
+      TYPES task_name   TYPE char40.
+      "! Immutable run identity - see class-level "RUN IDENTITY"
+      "! documentation. MUST be set on every insert; every reader
+      "! MUST filter by it.
+      TYPES run_id      TYPE sysuuid_x16.
+      "! Logical grouping id, stable across an original dispatch
+      "! and its retries/bisections (telemetry/correlation only -
+      "! callback resolution always uses TASK_NAME, never this).
+      TYPES batch_id    TYPE char32.
+      "! 1 for a group's first dispatch, +1 per retry/bisection.
+      TYPES attempt     TYPE i.
+      "! Exact TADIR rows sent in this one dispatch.
+      TYPES object_keys TYPE zif_abapgit_definitions=>ty_tadir_tt.
+      "! Current lifecycle state - one of the C_STATE_* constants.
+      TYPES state       TYPE c LENGTH 1.
+      "! Timestamp this dispatch was issued, used to detect wait-
+      "! budget expiry (logical abandonment).
+      TYPES dispatch_ts TYPE timestampl.
+    TYPES END OF ty_dispatch.
     "! All dispatches, current run and any not-yet-purged abandoned
     "! dispatches from earlier runs in the same internal session. Keyed
     "! for O(1) callback resolution by TASK_NAME.
@@ -125,11 +125,11 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! terminally logged as failed, for exactly one run - the belt-and-
     "! suspenders guard against ever merging the same object's result
     "! twice (duplicate/late callback safety).
-    TYPES: BEGIN OF ty_resolved,
-             run_id   TYPE sysuuid_x16,
-             obj_type TYPE trobjtype,
-             obj_name TYPE sobj_name,
-           END OF ty_resolved.
+    TYPES BEGIN OF ty_resolved.
+      TYPES run_id   TYPE sysuuid_x16.
+      TYPES obj_type TYPE trobjtype.
+      TYPES obj_name TYPE sobj_name.
+    TYPES END OF ty_resolved.
     "! RUN_ID is part of the key so two DIFFERENT runs resolving the SAME
     "! OBJ_TYPE/OBJ_NAME (e.g. the same CLAS in two repositories in one
     "! session) can never collide.
@@ -137,13 +137,13 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
 
     "! One confirmed task outcome, for the per-run sliding-window circuit
     "! breaker.
-    TYPES: BEGIN OF ty_outcome,
-             run_id  TYPE sysuuid_x16,
-             "! Monotonic sequence number, scoped to this RUN_ID only (no
-             "! cross-run ordering is implied or needed).
-             seq     TYPE i,
-             success TYPE abap_bool,
-           END OF ty_outcome.
+    TYPES BEGIN OF ty_outcome.
+      TYPES run_id  TYPE sysuuid_x16.
+      "! Monotonic sequence number, scoped to this RUN_ID only (no
+      "! cross-run ordering is implied or needed).
+      TYPES seq     TYPE i.
+      TYPES success TYPE abap_bool.
+    TYPES END OF ty_outcome.
     "! Windowed (see serialization_adaptive_batch_design.md &sect;5.8) PER
     "! RUN_ID - a systemic outage in one run can never trip or influence
     "! another run's breaker.
@@ -258,7 +258,8 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! @parameter iv_attempt     | 1 for a group's first dispatch, +1 per
     "!   retry/bisection
     "! @parameter iv_batch_id    | Logical grouping id, stable across retries
-    "! @raising zcx_abapgit_exception |
+    "! @raising zcx_abapgit_exception | Batch-level dispatch failure (e.g.
+    "!   STARTING NEW TASK could not be issued at all)
     CLASS-METHODS dispatch_batch
       IMPORTING iv_run_id      TYPE sysuuid_x16
                 it_object_keys TYPE zif_abapgit_definitions=>ty_tadir_tt
@@ -284,7 +285,8 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! for an object that still fails alone.
     "! @parameter iv_run_id   | Owning run
     "! @parameter is_dispatch | The failed dispatch row
-    "! @raising zcx_abapgit_exception |
+    "! @raising zcx_abapgit_exception | Propagated from the bisected
+    "!   re-dispatch or sequential-fallback path when that also fails
     CLASS-METHODS handle_receive_failure
       IMPORTING iv_run_id   TYPE sysuuid_x16
                 is_dispatch TYPE ty_dispatch
@@ -297,7 +299,8 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! type). Marks each object resolved (MT_RESOLVED) as it completes.
     "! @parameter iv_run_id      | Owning run
     "! @parameter it_object_keys | Objects to serialize sequentially
-    "! @raising zcx_abapgit_exception |
+    "! @raising zcx_abapgit_exception | Propagated unchanged from the
+    "!   underlying standard per-object serialize() call
     CLASS-METHODS route_to_sequential_fallback
       IMPORTING iv_run_id      TYPE sysuuid_x16
                 it_object_keys TYPE zif_abapgit_definitions=>ty_tadir_tt

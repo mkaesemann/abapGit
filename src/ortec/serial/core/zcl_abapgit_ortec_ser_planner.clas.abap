@@ -42,18 +42,18 @@ CLASS zcl_abapgit_ortec_ser_planner DEFINITION
     CONSTANTS c_shrink_factor TYPE i VALUE 2.
 
     "! One object still to be dispatched, with its current cost estimate.
-    TYPES: BEGIN OF ty_work_item,
-             "! The object's TADIR identity (object type + name + package).
-             tadir      TYPE zif_abapgit_definitions=>ty_tadir,
-             "! Estimated serialization time, in milliseconds (see
-             "! ZCL_ABAPGIT_ORTEC_SER_COST).
-             est_ms     TYPE i,
-             "! Estimated serialized output size, in bytes.
-             est_bytes  TYPE i,
-             "! Estimate provenance - see
-             "! ZCL_ABAPGIT_ORTEC_SER_COST=>C_SOURCE_EXACT/C_SOURCE_FAMILY.
-             est_source TYPE c LENGTH 1,
-           END OF ty_work_item.
+    TYPES BEGIN OF ty_work_item.
+      "! The object's TADIR identity (object type + name + package).
+      TYPES tadir      TYPE zif_abapgit_definitions=>ty_tadir.
+      "! Estimated serialization time, in milliseconds (see
+      "! ZCL_ABAPGIT_ORTEC_SER_COST).
+      TYPES est_ms     TYPE i.
+      "! Estimated serialized output size, in bytes.
+      TYPES est_bytes  TYPE i.
+      "! Estimate provenance - see
+      "! ZCL_ABAPGIT_ORTEC_SER_COST=>C_SOURCE_EXACT/C_SOURCE_FAMILY.
+      TYPES est_source TYPE c LENGTH 1.
+    TYPES END OF ty_work_item.
     TYPES tt_work_item TYPE STANDARD TABLE OF ty_work_item WITH EMPTY KEY.
 
     "! One planned batch: a set of work items intended for one RFC
@@ -62,19 +62,19 @@ CLASS zcl_abapgit_ortec_ser_planner DEFINITION
     "! batch may still be re-split by the actual-bytes admission check,
     "! serialization_adaptive_batch_design.md &sect;5.9, before it becomes
     "! a real dispatch).
-    TYPES: BEGIN OF ty_batch,
-             "! Work items assigned to this planned batch, in dispatch
-             "! order.
-             items            TYPE tt_work_item,
-             "! Sum of ITEMS' EST_MS - the planner's own load-balancing
-             "! measure for this batch, not a hard limit.
-             total_est_ms     TYPE i,
-             "! Sum of ITEMS' EST_BYTES - an ADVISORY planning figure
-             "! only; the actual-bytes admission check
-             "! (serialization_adaptive_batch_design.md &sect;5.9) is the
-             "! authoritative gate, not this estimate.
-             total_est_bytes  TYPE i,
-           END OF ty_batch.
+    TYPES BEGIN OF ty_batch.
+      "! Work items assigned to this planned batch, in dispatch
+      "! order.
+      TYPES items            TYPE tt_work_item.
+      "! Sum of ITEMS' EST_MS - the planner's own load-balancing
+      "! measure for this batch, not a hard limit.
+      TYPES total_est_ms     TYPE i.
+      "! Sum of ITEMS' EST_BYTES - an ADVISORY planning figure
+      "! only; the actual-bytes admission check
+      "! (serialization_adaptive_batch_design.md &sect;5.9) is the
+      "! authoritative gate, not this estimate.
+      TYPES total_est_bytes  TYPE i.
+    TYPES END OF ty_batch.
     TYPES tt_batch TYPE STANDARD TABLE OF ty_batch WITH EMPTY KEY.
 
     "! Builds the initial set of batches for a run using longest-

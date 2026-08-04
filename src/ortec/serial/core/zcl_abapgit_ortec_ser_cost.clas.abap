@@ -70,24 +70,24 @@ CLASS zcl_abapgit_ortec_ser_cost DEFINITION
     CONSTANTS c_default_bytes_generic TYPE i VALUE 8000.
 
     "! One run-local cost estimate for one object type.
-    TYPES: BEGIN OF ty_estimate,
-             "! Estimated wall-clock serialization time, in milliseconds.
-             est_ms     TYPE i,
-             "! Estimated serialized output size, in bytes.
-             est_bytes  TYPE i,
-             "! How this estimate was derived - C_SOURCE_EXACT (a real
-             "! run-local sample exists) or C_SOURCE_FAMILY (static
-             "! per-type-family default; no sample yet this run).
-             est_source TYPE c LENGTH 1,
-           END OF ty_estimate.
+    TYPES BEGIN OF ty_estimate.
+      "! Estimated wall-clock serialization time, in milliseconds.
+      TYPES est_ms     TYPE i.
+      "! Estimated serialized output size, in bytes.
+      TYPES est_bytes  TYPE i.
+      "! How this estimate was derived - C_SOURCE_EXACT (a real
+      "! run-local sample exists) or C_SOURCE_FAMILY (static
+      "! per-type-family default; no sample yet this run).
+      TYPES est_source TYPE c LENGTH 1.
+    TYPES END OF ty_estimate.
 
     "! One run-local EWMA sample, keyed by object type.
-    TYPES: BEGIN OF ty_ewma,
-             "! abapGit object type this sample applies to (e.g. CLAS).
-             obj_type  TYPE trobjtype,
-             est_ms    TYPE i,
-             est_bytes TYPE i,
-           END OF ty_ewma.
+    TYPES BEGIN OF ty_ewma.
+      "! abapGit object type this sample applies to (e.g. CLAS).
+      TYPES obj_type  TYPE trobjtype.
+      TYPES est_ms    TYPE i.
+      TYPES est_bytes TYPE i.
+    TYPES END OF ty_ewma.
     "! Run-local EWMA sample table. OWNED BY THE CALLER (the orchestrator's
     "! own run-scoped static state, one such table per active RUN_ID) -
     "! this class never stores or retains this table itself.

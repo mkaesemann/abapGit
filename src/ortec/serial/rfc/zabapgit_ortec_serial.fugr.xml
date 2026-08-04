@@ -105,10 +105,12 @@
       <RSFDO>
        <PARAMETER>IV_BATCH_ID</PARAMETER>
        <KIND>P</KIND>
+       <STEXT>Batch dispatch correlation ID (telemetry only)</STEXT>
       </RSFDO>
       <RSFDO>
        <PARAMETER>IV_ATTEMPT</PARAMETER>
        <KIND>P</KIND>
+       <STEXT>Dispatch attempt number (1 = first, then retries)</STEXT>
       </RSFDO>
       <RSFDO>
        <PARAMETER>IV_ABAP_LANGUAGE_VERS</PARAMETER>
@@ -141,6 +143,7 @@
       <RSFDO>
        <PARAMETER>IT_TADIR</PARAMETER>
        <KIND>P</KIND>
+       <STEXT>Bounded batch of objects to serialize in this dispatch</STEXT>
       </RSFDO>
       <RSFDO>
        <PARAMETER>IV_PREFETCH_BUFFER</PARAMETER>
@@ -169,10 +172,12 @@
       <RSFDO>
        <PARAMETER>ET_RESULT</PARAMETER>
        <KIND>P</KIND>
+       <STEXT>One result row per object in IT_TADIR</STEXT>
       </RSFDO>
       <RSFDO>
        <PARAMETER>EV_OUTPUT_ROW_COUNT</PARAMETER>
        <KIND>P</KIND>
+       <STEXT>Rows actually returned in ET_RESULT</STEXT>
       </RSFDO>
       <RSFDO>
        <PARAMETER>ERROR</PARAMETER>
@@ -190,7 +195,7 @@
       <TYP>T</TYP>
       <VERSION>0001</VERSION>
       <MASTERLANG>X</MASTERLANG>
-      <TXTLINES>00005</TXTLINES>
+      <TXTLINES>00042</TXTLINES>
       <DOKSTATE>A</DOKSTATE>
      </DOKIL>
      <HEAD>
@@ -210,7 +215,71 @@
       </TLINE>
       <TLINE>
        <TDFORMAT>AS</TDFORMAT>
-       <TDLINE>&lt;&lt;Documentation&gt;&gt;</TDLINE>
+       <TDLINE>Multi-object batch serialization worker for the ORTEC</TDLINE>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+       <TDLINE>adaptive serialization orchestrator (ZCL_ABAPGIT_ORTEC_SER_ORCH).</TDLINE>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+       <TDLINE>Called only by ZCL_ABAPGIT_ORTEC_SER_ORCH via CALL FUNCTION</TDLINE>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+       <TDLINE>'Z_ABAPGIT_ORTEC_SER_BATCH' STARTING NEW TASK - not intended</TDLINE>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+       <TDLINE>for direct use by any other caller.</TDLINE>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+       <TDLINE>One call processes a bounded batch (IT_TADIR), never the</TDLINE>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+       <TDLINE>whole repository - the caller/planner budgets rows/bytes</TDLINE>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+       <TDLINE>before dispatch. Every object produces exactly one</TDLINE>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+       <TDLINE>ET_RESULT row (success or failure).</TDLINE>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+       <TDLINE>This worker may serialize multiple different objects, one</TDLINE>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+       <TDLINE>after another, inside the SAME RFC work-process session</TDLINE>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+       <TDLINE>(unlike Z_ABAPGIT_SERIALIZE_PARALLEL, always exactly one).</TDLINE>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+       <TDLINE>No WAPA object is ever processed here - WAPA remains on its</TDLINE>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+       <TDLINE>existing, unchanged, single-object serialization path.</TDLINE>
       </TLINE>
       <TLINE>
        <TDFORMAT>U4</TDFORMAT>
@@ -225,6 +294,68 @@
       </TLINE>
       <TLINE>
        <TDFORMAT>AS</TDFORMAT>
+       <TDLINE>IV_INPUT_VERSION and the ET_RESULT row shape are versioned</TDLINE>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+       <TDLINE>together - caller and worker built from different code</TDLINE>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+       <TDLINE>generations must not be mixed. IV_INPUT_ROW_COUNT and</TDLINE>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+       <TDLINE>EV_OUTPUT_ROW_COUNT let both sides cross-check batch size.</TDLINE>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+       <TDLINE>No explicit COMMIT WORK/ROLLBACK WORK is issued here beyond</TDLINE>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+       <TDLINE>whatever the underlying per-object serialize() call already</TDLINE>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+       <TDLINE>does today.</TDLINE>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+       <TDLINE>ERROR is reserved for a batch-level failure that prevents</TDLINE>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+       <TDLINE>this worker attempting any object at all (e.g. prefetch-</TDLINE>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+       <TDLINE>buffer injection failing) - an individual object's own</TDLINE>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+       <TDLINE>failure is always a normal ET_RESULT row with RC &lt;&gt; 0.</TDLINE>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+       <TDLINE>No scheduling/cost statistics are persisted by this function</TDLINE>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+       <TDLINE>module - ELAPSED_MS/OUTPUT_BYTES are read back only by the</TDLINE>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+       <TDLINE>orchestrator's run-local, in-memory adaptive cost estimator.</TDLINE>
       </TLINE>
       <TLINE>
        <TDFORMAT>U4</TDFORMAT>
@@ -232,6 +363,11 @@
       </TLINE>
       <TLINE>
        <TDFORMAT>AS</TDFORMAT>
+       <TDLINE>.memory/logs/serialization_adaptive_batch_design.md</TDLINE>
+      </TLINE>
+      <TLINE>
+       <TDFORMAT>AS</TDFORMAT>
+       <TDLINE>.memory/logs/serialization_slice_2_od14_audit.md</TDLINE>
       </TLINE>
      </LINES>
     </item>
