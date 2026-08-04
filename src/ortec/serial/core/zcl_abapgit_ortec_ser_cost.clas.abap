@@ -137,14 +137,45 @@ ENDCLASS.
 CLASS zcl_abapgit_ortec_ser_cost IMPLEMENTATION.
 
   METHOD get_estimate.
-    " SER-SLICE-2 Phase 2: implement the lookup-or-default hierarchy
-    " described in serialization_adaptive_batch_design.md &sect;3.
+    READ TABLE it_ewma WITH TABLE KEY obj_type = iv_obj_type INTO DATA(ls_ewma).
+    IF sy-subrc = 0.
+      rs_estimate-est_ms     = ls_ewma-est_ms.
+      rs_estimate-est_bytes  = ls_ewma-est_bytes.
+      rs_estimate-est_source = c_source_exact.
+      RETURN.
+    ENDIF.
+
+    CASE iv_obj_type.
+      WHEN 'CLAS' OR 'INTF'.
+        rs_estimate-est_ms    = c_default_ms_oo.
+        rs_estimate-est_bytes = c_default_bytes_oo.
+      WHEN 'DTEL' OR 'DOMA'.
+        rs_estimate-est_ms    = c_default_ms_ddic.
+        rs_estimate-est_bytes = c_default_bytes_ddic.
+      WHEN OTHERS.
+        rs_estimate-est_ms    = c_default_ms_generic.
+        rs_estimate-est_bytes = c_default_bytes_generic.
+    ENDCASE.
+    rs_estimate-est_source = c_source_family.
   ENDMETHOD.
 
   METHOD update_estimate.
-    " SER-SLICE-2 Phase 2: implement the EWMA fold-in described in
-    " serialization_adaptive_batch_design.md &sect;3 (new = alpha*actual +
-    " (1-alpha)*old, or a fresh sample if none exists yet for this type).
+    DATA lv_new_ms    TYPE p LENGTH 8 DECIMALS 4.
+    DATA lv_new_bytes TYPE p LENGTH 8 DECIMALS 4.
+
+    READ TABLE ct_ewma WITH TABLE KEY obj_type = iv_obj_type ASSIGNING FIELD-SYMBOL(<ls_ewma>).
+    IF sy-subrc = 0.
+      lv_new_ms    = c_ewma_alpha * iv_actual_ms    + ( 1 - c_ewma_alpha ) * <ls_ewma>-est_ms.
+      lv_new_bytes = c_ewma_alpha * iv_actual_bytes + ( 1 - c_ewma_alpha ) * <ls_ewma>-est_bytes.
+      <ls_ewma>-est_ms    = round( val = lv_new_ms    dec = 0 ).
+      <ls_ewma>-est_bytes = round( val = lv_new_bytes dec = 0 ).
+    ELSE.
+      " First observation of this type this run - the sample starts at
+      " the observed value itself (standard EWMA cold-start).
+      INSERT VALUE #( obj_type  = iv_obj_type
+                       est_ms    = iv_actual_ms
+                       est_bytes = iv_actual_bytes ) INTO TABLE ct_ewma.
+    ENDIF.
   ENDMETHOD.
 
 ENDCLASS.

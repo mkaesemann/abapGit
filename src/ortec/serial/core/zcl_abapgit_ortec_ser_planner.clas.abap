@@ -141,16 +141,91 @@ ENDCLASS.
 CLASS zcl_abapgit_ortec_ser_planner IMPLEMENTATION.
 
   METHOD build_initial_batches.
-    " SER-SLICE-2 Phase 2: implement LPT-first assignment per
-    " serialization_adaptive_batch_design.md &sect;4, with stable-sort
-    " tie-breaking on original TADIR order for determinism.
+    TYPES: BEGIN OF ty_sortable,
+             idx  TYPE i,
+             item TYPE ty_work_item,
+           END OF ty_sortable.
+    DATA lt_sortable   TYPE STANDARD TABLE OF ty_sortable WITH EMPTY KEY.
+    DATA lt_active     TYPE STANDARD TABLE OF i WITH EMPTY KEY.
+    DATA lv_idx        TYPE i.
+    DATA lv_worker_cnt TYPE i.
+    DATA lv_best_pos   TYPE i.
+    DATA lv_best_ridx  TYPE i.
+    DATA lv_best_ms    TYPE i.
+
+    " defend against a non-positive worker budget - one active batch is
+    " always safe, never a crash (hard limits always win, see class doc)
+    lv_worker_cnt = COND #( WHEN iv_worker_count > 0 THEN iv_worker_count ELSE 1 ).
+
+    LOOP AT it_work_items INTO DATA(ls_item).
+      lv_idx = lv_idx + 1.
+      APPEND VALUE #( idx = lv_idx item = ls_item ) TO lt_sortable.
+    ENDLOOP.
+
+    " deterministic tie-break on original TADIR order - never rely on
+    " SORT stability alone
+    SORT lt_sortable BY item-est_ms DESCENDING idx ASCENDING.
+
+    LOOP AT lt_sortable INTO DATA(ls_sortable).
+      DATA(ls_work_item) = ls_sortable-item.
+
+      IF lines( lt_active ) < lv_worker_cnt.
+        APPEND VALUE #( items           = VALUE #( ( ls_work_item ) )
+                         total_est_ms    = ls_work_item-est_ms
+                         total_est_bytes = ls_work_item-est_bytes ) TO rt_batches.
+        APPEND lines( rt_batches ) TO lt_active.
+        CONTINUE.
+      ENDIF.
+
+      CLEAR lv_best_pos.
+      LOOP AT lt_active INTO DATA(lv_ridx).
+        ASSIGN rt_batches[ lv_ridx ] TO FIELD-SYMBOL(<ls_candidate>).
+        IF lv_best_pos = 0 OR <ls_candidate>-total_est_ms < lv_best_ms.
+          lv_best_pos  = sy-tabix.
+          lv_best_ridx = lv_ridx.
+          lv_best_ms   = <ls_candidate>-total_est_ms.
+        ENDIF.
+      ENDLOOP.
+
+      ASSIGN rt_batches[ lv_best_ridx ] TO FIELD-SYMBOL(<ls_best>).
+      IF lines( <ls_best>-items ) < iv_row_limit AND
+         <ls_best>-total_est_bytes + ls_work_item-est_bytes <= iv_byte_limit.
+        APPEND ls_work_item TO <ls_best>-items.
+        <ls_best>-total_est_ms    = <ls_best>-total_est_ms + ls_work_item-est_ms.
+        <ls_best>-total_est_bytes = <ls_best>-total_est_bytes + ls_work_item-est_bytes.
+      ELSE.
+        " the smallest active batch has no room left - close it (it never
+        " becomes a dispatch candidate again) and open a fresh one
+        DELETE lt_active INDEX lv_best_pos.
+        APPEND VALUE #( items           = VALUE #( ( ls_work_item ) )
+                         total_est_ms    = ls_work_item-est_ms
+                         total_est_bytes = ls_work_item-est_bytes ) TO rt_batches.
+        APPEND lines( rt_batches ) TO lt_active.
+      ENDIF.
+    ENDLOOP.
   ENDMETHOD.
 
   METHOD compute_refill_size.
-    " SER-SLICE-2 Phase 2: implement the shrink-factor formula per
-    " serialization_adaptive_batch_design.md &sect;4:
-    " MAX( 1, CEIL( iv_remaining_items / ( iv_worker_count *
-    " c_shrink_factor ) ) ), capped by iv_row_limit.
+    DATA lv_denom TYPE i.
+
+    IF iv_remaining_items <= 0.
+      rv_batch_size = 0.
+      RETURN.
+    ENDIF.
+
+    lv_denom = iv_worker_count * c_shrink_factor.
+    IF lv_denom <= 0.
+      lv_denom = 1.
+    ENDIF.
+
+    " integer ceiling division: CEIL(a/b) = (a + b - 1) DIV b for a,b > 0
+    rv_batch_size = ( iv_remaining_items + lv_denom - 1 ) DIV lv_denom.
+    IF rv_batch_size < 1.
+      rv_batch_size = 1.
+    ENDIF.
+    IF iv_row_limit > 0 AND rv_batch_size > iv_row_limit.
+      rv_batch_size = iv_row_limit.
+    ENDIF.
   ENDMETHOD.
 
 ENDCLASS.
