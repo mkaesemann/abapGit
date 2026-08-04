@@ -3,13 +3,49 @@
 ```text
 PACKET=COMPACT_HANDOFF_V1
 TASK=SERIALIZATION_SER_SLICE_0
-STATUS=LOCAL_COMPLETE (bulk-exists), PARTIAL/BLOCKED (WAPA)
+STATUS=LOCAL_COMPLETE (bulk-exists, IT8-INCIDENT-FIXED), PARTIAL/BLOCKED (WAPA)
 DEPENDS_ON=.memory/handoffs/serialization-design-bootstrap.md (SLICE 0),
   .memory/logs/serialization_bulk_exists_design.md (T-1/T-2/T-3),
   .memory/logs/serialization_wapa_review.md (T-WAPA-1..5)
 PRODUCTIVE_CODE_CHANGED=NO
 STATE_MD_CHANGED=NO
 ```
+
+## IT8 incident and fix (2026-08-04, after initial commit 78f48fc7)
+
+A real IT8 ABAP Unit run short-dumped reproducibly (confirmed on 2
+separate runs, not transient) with `RAISE_EXCEPTION`/`NOT_FOUND` on
+`t1_exists_clas`, call stack:
+
+```text
+LTCL_BULK_EXISTS=>T1_EXISTS_CLAS
+ -> CL_OSQL_TEST_ENVIRONMENT=>INSERT_TEST_DATA
+  -> LCL_DATASOURCE_STUB=>IF_OSQL_STUB~INSERT
+   -> CL_ABAP_STRUCTDESCR=>GET_DDIC_FIELD_LIST
+    -> CALL FUNCTION 'DDIF_FIELDINFO_GET' TABNAME = REL_NAME ... sy-subrc <> 0 -> RAISE NOT_FOUND
+```
+
+**ROOT CAUSE (owner-supplied hypothesis, confirmed correct):** the original
+test doubled `DD01L` (domains), `DD04L` (data elements), and `SEOCLASSDF`
+(class/interface definitions) via `CL_OSQL_TEST_ENVIRONMENT`. These are
+DDIC CATALOG tables the ABAP runtime itself depends on to resolve types
+for the WHOLE session — including to load and describe the test class
+itself, `CL_ABAP_UNIT_ASSERT`, and every other type touched during test
+execution. Doubling them breaks the runtime's own type-resolution chain,
+not just the productive method under test. `DD02L`/`DD03L` (the TABL
+catalog) would carry the identical risk, though this slice never doubled
+those. Because the FIRST test method to touch the doubled `SEOCLASSDF`
+(alphabetically, `t1_exists_clas`) crashes with an uncaught runtime error
+(not a normal exception), ABAP Unit does not continue running the REST of
+that test class's methods — the original completion report's assumption
+that "only one test failed, the others presumably passed" was WRONG and
+has been retracted; no test in this class actually ran to completion on
+either IT8 attempt.
+
+**FIX:** the test file was rewritten to never double any DDIC catalog
+table. See the corrected "Deliberate deviation" section below for the
+full before/after design. Independently reviewed and confirmed sound (see
+updated Regression review section).
 
 ## Scope actually implemented
 
@@ -18,7 +54,10 @@ IMPLEMENTED_TEST_IDS
   T-1  -> t1_exists_doma, t1_exists_dtel, t1_exists_clas, t1_exists_intf,
           t1_order_preserved
   T-2  -> t2_absent_doma, t2_absent_dtel, t2_absent_clas, t2_absent_intf
-  T-3  -> t3_clas_sadl_generated_excl, t3_intf_proxy_generated_excl
+  T-3  -> t3_clas_sadl_generated_excl, t3_clas_sadl_control_incl,
+          t3_intf_proxy_generated_excl, t3_intf_proxy_control_incl
+          (2 control tests ADDED during the IT8-incident fix, proving the
+          exclusion is genuinely conditional on the fabricated join row)
   T-WAPA-1 -> t_wapa_1_active_only, t_wapa_1_inactive_only, t_wapa_1_neither
 
 NOT_IMPLEMENTED (BLOCKED_MISSING_PRODUCTION_SEAM, reported not silently
@@ -40,22 +79,49 @@ repository-independent unit test:
    NOT INITIAL`) — this is exactly "repository-specific unstable data",
    explicitly forbidden by this slice's own instructions.
 
-**Substitution used instead:** all three tests call
+**Substitution used instead:** all tests call
 `ZCL_ABAPGIT_ORTEC_BULK_EXISTS=>filter_existing` DIRECTLY — this is the
 actual method whose behavior T-1/T-2/T-3 are pinning, a plain `PUBLIC
 CLASS-METHOD` taking `it_tadir` as an ordinary importing parameter (no
-package scan involved). Synthetic, deterministic TADIR fixtures are built
-in-test, and the underlying DDIC tables the method itself queries
-(`DD01L`, `DD04L`, `SEOCLASSDF`, `VSEOEXTEND`, `SPROXHDR`) are doubled via
-`CL_OSQL_TEST_ENVIRONMENT` (the proven pattern already used elsewhere in
-this workspace, e.g. `zcl_abapgit_ortec_mat_state.clas.testclasses.abap`).
+package scan involved).
+
+**REVISED after the IT8 incident above — no DDIC catalog table is ever
+doubled:**
+- T-1 "exists" and T-2 "absent" checks for DOMA/DTEL/CLAS/INTF use REAL,
+  stable objects instead of fabricated `DD01L`/`DD04L`/`SEOCLASSDF` rows:
+  `MANDT` (the universal SAP Basis client-field domain AND data element —
+  confirmed present via a live `SELECT` against `DD01L`/`DD04L` on IT8),
+  and `ZCL_ABAPGIT_ORTEC_BULK_EXISTS`/`ZIF_ABAPGIT_DEFINITIONS` (existing
+  abapGit classes/interfaces — confirmed present via a live `SELECT`
+  against `SEOCLASSDF WHERE version = '1'` on IT8). T-2 absent cases use
+  obviously-fake names (e.g. `ZZZZ_BEX_NOT_A_REAL_DOM`) with NO doubling
+  at all — a real absence check against real system tables.
+- T-3 (SADL/proxy exclusion) uses a REAL existing class/interface as the
+  base object (`ZCL_ABAPGIT_ORTEC_WAPA`, `ZIF_ABAPGIT_TADIR` — also
+  confirmed present via live `SEOCLASSDF` query) so the "exists" side is
+  genuine, and fabricates ONLY the join row that TRIGGERS the exclusion —
+  `VSEOEXTEND`/`SPROXHDR` — which are plain application content tables
+  (class-extension relationships / proxy header registry), NOT part of
+  the DDIC catalog/RTTI bootstrap chain, and therefore safe to double.
+  Two new control tests (`t3_clas_sadl_control_incl`,
+  `t3_intf_proxy_control_incl`) prove the same real object is normally
+  INCLUDED when that join row is absent, so the exclusion tests are
+  provably conditional, not vacuous.
+
+Using `MANDT`/existing abapGit `CLAS`/`INTF` objects as fixtures is a
+dependency on foundational, permanent SAP Basis / abapGit-shipped content
+— not "repository-specific unstable data" in the sense the original
+design forbade (that concern was about a customer's own arbitrary
+package/repo content, not universal Basis fields or abapGit's own shipped
+objects).
 
 This achieves the exact documented semantics (bulk classification agrees
 with existence, deleted/never-existed exclusion, CHDO/SADL/proxy-generated
-exclusion) with fully deterministic data, and is a MORE precise unit-level
-pin than driving the same assertion through the much heavier
-`zcl_abapgit_tadir` package-scan stack. Independently reviewed and
-confirmed faithful/non-scope-broadening (see Regression review below).
+exclusion) with fully deterministic data and zero DDIC-catalog doubling,
+and is a MORE precise unit-level pin than driving the same assertion
+through the much heavier `zcl_abapgit_tadir` package-scan stack.
+Independently reviewed and confirmed faithful/non-scope-broadening both
+before and after the IT8-incident fix (see Regression review below).
 
 **UNKNOWN/`ev_success = abap_false` fallback branch:** every `WHEN` branch
 in `filter_existing`'s `CASE ls_tadir-object` statement follows the
@@ -133,12 +199,20 @@ local syntax/error diagnostics   PASS (get_errors: no errors on either new
 ```
 
 No IT8 activation, ABAP Unit run, or ATC check was performed or is claimed
-here — none of these are available in this workspace (per repo memory:
-the connected live SAP diagnostic tools do not point at this repo's target
-IT8 system). **IT8 validation is still required** before this slice is
-considered DONE per the design's own SLICE 0 `SAP_VALIDATION` requirement.
+as executed BY THIS AGENT in this session prior to the fix — the owner
+ran ABAP Unit on IT8 independently and reported the `t1_exists_clas`
+failure analyzed above. ATC was reported clean by the owner. **IT8
+re-validation of the FIXED test file is still required** before this
+slice is considered DONE per the design's own SLICE 0 `SAP_VALIDATION`
+requirement — the fix has only been reviewed statically and against live
+read-only `SAPQuery` checks confirming the new fixtures
+(`MANDT`/`ZCL_ABAPGIT_ORTEC_BULK_EXISTS`/`ZIF_ABAPGIT_DEFINITIONS`/
+`ZCL_ABAPGIT_ORTEC_WAPA`/`ZIF_ABAPGIT_TADIR`) genuinely exist on IT8; the
+rewritten tests themselves have NOT yet been executed on IT8.
 
 ## Regression review (delegated, independent)
+
+First pass (pre-IT8, against the original DD01L/DD04L/SEOCLASSDF-doubling design):
 
 ```text
 REVIEWER=ortec-abapgit-regression
@@ -150,6 +224,30 @@ NO_UNSTABLE_DATA=YES
 METHOD_NAMES_OK=YES
 NO_FORBIDDEN_OBJECTS=YES
 CONVENTION_MATCH=YES
+ISSUES_FOUND=0
+VERDICT=PASS
+```
+
+**This PASS verdict did not catch the DDIC-catalog-doubling defect** — it
+confirmed the tests were well-formed and followed this workspace's
+established `CL_OSQL_TEST_ENVIRONMENT` convention, but neither the
+implementing agent nor this review considered that `DD01L`/`DD04L`/
+`SEOCLASSDF` specifically are unsafe to double (a real-system-only
+failure mode, invisible to local static review). Recorded here so a
+future reviewer knows this class of defect was previously missed.
+
+Second pass (post-fix, against the MANDT/real-object rewrite):
+
+```text
+REVIEWER=ortec-abapgit-regression
+NO_DDIC_CATALOG_DOUBLED=YES
+JOIN_TABLES_SAFE=YES
+TESTS_MEANINGFUL=YES
+CONTROL_TESTS_VALUABLE=YES
+MANDT_DUAL_USE_SAFE=YES
+PRODUCTIVE_UNCHANGED=YES
+METHOD_NAMES_OK=YES
+FIXTURES_STABLE=YES
 ISSUES_FOUND=0
 VERDICT=PASS
 ```
@@ -168,13 +266,14 @@ interface, DDIC object, function group, or function module was created.
 
 ## Next action for the owner
 
-1. Import this commit into IT8; run ABAP Unit for
-   `ZCL_ABAPGIT_ORTEC_BULK_EXISTS` and `ZCL_ABAPGIT_ORTEC_WAPA` and confirm
-   all listed test methods PASS (they are pinning tests: a failure would
-   mean this design's own understanding of current behavior is wrong
-   somewhere and must be re-verified before any later SER slice proceeds,
-   per SLICE 0's own STOP_CONDITIONS).
-2. Run ATC on both classes.
+1. Import this fix commit into IT8; re-run ABAP Unit for
+   `ZCL_ABAPGIT_ORTEC_BULK_EXISTS` (now 13 methods, including 2 new
+   control tests) and `ZCL_ABAPGIT_ORTEC_WAPA` (unchanged, 3 methods) and
+   confirm ALL listed test methods PASS this time, including
+   `t1_exists_clas` and everything after it that never got a chance to run
+   on the previous 2 attempts.
+2. Run ATC on both classes again (was already clean before; should remain
+   so, no productive/ATC-relevant code changed).
 3. Decide whether T-WAPA-2..5 remain permanently out of scope for
    automated pinning (accepting the documented residual risk) or whether a
    future, separately-authorized slice should add a production seam
