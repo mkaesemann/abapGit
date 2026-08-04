@@ -3,15 +3,18 @@
 ```text
 PACKET=COMPACT_HANDOFF_V1
 TASK=SERIALIZATION_SER_SLICE_2
-STATUS=NOT_STARTED
-REASON=Every SER-SLICE-2 global object is missing (confirmed via
-  file_search — zero results for ZCL_ABAPGIT_ORTEC_SER_*, ZABAPGIT_ORTEC_
-  SERIAL*, Z_ABAPGIT_ORTEC_SER*, ZAOG_SER*, ZIF_ABAPGIT_ORTEC_SER*). Per
-  this task's Phase A, these must be created manually by the owner — this
-  agent does not create global repository objects automatically.
+STATUS=BLOCKED
+REASON=Phase 0.2 manual-object verification (2026-08-04) found all 11
+  manifest objects created and active, EXCEPT one package-assignment
+  discrepancy: FUGR ZABAPGIT_ORTEC_SERIAL (and its member function module
+  Z_ABAPGIT_ORTEC_SER_BATCH) sits in $ABAPGIT_ORTEC_SERIAL_CORE instead of
+  the manifest's $ABAPGIT_ORTEC_SERIAL_RFC. Full verification table:
+  .memory/logs/serialization_slice_2_object_verification.md. Per this
+  task's own stop condition ("a package assignment is wrong"), this agent
+  reports the correction rather than moving the object or proceeding.
 PRODUCTIVE_CODE_CHANGED=NO
 STATE_MD_CHANGED=NO
-COMMITS_CREATED=NONE (nothing to commit for Slice 2 itself this pass)
+COMMITS_CREATED=see below
 PUSHED=NO
 ```
 
@@ -30,18 +33,17 @@ LUW/aRFC_CONTRACT=RE-CONFIRMED, no change from the already-approved
   design (performance_design.md §3a, adaptive_batch_design.md OD-13).
 ```
 
-## OWNER_ACTION_REQUIRED — exact creation checklist
+## OWNER_ACTION_COMPLETED (2026-08-04) — original creation checklist, now historical
 
 ```text
-OWNER_ACTION_REQUIRED=CREATE_GLOBAL_OBJECTS
+OWNER_ACTION_REQUIRED=CREATE_GLOBAL_OBJECTS  -- COMPLETED by owner 2026-08-04
 ```
 
-All names verified `<=30` characters (per the bootstrap's own creation
-manifest, re-confirmed here). Exact signatures/field lists are in the
-cited design sections — the owner creates the OBJECT SHELLS (correct
-type, package, and DDIC field lists where applicable); this agent will
-then fill in all method/function bodies via normal file edits once the
-objects exist.
+All 11 objects below were created and verified live against IT8 in
+`.memory/logs/serialization_slice_2_object_verification.md`. Table kept
+here for historical/dependency-order reference only — see the
+verification log for actual current state and the one open correction
+(FUGR/FM package placement).
 
 | STEP | PACKAGE | PARENT_PACKAGE | OBJECT_TYPE | OBJECT_NAME | DESCRIPTION | DEPENDENCIES | CREATE_BEFORE_STEP |
 |---|---|---|---|---|---|---|---|
@@ -62,7 +64,19 @@ SER-SLICE-2 (confirmed against the bootstrap's own creation manifest —
 `ZIF_ABAPGIT_ORTEC_SER_PROV` and `ZCL_ABAPGIT_ORTEC_SER_PROV_DD` are
 SER-SLICE-3 items, not created or needed now).
 
-## What happens once the owner confirms creation
+## Current blocking correction (see verification log for full detail)
+
+```text
+OBJECT=ZABAPGIT_ORTEC_SERIAL (FUGR) + Z_ABAPGIT_ORTEC_SER_BATCH (FUNC, member)
+EXPECTED_PACKAGE=$ABAPGIT_ORTEC_SERIAL_RFC
+ACTUAL_PACKAGE=$ABAPGIT_ORTEC_SERIAL_CORE
+ACTION_NEEDED=owner moves the function group to the correct package, OR
+  explicitly accepts the current placement as a deviation (in which case
+  say so and this agent updates the manifest, not the object, and
+  proceeds).
+```
+
+## What happens once the owner resolves the correction above
 
 Resume directly at Phase C2 (minimal standard-abapGit hook) through C11
 (checkpoint commits), per the already-approved design
@@ -76,7 +90,10 @@ exist.
 ## SER-SLICE-2 status summary
 
 ```text
-SLICE_2_STATUS=NOT_STARTED
+SLICE_2_STATUS=BLOCKED (Phase 0.2 object verification found one package
+  discrepancy; implementation not started)
+MANUAL_OBJECT_VERIFICATION=BLOCKED (10 of 11 objects match exactly; 1
+  package-placement discrepancy, see above)
 OD14_STATIC_STATE_AUDIT=PASS
 RUN_REGISTRY=NOT_STARTED
 BATCH_RFC=NOT_STARTED
