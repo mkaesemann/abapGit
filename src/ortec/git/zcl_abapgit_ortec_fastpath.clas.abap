@@ -4,7 +4,6 @@
 CLASS zcl_abapgit_ortec_fastpath DEFINITION
   PUBLIC FINAL
   CREATE PRIVATE.
-
   PUBLIC SECTION.
     "! Attempt ORTEC fast-path pull by branch.
     "! Returns INITIAL result if fast-path cannot be applied
@@ -15,6 +14,12 @@ CLASS zcl_abapgit_ortec_fastpath DEFINITION
     "! Branch ref name
     "! @parameter iv_deepen_level |
     "! Deepen level
+    "! @parameter ii_progress |
+    "! Optional progress lifecycle owned by an orchestrator (e.g.
+    "! upload_pack_by_branch). When supplied, reused as-is - this method
+    "! never calls zcl_abapgit_progress=>get_instance itself in that case.
+    "! When not supplied (a direct caller), falls back to its own
+    "! get_instance(1) call exactly as before this parameter existed.
     "! @parameter rs_result |
     "! Pull result (INITIAL if fast-path not applicable)
     "! @raising zcx_abapgit_ortec_git |
@@ -23,6 +28,7 @@ CLASS zcl_abapgit_ortec_fastpath DEFINITION
       IMPORTING iv_url           TYPE string
                 iv_branch_name   TYPE string
                 iv_deepen_level  TYPE i DEFAULT 1
+                ii_progress      TYPE REF TO zif_abapgit_progress OPTIONAL
       RETURNING VALUE(rs_result) TYPE zcl_abapgit_git_porcelain=>ty_pull_result
       RAISING   zcx_abapgit_ortec_git
                 zcx_abapgit_exception.
@@ -330,6 +336,7 @@ CLASS zcl_abapgit_ortec_fastpath DEFINITION
         it_hashes       TYPE zif_abapgit_git_definitions=>ty_sha1_tt
         iv_mode         TYPE zcl_abapgit_ortec_fetch_req=>ty_fetch_mode
         iv_server_caps  TYPE string OPTIONAL
+        ii_progress     TYPE REF TO zif_abapgit_progress OPTIONAL
       RETURNING
         VALUE(rt_objects) TYPE zif_abapgit_definitions=>ty_objects_tt
       RAISING
@@ -348,8 +355,9 @@ CLASS zcl_abapgit_ortec_fastpath DEFINITION
     "! failure.
     CLASS-METHODS serve_cached_when_nothing_new
       IMPORTING
-        iv_url    TYPE string
-        it_hashes TYPE zif_abapgit_git_definitions=>ty_sha1_tt
+        iv_url      TYPE string
+        it_hashes   TYPE zif_abapgit_git_definitions=>ty_sha1_tt
+        ii_progress TYPE REF TO zif_abapgit_progress OPTIONAL
       RETURNING
         VALUE(rt_objects) TYPE zif_abapgit_definitions=>ty_objects_tt
       RAISING
@@ -363,6 +371,16 @@ CLASS zcl_abapgit_ortec_fastpath DEFINITION
         ix_exception  TYPE REF TO cx_root
       RETURNING
         VALUE(rv_yes) TYPE abap_bool.
+
+    "! Best-effort progress report: never lets a progress-display failure
+    "! affect fetch/decode results. No-op if ii_progress is not bound.
+    "! Never calls zcl_abapgit_progress=>get_instance - the orchestration
+    "! entry points (upload_pack_by_branch/upload_pack_by_commit) own the
+    "! lifecycle and pass their own reference down.
+    CLASS-METHODS report_progress
+      IMPORTING ii_progress TYPE REF TO zif_abapgit_progress OPTIONAL
+                iv_current  TYPE i
+                iv_text     TYPE string.
 
 ENDCLASS.
 
@@ -662,6 +680,19 @@ METHOD pull_by_branch.
       RETURN.
     ENDIF.
 
+    " Progress ownership (design constraint: one clear owner). If the caller
+    " (an orchestrator such as upload_pack_by_branch) already supplied a
+    " reference, reuse it as-is - never call get_instance again here, which
+    " would reset the owner's own throttle/total state. Otherwise (a direct
+    " caller of this method), fall back to this method's own instance
+    " exactly as before this parameter existed.
+    IF ii_progress IS BOUND.
+      li_progress = ii_progress.
+    ELSE.
+      li_progress = zcl_abapgit_progress=>get_instance( 1 ).
+    ENDIF.
+    report_progress( ii_progress = li_progress iv_current = 1 iv_text = 'Git: checking local cache' ).
+
     " Resolve repo key — read-only lookup here (don't create yet)
     lv_repo_key = zcl_abapgit_ortec_repo_state=>get_repo_key_for_url( iv_url ).
     IF lv_repo_key IS INITIAL.
@@ -707,6 +738,8 @@ METHOD pull_by_branch.
 
         IF lv_lock_held = abap_true AND lv_attempt_id IS NOT INITIAL.
           TRY.
+              report_progress( ii_progress = li_progress iv_current = 1
+                iv_text = 'Git: reading resume session from buffer (ZAOG_RAW_PACK/ZAOG_PACK_IDX)' ).
               lt_resumed = zcl_abapgit_ortec_pack_dec=>resume_decode(
                                iv_repo_key   = lv_repo_key
                                iv_lock_held  = abap_true
@@ -779,10 +812,8 @@ METHOD pull_by_branch.
             ENDIF.
 
             lv_fp_duration = lo_fp_timer->end( ).
-            li_progress = zcl_abapgit_progress=>get_instance( 1 ).
-            li_progress->show(
-              iv_current = 1
-              iv_text    = |Fastpath: { lines( rs_result-objects ) } git objects (resumed), { lv_fp_duration }| ).
+            report_progress( ii_progress = li_progress iv_current = 1
+              iv_text = |Git: completed ({ lines( rs_result-objects ) } objects, { lv_fp_duration }, cache reuse - resumed)| ).
             RETURN. " Success! Avoid redundant GET from remote.
           CATCH zcx_abapgit_exception.
             IF lv_lock_held = abap_true.
@@ -821,6 +852,8 @@ METHOD pull_by_branch.
 
       " Phase 4: Walk tree to produce files
       TRY.
+          report_progress( ii_progress = li_progress iv_current = 1
+            iv_text = 'Git: reading cached objects from buffer (ZAOG_OBJ_STORE)' ).
           rs_result-objects = zcl_abapgit_ortec_obj_store=>get_reachable_objects(
             iv_repo_key = lv_repo_key
             iv_commit   = rs_result-commit ).
@@ -863,10 +896,8 @@ METHOD pull_by_branch.
       ENDTRY.
 
       lv_fp_duration = lo_fp_timer->end( ).
-      li_progress = zcl_abapgit_progress=>get_instance( 1 ).
-      li_progress->show(
-        iv_current = 1
-        iv_text    = |Fastpath: { lines( rs_result-objects ) } git objects, { lv_fp_duration }| ).
+      report_progress( ii_progress = li_progress iv_current = 1
+        iv_text = |Git: completed ({ lines( rs_result-objects ) } objects, { lv_fp_duration }, cache reuse)| ).
       RETURN.
     ENDIF.
 
@@ -907,13 +938,13 @@ METHOD pull_by_branch.
 
     data(li_progress) = zcl_abapgit_progress=>get_instance( 1 ).
 
-    li_progress->show( iv_current = 2
-                       iv_text    = 'Fetch remote files (Fastpath)' ).
+    report_progress( ii_progress = li_progress iv_current = 1 iv_text = 'Git: checking local cache' ).
 
     ls_pull = pull_by_branch(
       iv_url          = iv_url
       iv_branch_name  = iv_branch_name
-      iv_deepen_level = iv_deepen_level ).
+      iv_deepen_level = iv_deepen_level
+      ii_progress     = li_progress ).
     IF ls_pull IS NOT INITIAL.
       et_objects = ls_pull-objects.
       ev_branch  = ls_pull-commit.
@@ -969,13 +1000,16 @@ METHOD pull_by_branch.
     lv_server_caps = zcl_abapgit_ortec_fetch_req=>parse_capabilities( lv_ref_data ).
 
     TRY.
+        report_progress( ii_progress = li_progress iv_current = 1
+          iv_text = 'Git: requesting objects from remote (thin attempt)' ).
         et_objects = upload_pack(
           io_client       = lo_client
           iv_url          = iv_url
           iv_deepen_level = lv_deepen_level
           it_hashes       = lt_hashes
           iv_mode         = zcl_abapgit_ortec_fetch_req=>cs_fetch_mode-incremental_thin
-          iv_server_caps  = lv_server_caps ).
+          iv_server_caps  = lv_server_caps
+          ii_progress     = li_progress ).
         " F-2C-002: the migrated wire modes never emit deepen (iv_deepen_level
         " is not read by upload_pack's body); reporting the caller/persisted
         " depth here would be a false signal implying a real shallow-history
@@ -1004,13 +1038,16 @@ METHOD pull_by_branch.
         lv_ref_data = lo_client->get_cdata( ).
         lv_server_caps = zcl_abapgit_ortec_fetch_req=>parse_capabilities( lv_ref_data ).
         TRY.
+            report_progress( ii_progress = li_progress iv_current = 1
+              iv_text = 'Git: requesting objects from remote (self-contained attempt)' ).
             et_objects = upload_pack(
               io_client       = lo_client
               iv_url          = iv_url
               iv_deepen_level = lv_deepen_level
               it_hashes       = lt_hashes
               iv_mode         = zcl_abapgit_ortec_fetch_req=>cs_fetch_mode-incremental_self_contained
-              iv_server_caps  = lv_server_caps ).
+              iv_server_caps  = lv_server_caps
+              ii_progress     = li_progress ).
             " F-2C-002: see the matching comment in the thin tier above.
             ev_deepen_used = 0.
           CATCH zcx_abapgit_ortec_git zcx_abapgit_exception INTO DATA(lx_nonthin_branch).
@@ -1048,12 +1085,15 @@ METHOD pull_by_branch.
               lv_ref_data = lo_client->get_cdata( ).
               lv_server_caps = zcl_abapgit_ortec_fetch_req=>parse_capabilities( lv_ref_data ).
               TRY.
+                  report_progress( ii_progress = li_progress iv_current = 1
+                    iv_text = 'Git: requesting objects from remote (recovery attempt)' ).
                   et_objects = upload_pack(
                     io_client       = lo_client
                     iv_url          = iv_url
                     it_hashes       = lt_hashes
                     iv_mode         = zcl_abapgit_ortec_fetch_req=>cs_fetch_mode-recovery_branch_full
-                    iv_server_caps  = lv_server_caps ).
+                    iv_server_caps  = lv_server_caps
+                    ii_progress     = li_progress ).
                   ev_deepen_used = 0.
                   RETURN.
                 CATCH zcx_abapgit_ortec_git zcx_abapgit_exception INTO DATA(lx_recovery_branch).
@@ -1089,6 +1129,10 @@ METHOD pull_by_branch.
     " See the matching comment in upload_pack_by_branch.
     zcl_abapgit_ortec_pack_stream=>reset_completion_budget( ).
 
+    data(li_progress) = zcl_abapgit_progress=>get_instance( 1 ).
+    report_progress( ii_progress = li_progress iv_current = 1
+      iv_text = 'Git: preparing fetch request' ).
+
     APPEND iv_hash TO lt_hashes.
     ev_commit = iv_hash.
 
@@ -1105,13 +1149,16 @@ METHOD pull_by_branch.
     lv_server_caps = zcl_abapgit_ortec_fetch_req=>parse_capabilities( lv_ref_data ).
 
     TRY.
+        report_progress( ii_progress = li_progress iv_current = 1
+          iv_text = 'Git: requesting objects from remote (thin attempt)' ).
         et_objects = upload_pack(
           io_client       = lo_client
           iv_url          = iv_url
           iv_deepen_level = iv_deepen_level
           it_hashes       = lt_hashes
           iv_mode         = zcl_abapgit_ortec_fetch_req=>cs_fetch_mode-incremental_thin
-          iv_server_caps  = lv_server_caps ).
+          iv_server_caps  = lv_server_caps
+          ii_progress     = li_progress ).
         " F-2C-002: see the matching comment in upload_pack_by_branch.
         ev_deepen_used = 0.
       CATCH zcx_abapgit_ortec_git zcx_abapgit_exception INTO DATA(lx_thin_commit).
@@ -1126,13 +1173,16 @@ METHOD pull_by_branch.
         lv_ref_data = lo_client->get_cdata( ).
         lv_server_caps = zcl_abapgit_ortec_fetch_req=>parse_capabilities( lv_ref_data ).
         TRY.
+            report_progress( ii_progress = li_progress iv_current = 1
+              iv_text = 'Git: requesting objects from remote (self-contained attempt)' ).
             et_objects = upload_pack(
               io_client       = lo_client
               iv_url          = iv_url
               iv_deepen_level = iv_deepen_level
               it_hashes       = lt_hashes
               iv_mode         = zcl_abapgit_ortec_fetch_req=>cs_fetch_mode-incremental_self_contained
-              iv_server_caps  = lv_server_caps ).
+              iv_server_caps  = lv_server_caps
+              ii_progress     = li_progress ).
             " F-2C-002: see the matching comment in upload_pack_by_branch.
             ev_deepen_used = 0.
           CATCH zcx_abapgit_ortec_git zcx_abapgit_exception INTO DATA(lx_nonthin_commit).
@@ -1154,12 +1204,15 @@ METHOD pull_by_branch.
               lv_ref_data = lo_client->get_cdata( ).
               lv_server_caps = zcl_abapgit_ortec_fetch_req=>parse_capabilities( lv_ref_data ).
               TRY.
+                  report_progress( ii_progress = li_progress iv_current = 1
+                    iv_text = 'Git: requesting objects from remote (recovery attempt)' ).
                   et_objects = upload_pack(
                     io_client       = lo_client
                     iv_url          = iv_url
                     it_hashes       = lt_hashes
                     iv_mode         = zcl_abapgit_ortec_fetch_req=>cs_fetch_mode-recovery_branch_full
-                    iv_server_caps  = lv_server_caps ).
+                    iv_server_caps  = lv_server_caps
+                    ii_progress     = li_progress ).
                   ev_deepen_used = 0.
                   RETURN.
                 CATCH zcx_abapgit_ortec_git zcx_abapgit_exception INTO DATA(lx_recovery_commit).
@@ -1187,7 +1240,6 @@ METHOD upload_pack.
 
     DATA lo_fetch_timer   TYPE REF TO zcl_abapgit_timer.
     DATA lv_fetch_duration TYPE string.
-    DATA li_progress      TYPE REF TO zif_abapgit_progress.
 
 
     io_client->set_headers(
@@ -1225,6 +1277,8 @@ METHOD upload_pack.
         OR iv_mode = zcl_abapgit_ortec_fetch_req=>cs_fetch_mode-incremental_self_contained.
       lv_have_repo_key = zcl_abapgit_ortec_repo_state=>get_repo_key_for_url( iv_url ).
       IF lv_have_repo_key IS NOT INITIAL.
+        report_progress( ii_progress = ii_progress iv_current = 1
+          iv_text = 'Git: reading certified haves from buffer (ZAOG_COMMIT_HIST)' ).
         lt_ortec_haves = zcl_abapgit_ortec_have_policy=>get_certified_haves(
           iv_repo_key    = lv_have_repo_key
           it_want_hashes = it_hashes ).
@@ -1238,9 +1292,16 @@ METHOD upload_pack.
       iv_server_caps     = iv_server_caps ).
 
 
+    report_progress( ii_progress = ii_progress iv_current = 1
+      iv_text = 'Git: preparing fetch request' ).
+
     lo_fetch_timer = zcl_abapgit_timer=>create( )->start( ).
+    report_progress( ii_progress = ii_progress iv_current = 1
+      iv_text = 'Git: requesting objects from remote' ).
     lv_xstring = io_client->send_receive_close( zcl_abapgit_convert=>string_to_xstring_utf8( ls_request-buffer ) ).
 
+    report_progress( ii_progress = ii_progress iv_current = 1
+      iv_text = 'Git: parsing server response' ).
     parse( IMPORTING ev_pack = lv_pack
            CHANGING  cv_data = lv_xstring ).
 
@@ -1257,13 +1318,12 @@ METHOD upload_pack.
     " the server rarely had reason to reply this way).
     IF lv_pack IS INITIAL OR zcl_abapgit_ortec_pack_dec=>peek_object_count( lv_pack ) = 0.
       rt_objects = serve_cached_when_nothing_new(
-        iv_url    = iv_url
-        it_hashes = it_hashes ).
+        iv_url      = iv_url
+        it_hashes   = it_hashes
+        ii_progress = ii_progress ).
       lv_fetch_duration = lo_fetch_timer->end( ).
-      li_progress = zcl_abapgit_progress=>get_instance( 1 ).
-      li_progress->show(
-        iv_current = 1
-        iv_text    = |Fastpath: { lines( rt_objects ) } git objects (cached, nothing new), { lv_fetch_duration }| ).
+      report_progress( ii_progress = ii_progress iv_current = 1
+        iv_text = |Git: completed ({ lines( rt_objects ) } objects, { lv_fetch_duration }, cached - nothing new)| ).
       RETURN.
     ENDIF.
 
@@ -1287,7 +1347,8 @@ METHOD upload_pack.
                 rt_objects = zcl_abapgit_ortec_pack_stream=>decode_streaming(
                   iv_data     = lv_pack
                   iv_repo_key = lv_ortec_rk
-                  iv_url      = iv_url ).
+                  iv_url      = iv_url
+                  ii_progress = ii_progress ).
                 lv_via_streaming = abap_true.
               CATCH zcx_abapgit_ortec_git INTO DATA(lx_streaming).
                 " TEMPORARY DIAGNOSTIC (2026-07-17): a live repo is hitting
@@ -1313,15 +1374,12 @@ METHOD upload_pack.
               " message below reflects whichever actually ran, made visible
               " so a streaming->fallback event is never silently normalized.
               lv_fetch_duration = lo_fetch_timer->end( ).
-              li_progress = zcl_abapgit_progress=>get_instance( 1 ).
               IF lv_via_streaming = abap_true.
-                li_progress->show(
-                  iv_current = 1
-                  iv_text    = |Fetch (streaming): { lines( rt_objects ) } commit(s), { lv_fetch_duration }| ).
+                report_progress( ii_progress = ii_progress iv_current = 1
+                  iv_text = |Git: completed ({ lines( rt_objects ) } objects, { lv_fetch_duration }, streaming decoder)| ).
               ELSE.
-                li_progress->show(
-                  iv_current = 1
-                  iv_text    = |Fetch (fallback decoder): { lines( rt_objects ) } git objects, { lv_fetch_duration }| ).
+                report_progress( ii_progress = ii_progress iv_current = 1
+                  iv_text = |Git: completed ({ lines( rt_objects ) } objects, { lv_fetch_duration }, fallback decoder)| ).
               ENDIF.
               RETURN.
             ENDIF.
@@ -1379,6 +1437,8 @@ METHOD upload_pack.
 
           LOOP AT it_hashes ASSIGNING <lv_hash>.
             TRY.
+                report_progress( ii_progress = ii_progress iv_current = 1
+                  iv_text = 'Git: reading cached objects from buffer (ZAOG_OBJ_STORE)' ).
                 lt_reachable = zcl_abapgit_ortec_obj_store=>get_reachable_objects(
                   iv_repo_key = lv_repo_key
                   iv_commit   = <lv_hash> ).
@@ -1443,6 +1503,17 @@ METHOD upload_pack.
       lx_ortec ?= ix_exception.
       rv_yes = lx_ortec->mv_retry_without_haves.
     ENDIF.
+  ENDMETHOD.
+
+  METHOD report_progress.
+    IF ii_progress IS NOT BOUND.
+      RETURN.
+    ENDIF.
+    TRY.
+        ii_progress->show( iv_current = iv_current iv_text = iv_text ).
+      CATCH zcx_abapgit_exception.
+        " Progress display must never affect fetch/decode results.
+    ENDTRY.
   ENDMETHOD.
 
   METHOD first_progressive_deepen.

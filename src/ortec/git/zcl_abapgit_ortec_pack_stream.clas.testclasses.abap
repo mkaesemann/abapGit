@@ -804,3 +804,350 @@ CLASS ltcl_pack_stream IMPLEMENTATION.
       msg = 'cleanup_incomplete must remove an attempt-tagged D-status row left behind by a simulated crash' ).
   ENDMETHOD.
 ENDCLASS.
+
+"! Progress test double patterned after ltcl_progress_double in
+"! zcl_abapgit_git_pack.clas.testclasses.abap, extended to record every
+"! call so tests can assert on monotonicity/cadence/text content.
+CLASS ltcl_progress_recorder DEFINITION CREATE PUBLIC FOR TESTING.
+  PUBLIC SECTION.
+    INTERFACES zif_abapgit_progress.
+    TYPES: BEGIN OF ty_call,
+             current TYPE i,
+             text    TYPE string,
+           END OF ty_call.
+    TYPES ty_calls TYPE STANDARD TABLE OF ty_call WITH EMPTY KEY.
+    DATA mt_calls TYPE ty_calls READ-ONLY.
+ENDCLASS.
+
+CLASS ltcl_progress_recorder IMPLEMENTATION.
+  METHOD zif_abapgit_progress~set_total.
+    RETURN.
+  ENDMETHOD.
+  METHOD zif_abapgit_progress~show.
+    APPEND VALUE #( current = iv_current text = iv_text ) TO mt_calls.
+  ENDMETHOD.
+  METHOD zif_abapgit_progress~off.
+    RETURN.
+  ENDMETHOD.
+ENDCLASS.
+
+CLASS ltcl_pack_stream_progress DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+  PRIVATE SECTION.
+    CONSTANTS mc_repo TYPE c LENGTH 12 VALUE 'ZAOGT_PROGR'.
+    METHODS setup.
+    METHODS teardown.
+    "! Test list items 1 & 3: object progress is monotonic, never exceeds
+    "! the truthful total, and the update count is bounded for a large
+    "! synthetic object count (not one call per object).
+    METHODS decoding_progress_bounded FOR TESTING RAISING cx_static_check.
+    "! Test list item 2: a zero-object pack does not divide by zero and
+    "! still produces coherent phase feedback.
+    METHODS zero_object_pack_coherent FOR TESTING RAISING cx_static_check.
+    "! Test list item 4: fixpoint phase reporting does not claim a false
+    "! percentage.
+    METHODS fixpoint_no_false_percentage FOR TESTING RAISING cx_static_check.
+    "! Test list item 7: a single injected progress reference threaded
+    "! through decode_streaming's whole call chain (decode + resolve +
+    "! extract) is one continuous lifecycle, never reset/replaced.
+    METHODS one_lifecycle_across_phases FOR TESTING RAISING cx_static_check.
+    "! Test list item 5: progress reporting does not change successful
+    "! decode results.
+    METHODS progress_no_result_change FOR TESTING RAISING cx_static_check.
+    "! Test list item 6: progress reporting does not replace the original
+    "! exception/failure behavior.
+    METHODS progress_preserves_failure FOR TESTING RAISING cx_static_check.
+ENDCLASS.
+
+CLASS ltcl_pack_stream_progress IMPLEMENTATION.
+  METHOD setup.
+    ROLLBACK WORK. "#EC CI_ROLLBACK
+    DELETE FROM zaog_obj_store WHERE repo_key = mc_repo.
+    COMMIT WORK.
+  ENDMETHOD.
+
+  METHOD teardown.
+    ROLLBACK WORK. "#EC CI_ROLLBACK
+    DELETE FROM zaog_obj_store WHERE repo_key = mc_repo.
+    COMMIT WORK.
+  ENDMETHOD.
+
+  METHOD decoding_progress_bounded.
+    DATA lt_obj           TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA ls_obj           TYPE zif_abapgit_definitions=>ty_object.
+    DATA lv_pack          TYPE xstring.
+    DATA lo_recorder      TYPE REF TO ltcl_progress_recorder.
+    DATA lv_prev_current  TYPE i.
+    DATA lv_decoding_calls TYPE i.
+
+    CREATE OBJECT lo_recorder.
+
+    DO 1200 TIMES.
+      CLEAR ls_obj.
+      ls_obj-type  = zif_abapgit_git_definitions=>c_type-blob.
+      ls_obj-data  = zcl_abapgit_convert=>string_to_xstring_utf8( |blob-{ sy-index }| ).
+      ls_obj-sha1  = zcl_abapgit_hash=>sha1( iv_type = ls_obj-type iv_data = ls_obj-data ).
+      ls_obj-index = sy-index.
+      APPEND ls_obj TO lt_obj.
+    ENDDO.
+    lv_pack = zcl_abapgit_git_pack=>encode( lt_obj ).
+
+    zcl_abapgit_ortec_pack_stream=>decode_and_persist_streaming(
+      iv_data     = lv_pack
+      iv_repo_key = mc_repo
+      ii_progress = lo_recorder ).
+
+    LOOP AT lo_recorder->mt_calls INTO DATA(ls_call) WHERE text CS 'decoding pack object'.
+      lv_decoding_calls = lv_decoding_calls + 1.
+      cl_abap_unit_assert=>assert_true( act = xsdbool( ls_call-current >= lv_prev_current )
+        msg = 'Decoding progress current must be monotonically non-decreasing' ).
+      cl_abap_unit_assert=>assert_true( act = xsdbool( ls_call-current <= 1200 )
+        msg = 'Decoding progress current must never exceed the truthful total' ).
+      lv_prev_current = ls_call-current.
+    ENDLOOP.
+
+    cl_abap_unit_assert=>assert_true( act = xsdbool( lv_decoding_calls > 0 )
+      msg = 'At least one decoding progress call must have fired' ).
+    cl_abap_unit_assert=>assert_true( act = xsdbool( lv_decoding_calls < 20 )
+      msg = 'Update count must be bounded, not one call per object, for a 1200-object pack' ).
+  ENDMETHOD.
+
+  METHOD zero_object_pack_coherent.
+    DATA lt_obj      TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lv_pack     TYPE xstring.
+    DATA lt_meta     TYPE zcl_abapgit_ortec_pack_stream=>ty_meta_tt.
+    DATA lo_recorder TYPE REF TO ltcl_progress_recorder.
+
+    CREATE OBJECT lo_recorder.
+
+    lv_pack = zcl_abapgit_git_pack=>encode( lt_obj ). " empty table -> 0-object pack
+
+    lt_meta = zcl_abapgit_ortec_pack_stream=>decode_and_persist_streaming(
+      iv_data     = lv_pack
+      iv_repo_key = mc_repo
+      ii_progress = lo_recorder ).
+
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_meta ) exp = 0
+      msg = 'A zero-object pack must decode to an empty metadata table without error' ).
+    cl_abap_unit_assert=>assert_true(
+      act = xsdbool( line_exists( lo_recorder->mt_calls[ text = 'Git: decoding pack object 0 of 0' ] ) )
+      msg = 'A zero-object pack must still produce coherent phase feedback with no division by zero' ).
+  ENDMETHOD.
+
+  METHOD fixpoint_no_false_percentage.
+    DATA lv_base_data   TYPE xstring VALUE '41414141'.
+    DATA lv_base_sha    TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_base_raw    TYPE x LENGTH 20.
+    DATA lv_delta       TYPE xstring VALUE '040590040121'.
+    DATA lv_compressed  TYPE xstring.
+    DATA lv_adler       TYPE zif_abapgit_git_definitions=>ty_adler32.
+    DATA lv_pack_magic  TYPE x LENGTH 4 VALUE '5041434B'.
+    DATA lv_version     TYPE x LENGTH 4 VALUE '00000002'.
+    DATA lv_obj_count   TYPE x LENGTH 4 VALUE '00000001'.
+    DATA lv_zlib_hdr    TYPE x LENGTH 2 VALUE '789C'.
+    DATA lv_type_len    TYPE x LENGTH 1 VALUE '76'.
+    DATA lv_pack        TYPE xstring.
+    DATA lv_trailer_hex TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_trailer_raw TYPE x LENGTH 20.
+    DATA lt_meta        TYPE zcl_abapgit_ortec_pack_stream=>ty_meta_tt.
+    DATA lv_pack_id     TYPE zcl_abapgit_ortec_pack_stream=>ty_pack_id.
+    DATA lo_recorder    TYPE REF TO ltcl_progress_recorder.
+    DATA lv_found_pass  TYPE abap_bool.
+
+    CREATE OBJECT lo_recorder.
+
+    lv_base_sha = zcl_abapgit_hash=>sha1_blob( lv_base_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo
+      iv_sha1     = lv_base_sha
+      iv_type     = zif_abapgit_git_definitions=>c_type-blob
+      iv_data     = lv_base_data ).
+
+    cl_abap_gzip=>compress_binary(
+      EXPORTING raw_in = lv_delta
+      IMPORTING gzip_out = lv_compressed ).
+    lv_adler = zcl_abapgit_hash=>adler32( lv_delta ).
+    lv_base_raw = to_upper( lv_base_sha ).
+
+    CONCATENATE lv_pack_magic lv_version lv_obj_count INTO lv_pack IN BYTE MODE.
+    CONCATENATE lv_pack lv_type_len lv_base_raw lv_zlib_hdr lv_compressed lv_adler
+      INTO lv_pack IN BYTE MODE.
+    lv_trailer_hex = zcl_abapgit_hash=>sha1_raw( lv_pack ).
+    lv_trailer_raw = to_upper( lv_trailer_hex ).
+    CONCATENATE lv_pack lv_trailer_raw INTO lv_pack IN BYTE MODE.
+
+    lt_meta = zcl_abapgit_ortec_pack_stream=>decode_and_persist_streaming(
+      EXPORTING
+        iv_data     = lv_pack
+        iv_repo_key = mc_repo
+      IMPORTING
+        ev_pack_id  = lv_pack_id ).
+
+    zcl_abapgit_ortec_obj_store=>invalidate_cache( ).
+    zcl_abapgit_ortec_base_cache=>get_instance( )->clear( ).
+
+    zcl_abapgit_ortec_pack_stream=>resolve_streaming(
+      EXPORTING
+        iv_repo_key = mc_repo
+        iv_pack_id  = lv_pack_id
+        ii_progress = lo_recorder
+      CHANGING
+        ct_meta     = lt_meta ).
+
+    LOOP AT lo_recorder->mt_calls INTO DATA(ls_call).
+      cl_abap_unit_assert=>assert_false( act = xsdbool( ls_call-text CS '%' )
+        msg = 'Fixpoint/resolution phase text must never claim a percentage' ).
+      IF ls_call-text CS 'resolving in-pack deltas'.
+        lv_found_pass = abap_true.
+      ENDIF.
+    ENDLOOP.
+    cl_abap_unit_assert=>assert_true( act = lv_found_pass
+      msg = 'At least one in-pack fixpoint pass must have been reported' ).
+  ENDMETHOD.
+
+  METHOD one_lifecycle_across_phases.
+    DATA lt_nodes       TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+    DATA ls_node        LIKE LINE OF lt_nodes.
+    DATA ls_commit      TYPE zcl_abapgit_git_pack=>ty_commit.
+    DATA lt_obj         TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA ls_obj         LIKE LINE OF lt_obj.
+    DATA lv_pack        TYPE xstring.
+    DATA lv_blob_data   TYPE xstring.
+    DATA lv_blob_sha    TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_tree_data   TYPE xstring.
+    DATA lv_tree_sha    TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_commit_data TYPE xstring.
+    DATA lv_commit_sha  TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lo_recorder    TYPE REF TO ltcl_progress_recorder.
+
+    CREATE OBJECT lo_recorder.
+
+    lv_blob_data = '48656C6C6F'.
+    lv_blob_sha  = zcl_abapgit_hash=>sha1_blob( lv_blob_data ).
+
+    ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-file.
+    ls_node-name  = 'hello.txt'.
+    ls_node-sha1  = lv_blob_sha.
+    APPEND ls_node TO lt_nodes.
+    lv_tree_data = zcl_abapgit_git_pack=>encode_tree( lt_nodes ).
+    lv_tree_sha  = zcl_abapgit_hash=>sha1_tree( lv_tree_data ).
+
+    ls_commit-tree      = lv_tree_sha.
+    ls_commit-author    = 'Test <test@example.com> 0 +0000'.
+    ls_commit-committer = 'Test <test@example.com> 0 +0000'.
+    ls_commit-body      = 'test'.
+    lv_commit_data = zcl_abapgit_git_pack=>encode_commit( ls_commit ).
+    lv_commit_sha  = zcl_abapgit_hash=>sha1_commit( lv_commit_data ).
+
+    CLEAR ls_obj.
+    ls_obj-type  = zif_abapgit_git_definitions=>c_type-blob.
+    ls_obj-data  = lv_blob_data.
+    ls_obj-sha1  = lv_blob_sha.
+    ls_obj-index = 1.
+    APPEND ls_obj TO lt_obj.
+
+    CLEAR ls_obj.
+    ls_obj-type  = zif_abapgit_git_definitions=>c_type-tree.
+    ls_obj-data  = lv_tree_data.
+    ls_obj-sha1  = lv_tree_sha.
+    ls_obj-index = 2.
+    APPEND ls_obj TO lt_obj.
+
+    CLEAR ls_obj.
+    ls_obj-type  = zif_abapgit_git_definitions=>c_type-commit.
+    ls_obj-data  = lv_commit_data.
+    ls_obj-sha1  = lv_commit_sha.
+    ls_obj-index = 3.
+    APPEND ls_obj TO lt_obj.
+
+    lv_pack = zcl_abapgit_git_pack=>encode( lt_obj ).
+
+    zcl_abapgit_ortec_pack_stream=>decode_streaming(
+      iv_data     = lv_pack
+      iv_repo_key = mc_repo
+      ii_progress = lo_recorder ).
+
+    cl_abap_unit_assert=>assert_true(
+      act = xsdbool( line_exists( lo_recorder->mt_calls[ text = |Git: decoding pack object 0 of 3| ] ) )
+      msg = 'The single injected progress reference must have received the decode phase call' ).
+    cl_abap_unit_assert=>assert_true(
+      act = xsdbool( line_exists( lo_recorder->mt_calls[ text = 'Git: extracting commits' ] ) )
+      msg = 'The SAME injected reference must also have received the final extraction phase call - ' &&
+            'one continuous lifecycle, not a reset/second progress object' ).
+  ENDMETHOD.
+
+  METHOD progress_no_result_change.
+    DATA lt_obj    TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA ls_obj    TYPE zif_abapgit_definitions=>ty_object.
+    DATA lv_pack   TYPE xstring.
+    DATA lt_meta_a TYPE zcl_abapgit_ortec_pack_stream=>ty_meta_tt.
+    DATA lt_meta_b TYPE zcl_abapgit_ortec_pack_stream=>ty_meta_tt.
+    DATA lo_recorder TYPE REF TO ltcl_progress_recorder.
+
+    CREATE OBJECT lo_recorder.
+
+    ls_obj-data  = '48656C6C6F'.
+    ls_obj-type  = zif_abapgit_git_definitions=>c_type-blob.
+    ls_obj-sha1  = zcl_abapgit_hash=>sha1( iv_type = ls_obj-type iv_data = ls_obj-data ).
+    ls_obj-index = 1.
+    APPEND ls_obj TO lt_obj.
+    lv_pack = zcl_abapgit_git_pack=>encode( lt_obj ).
+
+    lt_meta_a = zcl_abapgit_ortec_pack_stream=>decode_and_persist_streaming(
+      iv_data     = lv_pack
+      iv_repo_key = mc_repo ).
+
+    DELETE FROM zaog_obj_store WHERE repo_key = mc_repo.
+    COMMIT WORK.
+
+    lt_meta_b = zcl_abapgit_ortec_pack_stream=>decode_and_persist_streaming(
+      iv_data     = lv_pack
+      iv_repo_key = mc_repo
+      ii_progress = lo_recorder ).
+
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_meta_b ) exp = lines( lt_meta_a )
+      msg = 'Progress reporting must not change the number of decoded objects' ).
+    cl_abap_unit_assert=>assert_equals( act = lt_meta_b[ 1 ]-sha1 exp = lt_meta_a[ 1 ]-sha1
+      msg = 'Progress reporting must not change the decoded result' ).
+    cl_abap_unit_assert=>assert_equals( act = lt_meta_b[ 1 ]-is_resolved exp = lt_meta_a[ 1 ]-is_resolved ).
+    cl_abap_unit_assert=>assert_true( act = xsdbool( lo_recorder->mt_calls IS NOT INITIAL )
+      msg = 'Sanity: the recorder-attached run must actually have received calls' ).
+  ENDMETHOD.
+
+  METHOD progress_preserves_failure.
+    DATA lt_obj      TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA ls_obj      TYPE zif_abapgit_definitions=>ty_object.
+    DATA lv_pack     TYPE xstring.
+    DATA lv_len      TYPE i.
+    DATA lv_caught   TYPE abap_bool.
+    DATA lv_count    TYPE i.
+    DATA lo_recorder TYPE REF TO ltcl_progress_recorder.
+
+    CREATE OBJECT lo_recorder.
+
+    ls_obj-data  = '48656C6C6F'.
+    ls_obj-type  = zif_abapgit_git_definitions=>c_type-blob.
+    ls_obj-sha1  = zcl_abapgit_hash=>sha1( iv_type = ls_obj-type iv_data = ls_obj-data ).
+    ls_obj-index = 1.
+    APPEND ls_obj TO lt_obj.
+    lv_pack = zcl_abapgit_git_pack=>encode( lt_obj ).
+
+    lv_len = xstrlen( lv_pack ) - 1.
+    lv_pack = lv_pack(lv_len) && 'FF'.
+
+    lv_caught = abap_false.
+    TRY.
+        zcl_abapgit_ortec_pack_stream=>decode_and_persist_streaming(
+          iv_data     = lv_pack
+          iv_repo_key = mc_repo
+          ii_progress = lo_recorder ).
+      CATCH zcx_abapgit_ortec_git.
+        lv_caught = abap_true.
+    ENDTRY.
+    cl_abap_unit_assert=>assert_true( act = lv_caught
+      msg = 'A progress reference must not suppress the real decode failure' ).
+
+    SELECT COUNT(*) FROM zaog_obj_store INTO lv_count WHERE repo_key = mc_repo.
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 0
+      msg = 'Failure cleanup must still happen even when progress is attached' ).
+  ENDMETHOD.
+ENDCLASS.

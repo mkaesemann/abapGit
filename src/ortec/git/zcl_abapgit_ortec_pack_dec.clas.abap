@@ -1,5 +1,4 @@
-"! <p class="shorttext synchronized">ORTEC Incremental Pack Decoder with Persistence</p>
-"! Decodes a Git packfile object by object, persisting intermediate state so that
+"! <p class="shorttext synchronized">ORTEC Incremental Pack Decoder with Persistence</p>"! Decodes a Git packfile object by object, persisting intermediate state so that
 "! a timeout or crash can be resumed without re-downloading from the remote.
 "! <ul>
 "!   <li>Raw packfile → <em>ZAOG_RAW_PACK</em> (survives HTTP timeout)</li>
@@ -56,6 +55,7 @@ CLASS zcl_abapgit_ortec_pack_dec DEFINITION
                 iv_repo_key        TYPE ty_repo_key
                 iv_commit_interval TYPE i                                      DEFAULT 50
                 it_objects         TYPE zif_abapgit_definitions=>ty_objects_tt OPTIONAL
+                ii_progress        TYPE REF TO zif_abapgit_progress OPTIONAL
       RETURNING VALUE(rt_objects)  TYPE zif_abapgit_definitions=>ty_objects_tt
       RAISING   zcx_abapgit_exception.
 
@@ -243,6 +243,18 @@ CLASS zcl_abapgit_ortec_pack_dec DEFINITION
                 iv_pack_id  TYPE ty_pack_id
                 iv_count    TYPE i.
 
+    "! Best-effort progress report: never lets a progress-display failure
+    "! affect decode/persist results. No-op if ii_progress is not bound.
+    "! decode_and_persist is reachable only via a narrow, best-effort
+    "! fallback (zcl_abapgit_ortec_fastpath=>try_filtered_commit_fetch) that
+    "! owns no progress lifecycle today, so ii_progress is unbound (and this
+    "! is a no-op) on that path - kept available for a future direct caller
+    "! that does own one.
+    CLASS-METHODS report_progress
+      IMPORTING ii_progress TYPE REF TO zif_abapgit_progress OPTIONAL
+                iv_current  TYPE i
+                iv_text     TYPE string.
+
 ENDCLASS.
 
 
@@ -429,6 +441,9 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
           lv_obj_count = lines( rt_objects ).
         ENDIF.
 
+        report_progress( ii_progress = ii_progress iv_current = 0
+          iv_text = |Git: decoding pack object 0 of { lv_obj_count }| ).
+
         " STEP 3: Register pack metadata (status P = in progress)
         GET TIME STAMP FIELD lv_ts.
         ls_meta-repo_key    = iv_repo_key.
@@ -487,6 +502,8 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
         COMMIT WORK.
 
         release_repo_lock( lv_repo_lock_id ).
+        report_progress( ii_progress = ii_progress iv_current = lv_obj_count
+          iv_text = |Git: completed ({ lv_obj_count } objects)| ).
       CATCH zcx_abapgit_exception INTO DATA(lx_decode).
         " Clean up this failed attempt so it leaves the store exactly as if
         " it never started. A genuine decode/resolve failure (as opposed to
@@ -749,6 +766,17 @@ CLASS zcl_abapgit_ortec_pack_dec IMPLEMENTATION.
     UPDATE zaog_pack_meta
       SET status = 'C' obj_decoded = iv_count
       WHERE repo_key = iv_repo_key AND pack_id = iv_pack_id.
+  ENDMETHOD.
+
+  METHOD report_progress.
+    IF ii_progress IS NOT BOUND.
+      RETURN.
+    ENDIF.
+    TRY.
+        ii_progress->show( iv_current = iv_current iv_text = iv_text ).
+      CATCH zcx_abapgit_exception.
+        " Progress display must never affect decode/persist results.
+    ENDTRY.
   ENDMETHOD.
 
   METHOD create_session.

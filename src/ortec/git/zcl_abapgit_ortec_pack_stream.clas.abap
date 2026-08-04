@@ -2,7 +2,6 @@ CLASS zcl_abapgit_ortec_pack_stream DEFINITION
   PUBLIC
   FINAL
   CREATE PUBLIC.
-
   PUBLIC SECTION.
     TYPES ty_repo_key TYPE c LENGTH 12.
     TYPES ty_pack_id  TYPE c LENGTH 32.
@@ -72,6 +71,7 @@ CLASS zcl_abapgit_ortec_pack_stream DEFINITION
       IMPORTING iv_data        TYPE xstring
                 iv_repo_key    TYPE ty_repo_key
                 iv_attempt_id  TYPE zcl_abapgit_ortec_mat_state=>ty_attempt_id OPTIONAL
+                ii_progress    TYPE REF TO zif_abapgit_progress OPTIONAL
       EXPORTING ev_pack_id     TYPE ty_pack_id
       RETURNING VALUE(rt_meta) TYPE ty_meta_tt
       RAISING   zcx_abapgit_ortec_git.
@@ -106,6 +106,7 @@ CLASS zcl_abapgit_ortec_pack_stream DEFINITION
       IMPORTING iv_repo_key TYPE ty_repo_key
                 iv_pack_id  TYPE ty_pack_id
                 iv_url      TYPE string OPTIONAL
+                ii_progress TYPE REF TO zif_abapgit_progress OPTIONAL
       CHANGING  ct_meta     TYPE ty_meta_tt
       RAISING   zcx_abapgit_ortec_git.
 
@@ -146,6 +147,7 @@ CLASS zcl_abapgit_ortec_pack_stream DEFINITION
       IMPORTING iv_data          TYPE xstring
                 iv_repo_key      TYPE ty_repo_key
                 iv_url           TYPE string OPTIONAL
+                ii_progress      TYPE REF TO zif_abapgit_progress OPTIONAL
       RETURNING VALUE(rt_objects) TYPE zif_abapgit_definitions=>ty_objects_tt
       RAISING   zcx_abapgit_ortec_git.
 
@@ -332,6 +334,15 @@ CLASS zcl_abapgit_ortec_pack_stream DEFINITION
     CLASS-METHODS count_unresolved
       IMPORTING it_meta         TYPE ty_meta_tt
       RETURNING VALUE(rv_count) TYPE i.
+
+    "! Best-effort progress report: never lets a progress-display failure
+    "! affect decode/resolve results. No-op if ii_progress is not bound.
+    "! Never calls zcl_abapgit_progress=>get_instance - the caller (an
+    "! orchestrator) owns the lifecycle and passes its own reference in.
+    CLASS-METHODS report_progress
+      IMPORTING ii_progress TYPE REF TO zif_abapgit_progress OPTIONAL
+                iv_current  TYPE i
+                iv_text     TYPE string.
 ENDCLASS.
 
 
@@ -420,6 +431,17 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
     rv_count = REDUCE i( INIT n = 0
                          FOR ls_row IN it_meta
                          NEXT n = n + COND i( WHEN ls_row-is_resolved = abap_false THEN 1 ELSE 0 ) ).
+  ENDMETHOD.
+
+  METHOD report_progress.
+    IF ii_progress IS NOT BOUND.
+      RETURN.
+    ENDIF.
+    TRY.
+        ii_progress->show( iv_current = iv_current iv_text = iv_text ).
+      CATCH zcx_abapgit_exception.
+        " Progress display must never affect decode/resolve results.
+    ENDTRY.
   ENDMETHOD.
 
   METHOD flush_batch.
@@ -770,6 +792,7 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
   METHOD resolve_streaming.
     DATA lv_tabix    TYPE i.
     DATA lv_progress TYPE abap_bool.
+    DATA lv_pass     TYPE i.
     DATA ls_sha      TYPE ty_sha_idx.
     DATA ls_off      TYPE ty_tabix_by_offset.
     DATA lt_tabix_by_offset TYPE ty_tabix_by_offset_tt.
@@ -819,6 +842,7 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
     " pack's actual maximum delta-chain depth, not by object count.
     DO.
       lv_progress = abap_false.
+      lv_pass = lv_pass + 1.
       LOOP AT ct_meta ASSIGNING <ls_row>.
         lv_tabix = sy-tabix.
         IF <ls_row>-is_resolved = abap_true.
@@ -842,6 +866,8 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
           lv_progress = abap_true.
         ENDIF.
       ENDLOOP.
+      report_progress( ii_progress = ii_progress iv_current = lv_pass
+        iv_text = |Git: resolving in-pack deltas (pass { lv_pass }, { count_unresolved( ct_meta ) } remaining)| ).
       IF lv_progress = abap_false.
         EXIT.
       ENDIF.
@@ -874,6 +900,8 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
     ENDLOOP.
 
     IF lt_external_bases IS NOT INITIAL.
+      report_progress( ii_progress = ii_progress iv_current = lines( lt_external_bases )
+        iv_text = |Git: loading { lines( lt_external_bases ) } external delta bases| ).
       TRY.
           lt_loaded_bases = zcl_abapgit_ortec_delta=>bulk_resolve_external_bases(
             iv_repo_key = iv_repo_key
@@ -918,6 +946,11 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
 
     " Pass 2: one final ascending pass, now allowing the object-store fetch
     " and the precise "Delta base not found" raise.
+    DATA(lv_remaining_ext) = count_unresolved( ct_meta ).
+    IF lv_remaining_ext > 0.
+      report_progress( ii_progress = ii_progress iv_current = lv_remaining_ext
+        iv_text = |Git: resolving external deltas ({ lv_remaining_ext } remaining)| ).
+    ENDIF.
     LOOP AT ct_meta ASSIGNING <ls_row>.
       lv_tabix = sy-tabix.
       IF <ls_row>-is_resolved = abap_true.
@@ -970,6 +1003,7 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
     lt_meta = decode_and_persist_streaming(
       EXPORTING iv_data     = iv_data
                 iv_repo_key = iv_repo_key
+                ii_progress = ii_progress
       IMPORTING ev_pack_id  = lv_pack_id ).
 
     " Captured BEFORE resolve_streaming mutates ct_meta - its phase 1.5 can
@@ -985,6 +1019,7 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
           EXPORTING iv_repo_key = iv_repo_key
                     iv_pack_id  = lv_pack_id
                     iv_url      = iv_url
+                    ii_progress = ii_progress
           CHANGING  ct_meta     = lt_meta ).
       CATCH zcx_abapgit_ortec_git INTO lx_resolve.
         " resolve_streaming does not commit on failure (see its own doc) -
@@ -996,6 +1031,9 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
         ROLLBACK WORK.
         RAISE EXCEPTION lx_resolve.
     ENDTRY.
+
+    report_progress( ii_progress = ii_progress iv_current = lines( lt_meta )
+      iv_text = 'Git: extracting commits' ).
 
     LOOP AT lt_meta INTO ls_meta WHERE obj_type = zif_abapgit_git_definitions=>c_type-commit.
       IF sy-tabix > lv_original_count.
@@ -1058,6 +1096,9 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
         lv_xstring = lv_data(4).
         lv_objects = zcl_abapgit_convert=>xstring_to_int( lv_xstring ).
         lv_data = lv_data+4.
+
+        report_progress( ii_progress = ii_progress iv_current = 0
+          iv_text = |Git: decoding pack object 0 of { lv_objects }| ).
 
         DO lv_objects TIMES.
           lv_uindex = sy-index.
@@ -1145,11 +1186,18 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
 
           APPEND ls_meta TO rt_meta.
 
+          IF lv_uindex = 1 OR lv_uindex = lv_objects OR lines( lt_batch ) >= c_batch_size.
+            report_progress( ii_progress = ii_progress iv_current = lv_uindex
+              iv_text = |Git: decoding pack object { lv_uindex } of { lv_objects }| ).
+          ENDIF.
+
           IF lines( lt_batch ) >= c_batch_size.
             flush_batch(
               EXPORTING iv_repo_key = iv_repo_key
                         iv_pack_id  = lv_pack_id
               CHANGING  ct_batch    = lt_batch ).
+            report_progress( ii_progress = ii_progress iv_current = lv_uindex
+              iv_text = |Git: persisting decoded objects { lv_uindex } of { lv_objects }| ).
           ENDIF.
         ENDDO.
 
@@ -1157,6 +1205,11 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
           EXPORTING iv_repo_key = iv_repo_key
                     iv_pack_id  = lv_pack_id
           CHANGING  ct_batch    = lt_batch ).
+        report_progress( ii_progress = ii_progress iv_current = lv_objects
+          iv_text = |Git: persisting decoded objects { lv_objects } of { lv_objects }| ).
+
+        report_progress( ii_progress = ii_progress iv_current = lv_objects
+          iv_text = 'Git: validating pack' ).
 
         lv_len = xstrlen( iv_data ) - 20.
         " Offset/length notation on an XSTRING cannot be used inline as a
@@ -1176,6 +1229,9 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
         " delta-type UPDATE runs FIRST and is narrowed by obj_type, so the
         " second, broader UPDATE (still scoped to status = c_status_incomplete)
         " only ever matches the remaining non-delta rows.
+        report_progress( ii_progress = ii_progress iv_current = lv_objects
+          iv_text = 'Git: finalizing object store' ).
+
         UPDATE zaog_obj_store SET status = c_status_decoded
           WHERE repo_key = iv_repo_key
             AND pack_id  = lv_pack_id

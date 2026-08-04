@@ -936,3 +936,59 @@ CLASS ltcl_fastpath_protocol IMPLEMENTATION.
       msg = 'The initial progressive depth must also be capped at the configured ceiling' ).
   ENDMETHOD.
 ENDCLASS.
+
+"! Progress test double, same pattern as ltcl_progress_recorder in
+"! zcl_abapgit_ortec_pack_stream.clas.testclasses.abap (each testclasses
+"! include is its own compilation unit, so it is redeclared here).
+CLASS ltcl_fp_progress_recorder DEFINITION CREATE PUBLIC FOR TESTING.
+  PUBLIC SECTION.
+    INTERFACES zif_abapgit_progress.
+    TYPES: BEGIN OF ty_call,
+             current TYPE i,
+             text    TYPE string,
+           END OF ty_call.
+    TYPES ty_calls TYPE STANDARD TABLE OF ty_call WITH EMPTY KEY.
+    DATA mt_calls TYPE ty_calls READ-ONLY.
+ENDCLASS.
+
+CLASS ltcl_fp_progress_recorder IMPLEMENTATION.
+  METHOD zif_abapgit_progress~set_total.
+    RETURN.
+  ENDMETHOD.
+  METHOD zif_abapgit_progress~show.
+    APPEND VALUE #( current = iv_current text = iv_text ) TO mt_calls.
+  ENDMETHOD.
+  METHOD zif_abapgit_progress~off.
+    RETURN.
+  ENDMETHOD.
+ENDCLASS.
+
+CLASS ltcl_fastpath_progress DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+  PRIVATE SECTION.
+    "! Test list item 8: existing ORTEC-disabled behavior remains
+    "! unchanged. An unconfigured URL means
+    "! zcl_abapgit_ortec_git_switch=>is_active_for_repo returns
+    "! abap_false, so pull_by_branch must return an INITIAL result
+    "! immediately - before any progress call - even when an injected
+    "! progress reference is supplied.
+    METHODS disabled_repo_no_progress FOR TESTING RAISING cx_static_check.
+ENDCLASS.
+
+CLASS ltcl_fastpath_progress IMPLEMENTATION.
+  METHOD disabled_repo_no_progress.
+    DATA lo_recorder TYPE REF TO ltcl_fp_progress_recorder.
+    DATA ls_result   TYPE zcl_abapgit_git_porcelain=>ty_pull_result.
+
+    CREATE OBJECT lo_recorder.
+
+    ls_result = zcl_abapgit_ortec_fastpath=>pull_by_branch(
+      iv_url         = 'https://example.invalid/ortec-progress-disabled-test.git'
+      iv_branch_name = 'refs/heads/main'
+      ii_progress    = lo_recorder ).
+
+    cl_abap_unit_assert=>assert_initial( act = ls_result
+      msg = 'A repo where the ORTEC switch is off must still return an INITIAL result unchanged' ).
+    cl_abap_unit_assert=>assert_true( act = xsdbool( lo_recorder->mt_calls IS INITIAL )
+      msg = 'No progress call may fire before the disabled-switch short-circuit' ).
+  ENDMETHOD.
+ENDCLASS.
