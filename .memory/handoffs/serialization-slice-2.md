@@ -3,41 +3,91 @@
 ```text
 PACKET=COMPACT_HANDOFF_V1
 TASK=SERIALIZATION_SER_SLICE_2
-STATUS=PHASE_1_IT8_RECONCILED_PHASE_2_READY
-REASON=Owner activated Phase 1 contracts on IT8 (2026-08-04), found and
-  fixed real activation defects the local tooling could not detect
-  (commit c13943be "Syntax Fixes for Serialization Harness"): DD03P
-  DDTEXT length/COMPTYPE=E override rules, TTYP KEYDEF/KEYKIND corrected
-  from G/G to D/N (WITH DEFAULT KEY, matching ty_tadir_tt's own working
-  encoding), ORCH's iv_group corrected to TYPE rzlli_apcl (verified
-  against the real zcl_abapgit_serialize mv_group declaration), and a
-  new ZAOG_SER_TADIR/_TT DDIC pair created because RFC function modules
-  cannot reference an interface-scoped type (confirms the previously
-  flagged \TYPE=ZIF_*=>... risk was real). Pushed and pulled back; all
-  corrections reconciled and classified in
-  .memory/logs/serialization_slice_2_documentation.md. This agent then
-  ran a live SAPDiagnose(action="atc") gate check and found 6 real
-  priority-3 findings (empty @raising ABAP Doc tags, and ABAP Doc
-  incorrectly attached to chained TYPES: BEGIN OF blocks) across ORCH/
-  COST/PLANNER, plus restored FM long-text documentation that had been
-  silently reduced to an SE37 empty skeleton during the owner's fix pass
-  (the FUGR <DOCUMENTATION> element is a structured per-parameter RSFDO
-  list, not free text - real prose lives in a separate LONGTEXTS DOKU
-  block). All fixed locally and committed as f9d0a070 "SER-SLICE-2: fix
-  ATC findings on corrected Phase 1 contracts" - NOT YET re-verified live
-  (ATC reads the system's active version; needs owner import/activate
-  first).
-PRODUCTIVE_CODE_CHANGED=YES (contract-only, same scope as before; no
-  approved semantics changed by any correction - all are
-  SYNTAX_ONLY/DDIC_OR_RFC_COMPATIBILITY/SIGNATURE_CHANGE (RFC-boundary
-  type only)/DOCUMENTATION_CORRECTION per the classification table)
+STATUS=PHASE_2_LOCAL_IMPLEMENTATION_COMPLETE_AWAITING_IT8
+REASON=Phase 2 (ORCH state machine, minimal standard-abapGit hook,
+  partial T-DRAIN seam, unit tests for testable-without-RFC logic) is
+  now fully implemented locally, on top of the already-owner-corrected
+  and ATC-clean Phase 1 contracts. Before implementing ORCH, this agent
+  re-verified sections 5.0-5.9 and the section 9 limits table against
+  the ALREADY-committed Phase 1 ORCH contract and found 5 real
+  implementation-contradiction gaps (reported and owner-authorized
+  before any code was written, per the mandatory stop-and-report
+  discipline): (1) missing C_STATE_ABANDONED ('X') lifecycle state
+  required by the sect 5.3/5.4 poll-loop-termination design; (2) ~10
+  missing sect 9 limit/retry constants; (3) no method for the sect 5.9
+  actual-bytes admission/recursive-split check; (4) DISPATCH_BATCH could
+  not receive/forward the 3 prefetch buffers; (5) [discovered while
+  implementing, not pre-reported] no CLASS-DATA existed at all for a
+  run's own accumulated output/log-sink/i18n-params/dispatch-sequence/
+  EWMA-table/queue, which ON_END_OF_BATCH (a static aRFC callback with
+  NO access to SERIALIZE()'s own local variables) absolutely requires -
+  added MT_RUN_CONTEXT (TY_RUN_CONTEXT_TT), keyed by RUN_ID like every
+  other table in this class, as the mechanically-necessary completion.
+  All 5 gaps were additive only (no existing activated signature was
+  broken) and are fully documented with unit/hard-bound/SER-SLICE-2-vs-
+  deferred-scope ABAP Doc on every new declaration.
+DISCOVERED_AND_FIXED_DURING_IMPLEMENTATION (not pre-known gaps, caught by
+  live syntax dry-runs and a self-driven regression check):
+  - RAISE EXCEPTION TYPE zcx_abapgit_exception EXPORTING iv_text = ... is
+    NOT valid (that parameter does not exist on the constructor) - fixed
+    to zcx_abapgit_exception=>raise( 'text' ).
+  - Inline DATA(...) declarations are NOT allowed inside a
+    RECEIVE RESULTS FROM FUNCTION IMPORTING clause - fixed to explicit
+    DATA declarations before every RECEIVE.
+  - ZCX_ABAPGIT_EXCEPTION raised deep inside ON_END_OF_BATCH/
+    CHECK_TIMEOUTS (both unable to declare RAISING, since one is an aRFC
+    callback with a runtime-fixed signature and the other's contract was
+    already approved without RAISING) would have gone UNCAUGHT and
+    dumped inside an aRFC callback - wrapped every reachable RAISING call
+    in TRY/CATCH, logging via the run's own ii_log if bound, never
+    propagating.
+  - REAL REGRESSION CAUGHT BEFORE COMMIT: IS_NO_PARALLEL only denylists
+    ECTC/ECTD - it does NOT cover WAPA. The initial partition logic would
+    have silently routed WAPA into the batch-eligible pool, violating the
+    OD-14 audit's explicit "WAPA is never batch-eligible" requirement.
+    Fixed by adding an explicit `ls_tadir-object = 'WAPA'` check
+    alongside IS_NO_PARALLEL. Verified WAPA's actual fallback path
+    (ROUTE_TO_SEQUENTIAL_FALLBACK) is structurally identical to the
+    standard RUN_SEQUENTIAL's own zcl_abapgit_objects=>serialize() call
+    (read the real source to confirm), so routing WAPA there is not a
+    regression.
+DISCLOSED, NOT-YET-CLOSED LIMITATIONS (documented in code, not silent):
+  - BEFORE_DISPATCH always passes INITIAL prefetch buffers - PREF/
+    PREF_EXT/PREF_OO only expose EXTRACT_FOR_OBJECT (one object at a
+    time); a real batch-scoped extraction method is a genuine new
+    capability on those 3 EXISTING classes, out of this slice's
+    authorized scope. Safe (falls back to per-object read, a normal
+    prefetch miss) but the prefetch PERFORMANCE benefit does not yet
+    apply to batches - candidate follow-up slice.
+  - T-DRAIN seam is PARTIAL: Z_ABAPGIT_ORTEC_SER_BATCH got a new
+    IV_TEST_DELAY_S (default 0, test-only) parameter and sleep, but
+    C_BATCH_RFC_TIMEOUT_S/C_MAX_DRAIN_WAIT_S are hardcoded CONSTANTS with
+    no test-time override mechanism - the design's own T-DRAIN-1..8 test
+    sequence (sect 5.1b) needs this to avoid a 600s+ real wait per test
+    case. NOT implemented this slice (would need yet another contract
+    change); T-DRAIN-1..8 have NOT been executed. Per the design's own
+    text this is validated "alongside the implementation, not before
+    SLICE 2 code is written" - so this does not block Phase 2 code
+    completion, but SLICE 2 cannot be called DONE until it is closed.
+  - IV_ABAP_LANGUAGE_VERS is always passed as SPACE/initial to the batch
+    worker (ORCH's SERIALIZE() has no parameter carrying a repo's custom
+    ABAP language version, unlike the standard path's
+    MO_ABAP_LANGUAGE_VERSION) - correct for the common case (no custom
+    language version set) but a real, disclosed simplification.
+  - PROVIDER_HIT/MISS/FALLBACK in ET_RESULT remain always 0 (already
+    disclosed in the RFC worker's own Phase-2-slice-1 commit).
+PRODUCTIVE_CODE_CHANGED=YES (ORCH contract completion + full state-
+  machine bodies; minimal hook + IS_NO_PARALLEL visibility change in
+  zcl_abapgit_serialize.clas.abap; new IS_SERIAL_BATCH_ACTIVE feature
+  flag, default OFF, in zcl_abapgit_ortec_git_switch; T-DRAIN seam
+  parameter on the RFC FM; new ORCH testclasses include)
 STATE_MD_CHANGED=NO
-COMMITS_CREATED=93b814dc (Phase 1 contracts), 46f77304 (Phase 1 handoff/
-  doc log), c13943be (OWNER: IT8 activation fixes), f9d0a070 (ATC-finding
-  fixes on the corrected contracts, this agent)
-PUSHED=NO (f9d0a070 only; c13943be was already pushed+pulled by the owner
-  before this agent started)
-IT8_GATE:
+PUSHED=NO
+```
+
+## Prior Phase 1 reconciliation (2026-08-04, kept for history)
+
+```text
   DDIC_ACTIVATION=PASS (owner-confirmed)
   CLASS_CONTRACT_ACTIVATION=PASS (owner-confirmed)
   FUNCTION_GROUP_ACTIVATION=PASS (owner-confirmed)
