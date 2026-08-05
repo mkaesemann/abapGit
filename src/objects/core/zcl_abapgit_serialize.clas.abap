@@ -793,11 +793,12 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
       " (zcl_abapgit_ortec_git_switch=>is_serial_batch_active) - when off,
       " every line below this block runs completely unchanged.
       rt_files = zcl_abapgit_ortec_ser_orch=>serialize(
-        it_tadir         = lt_tadir
-        iv_max_processes = lv_max
-        iv_group         = mv_group
-        is_i18n_params   = ms_i18n_params
-        ii_log           = ii_log ).
+        it_tadir                   = lt_tadir
+        iv_max_processes           = lv_max
+        iv_group                   = mv_group
+        is_i18n_params             = ms_i18n_params
+        it_wo_translation_patterns = mt_wo_translation_patterns
+        ii_log                     = ii_log ).
       RETURN.
     ENDIF.
 

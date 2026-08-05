@@ -106,10 +106,15 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     TYPES BEGIN OF ty_dispatch.
       "! Globally unique (for the whole internal session) task name
       "! used in "STARTING NEW TASK" / "RECEIVE RESULTS FROM
-      "! FUNCTION" - formatted |SER-{run_id}-{dispatch_seq}|, always
-      "! within the SAP task-ID length limit. Never reused, even
-      "! for a retry of the same logical work (a retry gets a NEW
-      "! task name and a NEW row).
+      "! FUNCTION" - built by NEXT_TASK_NAME from a session-wide
+      "! monotonic counter (MV_NEXT_TASK_SEQ), NOT from any part of
+      "! RUN_ID (a truncated-RUN_ID scheme was found, via independent
+      "! adversarial audit AR-1-003, to be collision-prone: two
+      "! different runs could share the same first-8-hex-chars prefix
+      "! and dispatch_seq, corrupting MT_DISPATCH's UNIQUE KEY). Always
+      "! within the SAP task-ID length limit. Never reused, even for a
+      "! retry of the same logical work (a retry gets a NEW task name
+      "! and a NEW row).
       TYPES task_name   TYPE char40.
       "! Immutable run identity - see class-level "RUN IDENTITY"
       "! documentation. MUST be set on every insert; every reader
@@ -190,6 +195,15 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
       TYPES ii_log         TYPE REF TO zif_abapgit_log.
       TYPES iv_group       TYPE rzlli_apcl.
       TYPES is_i18n_params TYPE zif_abapgit_definitions=>ty_i18n_params.
+      "! Same "objects without translation" path-pattern list as the
+      "! standard path's MT_WO_TRANSLATION_PATTERNS (see AR-1-001,
+      "! independent adversarial audit) - the run-level IS_I18N_PARAMS-
+      "! MAIN_LANGUAGE_ONLY flag alone is NOT enough for output parity:
+      "! the standard path recomputes MAIN_LANGUAGE_ONLY per object via
+      "! ZCL_ABAPGIT_I18N_PARAMS=>MATCH_OBJ_PATTERNS whenever the run-
+      "! level flag is FALSE and this list is non-empty. ROUTE_TO_
+      "! SEQUENTIAL_FALLBACK reproduces that exact per-object check.
+      TYPES wo_translation_patterns TYPE string_table.
       "! Per-run monotonically increasing dispatch counter
       "! (serialization_adaptive_batch_design.md &sect;5.1) - incremented
       "! on EVERY dispatch including retries/bisections/refills, never
@@ -217,6 +231,17 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
       "! later REFILL) - drained by the poll loop as IN_FLIGHT capacity
       "! frees up.
       TYPES queue          TYPE zcl_abapgit_ortec_ser_planner=>tt_batch.
+      "! Set ABAP_TRUE by ON_END_OF_BATCH whenever a callback for this
+      "! run is processed (see PS-001, independent performance
+      "! implementation audit) - lets SERIALIZE()'s poll loop use
+      "! "WAIT FOR ASYNCHRONOUS TASKS UNTIL ... UP TO 5 SECONDS" instead
+      "! of a blind "WAIT UP TO 5 SECONDS" (which, per the ABAP Keyword
+      "! Documentation for that exact statement form, "does not wait for
+      "! callback routines" - i.e. NEVER returns early, always costing
+      "! the full 5 seconds even when every outstanding batch already
+      "! finished). Cleared by SERIALIZE() at the start of each poll
+      "! iteration.
+      TYPES changed        TYPE abap_bool.
     TYPES END OF ty_run_context.
     TYPES ty_run_context_tt TYPE HASHED TABLE OF ty_run_context WITH UNIQUE KEY run_id.
 
@@ -334,6 +359,13 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! @parameter is_i18n_params        | The caller's own resolved i18n
     "!   parameters (main language, translation languages, LXE flag,
     "!   PO-comment suppression) - unchanged, reused as-is
+    "! @parameter it_wo_translation_patterns | The caller's own MT_WO_
+    "!   TRANSLATION_PATTERNS (objects-without-translation path patterns,
+    "!   see AR-1-001 independent adversarial audit) - objects matching a
+    "!   pattern are routed to forced-sequential so their per-object
+    "!   MAIN_LANGUAGE_ONLY override (computed exactly like the standard
+    "!   path's own MATCH_OBJ_PATTERNS check) is never lost to a batch's
+    "!   single, uniform i18n treatment
     "! @parameter ii_log                | The caller's own log sink for per-object
     "!   warnings/errors, reused as-is
     "! @parameter rt_files              | Serialized files for every object in
@@ -345,12 +377,13 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "!   path (expected to be rare to never in practice, since the whole
     "!   design point is to fall back rather than fail)
     CLASS-METHODS serialize
-      IMPORTING it_tadir         TYPE zif_abapgit_definitions=>ty_tadir_tt
-                iv_max_processes TYPE i
-                iv_group         TYPE rzlli_apcl             OPTIONAL
-                is_i18n_params   TYPE zif_abapgit_definitions=>ty_i18n_params
-                ii_log           TYPE REF TO zif_abapgit_log OPTIONAL
-      RETURNING VALUE(rt_files)  TYPE zif_abapgit_definitions=>ty_files_item_tt
+      IMPORTING it_tadir                   TYPE zif_abapgit_definitions=>ty_tadir_tt
+                iv_max_processes           TYPE i
+                iv_group                   TYPE rzlli_apcl             OPTIONAL
+                is_i18n_params             TYPE zif_abapgit_definitions=>ty_i18n_params
+                it_wo_translation_patterns TYPE string_table            OPTIONAL
+                ii_log                     TYPE REF TO zif_abapgit_log OPTIONAL
+      RETURNING VALUE(rt_files)            TYPE zif_abapgit_definitions=>ty_files_item_tt
       RAISING   zcx_abapgit_exception.
 
     "! aRFC callback target for "CALLING on_end_of_batch ON END OF TASK".
@@ -390,6 +423,12 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! Each active run's shared context (output accumulator, log sink,
     "! RFC group, i18n params) - see TY_RUN_CONTEXT_TT.
     CLASS-DATA mt_run_context   TYPE ty_run_context_tt.
+    "! Session-wide monotonic counter dedicated to TASK_NAME generation
+    "! (see AR-1-003, independent adversarial audit) - guarantees every
+    "! task name is globally unique regardless of RUN_ID content,
+    "! replacing an earlier truncated-RUN_ID-hex scheme that had a real
+    "! (if low-probability) collision risk. Never reset, never reused.
+    CLASS-DATA mv_next_task_seq TYPE i.
 
     "! Session-scoped table types and static state above; helper methods
     "! below.
@@ -400,13 +439,22 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! PATH from its own TADIR entry (mirrors the standard path's own
     "! ADD_TO_RETURN, since a batch can contain objects from different
     "! paths, unlike the single-object worker).
+    "! RV_MERGED (see AR-1-004, independent adversarial audit): the
+    "! caller (ON_END_OF_BATCH) MUST check this and treat ABAP_FALSE as a
+    "! failed merge (missing run context, or IS_RESULT-FILES_XSTRING
+    "! could not be IMPORTed) - marking the object MT_RESOLVED without
+    "! checking this would silently record a "successful" object with NO
+    "! actual output.
     "! @parameter iv_run_id | Owning run
     "! @parameter is_tadir  | The object's own TADIR row (for PATH)
     "! @parameter is_result | One ET_RESULT row with RC = 0
+    "! @parameter rv_merged | ABAP_TRUE only if the run context was found
+    "!   AND the IMPORT of IS_RESULT-FILES_XSTRING succeeded
     CLASS-METHODS merge_into_mt_files
-      IMPORTING iv_run_id  TYPE sysuuid_x16
-                is_tadir   TYPE zif_abapgit_definitions=>ty_tadir
-                is_result  TYPE zaog_ser_batch_result.
+      IMPORTING iv_run_id       TYPE sysuuid_x16
+                is_tadir        TYPE zif_abapgit_definitions=>ty_tadir
+                is_result       TYPE zaog_ser_batch_result
+      RETURNING VALUE(rv_merged) TYPE abap_bool.
 
     "! Set-equality check between an ET_RESULT row set and a dispatch's own
     "! OBJECT_KEYS (same OBJ_TYPE/OBJ_NAME pairs, same count) -
@@ -461,12 +509,22 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! normal prefetch miss) but means the PERFORMANCE benefit of batch-
     "! scoped prefetching does not yet apply - a disclosed limitation, not
     "! a silent gap, flagged as a candidate follow-up slice.
+    "!
+    "! BREAKER GATE (see AR-1-002, independent adversarial audit): if
+    "! IV_RUN_ID's circuit breaker has tripped (MT_BROKEN_RUNS), this
+    "! method routes IT_OBJECT_KEYS straight to ROUTE_TO_SEQUENTIAL_
+    "! FALLBACK instead of splitting/dispatching - this is the SINGLE
+    "! choke point for every dispatch source (initial batches, queue
+    "! drain, timeout retries, receive-failure bisection all funnel
+    "! through here), so a tripped breaker reliably stops ALL further RFC
+    "! dispatches for that run, not just new ones.
     "! @parameter iv_run_id      | Owning run
     "! @parameter it_object_keys | Candidate objects for one dispatch (may
     "!   be split into smaller dispatches by this method)
     "! @parameter iv_attempt     | Passed through unchanged to DISPATCH_BATCH
     "! @parameter iv_batch_id    | Passed through unchanged to DISPATCH_BATCH
-    "! @raising zcx_abapgit_exception | Propagated from DISPATCH_BATCH
+    "! @raising zcx_abapgit_exception | Propagated from DISPATCH_BATCH or
+    "!   ROUTE_TO_SEQUENTIAL_FALLBACK
     CLASS-METHODS before_dispatch
       IMPORTING iv_run_id      TYPE sysuuid_x16
                 it_object_keys TYPE zif_abapgit_definitions=>ty_tadir_tt
@@ -507,6 +565,17 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
                 iv_prefetch_buffer_ext TYPE xstring OPTIONAL
                 iv_prefetch_buffer_oo  TYPE xstring OPTIONAL
       RAISING   zcx_abapgit_exception.
+
+    "! Builds a globally unique TASK_NAME by incrementing MV_NEXT_TASK_
+    "! SEQ (see AR-1-003, independent adversarial audit) - a pure,
+    "! side-effect-free-except-for-the-counter helper, deliberately kept
+    "! separate from DISPATCH_BATCH's own CALL FUNCTION so it can be unit
+    "! tested (repeated calls must never return the same value) without
+    "! any RFC dependency.
+    "! @parameter rv_task_name | A new, never-before-returned task name,
+    "!   well within the SAP task-ID length limit
+    CLASS-METHODS next_task_name
+      RETURNING VALUE(rv_task_name) TYPE char40.
 
     "! Scans MT_DISPATCH for this run's C_STATE_AWAITING rows whose wait
     "! budget has expired and marks them C_STATE_TIMED_OUT (logical
@@ -610,11 +679,12 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
         zcx_abapgit_exception=>raise( 'ORTEC batch: could not generate a run id' ).
     ENDTRY.
 
-    INSERT VALUE #( run_id         = lv_run_id
-                     ii_log         = ii_log
-                     iv_group       = iv_group
-                     is_i18n_params = is_i18n_params
-                     worker_count   = iv_max_processes ) INTO TABLE mt_run_context.
+    INSERT VALUE #( run_id                 = lv_run_id
+                     ii_log                 = ii_log
+                     iv_group               = iv_group
+                     is_i18n_params         = is_i18n_params
+                     wo_translation_patterns = it_wo_translation_patterns
+                     worker_count           = iv_max_processes ) INTO TABLE mt_run_context.
     ASSIGN mt_run_context[ run_id = lv_run_id ] TO FIELD-SYMBOL(<ls_ctx>).
 
     LOOP AT it_tadir INTO DATA(ls_tadir).
@@ -624,9 +694,22 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
       " which calls the SAME generic zcl_abapgit_objects=>serialize()
       " dispatch as the standard RUN_SEQUENTIAL - structurally identical,
       " not a regression.
+      "
+      " AR-1-001 (independent adversarial audit): an object whose path
+      " matches IT_WO_TRANSLATION_PATTERNS needs its OWN, possibly
+      " different, MAIN_LANGUAGE_ONLY value (per the standard path's own
+      " MATCH_OBJ_PATTERNS check) - a batch dispatches ALL its objects
+      " with ONE shared i18n flag, so any such object is routed to forced
+      " sequential instead, where ROUTE_TO_SEQUENTIAL_FALLBACK recomputes
+      " the correct per-object flag exactly like the standard path does.
       IF iv_max_processes = 1
          OR ls_tadir-object = 'WAPA'
-         OR is_standard_no_parallel_type( ls_tadir-object ) = abap_true.
+         OR is_standard_no_parallel_type( ls_tadir-object ) = abap_true
+         OR ( is_i18n_params-main_language_only = abap_false
+              AND it_wo_translation_patterns IS NOT INITIAL
+              AND zcl_abapgit_i18n_params=>match_obj_patterns(
+                    is_tadir                   = ls_tadir
+                    it_wo_translation_patterns = it_wo_translation_patterns ) = abap_true ).
         APPEND ls_tadir TO lt_forced_seq.
       ELSE.
         APPEND ls_tadir TO lt_eligible.
@@ -668,7 +751,31 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     ENDLOOP.
 
     DO.
-      WAIT UP TO 5 SECONDS.
+      " AR-1-005 (independent adversarial audit): check the exit
+      " condition BEFORE waiting, not after - a run with nothing queued
+      " and no awaiting/timed-out dispatch (all objects forced-sequential,
+      " or an empty IT_TADIR) must return immediately, not pay one
+      " unavoidable 5-second wait for work that was never dispatched.
+      IF NOT ( <ls_ctx> IS ASSIGNED AND lines( <ls_ctx>-queue ) > 0 )
+         AND NOT line_exists( mt_dispatch[ run_id = lv_run_id state = c_state_awaiting ] )
+         AND NOT line_exists( mt_dispatch[ run_id = lv_run_id state = c_state_timed_out ] ).
+        EXIT.
+      ENDIF.
+
+      " PS-001 (independent performance implementation audit): a plain
+      " "WAIT UP TO 5 SECONDS" never returns early for an aRFC callback
+      " (confirmed against the ABAP Keyword Documentation) - use
+      " "WAIT FOR ASYNCHRONOUS TASKS UNTIL ... UP TO 5 SECONDS" against
+      " this run's own CHANGED flag instead, so a batch that finishes in
+      " milliseconds is observed immediately rather than up to 5s late.
+      " The 5-second ceiling is preserved as the existing safety net for
+      " a genuinely slow/hung batch.
+      IF <ls_ctx> IS ASSIGNED.
+        CLEAR <ls_ctx>-changed.
+        WAIT FOR ASYNCHRONOUS TASKS UNTIL <ls_ctx>-changed = abap_true UP TO 5 SECONDS.
+      ELSE.
+        WAIT UP TO 5 SECONDS.
+      ENDIF.
       check_timeouts( lv_run_id ).
 
       IF <ls_ctx> IS ASSIGNED.
@@ -683,12 +790,6 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
                             iv_attempt     = 1
                             iv_batch_id    = |B{ lv_batch_ctr }| ).
         ENDWHILE.
-      ENDIF.
-
-      IF NOT ( <ls_ctx> IS ASSIGNED AND lines( <ls_ctx>-queue ) > 0 )
-         AND NOT line_exists( mt_dispatch[ run_id = lv_run_id state = c_state_awaiting ] )
-         AND NOT line_exists( mt_dispatch[ run_id = lv_run_id state = c_state_timed_out ] ).
-        EXIT.
       ENDIF.
     ENDDO.
 
@@ -714,6 +815,14 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
         IMPORTING et_result = lt_purged_discard
         EXCEPTIONS system_failure = 1 communication_failure = 2 OTHERS = 3.
       RETURN.
+    ENDIF.
+
+    " PS-001 (independent performance implementation audit): signal this
+    " run's poll loop that something changed, regardless of which CASE
+    " branch below runs - see TY_RUN_CONTEXT-CHANGED's own doc.
+    ASSIGN mt_run_context[ run_id = <ls_d>-run_id ] TO FIELD-SYMBOL(<ls_changed_ctx>).
+    IF <ls_changed_ctx> IS ASSIGNED.
+      <ls_changed_ctx>-changed = abap_true.
     ENDIF.
 
     CASE <ls_d>-state.
@@ -780,7 +889,32 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
             WITH KEY object = ls_row-obj_type obj_name = ls_row-obj_name.
 
           IF ls_row-rc = 0 AND sy-subrc = 0.
-            merge_into_mt_files( iv_run_id = <ls_d>-run_id is_tadir = ls_tadir_row is_result = ls_row ).
+            IF merge_into_mt_files( iv_run_id = <ls_d>-run_id is_tadir = ls_tadir_row is_result = ls_row ) = abap_false.
+              " AR-1-004 (independent adversarial audit): the batch
+              " itself reported success (RC = 0), but this run's own
+              " local merge failed (missing run context, or a corrupted/
+              " incompatible FILES_XSTRING payload) - do NOT mark this
+              " object MT_RESOLVED with no actual output. Recover via the
+              " always-correct, single-object standard path instead
+              " (bypasses the batch RFC's EXPORT/IMPORT wire format
+              " entirely). ROUTE_TO_SEQUENTIAL_FALLBACK inserts
+              " MT_RESOLVED itself, so skip this row's own trailing
+              " insert/EWMA update below.
+              ASSIGN mt_run_context[ run_id = <ls_d>-run_id ] TO FIELD-SYMBOL(<ls_merge_fail_ctx>).
+              IF <ls_merge_fail_ctx> IS ASSIGNED AND <ls_merge_fail_ctx>-ii_log IS BOUND.
+                <ls_merge_fail_ctx>-ii_log->add_warning(
+                  |ORTEC batch { p_task }: { ls_row-obj_type } { ls_row-obj_name } reported success but | &&
+                  |its result could not be merged locally - falling back to per-object serialization| ).
+              ENDIF.
+              TRY.
+                  route_to_sequential_fallback( iv_run_id = <ls_d>-run_id it_object_keys = VALUE #( ( ls_tadir_row ) ) ).
+                CATCH zcx_abapgit_exception INTO DATA(lx_merge_fallback_error).
+                  IF <ls_merge_fail_ctx> IS ASSIGNED AND <ls_merge_fail_ctx>-ii_log IS BOUND.
+                    <ls_merge_fail_ctx>-ii_log->add_exception( lx_merge_fallback_error ).
+                  ENDIF.
+              ENDTRY.
+              CONTINUE.
+            ENDIF.
           ELSE.
             ASSIGN mt_run_context[ run_id = <ls_d>-run_id ] TO FIELD-SYMBOL(<ls_fail_ctx>).
             IF <ls_fail_ctx> IS ASSIGNED AND <ls_fail_ctx>-ii_log IS BOUND.
@@ -827,6 +961,8 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
       <ls_return>-file-path = is_tadir-path.
       <ls_return>-item = ls_serialization-item.
     ENDLOOP.
+
+    rv_merged = abap_true.
   ENDMETHOD.
 
   METHOD object_key_sets_equal.
@@ -859,6 +995,16 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     DATA lt_half_2       TYPE zif_abapgit_definitions=>ty_tadir_tt.
     DATA lv_actual_bytes TYPE i.
     DATA lv_split_at     TYPE i.
+
+    " AR-1-002 (independent adversarial audit): a tripped circuit breaker
+    " must actually stop future dispatches for this run - this is the
+    " single choke point every dispatch source funnels through (initial
+    " batches, queue drain, timeout retries, receive-failure bisection),
+    " so checking here covers all of them.
+    IF line_exists( mt_broken_runs[ table_line = iv_run_id ] ).
+      route_to_sequential_fallback( iv_run_id = iv_run_id it_object_keys = it_object_keys ).
+      RETURN.
+    ENDIF.
 
     " SER-SLICE-2 scope boundary (see class-level documentation on this
     " method): no batch-scoped extraction exists yet on PREF/PREF_EXT/
@@ -910,8 +1056,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     ENDLOOP.
 
     <ls_ctx>-dispatch_seq = <ls_ctx>-dispatch_seq + 1.
-    DATA(lv_run_hex) = |{ iv_run_id }|.
-    lv_task_name = |SER-{ lv_run_hex(8) }-{ <ls_ctx>-dispatch_seq }|.
+    lv_task_name = next_task_name( ).
 
     GET TIME STAMP FIELD lv_now.
 
@@ -969,6 +1114,11 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
       release_in_flight_budget( iv_run_id ).
       route_to_sequential_fallback( iv_run_id = iv_run_id it_object_keys = it_object_keys ).
     ENDIF.
+  ENDMETHOD.
+
+  METHOD next_task_name.
+    mv_next_task_seq = mv_next_task_seq + 1.
+    rv_task_name = |SER-{ mv_next_task_seq }|.
   ENDMETHOD.
 
   METHOD check_timeouts.
@@ -1072,7 +1222,8 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD route_to_sequential_fallback.
-    DATA ls_item TYPE zif_abapgit_definitions=>ty_item.
+    DATA ls_item       TYPE zif_abapgit_definitions=>ty_item.
+    DATA ls_i18n_params TYPE zif_abapgit_definitions=>ty_i18n_params.
 
     ASSIGN mt_run_context[ run_id = iv_run_id ] TO FIELD-SYMBOL(<ls_ctx>).
     IF sy-subrc <> 0.
@@ -1091,10 +1242,21 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
       ls_item-srcsystem = ls_key-srcsystem.
       ls_item-origlang  = ls_key-masterlang.
 
+      " AR-1-001 (independent adversarial audit): mirror the standard
+      " path's own per-object MAIN_LANGUAGE_ONLY override exactly (see
+      " ZCL_ABAPGIT_SERIALIZE~RUN_SEQUENTIAL) - the run-level flag alone
+      " is not sufficient when WO_TRANSLATION_PATTERNS is non-empty.
+      ls_i18n_params = <ls_ctx>-is_i18n_params.
+      IF ls_i18n_params-main_language_only = abap_false AND <ls_ctx>-wo_translation_patterns IS NOT INITIAL.
+        ls_i18n_params-main_language_only = zcl_abapgit_i18n_params=>match_obj_patterns(
+          is_tadir                   = ls_key
+          it_wo_translation_patterns = <ls_ctx>-wo_translation_patterns ).
+      ENDIF.
+
       TRY.
           DATA(ls_serialization) = zcl_abapgit_objects=>serialize(
             is_item        = ls_item
-            io_i18n_params = zcl_abapgit_i18n_params=>new( is_params = <ls_ctx>-is_i18n_params ) ).
+            io_i18n_params = zcl_abapgit_i18n_params=>new( is_params = ls_i18n_params ) ).
 
           LOOP AT ls_serialization-files INTO DATA(ls_file).
             APPEND INITIAL LINE TO <ls_ctx>-files ASSIGNING FIELD-SYMBOL(<ls_return>).

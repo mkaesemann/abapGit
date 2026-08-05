@@ -35,6 +35,12 @@ CLASS ltcl_ser_orch DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FI
 
     METHODS no_parallel_parity FOR TESTING.
 
+    METHODS next_task_name_is_unique FOR TESTING.
+    METHODS breaker_gates_before_dispatch FOR TESTING.
+    METHODS merge_fails_without_context FOR TESTING.
+    METHODS merge_fails_on_bad_payload FOR TESTING.
+    METHODS merge_succeeds_with_payload FOR TESTING.
+
 ENDCLASS.
 
 
@@ -242,6 +248,96 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
       act = zcl_abapgit_ortec_ser_orch=>is_standard_no_parallel_type( 'DDLS' ) ).
     cl_abap_unit_assert=>assert_false(
       act = zcl_abapgit_ortec_ser_orch=>is_standard_no_parallel_type( 'WAPA' ) ).
+  ENDMETHOD.
+
+  METHOD next_task_name_is_unique.
+    " AR-1-003 regression test (independent adversarial audit) - the
+    " earlier truncated-RUN_ID-hex scheme could produce identical task
+    " names for two different runs; the session-wide monotonic counter
+    " cannot.
+    DATA(lv_name_1) = zcl_abapgit_ortec_ser_orch=>next_task_name( ).
+    DATA(lv_name_2) = zcl_abapgit_ortec_ser_orch=>next_task_name( ).
+
+    cl_abap_unit_assert=>assert_differs( act = lv_name_2 exp = lv_name_1 ).
+  ENDMETHOD.
+
+  METHOD breaker_gates_before_dispatch.
+    " AR-1-002 regression test (independent adversarial audit) - a
+    " tripped breaker must stop BEFORE_DISPATCH from ever reaching
+    " DISPATCH_BATCH (no new MT_DISPATCH row). No run context is
+    " inserted, so the fallback it routes to returns immediately without
+    " touching any real object - a zero-risk, deterministic check of the
+    " gate itself.
+    DATA(lv_run) = build_run_id( ).
+    INSERT lv_run INTO TABLE zcl_abapgit_ortec_ser_orch=>mt_broken_runs.
+
+    DATA(lt_keys) = VALUE zif_abapgit_definitions=>ty_tadir_tt(
+      ( build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'ZZZ' ) ) ).
+
+    zcl_abapgit_ortec_ser_orch=>before_dispatch(
+      iv_run_id      = lv_run
+      it_object_keys = lt_keys
+      iv_attempt     = 1
+      iv_batch_id    = 'B1' ).
+
+    cl_abap_unit_assert=>assert_initial( zcl_abapgit_ortec_ser_orch=>mt_dispatch ).
+  ENDMETHOD.
+
+  METHOD merge_fails_without_context.
+    " AR-1-004 regression test (independent adversarial audit).
+    DATA(lv_run) = build_run_id( ).
+
+    DATA(lv_merged) = zcl_abapgit_ortec_ser_orch=>merge_into_mt_files(
+      iv_run_id = lv_run
+      is_tadir  = build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'A' )
+      is_result = build_result( iv_obj_type = 'CLAS' iv_obj_name = 'A' ) ).
+
+    cl_abap_unit_assert=>assert_false( lv_merged ).
+  ENDMETHOD.
+
+  METHOD merge_fails_on_bad_payload.
+    " AR-1-004 regression test (independent adversarial audit) - a
+    " corrupted/incompatible FILES_XSTRING must not be silently treated
+    " as a successful merge.
+    DATA(lv_run) = build_run_id( ).
+    INSERT VALUE #( run_id = lv_run ) INTO TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context.
+
+    DATA(ls_result) = build_result( iv_obj_type = 'CLAS' iv_obj_name = 'A' ).
+    ls_result-files_xstring = '0102030405'.
+
+    DATA(lv_merged) = zcl_abapgit_ortec_ser_orch=>merge_into_mt_files(
+      iv_run_id = lv_run
+      is_tadir  = build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'A' )
+      is_result = ls_result ).
+
+    cl_abap_unit_assert=>assert_false( lv_merged ).
+  ENDMETHOD.
+
+  METHOD merge_succeeds_with_payload.
+    DATA(lv_run) = build_run_id( ).
+    INSERT VALUE #( run_id = lv_run ) INTO TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context.
+
+    DATA ls_serialization TYPE zif_abapgit_objects=>ty_serialization.
+    ls_serialization-item-obj_type = 'CLAS'.
+    ls_serialization-item-obj_name = 'ZCL_TEST'.
+    APPEND INITIAL LINE TO ls_serialization-files ASSIGNING FIELD-SYMBOL(<ls_file>).
+    <ls_file>-filename = 'zcl_test.clas.abap'.
+
+    DATA lv_buffer TYPE xstring.
+    EXPORT data = ls_serialization TO DATA BUFFER lv_buffer.
+
+    DATA(ls_result) = build_result( iv_obj_type = 'CLAS' iv_obj_name = 'ZCL_TEST' ).
+    ls_result-files_xstring = lv_buffer.
+
+    DATA(lv_merged) = zcl_abapgit_ortec_ser_orch=>merge_into_mt_files(
+      iv_run_id = lv_run
+      is_tadir  = build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'ZCL_TEST' )
+      is_result = ls_result ).
+
+    cl_abap_unit_assert=>assert_true( lv_merged ).
+
+    READ TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context INTO DATA(ls_ctx) WITH TABLE KEY run_id = lv_run.
+    cl_abap_unit_assert=>assert_equals( act = lines( ls_ctx-files ) exp = 1 ).
   ENDMETHOD.
 
 ENDCLASS.
