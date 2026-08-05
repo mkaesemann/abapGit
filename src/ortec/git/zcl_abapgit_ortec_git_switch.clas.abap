@@ -98,6 +98,23 @@ CLASS zcl_abapgit_ortec_git_switch DEFINITION
     CLASS-METHODS is_wapa_active
       RETURNING VALUE(rv_active) TYPE abap_bool.
 
+    "! Check if the SER-SLICE-2 adaptive batch serialization path is
+    "! enabled in this internal session. Defaults to ABAP_FALSE - this is
+    "! new, not-yet-IT8-validated behavior, so it must be explicitly
+    "! opted into; the existing sequential/parallel path is always used
+    "! when this is off.
+    "! @parameter rv_active |
+    "! ABAP_TRUE if the adaptive batch path is enabled.
+    CLASS-METHODS is_serial_batch_active
+      RETURNING VALUE(rv_active) TYPE abap_bool.
+
+    "! Enable or disable the SER-SLICE-2 adaptive batch serialization path
+    "! in this internal session.
+    "! @parameter iv_active |
+    "! ABAP_TRUE enables ZCL_ABAPGIT_ORTEC_SER_ORCH=>SERIALIZE dispatch.
+    CLASS-METHODS set_serial_batch_active
+      IMPORTING iv_active TYPE abap_bool.
+
     "! Check if timeout avoidance via TH_REDISPATCH is enabled in this internal session.
     "! Defaults to ABAP_FALSE in IT8 so SAT traces can run without redispatch interference.
     "! @parameter rv_active |
@@ -142,6 +159,7 @@ CLASS zcl_abapgit_ortec_git_switch DEFINITION
     CLASS-DATA mv_bulk_exists_active TYPE abap_bool VALUE abap_true.
     CLASS-DATA mv_serial_prefetch_active TYPE abap_bool VALUE abap_true.
     CLASS-DATA mv_avoid_timeout_active TYPE abap_bool VALUE abap_true.
+    CLASS-DATA mv_serial_batch_active TYPE abap_bool VALUE abap_false.
 
 ENDCLASS.
 
@@ -209,6 +227,14 @@ CLASS zcl_abapgit_ortec_git_switch IMPLEMENTATION.
 
   METHOD is_wapa_active.
     rv_active = abap_true.
+  ENDMETHOD.
+
+  METHOD is_serial_batch_active.
+    rv_active = mv_serial_batch_active.
+  ENDMETHOD.
+
+  METHOD set_serial_batch_active.
+    mv_serial_batch_active = iv_active.
   ENDMETHOD.
 
 ENDCLASS.

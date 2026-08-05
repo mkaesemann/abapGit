@@ -33,6 +33,17 @@ CLASS zcl_abapgit_serialize DEFINITION
         VALUE(rt_files) TYPE zif_abapgit_definitions=>ty_files_item_tt
       RAISING
         zcx_abapgit_exception .
+    "! Pure, stateless predicate (no instance data access) - PUBLIC STATIC
+    "! so ZCL_ABAPGIT_ORTEC_SER_ORCH can reuse the real check instead of
+    "! duplicating it (serialization_adaptive_batch_design.md sect 5.0
+    "! step 1). This is the only visibility change made to this class for
+    "! SER-SLICE-2 - the method's own logic and its one existing call site
+    "! (below, in SERIALIZE) are both unchanged.
+    CLASS-METHODS is_no_parallel
+      IMPORTING
+        !iv_object_type  TYPE tadir-object
+      RETURNING
+        VALUE(rv_result) TYPE abap_bool.
   PROTECTED SECTION.
 
     TYPES:
@@ -128,12 +139,6 @@ CLASS zcl_abapgit_serialize DEFINITION
   PRIVATE SECTION.
 
     METHODS is_parallelization_possible
-      RETURNING
-        VALUE(rv_result) TYPE abap_bool.
-
-    METHODS is_no_parallel
-      IMPORTING
-        !iv_object_type  TYPE tadir-object
       RETURNING
         VALUE(rv_result) TYPE abap_bool.
 
@@ -783,6 +788,23 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
         iv_package = iv_package
       CHANGING
         ct_tadir   = lt_tadir ).
+
+    IF zcl_abapgit_ortec_git_switch=>is_serial_batch_active( ) = abap_true
+       AND lv_max > 1
+       AND mv_parallel_broken = abap_false.
+      " ORTEC SER-SLICE-2 minimal hook: delegate the whole call to the
+      " adaptive batch orchestrator instead of this method's own per-
+      " object sequential/parallel loop below. Off by default
+      " (zcl_abapgit_ortec_git_switch=>is_serial_batch_active) - when off,
+      " every line below this block runs completely unchanged.
+      rt_files = zcl_abapgit_ortec_ser_orch=>serialize(
+        it_tadir         = lt_tadir
+        iv_max_processes = lv_max
+        iv_group         = mv_group
+        is_i18n_params   = ms_i18n_params
+        ii_log           = ii_log ).
+      RETURN.
+    ENDIF.
 
     lv_use_ortec_prefetch = zcl_abapgit_ortec_git_switch=>is_serial_prefetch_active( ).
     IF lv_use_ortec_prefetch = abap_true.

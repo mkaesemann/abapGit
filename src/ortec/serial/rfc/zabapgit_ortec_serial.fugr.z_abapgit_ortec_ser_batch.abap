@@ -18,6 +18,7 @@ FUNCTION Z_ABAPGIT_ORTEC_SER_BATCH.
 *"     VALUE(IV_PREFETCH_BUFFER_DD) TYPE  XSTRING OPTIONAL
 *"     VALUE(IV_INPUT_ROW_COUNT) TYPE  I
 *"     VALUE(IV_INPUT_VERSION) TYPE  I DEFAULT 1
+*"     VALUE(IV_TEST_DELAY_S) TYPE  I DEFAULT 0
 *"  EXPORTING
 *"     VALUE(ET_RESULT) TYPE  ZAOG_SER_BATCH_RESULT_TT
 *"     VALUE(EV_OUTPUT_ROW_COUNT) TYPE  I
@@ -51,6 +52,14 @@ FUNCTION Z_ABAPGIT_ORTEC_SER_BATCH.
         lx_error        TYPE REF TO zcx_abapgit_exception,
         lv_t0           TYPE i,
         lv_t1           TYPE i.
+
+  " T-DRAIN test seam (serialization_adaptive_batch_design.md sect 5.1b) -
+  " IV_TEST_DELAY_S is always 0/initial in production; no production
+  " caller ever sets it. Simulates a slow/hung worker for orchestrator
+  " timeout/abandonment tests only.
+  IF iv_test_delay_s > 0.
+    WAIT UP TO iv_test_delay_s SECONDS.
+  ENDIF.
 
   IF iv_prefetch_buffer IS NOT INITIAL.
     zcl_abapgit_ortec_ser_pref=>inject_from_buffer( iv_prefetch_buffer ).
