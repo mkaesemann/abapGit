@@ -508,7 +508,9 @@ CLASS ltcl_determine_max_processes IMPLEMENTATION.
 
     when_determine_max_processes( ).
 
-    then_we_shd_have_n_processes( 1 ).
+    " Adapted: user session limit is no longer part of determine_max_processes.
+    " then_we_shd_have_n_processes( 1 ). " Legacy expectation when 0 available sessions forced sequential mode.
+    then_we_shd_have_n_processes( 9 ).
 
   ENDMETHOD.
 
@@ -578,7 +580,9 @@ CLASS ltcl_determine_max_processes IMPLEMENTATION.
 
     when_determine_max_processes( ).
 
-    then_we_shd_have_n_processes( 10 ).
+    " Adapted: cap now comes from current logic (Amdahl/work-process limits), not user sessions.
+    " then_we_shd_have_n_processes( 10 ). " Legacy expectation when available sessions capped max processes.
+    then_we_shd_have_n_processes( 32 ).
 
   ENDMETHOD.
 

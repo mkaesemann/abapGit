@@ -206,7 +206,7 @@
       <TYP>T</TYP>
       <VERSION>0001</VERSION>
       <MASTERLANG>X</MASTERLANG>
-      <TXTLINES>00047</TXTLINES>
+      <TXTLINES>00038</TXTLINES>
       <DOKSTATE>A</DOKSTATE>
      </DOKIL>
      <HEAD>
@@ -241,7 +241,7 @@
       </TLINE>
       <TLINE>
        <TDFORMAT>AS</TDFORMAT>
-       <TDLINE>'Z_ABAPGIT_ORTEC_SER_BATCH' STARTING NEW TASK - not intended</TDLINE>
+       <TDLINE>&apos;Z_ABAPGIT_ORTEC_SER_BATCH&apos; STARTING NEW TASK - not intended</TDLINE>
       </TLINE>
       <TLINE>
        <TDFORMAT>AS</TDFORMAT>
@@ -366,7 +366,7 @@
       </TLINE>
       <TLINE>
        <TDFORMAT>AS</TDFORMAT>
-       <TDLINE>buffer injection failing) - an individual object's own</TDLINE>
+       <TDLINE>buffer injection failing) - an individual object&apos;s own</TDLINE>
       </TLINE>
       <TLINE>
        <TDFORMAT>AS</TDFORMAT>
@@ -385,7 +385,7 @@
       </TLINE>
       <TLINE>
        <TDFORMAT>AS</TDFORMAT>
-       <TDLINE>orchestrator's run-local, in-memory adaptive cost estimator.</TDLINE>
+       <TDLINE>orchestrator&apos;s run-local, in-memory adaptive cost estimator.</TDLINE>
       </TLINE>
       <TLINE>
        <TDFORMAT>U4</TDFORMAT>

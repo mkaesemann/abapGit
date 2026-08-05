@@ -5,6 +5,9 @@ CLASS ltcl_ser_orch DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FI
   PRIVATE SECTION.
     METHODS setup.
 
+    METHODS build_run_id
+      RETURNING VALUE(rv_run_id) TYPE sysuuid_x16.
+
     METHODS build_result
       IMPORTING iv_obj_type     TYPE trobjtype
                 iv_obj_name     TYPE sobj_name
@@ -44,6 +47,14 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
     CLEAR zcl_abapgit_ortec_ser_orch=>mt_task_outcomes.
     CLEAR zcl_abapgit_ortec_ser_orch=>mt_broken_runs.
     CLEAR zcl_abapgit_ortec_ser_orch=>mt_run_context.
+  ENDMETHOD.
+
+  METHOD build_run_id.
+    TRY.
+        rv_run_id = cl_system_uuid=>create_uuid_x16_static( ).
+      CATCH cx_uuid_error INTO DATA(lx_uuid).
+        cl_abap_unit_assert=>fail( msg = lx_uuid->get_text( ) ).
+    ENDTRY.
   ENDMETHOD.
 
   METHOD build_result.
@@ -93,19 +104,21 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD breaker_stays_closed_below_min.
-    DATA(lv_run) = cl_system_uuid=>create_uuid_x16_static( ).
+    DATA(lv_run) = build_run_id( ).
 
     " c_breaker_min_sample = 5: only 4 confirmed failures - must not trip
     DO 4 TIMES.
       zcl_abapgit_ortec_ser_orch=>record_task_outcome( iv_run_id = lv_run iv_success = abap_false ).
     ENDDO.
 
-    cl_abap_unit_assert=>assert_false(
-      line_exists( zcl_abapgit_ortec_ser_orch=>mt_broken_runs[ table_line = lv_run ] ) ).
+    READ TABLE zcl_abapgit_ortec_ser_orch=>mt_broken_runs
+      WITH TABLE KEY table_line = lv_run
+      TRANSPORTING NO FIELDS.
+    cl_abap_unit_assert=>assert_subrc( exp = 4 act = sy-subrc ).
   ENDMETHOD.
 
   METHOD breaker_trips_on_high_failure.
-    DATA(lv_run) = cl_system_uuid=>create_uuid_x16_static( ).
+    DATA(lv_run) = build_run_id( ).
 
     " 5 confirmed outcomes, 4 failures = 80% >= c_breaker_failure_ratio (70%)
     DO 4 TIMES.
@@ -113,13 +126,15 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
     ENDDO.
     zcl_abapgit_ortec_ser_orch=>record_task_outcome( iv_run_id = lv_run iv_success = abap_true ).
 
-    cl_abap_unit_assert=>assert_true(
-      line_exists( zcl_abapgit_ortec_ser_orch=>mt_broken_runs[ table_line = lv_run ] ) ).
+    READ TABLE zcl_abapgit_ortec_ser_orch=>mt_broken_runs
+      WITH TABLE KEY table_line = lv_run
+      TRANSPORTING NO FIELDS.
+    cl_abap_unit_assert=>assert_subrc( exp = 0 act = sy-subrc ).
   ENDMETHOD.
 
   METHOD breaker_ignores_other_runs.
-    DATA(lv_run_a) = cl_system_uuid=>create_uuid_x16_static( ).
-    DATA(lv_run_b) = cl_system_uuid=>create_uuid_x16_static( ).
+    DATA(lv_run_a) = build_run_id( ).
+    DATA(lv_run_b) = build_run_id( ).
 
     " run A: 5 confirmed failures - trips
     DO 5 TIMES.
@@ -130,14 +145,19 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
       zcl_abapgit_ortec_ser_orch=>record_task_outcome( iv_run_id = lv_run_b iv_success = abap_true ).
     ENDDO.
 
-    cl_abap_unit_assert=>assert_true(
-      line_exists( zcl_abapgit_ortec_ser_orch=>mt_broken_runs[ table_line = lv_run_a ] ) ).
-    cl_abap_unit_assert=>assert_false(
-      line_exists( zcl_abapgit_ortec_ser_orch=>mt_broken_runs[ table_line = lv_run_b ] ) ).
+    READ TABLE zcl_abapgit_ortec_ser_orch=>mt_broken_runs
+      WITH TABLE KEY table_line = lv_run_a
+      TRANSPORTING NO FIELDS.
+    cl_abap_unit_assert=>assert_subrc( exp = 0 act = sy-subrc ).
+
+    READ TABLE zcl_abapgit_ortec_ser_orch=>mt_broken_runs
+      WITH TABLE KEY table_line = lv_run_b
+      TRANSPORTING NO FIELDS.
+    cl_abap_unit_assert=>assert_subrc( exp = 4 act = sy-subrc ).
   ENDMETHOD.
 
   METHOD purge_blocked_while_awaiting.
-    DATA(lv_run) = cl_system_uuid=>create_uuid_x16_static( ).
+    DATA(lv_run) = build_run_id( ).
     INSERT VALUE #( task_name = 'T1' run_id = lv_run
                      state = zcl_abapgit_ortec_ser_orch=>c_state_awaiting )
       INTO TABLE zcl_abapgit_ortec_ser_orch=>mt_dispatch.
@@ -145,12 +165,14 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
 
     zcl_abapgit_ortec_ser_orch=>purge_run_state( lv_run ).
 
-    cl_abap_unit_assert=>assert_true(
-      line_exists( zcl_abapgit_ortec_ser_orch=>mt_run_context[ run_id = lv_run ] ) ).
+    READ TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context
+      WITH TABLE KEY run_id = lv_run
+      TRANSPORTING NO FIELDS.
+    cl_abap_unit_assert=>assert_subrc( exp = 0 act = sy-subrc ).
   ENDMETHOD.
 
   METHOD purge_keeps_abandoned_rows.
-    DATA(lv_run) = cl_system_uuid=>create_uuid_x16_static( ).
+    DATA(lv_run) = build_run_id( ).
     INSERT VALUE #( task_name = 'T1' run_id = lv_run
                      state = zcl_abapgit_ortec_ser_orch=>c_state_abandoned )
       INTO TABLE zcl_abapgit_ortec_ser_orch=>mt_dispatch.
@@ -158,15 +180,20 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
 
     zcl_abapgit_ortec_ser_orch=>purge_run_state( lv_run ).
 
-    cl_abap_unit_assert=>assert_true(
-      line_exists( zcl_abapgit_ortec_ser_orch=>mt_dispatch[ task_name = 'T1' ] ) ).
+    READ TABLE zcl_abapgit_ortec_ser_orch=>mt_dispatch
+      WITH TABLE KEY task_name = 'T1'
+      TRANSPORTING NO FIELDS.
+    cl_abap_unit_assert=>assert_subrc( exp = 0 act = sy-subrc ).
+
     " the run's OTHER state (context, resolved, outcomes) is still purged
-    cl_abap_unit_assert=>assert_false(
-      line_exists( zcl_abapgit_ortec_ser_orch=>mt_run_context[ run_id = lv_run ] ) ).
+    READ TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context
+      WITH TABLE KEY run_id = lv_run
+      TRANSPORTING NO FIELDS.
+    cl_abap_unit_assert=>assert_subrc( exp = 4 act = sy-subrc ).
   ENDMETHOD.
 
   METHOD purge_removes_terminal_rows.
-    DATA(lv_run) = cl_system_uuid=>create_uuid_x16_static( ).
+    DATA(lv_run) = build_run_id( ).
     INSERT VALUE #( task_name = 'T1' run_id = lv_run
                      state = zcl_abapgit_ortec_ser_orch=>c_state_received )
       INTO TABLE zcl_abapgit_ortec_ser_orch=>mt_dispatch.
@@ -174,12 +201,14 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
 
     zcl_abapgit_ortec_ser_orch=>purge_run_state( lv_run ).
 
-    cl_abap_unit_assert=>assert_false(
-      line_exists( zcl_abapgit_ortec_ser_orch=>mt_dispatch[ task_name = 'T1' ] ) ).
+    READ TABLE zcl_abapgit_ortec_ser_orch=>mt_dispatch
+      WITH TABLE KEY task_name = 'T1'
+      TRANSPORTING NO FIELDS.
+    cl_abap_unit_assert=>assert_subrc( exp = 4 act = sy-subrc ).
   ENDMETHOD.
 
   METHOD release_budget_floors_at_zero.
-    DATA(lv_run) = cl_system_uuid=>create_uuid_x16_static( ).
+    DATA(lv_run) = build_run_id( ).
     INSERT VALUE #( run_id = lv_run in_flight = 0 ) INTO TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context.
 
     zcl_abapgit_ortec_ser_orch=>release_in_flight_budget( lv_run ).
