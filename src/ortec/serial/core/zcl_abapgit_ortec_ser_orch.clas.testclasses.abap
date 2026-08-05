@@ -33,6 +33,8 @@ CLASS ltcl_ser_orch DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FI
 
     METHODS release_budget_floors_at_zero FOR TESTING.
 
+    METHODS no_parallel_parity FOR TESTING.
+
 ENDCLASS.
 
 
@@ -215,6 +217,31 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
 
     READ TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context INTO DATA(ls_ctx) WITH TABLE KEY run_id = lv_run.
     cl_abap_unit_assert=>assert_equals( act = ls_ctx-in_flight exp = 0 ).
+  ENDMETHOD.
+
+  METHOD no_parallel_parity.
+    " Pins ZCL_ABAPGIT_ORTEC_SER_ORCH's local IS_STANDARD_NO_PARALLEL_TYPE
+    " copy against ZCL_ABAPGIT_SERIALIZE=>IS_NO_PARALLEL's ACTUAL, current,
+    " PRIVATE source (read directly, not called - that method stays
+    " private, see this test's own class-level doc and the method's own
+    " ABAP Doc). If the standard method's denylist ever changes, this
+    " test's own hardcoded expectations must be reviewed and updated to
+    " match, keeping the two in permanent, visible sync instead of silent
+    " drift. Covers every currently-denylisted type plus representative
+    " allowed types.
+    cl_abap_unit_assert=>assert_true(
+      act = zcl_abapgit_ortec_ser_orch=>is_standard_no_parallel_type( 'ECTC' ) ).
+    cl_abap_unit_assert=>assert_true(
+      act = zcl_abapgit_ortec_ser_orch=>is_standard_no_parallel_type( 'ECTD' ) ).
+
+    cl_abap_unit_assert=>assert_false(
+      act = zcl_abapgit_ortec_ser_orch=>is_standard_no_parallel_type( 'CLAS' ) ).
+    cl_abap_unit_assert=>assert_false(
+      act = zcl_abapgit_ortec_ser_orch=>is_standard_no_parallel_type( 'INTF' ) ).
+    cl_abap_unit_assert=>assert_false(
+      act = zcl_abapgit_ortec_ser_orch=>is_standard_no_parallel_type( 'DDLS' ) ).
+    cl_abap_unit_assert=>assert_false(
+      act = zcl_abapgit_ortec_ser_orch=>is_standard_no_parallel_type( 'WAPA' ) ).
   ENDMETHOD.
 
 ENDCLASS.

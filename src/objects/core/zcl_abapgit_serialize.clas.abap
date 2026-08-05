@@ -33,17 +33,6 @@ CLASS zcl_abapgit_serialize DEFINITION
         VALUE(rt_files) TYPE zif_abapgit_definitions=>ty_files_item_tt
       RAISING
         zcx_abapgit_exception .
-    "! Pure, stateless predicate (no instance data access) - PUBLIC STATIC
-    "! so ZCL_ABAPGIT_ORTEC_SER_ORCH can reuse the real check instead of
-    "! duplicating it (serialization_adaptive_batch_design.md sect 5.0
-    "! step 1). This is the only visibility change made to this class for
-    "! SER-SLICE-2 - the method's own logic and its one existing call site
-    "! (below, in SERIALIZE) are both unchanged.
-    CLASS-METHODS is_no_parallel
-      IMPORTING
-        !iv_object_type  TYPE tadir-object
-      RETURNING
-        VALUE(rv_result) TYPE abap_bool.
   PROTECTED SECTION.
 
     TYPES:
@@ -139,6 +128,12 @@ CLASS zcl_abapgit_serialize DEFINITION
   PRIVATE SECTION.
 
     METHODS is_parallelization_possible
+      RETURNING
+        VALUE(rv_result) TYPE abap_bool.
+
+    METHODS is_no_parallel
+      IMPORTING
+        !iv_object_type  TYPE tadir-object
       RETURNING
         VALUE(rv_result) TYPE abap_bool.
 

@@ -568,6 +568,28 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     CLASS-METHODS purge_run_state
       IMPORTING iv_run_id TYPE sysuuid_x16.
 
+    "! Deliberate LOCAL COPY of ZCL_ABAPGIT_SERIALIZE's PRIVATE instance
+    "! method IS_NO_PARALLEL's exact denylist logic (currently ECTC/ECTD
+    "! only, see #7148). This class does NOT call the standard method -
+    "! the standard hook (ZCL_ABAPGIT_SERIALIZE~SERIALIZE) must remain the
+    "! smallest possible delegation, and widening a standard PRIVATE
+    "! method's visibility to CLASS-PUBLIC purely so this class could
+    "! reuse it was rejected as an unnecessary standard-class API change.
+    "! WAPA's own exclusion from batching is unrelated and handled
+    "! separately in SERIALIZE (see the OD-14 audit) - do not fold it into
+    "! this method.
+    "! MAINTENANCE: if ZCL_ABAPGIT_SERIALIZE=>IS_NO_PARALLEL's own denylist
+    "! ever changes upstream, this copy must be reviewed and updated to
+    "! match (see the parity-pinning unit test in this class's testclasses
+    "! include, which fails if the two diverge for any of today's known
+    "! object types).
+    "! @parameter iv_object_type | TADIR object type to check
+    "! @parameter rv_result      | ABAP_TRUE if the standard path would
+    "!   also treat this object type as never-parallel-eligible
+    CLASS-METHODS is_standard_no_parallel_type
+      IMPORTING iv_object_type   TYPE tadir-object
+      RETURNING VALUE(rv_result) TYPE abap_bool.
+
 ENDCLASS.
 
 
@@ -596,14 +618,15 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     ASSIGN mt_run_context[ run_id = lv_run_id ] TO FIELD-SYMBOL(<ls_ctx>).
 
     LOOP AT it_tadir INTO DATA(ls_tadir).
-      " WAPA is never batch-eligible (OD-14 audit) - IS_NO_PARALLEL alone
-      " does not cover it (that denylist is only ECTC/ECTD). This routes
-      " WAPA through ROUTE_TO_SEQUENTIAL_FALLBACK, which calls the SAME
-      " generic zcl_abapgit_objects=>serialize() dispatch as the standard
-      " RUN_SEQUENTIAL - structurally identical, not a regression.
+      " WAPA is never batch-eligible (OD-14 audit) - IS_STANDARD_NO_
+      " PARALLEL_TYPE alone does not cover it (that denylist is only
+      " ECTC/ECTD). This routes WAPA through ROUTE_TO_SEQUENTIAL_FALLBACK,
+      " which calls the SAME generic zcl_abapgit_objects=>serialize()
+      " dispatch as the standard RUN_SEQUENTIAL - structurally identical,
+      " not a regression.
       IF iv_max_processes = 1
          OR ls_tadir-object = 'WAPA'
-         OR zcl_abapgit_serialize=>is_no_parallel( ls_tadir-object ) = abap_true.
+         OR is_standard_no_parallel_type( ls_tadir-object ) = abap_true.
         APPEND ls_tadir TO lt_forced_seq.
       ELSE.
         APPEND ls_tadir TO lt_eligible.
@@ -1138,6 +1161,15 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     DELETE mt_task_outcomes WHERE run_id = iv_run_id.
     DELETE mt_broken_runs WHERE table_line = iv_run_id.
     DELETE mt_run_context WHERE run_id = iv_run_id.
+  ENDMETHOD.
+
+  METHOD is_standard_no_parallel_type.
+    " Local copy of ZCL_ABAPGIT_SERIALIZE=>IS_NO_PARALLEL's exact logic -
+    " see this method's own declaration doc for why it is not reused
+    " directly. Keep in sync with #7148's denylist.
+    IF iv_object_type = 'ECTC' OR iv_object_type = 'ECTD'.
+      rv_result = abap_true.
+    ENDIF.
   ENDMETHOD.
 
 ENDCLASS.

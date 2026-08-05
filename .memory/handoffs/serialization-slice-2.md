@@ -3,7 +3,9 @@
 ```text
 PACKET=COMPACT_HANDOFF_V1
 TASK=SERIALIZATION_SER_SLICE_2
-STATUS=PHASE_2_LOCAL_IMPLEMENTATION_COMPLETE_AWAITING_IT8
+STATUS=IMPLEMENTATION_AUDITED_AWAITING_IT8_FEATURE_ON_VALIDATION
+SEE_ALSO=Minimal-hook restoration + independent audits section below
+  (most current); this legacy STATUS block is Phase-2-local-only history.
 REASON=Phase 2 (ORCH state machine, minimal standard-abapGit hook,
   partial T-DRAIN seam, unit tests for testable-without-RFC logic) is
   now fully implemented locally, on top of the already-owner-corrected
@@ -83,6 +85,97 @@ PRODUCTIVE_CODE_CHANGED=YES (ORCH contract completion + full state-
   parameter on the RFC FM; new ORCH testclasses include)
 STATE_MD_CHANGED=NO
 PUSHED=NO
+```
+
+## Minimal hook restoration + independent audits (most current)
+
+```text
+PACKET=COMPACT_HANDOFF_V1
+TASK=SER_SLICE_2_MINIMAL_HOOK_AND_AUDIT
+BASELINE_HEAD=d030412ac3410df7ccd9e1cc03ee2a72ece3eb0c
+PHASE_0=Confirmed HEAD == BASELINE_HEAD (owner's own "Fixes for Unit
+  Tests" commit already at HEAD, own repo push/pull cycle involved a
+  rebase - commit MESSAGES match my prior session's report but SHAs
+  differ, e.g. 9c9de24c now vs 25c815fe reported earlier - same content).
+  Owner's d030412a fixed: (1) LOCAL FRIENDS needs a matching
+  `CLASS ltcl_ser_orch DEFINITION DEFERRED.` in a NEW
+  zcl_abapgit_ortec_ser_orch.clas.locals_imp.abap include (a real ABAP
+  structural requirement, not previously known); (2) several ORCH test
+  assertions rewritten from `line_exists( itab[ ... ] )` to
+  `READ TABLE ... WITH TABLE KEY ... TRANSPORTING NO FIELDS` +
+  `assert_subrc` - table-expression syntax on a FRIEND class's private
+  static data appears unreliable/unsupported in that context (kept, not
+  reverted - production code's OWN internal use of line_exists() on its
+  own data is unaffected and untouched); (3) an UNRELATED standard-class
+  test-expectation change in zcl_abapgit_serialize.clas.testclasses.abap
+  (determine_max_processes expected values 1->9, 10->32) - classified
+  UNRELATED_CHANGE, not touched by this task; (4) apostrophe XML-escaping
+  fix (&apos;) and TXTLINES correction (47->38) in the FUGR DOKU, and
+  deletion of a redundant SUSH short-text sub-object - all
+  OWNER_SYNTAX_CORRECTIONs from real IT8 activation, not touched.
+  Diffed zcl_abapgit_serialize.clas.abap against ada103d5 (the true
+  pre-SER-SLICE-2 parent, confirmed via `git log --follow`): exactly two
+  changes existed - IS_NO_PARALLEL visibility/staticness
+  (UNNECESSARY_VISIBILITY_CHANGE) and the minimal hook block
+  (REQUIRED_MINIMAL_HOOK). No unrelated changes in that file.
+PHASE_1=DONE. Reverted IS_NO_PARALLEL to its exact original PRIVATE
+  instance form (signature/doc/call-site unchanged, verified byte-for-
+  byte equivalent to ada103d5 via `git diff ada103d5 -- <file>` showing
+  ONLY the hook block as a residual diff). Added a new PRIVATE
+  CLASS-METHODS IS_STANDARD_NO_PARALLEL_TYPE (28 chars) on
+  ZCL_ABAPGIT_ORTEC_SER_ORCH - a deliberate local copy of the exact same
+  ECTC/ECTD denylist, with ABAP Doc explaining why it is a copy (standard
+  method stays private) and a MAINTENANCE note pointing at the new
+  parity-pinning test. Updated ORCH's SERIALIZE() partition logic to call
+  the new local helper instead of ZCL_ABAPGIT_SERIALIZE=>IS_NO_PARALLEL.
+  Added NO_PARALLEL_PARITY test in the ORCH testclasses include -
+  hardcoded-expectation pin (ECTC/ECTD=true; CLAS/INTF/DDLS/WAPA=false)
+  since the friend relationship does not extend across classes and the
+  standard method must stay private (cannot be called from the test
+  either) - documented in the test's own comment that upstream denylist
+  changes require a manual review of both sides.
+SIDE_EFFECT_LEDGER (standard ZCL_ABAPGIT_SERIALIZE~SERIALIZE, comparing
+  the per-object loop's side effects against what the ORTEC hook path
+  skips when it fires):
+  - SKIPPED: IS_SERIAL_PREFETCH_ACTIVE prepare/clear on PREF/PREF_EXT/
+    PREF_OO - a REAL, pre-existing, SEPARATE ORTEC feature is silently a
+    no-op whenever IS_SERIAL_BATCH_ACTIVE is also on, since the hook
+    RETURNs before that code is ever reached. Functionally safe (ORCH's
+    own fallback/RFC-worker paths still serialize correctly without it,
+    just without the prefetch speed benefit) but NOT previously called
+    out as an explicit feature-interaction; flagged for the IT8
+    validation plan and the independent audits below.
+  - SKIPPED: progress bar (ZIF_ABAPGIT_PROGRESS) and
+    ZCL_ABAPGIT_TIMER - UX/telemetry only, no correctness impact.
+  - SKIPPED: the standard AVOID_TIMEOUT redispatch-every-300s call - ORCH
+    has its own, functionally analogous but NOT identical,
+    C_BATCH_RFC_TIMEOUT_S=300 mechanism; not a gap, a different
+    mechanism achieving the same purpose.
+  - UNCHANGED: MV_FREE/GV_MAX_PROCESSES/MV_PARALLEL_BROKEN/MI_LOG - all
+    read-only or already set before the hook check; the hook's RETURN
+    happens before the standard TRY/CLEANUP block, so no prefetch CLEANUP
+    is skipped inconsistently (prefetch was never started on this path).
+  - NOTED, NOT A DEFECT: the hook's own
+    `AND mv_parallel_broken = abap_false` guard is always true at that
+    point (MV_PARALLEL_BROKEN is reset to abap_false at the very top of
+    SERIALIZE() and nothing between there and the hook sets it) - a
+    harmless, defensive-but-currently-redundant condition, left in place
+    since a future insertion between those two points could set it and
+    this guard is exactly the safety net that would matter then.
+STANDARD_PUBLIC_API_CHANGE=NONE (confirmed via ada103d5 diff)
+LIVE_VERIFICATION=mcp_arc-12 SAPDiagnose(action="syntax") dry-run, full
+  replacement source, on BOTH ZCL_ABAPGIT_SERIALIZE (clean, 0 messages)
+  and ZCL_ABAPGIT_ORTEC_SER_ORCH (clean, 1 PRE-EXISTING unrelated
+  shorttext-length warning only, not introduced this pass). Local
+  get_errors clean on all 3 touched files.
+PRODUCTIVE_CODE_CHANGED=YES (zcl_abapgit_serialize.clas.abap:
+  IS_NO_PARALLEL reverted to private instance; zcl_abapgit_ortec_ser_
+  orch.clas.abap: new IS_STANDARD_NO_PARALLEL_TYPE + call-site swap;
+  zcl_abapgit_ortec_ser_orch.clas.testclasses.abap: new
+  NO_PARALLEL_PARITY test)
+NEXT=Phase 2 (independent adversarial + performance implementation
+  audits via dedicated subagents), Phase 3 (T-DRAIN owner-decision
+  recommendation + expanded IT8 plan), Phase 4 (compact .memory/state.md)
 ```
 
 ## Prior Phase 1 reconciliation (2026-08-04, kept for history)
