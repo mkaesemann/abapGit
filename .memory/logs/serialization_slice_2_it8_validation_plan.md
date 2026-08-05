@@ -19,10 +19,22 @@ until every item below passes.
 5. `ZABAPGIT_ORTEC_SERIAL` (FUGR) / `Z_ABAPGIT_ORTEC_SER_BATCH` (FUNC)
    (depends on 1-2)
 6. `ZCL_ABAPGIT_ORTEC_GIT_SWITCH` (new `IS_SERIAL_BATCH_ACTIVE` flag)
-7. `ZCL_ABAPGIT_SERIALIZE` (new `IS_NO_PARALLEL` visibility + minimal hook)
-   — depends on 4 and 6
+7. `ZCL_ABAPGIT_SERIALIZE` (`IS_NO_PARALLEL` REVERTED back to its original
+   PRIVATE instance form - NO standard public API change - plus the
+   minimal hook block) - depends on 4 and 6
 
 All 7 must activate with zero syntax errors before any test below runs.
+
+### 1a. Minimal-hook proof (new, Phase 3)
+
+Diff the ACTIVE `ZCL_ABAPGIT_SERIALIZE` source against the nearest
+pre-SER-SLICE-2 commit touching that file (`ada103d5` at the time of
+writing) and confirm the ONLY residual difference is the one `IF
+zcl_abapgit_ortec_git_switch=>is_serial_batch_active( ) = abap_true ...
+ENDIF.` block inside `SERIALIZE()` - no visibility/staticness change,
+no other statement touched. This is a repeat of the Phase 0/1 diff
+already performed locally; re-confirm it against the ACTUAL IT8-active
+version after import, not just the git working tree.
 
 ## 2. ABAP Unit suites
 
@@ -32,9 +44,13 @@ ZCL_ABAPGIT_ORTEC_SER_COST      - PASS required (14 methods, EWMA/default-
 ZCL_ABAPGIT_ORTEC_SER_PLANNER   - PASS required (LPT/refill logic, no RFC)
 ZCL_ABAPGIT_ORTEC_SER_ORCH      - PASS required (object_key_sets_equal,
                                    breaker sliding-window, purge guard/
-                                   retention, in-flight-budget floor - all
-                                   testable without live RFC via LOCAL
-                                   FRIENDS access to private static state)
+                                   retention, in-flight-budget floor,
+                                   no-parallel parity, next_task_name
+                                   uniqueness, breaker gate at
+                                   before_dispatch, merge failure
+                                   fallback (3 cases) - all testable
+                                   without live RFC via LOCAL FRIENDS
+                                   access to private static state)
 ```
 
 ## 3. ATC
@@ -52,12 +68,48 @@ STATUS=BLOCKED_ON_FOLLOW_UP_WORK
 REASON=IV_TEST_DELAY_S exists on Z_ABAPGIT_ORTEC_SER_BATCH (default 0,
   test-only), but C_BATCH_RFC_TIMEOUT_S/C_MAX_DRAIN_WAIT_S have no
   test-time override, so a real T-DRAIN-1..8 run would take 600s+ per
-  case. Owner decision needed: either accept a long-running IT8 test, or
-  authorize a follow-up contract change to make these two constants
-  test-overridable (e.g. a test-only class-method setter, mirroring how
-  other ORTEC feature flags in ZCL_ABAPGIT_ORTEC_GIT_SWITCH work) before
-  T-DRAIN-1..8 can be executed practically.
+  case.
 ```
+
+### T-DRAIN owner-decision options (Phase 3 recommendation)
+
+**Option A - run it for real, no code change (RECOMMENDED).**
+Execute T-DRAIN-1..8 against the real 300s/300s constants as-is. Total
+cost ≈8 cases x up to 600s ≈ 80 minutes of real wall-clock time, once,
+as a one-time SER-SLICE-2 validation gate (not part of routine CI).
+Zero risk to the already-approved "HARD BOUND, compile-time CONSTANTS,
+never a variable" design guarantee for `C_BATCH_RFC_TIMEOUT_S`/
+`C_MAX_DRAIN_WAIT_S` (see their own ABAP Doc). No new contract surface.
+
+**Option B - convert the two constants to a variable get/set pair
+(NOT RECOMMENDED without explicit owner sign-off).** Would let a test
+shrink the timeouts directly, but converts a value the design doc calls
+a "HARD BOUND" into something mutable at runtime - this weakens an
+already-approved correctness property of the activated contract, which
+this mode's own rules treat as requiring a real design decision, not an
+implementation-level convenience.
+
+**Option C - add a separate, explicit TEST-MODE override (viable
+alternative to A if repeated re-validation is expected).** Mirror the
+existing `ZCL_ABAPGIT_ORTEC_GIT_SWITCH` feature-flag pattern: add a new,
+narrowly-scoped test-only static flag (e.g.
+`IS_SER_TEST_MODE_ACTIVE`/`SET_SER_TEST_MODE_ACTIVE` plus paired
+test-only timeout setters) that ONLY takes effect when a test explicitly
+arms it; `C_BATCH_RFC_TIMEOUT_S`/`C_MAX_DRAIN_WAIT_S` themselves stay
+untouched, real, compile-time constants for production - CHECK_TIMEOUTS
+would read an "effective timeout" through one small private helper that
+consults the test-mode override first. This preserves the hard-bound
+production guarantee while making repeat T-DRAIN runs fast, but is a
+NEW contract addition (even if test-only) and therefore requires the
+same design-review gate as any other productive ABAP change - NOT
+implemented in this pass.
+
+**Recommendation: Option A.** This is a one-time gate for a feature that
+is default-OFF and not yet enabled anywhere; the 80-minute one-time cost
+is acceptable and avoids any change to an already-approved hard-bound
+correctness property. Revisit Option C only if SER-SLICE-3+ work is
+expected to require re-running T-DRAIN repeatedly.
+
 
 ## 5. Callback/run-registry isolation (manual or scripted IT8 test)
 
@@ -82,6 +134,26 @@ a BLOCKING correctness defect. Repeat for a repository containing:
   fixed; confirm empirically here, not just by code review)
 - at least one object type in `IS_NO_PARALLEL`'s denylist (ECTC/ECTD, if
   available) or `IV_MAX_PROCESSES = 1` forced-sequential case
+- **CLAS-only baseline** (single object type, simplest possible parity
+  check, easiest to diff and triage first if anything fails)
+- **mixed CLAS/INTF/DTEL/DOMA** (a realistic cross-type repository slice)
+  to exercise the planner's per-type cost-estimate grouping and confirm
+  DTEL/DOMA (typically small/fast objects) do not get mis-batched
+  relative to larger CLAS objects
+- **at least one object whose path matches a configured
+  `MT_WO_TRANSLATION_PATTERNS` entry**, with the repository's own
+  `MAIN_LANGUAGE_ONLY` set to `abap_false` - confirms the AR-1-001 fix
+  (per-object i18n override) empirically, not just by code review
+
+### 6a. Feature-off regression (new, Phase 3)
+
+Before testing the feature ON at all, first confirm `IS_SERIAL_BATCH_
+ACTIVE` defaults to `abap_false` (`GET_INSTANCE`/direct getter check),
+and run the EXISTING standard serialization ABAP Unit suite plus a
+manual repository pull with the feature left at its default OFF value -
+results must be byte-identical to the pre-SER-SLICE-2 baseline (this
+proves the minimal hook is truly inert when off, per the Phase 1 side-
+effect ledger review already performed locally).
 
 ## 7. WAPA exclusion (explicit, in addition to output parity above)
 
@@ -98,12 +170,26 @@ batch path is NOT expected to outperform the existing prefetch-enabled
 standard parallel path yet - the primary expected win this slice is
 reduced RFC task-dispatch overhead (fewer, larger `STARTING NEW TASK`
 calls) per SAT trace evidence in the design doc section 1, not prefetch
-acceleration. Record actual numbers; do not assume the win materializes
-without measuring it.
+acceleration. Record actual numbers where available; do not assume the
+win materializes without measuring it:
+
+- total wall-clock elapsed time (OFF vs ON)
+- RFC task/dispatch count (should be roughly `object_count /
+  c_max_batch_rows`, not one per object)
+- total batch count and average objects-per-batch
+- poll-loop "wait tail" time (with the PS-001 fix, this should now be
+  near-zero for the common case instead of up to 5s per round - measure
+  to confirm the fix actually helps in practice, not just in theory)
+- DB time (if measurable via ST05/SAT) - expected negligible for this
+  slice (no new SQL hot path)
+- peak memory (informal, e.g. via SAT or a rough estimate) - to sanity-
+  check PS-003's "K-proportional, not N-proportional" analysis on a real
+  large-K single run
 
 ## Sign-off
 
-SER-SLICE-2 may be marked complete only when ALL of sections 1-3, 5, 6,
-and 7 pass, AND section 4 (T-DRAIN) is either executed successfully or
-the owner has explicitly accepted the disclosed limitation and decided
-how to proceed. Section 8 is informational, not a blocking gate.
+SER-SLICE-2 may be marked complete only when ALL of sections 1, 1a, 2,
+3, 5, 6, 6a, and 7 pass, AND section 4 (T-DRAIN) is either executed per
+Option A/B/C above or the owner has explicitly accepted the disclosed
+limitation and decided how to proceed. Section 8 is informational, not
+a blocking gate.
