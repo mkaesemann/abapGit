@@ -1,278 +1,176 @@
 # ORTEC abapGit opt-rework — active state
 
-## Topic and phase
-
 ```text
-TOPIC=variant-b-partial-clone
-CURRENT_PHASE=PACKAGE_E_CHECKPOINT_1_SAP_VALIDATED_COMPLETE
-PACKAGE_D2_STATUS=SAP_VALIDATED_COMPLETE
-PACKAGE_D2_VALIDATED_HEAD=733bb30799886ef8659be7e293b82c3ccfcebbdd
-PACKAGE_E_STATUS=CHECKPOINT_1_SAP_VALIDATED_COMPLETE; E1-A
-  (OBJ_INDEX write batching) live-implemented with chunk size 30000; E1-TREE-REUSE
-  design APPROVED but PARKED_MEASUREMENT_PENDING by owner decision 2026-07-20;
-  E2_CONSUMER_COHERENCE remains POSTPONED (working hypotheses only, not to
-  be touched right now); E3_CACHE_ADMIN_F4 COMPLETED 2026-07-31
-  (owner-confirmed, manually fixed/verified in the productive system)
-PACKAGE_E_CHECKPOINT_1=SAP_VALIDATED_COMPLETE
-PACKAGE_E_CHECKPOINT_1_VALIDATED_HEAD=3c77d898b62f3b0464e48cf59844e2e30c7b6e89
-PACKAGE_E_CHECKPOINT_1_SCOPE=E1-TEST, E3-TEST, E4-VERIFY, E-HARDEN OF-2
-PACKAGE_E_CHECKPOINT_1_VALIDATION=2026-07-29 (SAP_SYSTEM=IT8; ACTIVATION=PASS,
-  SYNTAX=PASS, ABAP_UNIT=PASS, ATC=PASS, SEVERE_ATC_FINDINGS=NONE — owner-
-  reported, covers the corrected head including the pre-import audit's
-  placeholder removal and the 2 IT8-reported syntax/exception-contract
-  fixes; detail in the checkpoint-1 handoff/regression log)
-PRODUCTIVE_CHANGES_ALLOWED=NO for E1/E2 (POSTPONED, see below); E3 is
-  COMPLETED, no further change; all other Package E slices remain gated per
-  their own authorization state below
+BRANCH=ortec/abapgit_1_133-opt-rework
+CURRENT_HEAD=f6a021ac276bb9766f8ca67fd1d32df46610b568
+LATEST_SAP_VALIDATED_HEAD=3c77d898b62f3b0464e48cf59844e2e30c7b6e89
+  (Package E checkpoint 1, 2026-07-29 - see Variant B backlog below)
 ```
 
-Branch: `ortec/abapgit_1_133-opt-rework`. Package sequence decision:
-OWNER_DECISION 2026-07-24 (`.memory/decisions/variant_b_package_renumbering.md`).
-Planned following phase: Package F — validated legacy-code cleanup (not
-before Package E is live-validated).
-
-## Validated productive baseline
+## Active topic
 
 ```text
-PACKAGE_C_VALIDATED_HEAD=29199f629773c676e0eaa2f3a006f5167d304ae8 (SAP_VALIDATED_COMPLETE)
-PACKAGE_C_LAST_VALIDATION=2026-07-24 (SAP_SYSTEM=IT8; see Package C
-  design/closeout link below — kept separate from Package D2's date, they
-  are different validation runs on different code states)
-PACKAGE_D2_VALIDATED_HEAD=733bb30799886ef8659be7e293b82c3ccfcebbdd (SAP_VALIDATED_COMPLETE)
-PACKAGE_D2_LAST_VALIDATION=2026-07-23 (SAP_SYSTEM=IT8)
-ATC=PASS, ABAP_UNIT=PASS, COLD_BRANCH=PASS, WARM_UNCHANGED=PASS,
-CERTIFIED_STATE=F/C, CACHE_ADMIN=PASS, LARGE_REPO_FUNCTIONAL=PASS
-  (all against the PACKAGE_D2_VALIDATED_HEAD/PACKAGE_D2_LAST_VALIDATION pair
-  above; do not conflate with Package C's separate, earlier validation run)
-D2_LIVE_INCIDENTS_RESOLVED=SYSTEM_NO_ROLL, TIME_OUT, DBSQL_STMNT_TOO_LARGE
-  (all SAP_VALIDATED_RESOLVED — see incident links below)
-MEMORY_HEAD=8eef0b55fb37892c3d6b6428c038886481c73192 (memory-only range vs
-  the PACKAGE_D2_VALIDATED_HEAD above, confirmed via `git diff --name-status`;
-  this corrective E0 pass's own edits land on top of this same memory-only
-  range — no productive file has been touched)
+TOPIC=SERIALIZATION_PERFORMANCE
+STATUS=IN_PROGRESS
 ```
 
-## Active Package E scope (corrective, 9-slice model — see design §0)
+SER-SLICE-0 and SER-SLICE-1: SAP_VALIDATED_COMPLETE (established prior
+sessions, not revisited this pass).
 
-Corrective design/review complete for all 9 slices
-(`.memory/logs/variant_b_package_e_discovery.md`,
-`.memory/logs/variant_b_package_e_design.md` §0-§12). Per-slice
-implementation authorization (source of truth: design §0 — this is a
-convenience mirror, not a second source of truth; if these ever diverge,
-the design document wins):
+SER-SLICE-2 (adaptive, cost-aware, bounded multi-object serialization
+batching via `ZCL_ABAPGIT_ORTEC_SER_ORCH`, gated behind
+`zcl_abapgit_ortec_git_switch=>is_serial_batch_active`, default OFF):
 
 ```text
-E1_OBJINDEX_CORRECTNESS=CONFIRMED_CURRENT (not a defect). Slice E1-TEST,
-  SAP_VALIDATED_COMPLETE (checkpoint 1, head 3c77d898, 2026-07-29).
-E1_OBJINDEX_PERFORMANCE=CORRECT_BUT_PERFORMANCE_OPEN. E1-A
-  (write batching) is live-implemented with
-  `c_index_write_chunk_size TYPE i VALUE 30000`; 20000 was previously tested
-  without issue, while 50000 has not yet been tested. Do not revert this value
-  to the obsolete design value 5000 without a new owner decision and comparable
-  IT8 measurement.
-  E1-TREE-REUSE (formerly E1-D/E1-E) now has a completed, adversarially reviewed
-  design with correctness, protocol/persistence and performance design gates
-  approved. The design is preserved in the dedicated E1-TREE-REUSE discovery,
-  design, review and bootstrap artifacts. Implementation remains NOT_AUTHORIZED:
-  owner decision 2026-07-20 is PARKED_MEASUREMENT_PENDING because the initial
-  aggregated IT8 SAT traces do not show tree/index rebuild as a dominant cost.
-  The traces show approximately 161-200 s local serialization per Full Stage;
-  warm and near-identical cold-branch remote paths are approximately 19.1 s and
-  21.2 s respectively, while the direct REBUILD_INDEX cost could not be isolated.
-  Resume only if a focused, preferably non-aggregated trace proves a material,
-  repeated REBUILD_INDEX tree-decode/mapping cost after 30000-row write batching.
-  No E1-TREE-REUSE DDIC or productive implementation is authorized before that
-  evidence and a new explicit owner GO decision.
-E2_CONSUMER_COHERENCE=NOT_VERIFIED root cause. Slice E2-DIAG, D0/D1
-  AUTHORIZED_NOW (D0=owner reproduction packet, no code; D1=read-only
-  single-row comparison tool, no persistence); D2/D3
-  BLOCKED_PENDING_D0_D1_INSUFFICIENCY. Slice E2-FIX NOT_AUTHORIZED, gated on
-  a live D1/D2-confirmed mismatch. OF-1 (stale-but-present index row) is
-  KEPT ACTIVE as the leading candidate root cause with a concrete,
-  bounded detection/repair design (see design §3) — not silently dropped.
-  2026-07-30: the earlier small-repo (abapGit-testing) D0/D1 reproduction is
-  RETRACTED (stale local clone; branches actually differ — see
-  `.memory/handoffs/variant-b-package-e-e2-diagnostic.md`,
-  STATUS=SUPERSEDED_INVALID_REPRODUCTION). Active incident is now OS4
-  (large repo, DTEL /LOT/GC_GEOLAT, overview+Full-Stage show MODIFIED,
-  Diff shows no differences) — D0/D1 static trace complete, WAITING_FOR_
-  OWNER_DEBUG_CAPTURE; see
-  `.memory/handoffs/variant-b-package-e-e2-os4-diagnostic.md`.
-  POSTPONED 2026-07-31 (owner decision): the OS4 investigation has since
-  produced multiple candidate root causes and partially-implemented fixes
-  (parallel-worker stale-cache injection, FUGR get_includes flag, a
-  near-empty checksum baseline) with CONTRADICTORY phase status across
-  the D0/D1/handoff files above — all working hypotheses, none
-  owner-validated end-to-end yet. No further E2 work is authorized right
-  now. PRODUCTIVE_CHANGES_ALLOWED=NO until the owner resumes after
-  Package E is fully complete and the full situation is verified in the
-  productive development system.
-E3_CACHE_ADMIN_F4=CONFIRMED_CURRENT (not a defect); F4 already unions
-  repo_state + obj_store + commit_hist orphans. Slice E3-TEST,
-  SAP_VALIDATED_COMPLETE (checkpoint 1, head 3c77d898, 2026-07-29).
-  COMPLETED 2026-07-31 (owner-confirmed, manually fixed/verified in the
-  productive system — no further action).
-E4_CERTIFIED_REPAIR=E4_NOT_REQUIRED_CURRENTLY_COMPLETE for 7 of 9
-  constructed scenarios (reclassified from a blanket NOT_REQUIRED — see
-  design §6, CR-05). Scenario 8 (stale-but-wrong index content) is
-  OWNED_BY_E2-DIAG, not E4's remit. Scenario 7 (a certified tip's blob
-  deleted out-of-band, bypassing all ORTEC write APIs) is a genuine,
-  evidence-based residual gap NOT reachable by normal operation — tracked
-  below as E4-OOB-DELETION-RISK, requires explicit owner risk-acceptance.
-  Slice E4-VERIFY, SAP_VALIDATED_COMPLETE (checkpoint 1, head 3c77d898,
-  2026-07-29; E4-D-01/E4-D-02 disposed BLOCKED_BY_MISSING_TEST_SEAM,
-  E4-D-04 disposed NOT_APPLICABLE_WITH_EXACT_SOURCE_PROOF — no placeholder
-  ABAP Unit methods, see checkpoint-1 regression log). Slice E4-FIX
-  NOT_REQUIRED (no code; risk documented, not designed away).
-E-HARDEN (new this pass, CR-07)=OF-3 (RELAXED absent-strictness mode)
-  ALREADY_ADEQUATELY_MITIGATED, closed, no action. OF-2 ('Walk,' string-
-  match duplication) SAP_VALIDATED_COMPLETE (checkpoint 1, head 3c77d898,
-  2026-07-29) — shared-constant extraction in the ORTEC-owned file only,
-  exact pre-existing text preserved ('Walk, tree not found'/'Walk, blob
-  not found', proven via ABAP string-template semantics and pinned by
-  exact-equality tests). The cross-file architecture question it surfaced
-  (why zcl_abapgit_git_porcelain carries embedded ORTEC branching/
-  duplicate logic) is tracked below as E-HARDEN-STANDARD-FILE-COUPLING,
-  NOT_AUTHORIZED to resolve unilaterally.
+SER_SLICE_2_STATUS=IMPLEMENTATION_AUDITED_AWAITING_IT8_FEATURE_ON_VALIDATION
 ```
 
-## Binding invariants
+Do NOT report this as complete/enforced/validated until the IT8
+validation plan below is executed. Current local state:
 
-- No `deepen`/`shallow` in Variant B requests. No per-object SQL/HTTP. No
-  uncertified haves. No productive blank repository-key fallback.
-- Tree/blob processing uses bounded bulk windows; presence, metadata and
-  payload access stay separated; graph and snapshot completeness stay
-  separate states; snapshot publication requires `HIST_LEVEL=F`.
-- Standard abapGit behavior is unchanged when ORTEC is disabled.
-- Package D1 owns bounded external delta-base resolution; Package D2 owns
-  attempt/transaction isolation (both SAP_VALIDATED_COMPLETE, do not reopen
-  without new contradicting evidence).
-- Package E may NOT reintroduce a `deepen`/whole-commit fetch as a repair
-  mechanism, may NOT add a new certified-repair state machine where an
-  existing one already covers the case (E4), and may NOT authorize a
-  corrective E2 fix without a reproduced root cause.
-- Every Package E slice, including test-only and doc-only ones, requires
-  real IT8 activation/syntax check + ABAP Unit `PASS` + ATC `PASS` before
-  being considered complete — there is no test-only IT8 exemption (CR-08
-  correction; the prior bootstrap handoff's claim to the contrary was
-  false and has been withdrawn).
-- Package F owns validated legacy-code removal (not started).
+- Phase 1/2 contracts + full ORCH state machine + minimal standard hook
+  implemented and locally verified (live `SAPDiagnose(action="syntax")`
+  dry-runs clean, local `get_errors` clean).
+- Minimal-hook restoration done: `ZCL_ABAPGIT_SERIALIZE=>IS_NO_PARALLEL`
+  reverted to its exact original PRIVATE instance form (confirmed via
+  diff against the pre-SER-SLICE-2 parent `ada103d5` - only the hook
+  block itself remains as a residual, intentional diff). ORCH now uses
+  its own private local copy `IS_STANDARD_NO_PARALLEL_TYPE` (parity-
+  pinned by a unit test) instead of calling the standard method.
+- Independent adversarial audit (5 MAJOR findings, 0 BLOCKER) and
+  independent performance implementation audit
+  (APPROVE_WITH_MINOR_REVISIONS) both completed and all in-scope
+  findings fixed:
+  - AR-1-001 (i18n per-object MAIN_LANGUAGE_ONLY override lost inside a
+    batch) - fixed via forced-sequential routing + ROUTE_TO_SEQUENTIAL_
+    FALLBACK recompute.
+  - AR-1-002 (circuit breaker tripped but never read) - fixed:
+    BEFORE_DISPATCH now gates on MT_BROKEN_RUNS first.
+  - AR-1-003 (task-name collision risk from truncated RUN_ID hex) -
+    fixed via a new session-wide monotonic NEXT_TASK_NAME helper.
+  - AR-1-004 (silent resolved-without-output on merge failure) - fixed:
+    MERGE_INTO_MT_FILES returns RV_MERGED, checked by the caller.
+  - AR-1-005 (avoidable 5s wait on empty work) - fixed: exit check moved
+    before the first WAIT.
+  - PS-001 (blind WAIT UP TO 5 SECONDS never returns early for an aRFC
+    callback, confirmed via ABAP Keyword Documentation) - fixed via
+    WAIT FOR ASYNCHRONOUS TASKS UNTIL <run>-changed = abap_true UP TO
+    5 SECONDS.
+  - PS-002/PS-003 (dispatch-table scan shape / resolved-table growth) -
+    reviewed and accepted as documented, non-blocking trade-offs; no
+    code change (see performance implementation audit artifact).
+- All ten section-9 limit constants re-verified: 5 ENFORCED, 4
+  DECLARED_ONLY (disclosed follow-up scope, not silent gaps), 1
+  DEFERRED_BY_APPROVED_SCOPE (c_max_actual_batch_bytes - batch-scoped
+  prefetch extraction does not exist yet), 0 BROKEN.
+- Disclosed, still-open limitations (unchanged from Phase 2, not fixed
+  this pass, all non-blocking/safe-fallback): no batch-scoped prefetch
+  buffers yet; IV_ABAP_LANGUAGE_VERS always SPACE; PROVIDER_HIT/MISS/
+  FALLBACK always 0; T-DRAIN test seam only partial.
+- Checkpoint commits (not pushed): `6a94b62c` (restore minimal hook),
+  `1278b13d` (adversarial + performance fixes), `f6a021ac` (IT8 plan
+  expansion, memory-only).
+- WAPA residual decision: WAPA is excluded from batching by an explicit
+  `ls_tadir-object = 'WAPA'` check in ORCH=>SERIALIZE (separate from
+  IS_STANDARD_NO_PARALLEL_TYPE's ECTC/ECTD-only denylist) - confirmed
+  structurally identical fallback to the standard RUN_SEQUENTIAL path.
+  Not yet empirically re-confirmed on IT8 this pass (see validation plan
+  section 6/7) - do not claim WAPA parity SAP-validated until that runs.
+- T-DRAIN recommendation: Option A (run the real ~80-minute one-time
+  T-DRAIN-1..8 validation, no code change) - see
+  `.memory/logs/serialization_slice_2_it8_validation_plan.md` section 4
+  for the full A/B/C analysis. Option B (converting the hard-bound
+  timeout CONSTANTS to a variable) is explicitly NOT recommended without
+  a new owner decision.
 
-## Active evidence links
-
-- Owner spec: `.github/prompts/variant-b.prompt.md`
-- Package E memory audit: `.memory/logs/variant_b_package_e_memory_audit.md`
-- Package E discovery: `.memory/logs/variant_b_package_e_discovery.md`
-- Package E design (corrective, single active source):
-  `.memory/logs/variant_b_package_e_design.md`
-- Package E reviews (all rerun against the corrective design):
-  `.memory/reviews/variant_b_package_e_correctness_review.md` (APPROVE_WITH_MINOR_REVISIONS, 2 MINOR),
-  `.memory/reviews/variant_b_package_e_protocol_review.md` (APPROVE),
-  `.memory/reviews/performance_design_variant_b_package_e.md` (APPROVE)
-- Package E bootstrap handoff (corrective):
-  `.memory/handoffs/variant-b-package-e-bootstrap.md`
-- Package D1/D1 triage: `.memory/handoffs/variant-b-package-d-d1-implementation.md`,
-  `.memory/logs/variant_b_package_d_d1_modified_status_triage.md`
-- Package D2 implementation/incidents:
-  `.memory/handoffs/variant-b-package-d-d2-implementation.md`,
-  `.memory/incidents/variant_b_d2_it8_system_no_roll_timeout.md`,
-  `.memory/incidents/variant_b_d2_it8_dbsql_stmt_too_large.md`,
-  `.memory/incidents/variant_b_d2_sat_warm_to_cold_o4h8794.md`
-- Package D2 performance audit (source of AUDIT-M-1):
-  `.memory/logs/performance_audit_variant_b_package_d2.md`
-- Package C design/closeout: `.memory/logs/variant_b_package_c_design.md`,
-  `.memory/handoffs/variant-b-package-c-c2-checkpoint.md`
-
-## Deferred topics
-
-```text
-AUDIT-M-1: same-repo lock-contention latency under concurrent resumed
-  decodes (MAJOR, not blocking). No fixture/scale test yet. Entry condition:
-  a dedicated concurrency scale-test slice is scheduled (not yet).
-FINAL-SAT-PROFILING: final ST05/SAT profiling of very large unfiltered
-  repositories, active-window/payload-byte-budget tuning, remaining legacy
-  cache-population path review. Entry condition: after Package F cleanup.
-E1-TREE-REUSE: APPROVED_DESIGN, PARKED_MEASUREMENT_PENDING,
-  IMPLEMENTATION_NOT_AUTHORIZED (owner decision 2026-07-20). A bare tree-SHA1
-  key remains forbidden. The approved design uses an additive, context-bound,
-  versioned tree memo with explicit completeness/publication semantics, bounded
-  processing, concurrency handling, rollback/fallback behavior and dedicated
-  DDIC (`ZAOG_TREE_MAP`, `ZAOG_TREE_CHILD`). Initial aggregated IT8 SAT evidence
-  does not justify implementation yet: Full Stage is dominated by local
-  serialization (approximately 161-200 s), and warm versus near-identical cold
-  remote handling differs by only approximately 2.1 s; direct REBUILD_INDEX
-  tree-decode/mapping cost was not isolated. Entry condition: a focused trace
-  proves material repeated REBUILD_INDEX compute cost after active chunk size
-  30000, followed by an explicit owner GO. Until then preserve the design and
-  prioritize measured serialization, object-existence and parallel-worker
-  hotspots. Do not reopen design convergence unless new source or measurement
-  evidence contradicts the approved design.
-E2-REPRODUCTION: false-MODIFIED root cause. Entry condition: owner supplies
-  one concrete reproduction packet (repo, branch, exact file path, both
-  SHA1s, believed-current commit — D0 in design §3) or the E2-DIAG D1 tool
-  (once implemented) captures one live occurrence. 2026-07-30: OS4 (large
-  repo) reproduction packet received, D0/D1 STATIC trace complete (source-
-  confirmed candidate PC-1: overview/Full-Stage use the cached
-  `mt_remote`/`get_files_remote` path, single-object Diff uses the ORTEC
-  filtered-walk facade which independently revalidates the live branch tip
-  via `ZAOG_REPO_STATE`/`ZAOG_OBJ_INDEX`, bypassing that cache). Entry
-  condition for D2/E2-FIX: owner executes the bounded debugger worksheet in
-  `.memory/logs/variant_b_package_e_false_modified_os4_d1.md` §5 and
-  confirms a live mismatch.
-E4-OOB-DELETION-RISK (new this pass, CR-05; DISPOSITION FIXED this
-  consistency pass = ACCEPTED_NON_BLOCKING_RISK, see design §6 and
-  bootstrap handoff): a certified/complete snapshot tip whose blob is
-  later deleted by an out-of-band administrative action bypassing all
-  ORTEC write APIs is not detected by either existing repair mechanism.
-  Not reachable by normal operation; no live incident reported. Consumers
-  remain safe (the existing `ensure_available` top-up either self-heals or
-  raises the existing generic missing-object exception — a loud, safe
-  failure, never a silently wrong result); recovery is the existing manual
-  remote re-fetch / `rebuild_index` path, no new mechanism required. No
-  E4-FIX slice authorized or required. Remains listed here as a permanent,
-  accepted residual risk, not an open entry-condition item; owner may
-  revisit if this framing is disputed.
-E-HARDEN-STANDARD-FILE-COUPLING (new this pass, CR-07): whether
-  zcl_abapgit_git_porcelain.clas.abap's embedded ORTEC-aware branching and
-  duplicate 'Walk,' retry logic should be refactored into a single clean
-  hook. Entry condition: explicit owner input on whether/how to touch
-  standard abapGit's own source for this.
-SYSTEM_NO_ROLL-OS4-STAGE-AFTER-OVERVIEW (new, discovered during the E2 OS4
-  diagnosis, explicitly NOT part of E2): a `SYSTEM_NO_ROLL` runtime dump
-  observed in IT8 when Full Stage is triggered immediately after a full
-  Overview serialize of the OS4 repo (17321 objects). Owner's working
-  theory: cache/memory not released between the two back-to-back
-  large-repo computations. Not investigated. Entry condition: a dedicated
-  Package E or F backlog slice is scheduled for it; see
-  `.memory/logs/variant_b_package_e_false_modified_os4_d1.md` §11.
-```
+Authoritative artifacts (read these, do not re-derive):
+`.memory/handoffs/serialization-slice-2.md` (primary status handoff),
+`.memory/logs/serialization_adaptive_batch_design.md` (design, sect 1-10),
+`.memory/logs/serialization_slice_2_it8_validation_plan.md` (execution
+checklist - nothing below may be claimed complete until this passes),
+`.memory/reviews/serialization_slice_2_hook_audit_adversarial.md`,
+`.memory/reviews/serialization_slice_2_performance_scan.md`,
+`.memory/reviews/serialization_slice_2_performance_implementation_audit.md`.
 
 ## Next action
 
-Package E checkpoint 1 (E1-TEST, E3-TEST, E4-VERIFY, E-HARDEN OF-2) is
-SAP_VALIDATED_COMPLETE as of 2026-07-29, head `3c77d898`
-(`.memory/handoffs/variant-b-package-e-checkpoint-1.md`,
-`.memory/logs/regression_variant_b_package_e_checkpoint_1.md`,
-`.memory/logs/performance_scan_variant_b_package_e_checkpoint_1.md`). A
-pre-import audit found and fixed 3 forbidden placeholder ABAP Unit tests
-and 2 real IT8-reported compile defects (`ZCL_ABAPGIT_ORTEC_CACHE_ADMIN`
-keyless-table `FILTER`; `ZCL_ABAPGIT_ORTEC_OBJ_INDEX` `build_commit`
-missing `zcx_abapgit_exception` in `RAISING`) before the owner's IT8 run;
-full finding-to-fix matrix is in the regression log. No placeholder ABAP
-Unit methods remain anywhere in this checkpoint's scope.
+Run the SER-SLICE-2 IT8 validation plan in full (import/activate in
+dependency order, ABAP Unit, ATC, T-DRAIN per Option A, callback/run
+isolation, output parity incl. WAPA + i18n-pattern cases, performance
+comparison) before enabling `is_serial_batch_active` outside controlled
+validation, or before reporting SER-SLICE-2 as SAP-validated/complete.
+Do not resume Variant B / Package E/F backlog topics (below) without a
+new explicit owner instruction naming that topic.
 
-Current owner decision: E1-A remains at the live value 30000.
-E1-TREE-REUSE has an approved design but is PARKED_MEASUREMENT_PENDING and must
-not be implemented until a focused REBUILD_INDEX measurement demonstrates
-material benefit and the owner gives an explicit GO. E2_CONSUMER_COHERENCE
-remains POSTPONED; do not start E2 fix work without a new explicit owner
-instruction. E3_CACHE_ADMIN_F4 is COMPLETED (owner-
-confirmed, manually fixed/verified). The remaining open Package E item
-needing owner input is E-HARDEN-STANDARD-FILE-COUPLING (see Deferred
-topics); E4 remains SAP_VALIDATED_COMPLETE with its one accepted residual
-risk (E4-OOB-DELETION-RISK). No additional Package E slice is currently authorized for
-implementation. Do not implement E1-TREE-REUSE, resume E2 work, or start
-Package F without a new explicit owner instruction. Re-read this file plus the Package E
-design/review artifacts before any code change; do not resume an
-unrelated backlog topic without checking this file's own active-topic
-status first.
+## Resumable backlog topics (Variant B / Package E, paused)
+
+Package E checkpoint 1 (E1-TEST, E3-TEST, E4-VERIFY, E-HARDEN OF-2) is
+SAP_VALIDATED_COMPLETE (head `3c77d898`, 2026-07-29 - see
+`.memory/handoffs/variant-b-package-e-checkpoint-1.md`). The items below
+are paused, not abandoned; do not start real design/implementation work
+on any of them before its entry condition is met.
+
+```text
+E1-TREE-REUSE: APPROVED_DESIGN, PARKED_MEASUREMENT_PENDING (owner
+  decision 2026-07-20). Entry condition: a focused (non-aggregated) IT8
+  SAT trace proves material, repeated REBUILD_INDEX tree-decode/mapping
+  cost after the live 30000-row write-batching value, followed by an
+  explicit new owner GO. Do not implement DDIC (ZAOG_TREE_MAP/
+  ZAOG_TREE_CHILD) or code before that.
+E2_CONSUMER_COHERENCE: POSTPONED by owner decision 2026-07-31. Active
+  incident OS4 (large-repo false-MODIFIED, candidate root cause PC-1 -
+  overview/Full-Stage use a cached remote-files path, single-object Diff
+  independently revalidates via the ORTEC filtered-walk facade) has a
+  complete static (D0/D1) trace but multiple contradictory, unvalidated
+  fix hypotheses across handoff files. Entry condition: owner executes
+  the bounded debugger worksheet in
+  `.memory/logs/variant_b_package_e_false_modified_os4_d1.md` section 5
+  and confirms a live mismatch, THEN resumes after Package E/
+  serialization work is fully settled.
+E4-OOB-DELETION-RISK: ACCEPTED_NON_BLOCKING_RISK (permanent, not an open
+  item) - an out-of-band blob deletion bypassing all ORTEC write APIs is
+  not detected by either repair mechanism, but consumers fail loudly
+  (never silently wrong) and the existing manual remote re-fetch/
+  rebuild_index path recovers. No E4-FIX slice authorized.
+E-HARDEN-STANDARD-FILE-COUPLING: whether zcl_abapgit_git_porcelain's
+  embedded ORTEC-aware branching/duplicate 'Walk,' retry logic should be
+  refactored into one clean hook. Entry condition: explicit owner input
+  on touching standard abapGit source for this.
+SYSTEM_NO_ROLL-OS4-STAGE-AFTER-OVERVIEW: a SYSTEM_NO_ROLL dump when Full
+  Stage runs immediately after a full Overview serialize of a 17321-
+  object repo (cache/memory not released between the two). Not
+  investigated. Entry condition: a dedicated Package E/F slice is
+  scheduled. See
+  `.memory/logs/variant_b_package_e_false_modified_os4_d1.md` section 11.
+Package F (validated legacy-code cleanup): NOT_STARTED. Entry condition:
+  Package E fully settled first.
+```
+
+Full narrative history, per-slice validation matrices, and incident
+detail for the above remain in
+`.memory/handoffs/variant-b-package-e-checkpoint-1.md`,
+`.memory/logs/variant_b_package_e_design.md`,
+`.memory/logs/variant_b_package_e_discovery.md`, and the incident files
+under `.memory/incidents/` - this file intentionally does not duplicate
+them.
+
+## Binding invariants (all topics)
+
+- Standard abapGit behavior is unchanged when any ORTEC feature flag is
+  disabled (default state for every flag introduced by either the
+  Variant B partial-clone work or SER-SLICE-2).
+- No `deepen`/`shallow` widening in Variant B requests; no per-object
+  SQL/HTTP; no uncertified haves; no productive blank repository-key
+  fallback.
+- Package D1 owns bounded external delta-base resolution; Package D2
+  owns attempt/transaction isolation (both SAP_VALIDATED_COMPLETE - do
+  not reopen without new contradicting evidence).
+- WAPA is never batch-eligible in SER-SLICE-2 (structural exclusion,
+  separate from the ECTC/ECTD-only no-parallel denylist).
+- Any standard-abapGit-class change for an ORTEC hook must stay the
+  smallest possible delegation - no unnecessary visibility/staticness
+  changes to standard methods (see SER-SLICE-2's IS_NO_PARALLEL revert,
+  this pass).
+- Every slice, including test-only and doc-only ones, requires real IT8
+  activation/syntax check + ABAP Unit PASS + ATC PASS before being
+  considered complete - there is no test-only IT8 exemption.
