@@ -146,17 +146,182 @@ CLASS zcl_abapgit_ortec_porcelain DEFINITION
 ENDCLASS.
 
 
-CLASS zcl_abapgit_ortec_porcelain IMPLEMENTATION.
-  METHOD report_progress.
-    IF ii_progress IS NOT BOUND.
-      RETURN.
-    ENDIF.
-    TRY.
-        ii_progress->show( iv_current = iv_current iv_text = iv_text ).
-      CATCH zcx_abapgit_exception.
-        " Progress reporting is never allowed to fail the pull itself.
-    ENDTRY.
+
+CLASS ZCL_ABAPGIT_ORTEC_PORCELAIN IMPLEMENTATION.
+
+
+  METHOD build_trees.
+    DATA: lt_nodes   TYPE zcl_abapgit_git_pack=>ty_nodes_tt,
+          ls_tree    LIKE LINE OF rt_trees,
+          lv_len     TYPE i,
+          lt_folders TYPE ty_folders_tt.
+
+    FIELD-SYMBOLS: <ls_folder> LIKE LINE OF lt_folders,
+                   <ls_node>   LIKE LINE OF lt_nodes,
+                   <ls_sub>    LIKE LINE OF lt_folders,
+                   <ls_exp>    LIKE LINE OF it_expanded.
+
+    lt_folders = find_folders( it_expanded ).
+
+* start with the deepest folders
+    SORT lt_folders BY count DESCENDING.
+
+    LOOP AT lt_folders ASSIGNING <ls_folder>.
+      CLEAR lt_nodes.
+
+* files
+      LOOP AT it_expanded ASSIGNING <ls_exp> USING KEY path_name WHERE path = <ls_folder>-path.
+        APPEND INITIAL LINE TO lt_nodes ASSIGNING <ls_node>.
+        <ls_node>-chmod = <ls_exp>-chmod.
+        <ls_node>-name  = <ls_exp>-name.
+        <ls_node>-sha1  = <ls_exp>-sha1.
+      ENDLOOP.
+
+* folders
+      LOOP AT lt_folders ASSIGNING <ls_sub> WHERE count = <ls_folder>-count + 1.
+        lv_len = strlen( <ls_folder>-path ).
+        IF strlen( <ls_sub>-path ) > lv_len AND <ls_sub>-path(lv_len) = <ls_folder>-path.
+          APPEND INITIAL LINE TO lt_nodes ASSIGNING <ls_node>.
+          <ls_node>-chmod = zif_abapgit_git_definitions=>c_chmod-dir.
+
+* extract folder name, this can probably be done easier using regular expressions
+          <ls_node>-name = <ls_sub>-path+lv_len.
+          lv_len = strlen( <ls_node>-name ) - 1.
+          <ls_node>-name = <ls_node>-name(lv_len).
+
+          <ls_node>-sha1 = <ls_sub>-sha1.
+        ENDIF.
+      ENDLOOP.
+
+      CLEAR ls_tree.
+      ls_tree-path = <ls_folder>-path.
+      ls_tree-data = zcl_abapgit_git_pack=>encode_tree( lt_nodes ).
+      ls_tree-sha1 = zcl_abapgit_hash=>sha1_tree( ls_tree-data ).
+      APPEND ls_tree TO rt_trees.
+
+      <ls_folder>-sha1 = ls_tree-sha1.
+    ENDLOOP.
   ENDMETHOD.
+
+
+  METHOD find_folders.
+
+    DATA: lt_paths TYPE TABLE OF string,
+          lv_split TYPE string,
+          lv_path  TYPE string.
+
+    FIELD-SYMBOLS: <ls_folder> LIKE LINE OF rt_folders,
+                   <ls_new>    LIKE LINE OF rt_folders,
+                   <ls_exp>    LIKE LINE OF it_expanded.
+
+    LOOP AT it_expanded ASSIGNING <ls_exp>.
+      READ TABLE rt_folders WITH KEY path = <ls_exp>-path TRANSPORTING NO FIELDS.
+      IF sy-subrc <> 0.
+        APPEND INITIAL LINE TO rt_folders ASSIGNING <ls_folder>.
+        <ls_folder>-path = <ls_exp>-path.
+      ENDIF.
+    ENDLOOP.
+
+* add empty folders
+    LOOP AT rt_folders ASSIGNING <ls_folder>.
+      SPLIT <ls_folder>-path AT '/' INTO TABLE lt_paths.
+
+      CLEAR lv_path.
+      LOOP AT lt_paths INTO lv_split.
+        CONCATENATE lv_path lv_split '/' INTO lv_path.
+        READ TABLE rt_folders WITH KEY path = lv_path TRANSPORTING NO FIELDS.
+        IF sy-subrc <> 0.
+          APPEND INITIAL LINE TO rt_folders ASSIGNING <ls_new>.
+          <ls_new>-path = lv_path.
+        ENDIF.
+      ENDLOOP.
+    ENDLOOP.
+
+    LOOP AT rt_folders ASSIGNING <ls_folder>.
+      FIND ALL OCCURRENCES OF '/' IN <ls_folder>-path MATCH COUNT <ls_folder>-count.
+    ENDLOOP.
+  ENDMETHOD.
+
+
+  METHOD full_tree.
+    DATA lv_repo_key TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key.
+    DATA ls_object   TYPE zif_abapgit_definitions=>ty_object.
+    DATA ls_commit   TYPE zcl_abapgit_git_pack=>ty_commit.
+
+    lv_repo_key = iv_repo_key.
+    IF lv_repo_key IS INITIAL AND iv_url IS NOT INITIAL.
+      lv_repo_key = zcl_abapgit_ortec_repo_state=>get_repo_key_for_url( iv_url ).
+    ENDIF.
+
+    READ TABLE it_objects INTO ls_object
+         WITH KEY type COMPONENTS type = zif_abapgit_git_definitions=>c_type-commit
+                                  sha1 = iv_parent.
+    IF sy-subrc <> 0.
+      TRY.
+          ls_object = zcl_abapgit_ortec_obj_store=>get_object(
+                          iv_repo_key = lv_repo_key
+                          iv_sha1     = iv_parent ).
+          IF ls_object-type <> zif_abapgit_git_definitions=>c_type-commit.
+            zcx_abapgit_exception=>raise( 'commit not found' ).
+          ENDIF.
+        CATCH zcx_abapgit_ortec_git INTO DATA(lx_commit).
+          zcx_abapgit_exception=>raise_with_text( lx_commit ).
+      ENDTRY.
+    ENDIF.
+
+    ls_commit = zcl_abapgit_git_pack=>decode_commit( ls_object-data ).
+
+    rt_expanded = walk_tree( it_objects  = it_objects
+                             iv_tree     = ls_commit-tree
+                             iv_base     = '/'
+                             iv_repo_key = lv_repo_key ).
+  ENDMETHOD.
+
+
+  METHOD materialize_from_manifest.
+    DATA ls_ortec_object        TYPE zif_abapgit_definitions=>ty_object.
+    DATA ls_file                LIKE LINE OF ct_files.
+    DATA ls_blob_manifest       LIKE LINE OF it_blob_manifest.
+    DATA lt_blob_object_lookup  TYPE HASHED TABLE OF zif_abapgit_definitions=>ty_object WITH UNIQUE KEY sha1.
+    DATA lt_blob_sha1_lookup    TYPE HASHED TABLE OF zif_abapgit_git_definitions=>ty_sha1 WITH UNIQUE KEY table_line.
+
+    FIELD-SYMBOLS <ls_blob> LIKE LINE OF it_objects.
+
+    LOOP AT it_objects ASSIGNING <ls_blob>.
+      IF <ls_blob>-type <> zif_abapgit_git_definitions=>c_type-blob.
+        CONTINUE.
+      ENDIF.
+      IF <ls_blob>-sha1 IS INITIAL.
+        CONTINUE.
+      ENDIF.
+      INSERT <ls_blob> INTO TABLE lt_blob_object_lookup.
+      INSERT <ls_blob>-sha1 INTO TABLE lt_blob_sha1_lookup.
+    ENDLOOP.
+
+    LOOP AT it_blob_manifest INTO ls_blob_manifest.
+      IF ls_blob_manifest-chmod <> zif_abapgit_git_definitions=>c_chmod-file.
+        CONTINUE.
+      ENDIF.
+
+      IF NOT line_exists( lt_blob_sha1_lookup[ table_line = ls_blob_manifest-sha1 ] ).
+        CONTINUE.
+      ENDIF.
+
+      READ TABLE lt_blob_object_lookup INTO ls_ortec_object
+           WITH TABLE KEY sha1 = ls_blob_manifest-sha1.
+      IF sy-subrc <> 0.
+        CONTINUE.
+      ENDIF.
+
+      CLEAR ls_file.
+      ls_file-path = ls_blob_manifest-path.
+      ls_file-filename = ls_blob_manifest-name.
+      ls_file-data = ls_ortec_object-data.
+      ls_file-sha1 = ls_ortec_object-sha1.
+      APPEND ls_file TO ct_files.
+    ENDLOOP.
+  ENDMETHOD.
+
 
   METHOD pull.
     DATA lt_blob_manifest   TYPE zif_abapgit_git_definitions=>ty_expanded_tt.
@@ -266,6 +431,7 @@ CLASS zcl_abapgit_ortec_porcelain IMPLEMENTATION.
           ct_files         = rt_files ).
     ENDWHILE.
   ENDMETHOD.
+
 
   METHOD pull_by_branch.
     DATA lv_ortec_repo_key TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key.
@@ -570,6 +736,7 @@ CLASS zcl_abapgit_ortec_porcelain IMPLEMENTATION.
     ENDIF.
   ENDMETHOD.
 
+
   METHOD pull_by_commit.
     DATA lv_ortec_repo_key TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key.
 
@@ -609,39 +776,6 @@ CLASS zcl_abapgit_ortec_porcelain IMPLEMENTATION.
       iv_text = |Git: completed ({ lines( rs_result-files ) } files)| ).
   ENDMETHOD.
 
-  METHOD full_tree.
-    DATA lv_repo_key TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key.
-    DATA ls_object   TYPE zif_abapgit_definitions=>ty_object.
-    DATA ls_commit   TYPE zcl_abapgit_git_pack=>ty_commit.
-
-    lv_repo_key = iv_repo_key.
-    IF lv_repo_key IS INITIAL AND iv_url IS NOT INITIAL.
-      lv_repo_key = zcl_abapgit_ortec_repo_state=>get_repo_key_for_url( iv_url ).
-    ENDIF.
-
-    READ TABLE it_objects INTO ls_object
-         WITH KEY type COMPONENTS type = zif_abapgit_git_definitions=>c_type-commit
-                                  sha1 = iv_parent.
-    IF sy-subrc <> 0.
-      TRY.
-          ls_object = zcl_abapgit_ortec_obj_store=>get_object(
-                          iv_repo_key = lv_repo_key
-                          iv_sha1     = iv_parent ).
-          IF ls_object-type <> zif_abapgit_git_definitions=>c_type-commit.
-            zcx_abapgit_exception=>raise( 'commit not found' ).
-          ENDIF.
-        CATCH zcx_abapgit_ortec_git INTO DATA(lx_commit).
-          zcx_abapgit_exception=>raise_with_text( lx_commit ).
-      ENDTRY.
-    ENDIF.
-
-    ls_commit = zcl_abapgit_git_pack=>decode_commit( ls_object-data ).
-
-    rt_expanded = walk_tree( it_objects  = it_objects
-                             iv_tree     = ls_commit-tree
-                             iv_base     = '/'
-                             iv_repo_key = lv_repo_key ).
-  ENDMETHOD.
 
   METHOD push.
     DATA lv_repo_key   TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key.
@@ -736,96 +870,6 @@ CLASS zcl_abapgit_ortec_porcelain IMPLEMENTATION.
     ENDIF.
   ENDMETHOD.
 
-  METHOD find_folders.
-
-    DATA: lt_paths TYPE TABLE OF string,
-          lv_split TYPE string,
-          lv_path  TYPE string.
-
-    FIELD-SYMBOLS: <ls_folder> LIKE LINE OF rt_folders,
-                   <ls_new>    LIKE LINE OF rt_folders,
-                   <ls_exp>    LIKE LINE OF it_expanded.
-
-    LOOP AT it_expanded ASSIGNING <ls_exp>.
-      READ TABLE rt_folders WITH KEY path = <ls_exp>-path TRANSPORTING NO FIELDS.
-      IF sy-subrc <> 0.
-        APPEND INITIAL LINE TO rt_folders ASSIGNING <ls_folder>.
-        <ls_folder>-path = <ls_exp>-path.
-      ENDIF.
-    ENDLOOP.
-
-* add empty folders
-    LOOP AT rt_folders ASSIGNING <ls_folder>.
-      SPLIT <ls_folder>-path AT '/' INTO TABLE lt_paths.
-
-      CLEAR lv_path.
-      LOOP AT lt_paths INTO lv_split.
-        CONCATENATE lv_path lv_split '/' INTO lv_path.
-        READ TABLE rt_folders WITH KEY path = lv_path TRANSPORTING NO FIELDS.
-        IF sy-subrc <> 0.
-          APPEND INITIAL LINE TO rt_folders ASSIGNING <ls_new>.
-          <ls_new>-path = lv_path.
-        ENDIF.
-      ENDLOOP.
-    ENDLOOP.
-
-    LOOP AT rt_folders ASSIGNING <ls_folder>.
-      FIND ALL OCCURRENCES OF '/' IN <ls_folder>-path MATCH COUNT <ls_folder>-count.
-    ENDLOOP.
-  ENDMETHOD.
-
-  METHOD build_trees.
-    DATA: lt_nodes   TYPE zcl_abapgit_git_pack=>ty_nodes_tt,
-          ls_tree    LIKE LINE OF rt_trees,
-          lv_len     TYPE i,
-          lt_folders TYPE ty_folders_tt.
-
-    FIELD-SYMBOLS: <ls_folder> LIKE LINE OF lt_folders,
-                   <ls_node>   LIKE LINE OF lt_nodes,
-                   <ls_sub>    LIKE LINE OF lt_folders,
-                   <ls_exp>    LIKE LINE OF it_expanded.
-
-    lt_folders = find_folders( it_expanded ).
-
-* start with the deepest folders
-    SORT lt_folders BY count DESCENDING.
-
-    LOOP AT lt_folders ASSIGNING <ls_folder>.
-      CLEAR lt_nodes.
-
-* files
-      LOOP AT it_expanded ASSIGNING <ls_exp> USING KEY path_name WHERE path = <ls_folder>-path.
-        APPEND INITIAL LINE TO lt_nodes ASSIGNING <ls_node>.
-        <ls_node>-chmod = <ls_exp>-chmod.
-        <ls_node>-name  = <ls_exp>-name.
-        <ls_node>-sha1  = <ls_exp>-sha1.
-      ENDLOOP.
-
-* folders
-      LOOP AT lt_folders ASSIGNING <ls_sub> WHERE count = <ls_folder>-count + 1.
-        lv_len = strlen( <ls_folder>-path ).
-        IF strlen( <ls_sub>-path ) > lv_len AND <ls_sub>-path(lv_len) = <ls_folder>-path.
-          APPEND INITIAL LINE TO lt_nodes ASSIGNING <ls_node>.
-          <ls_node>-chmod = zif_abapgit_git_definitions=>c_chmod-dir.
-
-* extract folder name, this can probably be done easier using regular expressions
-          <ls_node>-name = <ls_sub>-path+lv_len.
-          lv_len = strlen( <ls_node>-name ) - 1.
-          <ls_node>-name = <ls_node>-name(lv_len).
-
-          <ls_node>-sha1 = <ls_sub>-sha1.
-        ENDIF.
-      ENDLOOP.
-
-      CLEAR ls_tree.
-      ls_tree-path = <ls_folder>-path.
-      ls_tree-data = zcl_abapgit_git_pack=>encode_tree( lt_nodes ).
-      ls_tree-sha1 = zcl_abapgit_hash=>sha1_tree( ls_tree-data ).
-      APPEND ls_tree TO rt_trees.
-
-      <ls_folder>-sha1 = ls_tree-sha1.
-    ENDLOOP.
-  ENDMETHOD.
 
   METHOD receive_pack_push.
     DATA: lv_time   TYPE zcl_abapgit_git_time=>ty_unixtime,
@@ -921,49 +965,18 @@ CLASS zcl_abapgit_ortec_porcelain IMPLEMENTATION.
     ev_new_tree = ls_commit-tree.
   ENDMETHOD.
 
-  METHOD materialize_from_manifest.
-    DATA ls_ortec_object        TYPE zif_abapgit_definitions=>ty_object.
-    DATA ls_file                LIKE LINE OF ct_files.
-    DATA ls_blob_manifest       LIKE LINE OF it_blob_manifest.
-    DATA lt_blob_object_lookup  TYPE HASHED TABLE OF zif_abapgit_definitions=>ty_object WITH UNIQUE KEY sha1.
-    DATA lt_blob_sha1_lookup    TYPE HASHED TABLE OF zif_abapgit_git_definitions=>ty_sha1 WITH UNIQUE KEY table_line.
 
-    FIELD-SYMBOLS <ls_blob> LIKE LINE OF it_objects.
-
-    LOOP AT it_objects ASSIGNING <ls_blob>.
-      IF <ls_blob>-type <> zif_abapgit_git_definitions=>c_type-blob.
-        CONTINUE.
-      ENDIF.
-      IF <ls_blob>-sha1 IS INITIAL.
-        CONTINUE.
-      ENDIF.
-      INSERT <ls_blob> INTO TABLE lt_blob_object_lookup.
-      INSERT <ls_blob>-sha1 INTO TABLE lt_blob_sha1_lookup.
-    ENDLOOP.
-
-    LOOP AT it_blob_manifest INTO ls_blob_manifest.
-      IF ls_blob_manifest-chmod <> zif_abapgit_git_definitions=>c_chmod-file.
-        CONTINUE.
-      ENDIF.
-
-      IF NOT line_exists( lt_blob_sha1_lookup[ table_line = ls_blob_manifest-sha1 ] ).
-        CONTINUE.
-      ENDIF.
-
-      READ TABLE lt_blob_object_lookup INTO ls_ortec_object
-           WITH TABLE KEY sha1 = ls_blob_manifest-sha1.
-      IF sy-subrc <> 0.
-        CONTINUE.
-      ENDIF.
-
-      CLEAR ls_file.
-      ls_file-path = ls_blob_manifest-path.
-      ls_file-filename = ls_blob_manifest-name.
-      ls_file-data = ls_ortec_object-data.
-      ls_file-sha1 = ls_ortec_object-sha1.
-      APPEND ls_file TO ct_files.
-    ENDLOOP.
+  METHOD report_progress.
+    IF ii_progress IS NOT BOUND.
+      RETURN.
+    ENDIF.
+    TRY.
+        ii_progress->show( iv_current = iv_current iv_text = iv_text ).
+      CATCH zcx_abapgit_exception.
+        " Progress reporting is never allowed to fail the pull itself.
+    ENDTRY.
   ENDMETHOD.
+
 
   METHOD walk.
     DATA lt_nodes        TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
@@ -1073,6 +1086,7 @@ CLASS zcl_abapgit_ortec_porcelain IMPLEMENTATION.
     ENDLOOP.
   ENDMETHOD.
 
+
   METHOD walk_tree.
     DATA lt_nodes        TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
     DATA ls_object       TYPE zif_abapgit_definitions=>ty_object.
@@ -1125,4 +1139,3 @@ CLASS zcl_abapgit_ortec_porcelain IMPLEMENTATION.
     ENDLOOP.
   ENDMETHOD.
 ENDCLASS.
-

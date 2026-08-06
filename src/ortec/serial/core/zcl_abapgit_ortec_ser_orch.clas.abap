@@ -950,7 +950,14 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    IMPORT data = ls_serialization FROM DATA BUFFER is_result-files_xstring.
+    TRY.
+        IMPORT data = ls_serialization FROM DATA BUFFER is_result-files_xstring.
+      CATCH cx_sy_import_format_error
+            cx_sy_import_mismatch_error
+            cx_sy_compression_error
+            cx_sy_conversion_codepage.
+        RETURN.
+    ENDTRY.
     IF sy-subrc <> 0.
       RETURN.
     ENDIF.

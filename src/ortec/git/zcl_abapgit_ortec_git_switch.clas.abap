@@ -159,7 +159,7 @@ CLASS zcl_abapgit_ortec_git_switch DEFINITION
     CLASS-DATA mv_bulk_exists_active TYPE abap_bool VALUE abap_true.
     CLASS-DATA mv_serial_prefetch_active TYPE abap_bool VALUE abap_true.
     CLASS-DATA mv_avoid_timeout_active TYPE abap_bool VALUE abap_true.
-    CLASS-DATA mv_serial_batch_active TYPE abap_bool VALUE abap_false.
+    CLASS-DATA mv_serial_batch_active TYPE abap_bool VALUE abap_true.
 
 ENDCLASS.
 
@@ -238,3 +238,4 @@ CLASS zcl_abapgit_ortec_git_switch IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
+
