@@ -268,12 +268,17 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! an unconditional recursive split, continuing to n=1 with no depth
     "! cap (recursion on strictly decreasing size always terminates).
     CONSTANTS c_max_actual_batch_bytes      TYPE i VALUE 12582912.
-    "! TELEMETRY/WARNING COUNTER ONLY (serialization_adaptive_batch_design.
-    "! md &sect;5.9, cycle-3 revision) - splitting in BEFORE_DISPATCH is
-    "! NEVER capped by this value; it exists purely so an excessively
-    "! fragmented batch can be logged as a warning signal for later
-    "! investigation, never as a reason to dispatch an over-limit group.
-    CONSTANTS c_max_pre_dispatch_splits     TYPE i VALUE 3.
+    "! HARD SAFETY BOUND (SER-SLICE-3, serialization_slice_3_provider_
+    "! contract.md &sect;4) on BEFORE_DISPATCH's own recursion depth,
+    "! independent of and in addition to C_MAX_ACTUAL_BATCH_BYTES itself -
+    "! covers a batch of up to 4096 objects splitting all the way to
+    "! singletons; a group that still has more than one object left after
+    "! this many splits is routed to ROUTE_TO_SEQUENTIAL_FALLBACK instead
+    "! of recursing further (see BEFORE_DISPATCH's IV_SPLIT_DEPTH
+    "! parameter and SPLIT_DEPTH_AT_CAP). Previously declared but never
+    "! enforced (disclosed SER-SLICE-2 DECLARED_ONLY scope) - now the real
+    "! gate.
+    CONSTANTS c_max_pre_dispatch_splits     TYPE i VALUE 12.
     "! Session-wide cap on total bytes across all currently in-flight
     "! dispatches (serialization_adaptive_batch_design.md &sect;9). Unit:
     "! bytes. TUNING value protecting overall RFC/memory pressure across
@@ -587,6 +592,13 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "!   be split into smaller dispatches by this method)
     "! @parameter iv_attempt     | Passed through unchanged to DISPATCH_BATCH
     "! @parameter iv_batch_id    | Passed through unchanged to DISPATCH_BATCH
+    "! @parameter iv_split_depth | Recursion depth of THIS call, relative to
+    "!   the original (non-split) dispatch attempt - 0 for the first call,
+    "!   +1 per recursive split. Compared against C_MAX_PRE_DISPATCH_SPLITS
+    "!   (SER-SLICE-3) via SPLIT_DEPTH_AT_CAP: once reached, an otherwise-
+    "!   splittable oversized group is routed to ROUTE_TO_SEQUENTIAL_
+    "!   FALLBACK instead of recursing further. External callers never set
+    "!   this explicitly (default 0).
     "! @raising zcx_abapgit_exception | Propagated from DISPATCH_BATCH or
     "!   ROUTE_TO_SEQUENTIAL_FALLBACK
     CLASS-METHODS before_dispatch
@@ -594,7 +606,20 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
                 it_object_keys TYPE zif_abapgit_definitions=>ty_tadir_tt
                 iv_attempt     TYPE i
                 iv_batch_id    TYPE char32
+                iv_split_depth TYPE i DEFAULT 0
       RAISING   zcx_abapgit_exception.
+
+    "! SER-SLICE-3 (serialization_slice_3_provider_contract.md &sect;4):
+    "! pure boundary check for BEFORE_DISPATCH's recursion-depth cap,
+    "! extracted as its own method purely so the exact boundary value can
+    "! be unit tested deterministically without needing to manufacture a
+    "! real oversized DOMA/DTEL buffer.
+    "! @parameter iv_split_depth | Recursion depth to check
+    "! @parameter rv_yes | ABAP_TRUE iff IV_SPLIT_DEPTH has reached or
+    "!   exceeded C_MAX_PRE_DISPATCH_SPLITS
+    CLASS-METHODS split_depth_at_cap
+      IMPORTING iv_split_depth TYPE i
+      RETURNING VALUE(rv_yes)  TYPE abap_bool.
 
     "! Dispatches one bounded batch via
     "! "CALL FUNCTION 'Z_ABAPGIT_ORTEC_SER_BATCH' STARTING NEW TASK", after
@@ -618,6 +643,10 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "!   buffer - same scope note as IV_PREFETCH_BUFFER
     "! @parameter iv_prefetch_buffer_oo | ZCL_ABAPGIT_ORTEC_SER_PREF_OO
     "!   buffer - same scope note as IV_PREFETCH_BUFFER
+    "! @parameter iv_prefetch_buffer_dd | ZCL_ABAPGIT_ORTEC_SER_PREF_EXT's
+    "!   DOMA/DTEL batch envelope (SER-SLICE-3, serialization_slice_3_
+    "!   provider_contract.md &sect;4) - computed once by BEFORE_DISPATCH
+    "!   via EXTRACT_FOR_BATCH and threaded through unchanged.
     "! @raising zcx_abapgit_exception | Batch-level dispatch failure (e.g.
     "!   STARTING NEW TASK could not be issued at all)
     CLASS-METHODS dispatch_batch
@@ -628,6 +657,7 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
                 iv_prefetch_buffer     TYPE xstring OPTIONAL
                 iv_prefetch_buffer_ext TYPE xstring OPTIONAL
                 iv_prefetch_buffer_oo  TYPE xstring OPTIONAL
+                iv_prefetch_buffer_dd  TYPE xstring OPTIONAL
       RAISING   zcx_abapgit_exception.
 
     "! Builds a globally unique TASK_NAME by incrementing MV_NEXT_TASK_
@@ -1214,13 +1244,21 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    " SER-SLICE-2 scope boundary (see class-level documentation on this
-    " method): no batch-scoped extraction exists yet on PREF/PREF_EXT/
-    " PREF_OO, so LV_ACTUAL_BYTES is legitimately 0 here - the gate below
-    " is structurally correct but does not trigger yet.
-    lv_actual_bytes = 0.
+    " SER-SLICE-3 (serialization_slice_3_provider_contract.md &sect;4): the
+    " real, actually-extracted DOMA/DTEL batch buffer for this dispatch's
+    " objects - computed once and reused for the final DISPATCH_BATCH call
+    " below (DR-003). Batches with no DOMA/DTEL objects legitimately
+    " extract to an INITIAL buffer (0 bytes) with no DB access, exactly
+    " like before this slice.
+    DATA(lv_prefetch_buffer_dd) = zcl_abapgit_ortec_ser_pref_ext=>extract_for_batch( it_object_keys ).
+    lv_actual_bytes = xstrlen( lv_prefetch_buffer_dd ).
 
     IF lv_actual_bytes > c_max_actual_batch_bytes AND lines( it_object_keys ) > 1.
+      IF split_depth_at_cap( iv_split_depth ) = abap_true.
+        route_to_sequential_fallback( iv_run_id = iv_run_id it_object_keys = it_object_keys ).
+        RETURN.
+      ENDIF.
+
       lv_split_at = lines( it_object_keys ) DIV 2.
       LOOP AT it_object_keys INTO DATA(ls_key).
         IF sy-tabix <= lv_split_at.
@@ -1229,12 +1267,28 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
           APPEND ls_key TO lt_half_2.
         ENDIF.
       ENDLOOP.
-      before_dispatch( iv_run_id = iv_run_id it_object_keys = lt_half_1 iv_attempt = iv_attempt iv_batch_id = iv_batch_id ).
-      before_dispatch( iv_run_id = iv_run_id it_object_keys = lt_half_2 iv_attempt = iv_attempt iv_batch_id = iv_batch_id ).
+      before_dispatch( iv_run_id      = iv_run_id
+                        it_object_keys = lt_half_1
+                        iv_attempt     = iv_attempt
+                        iv_batch_id    = iv_batch_id
+                        iv_split_depth = iv_split_depth + 1 ).
+      before_dispatch( iv_run_id      = iv_run_id
+                        it_object_keys = lt_half_2
+                        iv_attempt     = iv_attempt
+                        iv_batch_id    = iv_batch_id
+                        iv_split_depth = iv_split_depth + 1 ).
       RETURN.
     ENDIF.
 
-    dispatch_batch( iv_run_id = iv_run_id it_object_keys = it_object_keys iv_attempt = iv_attempt iv_batch_id = iv_batch_id ).
+    dispatch_batch( iv_run_id             = iv_run_id
+                     it_object_keys        = it_object_keys
+                     iv_attempt            = iv_attempt
+                     iv_batch_id           = iv_batch_id
+                     iv_prefetch_buffer_dd = lv_prefetch_buffer_dd ).
+  ENDMETHOD.
+
+  METHOD split_depth_at_cap.
+    rv_yes = boolc( iv_split_depth >= c_max_pre_dispatch_splits ).
   ENDMETHOD.
 
   METHOD dispatch_batch.
@@ -1296,6 +1350,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
           iv_prefetch_buffer      = iv_prefetch_buffer
           iv_prefetch_buffer_ext  = iv_prefetch_buffer_ext
           iv_prefetch_buffer_oo   = iv_prefetch_buffer_oo
+          iv_prefetch_buffer_dd   = iv_prefetch_buffer_dd
           iv_input_row_count      = lines( it_object_keys )
           iv_input_version        = 1
         EXCEPTIONS

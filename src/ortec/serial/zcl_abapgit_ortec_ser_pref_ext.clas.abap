@@ -49,6 +49,10 @@ CLASS zcl_abapgit_ortec_ser_pref_ext DEFINITION
     TYPES ty_dtel_i18n_texts TYPE STANDARD TABLE OF ty_dtel_i18n_text
       WITH DEFAULT KEY.
 
+    "! SER-SLICE-3: DOMA translation-language DD01V rows, one per
+    "! (domain, language) - see GET_DOMA_I18N.
+    TYPES ty_dd01v_i18n_tt TYPE STANDARD TABLE OF dd01v WITH DEFAULT KEY.
+
     CLASS-METHODS prepare
       IMPORTING
         it_tadir    TYPE zif_abapgit_definitions=>ty_tadir_tt
@@ -75,6 +79,31 @@ CLASS zcl_abapgit_ortec_ser_pref_ext DEFINITION
         et_dtel_texts    TYPE ty_dtel_i18n_texts
       RETURNING
         VALUE(rv_found)  TYPE abap_bool.
+
+    "! SER-SLICE-3 (serialization_slice_3_provider_contract.md &sect;1):
+    "! main-language DOMA header/fixed-values, the exact IMPORTING shape
+    "! ZCL_ABAPGIT_OBJECT_DOMA's own DDIF_DOMA_GET call receives today.
+    CLASS-METHODS get_doma_data
+      IMPORTING
+        iv_domname      TYPE dd01l-domname
+        iv_language     TYPE spras
+      EXPORTING
+        es_dd01v        TYPE dd01v
+        et_dd07v_tab    TYPE dd07v_tab
+      RETURNING
+        VALUE(rv_found) TYPE abap_bool.
+
+    "! SER-SLICE-3: prefetched DOMA i18n data (translation languages +
+    "! per-language DD01V/DD07V rows), mirroring GET_DTEL_I18N.
+    CLASS-METHODS get_doma_i18n
+      IMPORTING
+        iv_domname      TYPE dd01l-domname
+      EXPORTING
+        et_i18n_langs   TYPE zcl_abapgit_ortec_ser_pref=>ty_langu_tt
+        et_dd01v_i18n   TYPE ty_dd01v_i18n_tt
+        et_dd07v_i18n   TYPE dd07v_tab
+      RETURNING
+        VALUE(rv_found) TYPE abap_bool.
 
     CLASS-METHODS get_enhs_abap_language_vers
       IMPORTING
@@ -161,8 +190,30 @@ CLASS zcl_abapgit_ortec_ser_pref_ext DEFINITION
     CLASS-METHODS inject_from_buffer
       IMPORTING iv_buffer TYPE xstring.
 
+    "! SER-SLICE-3 (serialization_slice_3_provider_contract.md &sect;2/&sect;4):
+    "! extract the DOMA/DTEL batch prefetch envelope for an entire
+    "! dispatch's TADIR rows in ONE call (as opposed to EXTRACT_FOR_OBJECT's
+    "! one-object-at-a-time shape). Filters IT_OBJECT_KEYS to DOMA/DTEL
+    "! rows internally; returns an INITIAL buffer with no DB access when
+    "! none are present.
+    CLASS-METHODS extract_for_batch
+      IMPORTING it_object_keys   TYPE zif_abapgit_definitions=>ty_tadir_tt
+      RETURNING VALUE(rv_buffer) TYPE xstring.
+
+    "! SER-SLICE-3: inject a DOMA/DTEL batch prefetch envelope (produced by
+    "! EXTRACT_FOR_BATCH) into this session's caches. Unknown wire format
+    "! version, a failed IMPORT, or a duplicate ENTRIES row all reject the
+    "! WHOLE buffer by raising ZCX_ABAPGIT_EXCEPTION - callers must treat
+    "! this as a full prefetch MISS for this buffer only, never propagate
+    "! it into aborting the batch.
+    CLASS-METHODS inject_batch_from_buffer
+      IMPORTING iv_buffer TYPE xstring
+      RAISING   zcx_abapgit_exception.
+
   PRIVATE SECTION.
     TYPES ty_dtel_keys TYPE HASHED TABLE OF dd04l-rollname
+      WITH UNIQUE KEY table_line.
+    TYPES ty_doma_keys TYPE HASHED TABLE OF dd01l-domname
       WITH UNIQUE KEY table_line.
     TYPES ty_enhs_keys TYPE HASHED TABLE OF enhspotname
       WITH UNIQUE KEY table_line.
@@ -185,6 +236,21 @@ CLASS zcl_abapgit_ortec_ser_pref_ext DEFINITION
       END OF ty_dtel_cache.
     TYPES ty_dtel_cache_tt TYPE HASHED TABLE OF ty_dtel_cache
       WITH UNIQUE KEY rollname.
+
+    "! SER-SLICE-3 (serialization_slice_3_provider_contract.md &sect;1,
+    "! DR-001): MERGED, DD01V/DD07V-shaped cache rows - the exact same
+    "! shape ZCL_ABAPGIT_OBJECT_DOMA's own DDIF_DOMA_GET call receives
+    "! today, never raw DD01L/DD07L rows.
+    TYPES:
+      BEGIN OF ty_doma_cache,
+        domname        TYPE dd01l-domname,
+        dd01v          TYPE dd01v,
+        dd01v_i18n     TYPE ty_dd01v_i18n_tt,
+        dd07v_tab      TYPE dd07v_tab,
+        dd07v_tab_i18n TYPE STANDARD TABLE OF dd07v WITH DEFAULT KEY,
+      END OF ty_doma_cache.
+    TYPES ty_doma_cache_tt TYPE HASHED TABLE OF ty_doma_cache
+      WITH UNIQUE KEY domname.
 
     TYPES:
       BEGIN OF ty_enhs_cache,
@@ -263,6 +329,7 @@ CLASS zcl_abapgit_ortec_ser_pref_ext DEFINITION
       WITH DEFAULT KEY.
 
     CLASS-DATA mt_dtel TYPE ty_dtel_cache_tt.
+    CLASS-DATA mt_doma TYPE ty_doma_cache_tt.
     CLASS-DATA mt_enhs TYPE ty_enhs_cache_tt.
     CLASS-DATA mt_fugr_areat TYPE ty_fugr_areat_cache_tt.
     CLASS-DATA mt_fugr_enlfdir TYPE ty_fugr_enlfdir_cache_tt.
@@ -279,6 +346,7 @@ CLASS zcl_abapgit_ortec_ser_pref_ext DEFINITION
         it_tadir TYPE zif_abapgit_definitions=>ty_tadir_tt
       EXPORTING
         et_dtel  TYPE ty_dtel_keys
+        et_doma  TYPE ty_doma_keys
         et_enhs  TYPE ty_enhs_keys
         et_fugr  TYPE ty_fugr_keys
         et_prog  TYPE ty_prog_keys
@@ -295,6 +363,14 @@ CLASS zcl_abapgit_ortec_ser_pref_ext DEFINITION
     CLASS-METHODS prepare_dtel
       IMPORTING
         it_names TYPE ty_dtel_keys.
+    "! SER-SLICE-3 (serialization_slice_3_provider_contract.md &sect;1):
+    "! decision-free bulk-read mirror of what DDIF_DOMA_GET itself would do
+    "! for every domain in IT_NAMES, main language and every translation
+    "! language, as one bulk read instead of N function-module calls.
+    CLASS-METHODS prepare_doma
+      IMPORTING
+        it_names         TYPE ty_doma_keys
+        iv_main_language TYPE spras.
     CLASS-METHODS prepare_enhs
       IMPORTING
         it_names TYPE ty_enhs_keys.
@@ -320,6 +396,7 @@ ENDCLASS.
 CLASS zcl_abapgit_ortec_ser_pref_ext IMPLEMENTATION.
   METHOD clear.
     CLEAR mt_dtel.
+    CLEAR mt_doma.
     CLEAR mt_enhs.
     CLEAR mt_fugr_areat.
     CLEAR mt_fugr_enlfdir.
@@ -346,6 +423,8 @@ CLASS zcl_abapgit_ortec_ser_pref_ext IMPLEMENTATION.
         WHEN 'DTEL'.
           lv_rollname = ls_tadir-obj_name.
           INSERT lv_rollname INTO TABLE et_dtel.
+        WHEN 'DOMA'.
+          INSERT CONV dd01l-domname( ls_tadir-obj_name ) INTO TABLE et_doma.
         WHEN 'ENHS'.
           INSERT CONV enhspotname( ls_tadir-obj_name ) INTO TABLE et_enhs.
         WHEN 'FUGR'.
@@ -411,6 +490,40 @@ CLASS zcl_abapgit_ortec_ser_pref_ext IMPLEMENTATION.
     SORT et_i18n_langs ASCENDING.
     DELETE ADJACENT DUPLICATES FROM et_i18n_langs.
     SORT et_dtel_texts BY ddlanguage ASCENDING.
+
+    rv_found = abap_true.
+  ENDMETHOD.
+
+  METHOD get_doma_data.
+    CLEAR: es_dd01v, et_dd07v_tab.
+    IF iv_language <> mv_language.
+      RETURN.
+    ENDIF.
+
+    READ TABLE mt_doma INTO DATA(ls_doma) WITH TABLE KEY domname = iv_domname.
+    IF sy-subrc = 0.
+      es_dd01v     = ls_doma-dd01v.
+      et_dd07v_tab = ls_doma-dd07v_tab.
+      rv_found     = abap_true.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD get_doma_i18n.
+    CLEAR: et_i18n_langs, et_dd01v_i18n, et_dd07v_i18n.
+
+    READ TABLE mt_doma INTO DATA(ls_doma) WITH TABLE KEY domname = iv_domname.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+
+    et_dd01v_i18n = ls_doma-dd01v_i18n.
+    et_dd07v_i18n = ls_doma-dd07v_tab_i18n.
+
+    LOOP AT ls_doma-dd01v_i18n INTO DATA(ls_dd01v_i18n).
+      APPEND ls_dd01v_i18n-ddlanguage TO et_i18n_langs.
+    ENDLOOP.
+    SORT et_i18n_langs ASCENDING.
+    DELETE ADJACENT DUPLICATES FROM et_i18n_langs.
 
     rv_found = abap_true.
   ENDMETHOD.
@@ -527,6 +640,7 @@ CLASS zcl_abapgit_ortec_ser_pref_ext IMPLEMENTATION.
 
   METHOD prepare.
     DATA lt_dtel TYPE ty_dtel_keys.
+    DATA lt_doma TYPE ty_doma_keys.
     DATA lt_enhs TYPE ty_enhs_keys.
     DATA lt_fugr TYPE ty_fugr_keys.
     DATA lt_prog TYPE ty_prog_keys.
@@ -542,6 +656,7 @@ CLASS zcl_abapgit_ortec_ser_pref_ext IMPLEMENTATION.
         it_tadir = it_tadir
       IMPORTING
         et_dtel  = lt_dtel
+        et_doma  = lt_doma
         et_enhs  = lt_enhs
         et_fugr  = lt_fugr
         et_prog  = lt_prog
@@ -551,6 +666,9 @@ CLASS zcl_abapgit_ortec_ser_pref_ext IMPLEMENTATION.
 
     TRY.
         prepare_dtel( lt_dtel ).
+        prepare_doma(
+          it_names         = lt_doma
+          iv_main_language = iv_language ).
         prepare_enhs( lt_enhs ).
         prepare_fugr( lt_fugr ).
         prepare_prog_langs(
@@ -613,6 +731,115 @@ CLASS zcl_abapgit_ortec_ser_pref_ext IMPLEMENTATION.
           APPEND ls_dd04t TO <ls_dtel>-dd04t_i18n.
         ENDIF.
       ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD prepare_doma.
+    DATA lt_dd01l TYPE STANDARD TABLE OF dd01l WITH DEFAULT KEY.
+    DATA lt_dd01t TYPE STANDARD TABLE OF dd01t WITH DEFAULT KEY.
+    DATA lt_dd07l TYPE STANDARD TABLE OF dd07l WITH DEFAULT KEY.
+    DATA lt_dd07t TYPE STANDARD TABLE OF dd07t WITH DEFAULT KEY.
+
+    IF it_names IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    SELECT *
+      FROM dd01l
+      INTO TABLE @lt_dd01l
+      FOR ALL ENTRIES IN @it_names
+      WHERE domname = @it_names-table_line
+        AND as4local = 'A'
+        AND as4vers = '0000'.
+    IF lt_dd01l IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    SELECT *
+      FROM dd01t
+      INTO TABLE @lt_dd01t
+      FOR ALL ENTRIES IN @lt_dd01l
+      WHERE domname = @lt_dd01l-domname
+        AND as4local = 'A'
+        AND as4vers = '0000'.
+
+    SELECT *
+      FROM dd07l
+      INTO TABLE @lt_dd07l
+      FOR ALL ENTRIES IN @lt_dd01l
+      WHERE domname = @lt_dd01l-domname
+        AND as4local = 'A'
+        AND as4vers = '0000'.
+
+    SELECT *
+      FROM dd07t
+      INTO TABLE @lt_dd07t
+      FOR ALL ENTRIES IN @lt_dd01l
+      WHERE domname = @lt_dd01l-domname
+        AND as4local = 'A'
+        AND as4vers = '0000'.
+
+    LOOP AT lt_dd01l INTO DATA(ls_dd01l).
+      DATA(lt_langs) = VALUE zcl_abapgit_ortec_ser_pref=>ty_langu_tt( ( iv_main_language ) ).
+
+      " every language this domain has EITHER a DD01T OR a DD07T text row
+      " for (mirrors ZCL_ABAPGIT_OBJECT_DOMA's own serialize_texts language
+      " discovery, but from the already-fetched bulk tables). IV_MAIN_
+      " LANGUAGE is seeded above unconditionally - DDIF_DOMA_GET always
+      " returns the DD01L-derived header for the main language even when
+      " no DD01T/DD07T text row exists for it (correctness review DR-001:
+      " without this seed, a domain with no main-language text would get
+      " a fully INITIAL main-language DD01V and be silently dropped by
+      " the seam's "ls_dd01v IS INITIAL -> RETURN" guard).
+      LOOP AT lt_dd01t INTO DATA(ls_dd01t_lang) WHERE domname = ls_dd01l-domname.
+        APPEND ls_dd01t_lang-ddlanguage TO lt_langs.
+      ENDLOOP.
+      LOOP AT lt_dd07t INTO DATA(ls_dd07t_lang) WHERE domname = ls_dd01l-domname.
+        APPEND ls_dd07t_lang-ddlanguage TO lt_langs.
+      ENDLOOP.
+      SORT lt_langs ASCENDING.
+      DELETE ADJACENT DUPLICATES FROM lt_langs.
+
+      DATA(ls_cache) = VALUE ty_doma_cache( domname = ls_dd01l-domname ).
+
+      LOOP AT lt_langs INTO DATA(lv_lang).
+        DATA(ls_dd01v) = CORRESPONDING dd01v( ls_dd01l ).
+        READ TABLE lt_dd01t INTO DATA(ls_text) WITH KEY domname = ls_dd01l-domname ddlanguage = lv_lang.
+        IF sy-subrc = 0.
+          ls_dd01v-ddlanguage = ls_text-ddlanguage.
+          ls_dd01v-ddtext     = ls_text-ddtext.
+        ELSE.
+          " no DD01T text row - DDIF_DOMA_GET still sets ddlanguage
+          ls_dd01v-ddlanguage = lv_lang.
+        ENDIF.
+
+        DATA(lt_dd07v) = VALUE dd07v_tab( ).
+        LOOP AT lt_dd07l INTO DATA(ls_dd07l) WHERE domname = ls_dd01l-domname.
+          DATA(ls_dd07v) = CORRESPONDING dd07v( ls_dd07l ).
+          READ TABLE lt_dd07t INTO DATA(ls_val_text)
+            WITH KEY domname = ls_dd01l-domname ddlanguage = lv_lang valpos = ls_dd07l-valpos.
+          IF sy-subrc = 0.
+            ls_dd07v-ddlanguage = ls_val_text-ddlanguage.
+            ls_dd07v-ddtext     = ls_val_text-ddtext.
+            ls_dd07v-domval_ld  = ls_val_text-domval_ld.
+            ls_dd07v-domval_hd  = ls_val_text-domval_hd.
+          ELSE.
+            " no translation for this value - keep entry, texts stay initial
+            ls_dd07v-ddlanguage = lv_lang.
+          ENDIF.
+          APPEND ls_dd07v TO lt_dd07v.
+        ENDLOOP.
+
+        IF lv_lang = iv_main_language.
+          ls_cache-dd01v     = ls_dd01v.
+          ls_cache-dd07v_tab = lt_dd07v.
+        ELSE.
+          APPEND ls_dd01v TO ls_cache-dd01v_i18n.
+          APPEND LINES OF lt_dd07v TO ls_cache-dd07v_tab_i18n.
+        ENDIF.
+      ENDLOOP.
+
+      INSERT ls_cache INTO TABLE mt_doma.
     ENDLOOP.
   ENDMETHOD.
 
@@ -1066,6 +1293,123 @@ CLASS zcl_abapgit_ortec_ser_pref_ext IMPLEMENTATION.
       INSERT ls_tran INTO TABLE mt_tran.
     ENDLOOP.
 
+    IF lv_language IS NOT INITIAL.
+      mv_language = lv_language.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD extract_for_batch.
+    DATA lt_entries TYPE zaog_ser_dd_bentry_tt.
+    DATA lt_doma    TYPE ty_doma_cache_tt.
+    DATA lt_dtel    TYPE ty_dtel_cache_tt.
+    DATA ls_hdr     TYPE zaog_ser_dd_bhdr.
+
+    LOOP AT it_object_keys INTO DATA(ls_tadir) WHERE object = 'DOMA' OR object = 'DTEL'.
+      DATA(ls_entry) = VALUE zaog_ser_dd_bentry(
+        obj_type = ls_tadir-object
+        obj_name = ls_tadir-obj_name ).
+
+      CASE ls_tadir-object.
+        WHEN 'DOMA'.
+          READ TABLE mt_doma INTO DATA(ls_doma)
+            WITH TABLE KEY domname = CONV dd01l-domname( ls_tadir-obj_name ).
+          IF sy-subrc = 0.
+            ls_entry-present = abap_true.
+            INSERT ls_doma INTO TABLE lt_doma.
+          ENDIF.
+        WHEN 'DTEL'.
+          READ TABLE mt_dtel INTO DATA(ls_dtel)
+            WITH TABLE KEY rollname = CONV dd04l-rollname( ls_tadir-obj_name ).
+          IF sy-subrc = 0.
+            ls_entry-present = abap_true.
+            INSERT ls_dtel INTO TABLE lt_dtel.
+          ENDIF.
+      ENDCASE.
+
+      APPEND ls_entry TO lt_entries.
+    ENDLOOP.
+
+    IF lt_entries IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    ls_hdr-wire_format_version = 1.
+    ls_hdr-provider_id         = 'SER_DD01'.
+    ls_hdr-object_count        = lines( lt_entries ).
+
+    EXPORT hdr      = ls_hdr
+           entries  = lt_entries
+           doma     = lt_doma
+           dtel     = lt_dtel
+           language = mv_language
+      TO DATA BUFFER rv_buffer COMPRESSION ON.
+  ENDMETHOD.
+
+
+  METHOD inject_batch_from_buffer.
+    DATA ls_hdr            TYPE zaog_ser_dd_bhdr.
+    DATA lt_entries        TYPE zaog_ser_dd_bentry_tt.
+    DATA lt_doma           TYPE ty_doma_cache_tt.
+    DATA lt_dtel           TYPE ty_dtel_cache_tt.
+    DATA lt_entries_sorted TYPE STANDARD TABLE OF zaog_ser_dd_bentry WITH DEFAULT KEY.
+    DATA lv_lines_before   TYPE i.
+    DATA lv_language       TYPE spras.
+
+    CHECK iv_buffer IS NOT INITIAL.
+
+    TRY.
+        IMPORT hdr      = ls_hdr
+               entries  = lt_entries
+               doma     = lt_doma
+               dtel     = lt_dtel
+               language = lv_language
+          FROM DATA BUFFER iv_buffer.
+      CATCH cx_root INTO DATA(lx_import).
+        zcx_abapgit_exception=>raise(
+          |ORTEC DOMA/DTEL batch prefetch buffer is corrupt: { lx_import->get_text( ) }| ).
+    ENDTRY.
+    IF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise( 'ORTEC DOMA/DTEL batch prefetch buffer: IMPORT failed' ).
+    ENDIF.
+
+    IF ls_hdr-wire_format_version <> 1.
+      zcx_abapgit_exception=>raise(
+        |ORTEC DOMA/DTEL batch prefetch buffer: unknown wire_format_version { ls_hdr-wire_format_version }| ).
+    ENDIF.
+
+    IF ls_hdr-object_count <> lines( lt_entries ).
+      zcx_abapgit_exception=>raise(
+        'ORTEC DOMA/DTEL batch prefetch buffer: object_count does not match ENTRIES' ).
+    ENDIF.
+
+    " duplicate check MUST happen before any INSERT INTO mt_doma/mt_dtel -
+    " a HASHED TABLE INSERT would otherwise silently collapse a duplicate
+    " instead of rejecting the whole buffer as corrupt.
+    lt_entries_sorted = CORRESPONDING #( lt_entries ).
+    SORT lt_entries_sorted BY obj_type obj_name.
+    lv_lines_before = lines( lt_entries_sorted ).
+    DELETE ADJACENT DUPLICATES FROM lt_entries_sorted COMPARING obj_type obj_name.
+    IF lines( lt_entries_sorted ) <> lv_lines_before.
+      zcx_abapgit_exception=>raise(
+        'ORTEC DOMA/DTEL batch prefetch buffer: duplicate entry in ENTRIES' ).
+    ENDIF.
+
+    " CLEAR first: a parallel RFC worker session can be reused across many
+    " unrelated dispatches over its lifetime - see INJECT_FROM_BUFFER's own
+    " identical clear-before-insert rationale.
+    CLEAR mt_doma.
+    CLEAR mt_dtel.
+
+    LOOP AT lt_doma INTO DATA(ls_doma).
+      INSERT ls_doma INTO TABLE mt_doma.
+    ENDLOOP.
+    LOOP AT lt_dtel INTO DATA(ls_dtel).
+      INSERT ls_dtel INTO TABLE mt_dtel.
+    ENDLOOP.
+
+    " a worker session that never called PREPARE() has MV_LANGUAGE initial -
+    " without this, GET_DOMA_DATA/GET_DTEL_DATA's own language guard would
+    " reject every lookup after an otherwise-successful inject.
     IF lv_language IS NOT INITIAL.
       mv_language = lv_language.
     ENDIF.

@@ -56,6 +56,11 @@ CLASS ltcl_ser_orch DEFINITION FINAL
     METHODS merge_succeeds_with_payload    FOR TESTING.
     METHODS merge_empty_file_list_ok       FOR TESTING.
 
+    METHODS split_depth_below_cap_false     FOR TESTING.
+    METHODS split_depth_at_cap_true         FOR TESTING.
+    METHODS split_depth_above_cap_true      FOR TESTING.
+    METHODS before_dispatch_dd_buf_empty    FOR TESTING.
+
 ENDCLASS.
 
 
@@ -751,5 +756,57 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
 
     READ TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context INTO DATA(ls_empty_ctx) WITH TABLE KEY run_id = lv_run.
     cl_abap_unit_assert=>assert_equals( exp = 0 act = lines( ls_empty_ctx-files ) ).
+  ENDMETHOD.
+
+  METHOD split_depth_below_cap_false.
+    " SER-SLICE-3 (serialization_slice_3_provider_contract.md §4) -
+    " boundary check one step below C_MAX_PRE_DISPATCH_SPLITS.
+    cl_abap_unit_assert=>assert_false(
+      zcl_abapgit_ortec_ser_orch=>split_depth_at_cap(
+        zcl_abapgit_ortec_ser_orch=>c_max_pre_dispatch_splits - 1 ) ).
+  ENDMETHOD.
+
+  METHOD split_depth_at_cap_true.
+    cl_abap_unit_assert=>assert_true(
+      zcl_abapgit_ortec_ser_orch=>split_depth_at_cap(
+        zcl_abapgit_ortec_ser_orch=>c_max_pre_dispatch_splits ) ).
+  ENDMETHOD.
+
+  METHOD split_depth_above_cap_true.
+    cl_abap_unit_assert=>assert_true(
+      zcl_abapgit_ortec_ser_orch=>split_depth_at_cap(
+        zcl_abapgit_ortec_ser_orch=>c_max_pre_dispatch_splits + 1 ) ).
+  ENDMETHOD.
+
+  METHOD before_dispatch_dd_buf_empty.
+    " SER-SLICE-3 - a batch with no DOMA/DTEL objects must extract to an
+    " INITIAL (0-byte) DD buffer, so BEFORE_DISPATCH's actual-byte gate
+    " never trips for object types the DD provider does not cover, and
+    " BEFORE_DISPATCH must still reach DISPATCH_BATCH's real MT_DISPATCH
+    " insert for a broken (non-existent) run rather than looping forever -
+    " this exercises the wiring without a real RFC round trip, mirroring
+    " BREAKER_GATES_BEFORE_DISPATCH's own no-run-context technique.
+    DATA(lv_run) = build_run_id( ).
+    DATA(lt_keys) = VALUE zif_abapgit_definitions=>ty_tadir_tt(
+                              ( build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'ZZZ' ) ) ).
+
+    cl_abap_unit_assert=>assert_initial(
+      zcl_abapgit_ortec_ser_pref_ext=>extract_for_batch( lt_keys ) ).
+
+    TRY.
+        zcl_abapgit_ortec_ser_orch=>before_dispatch(
+            iv_run_id      = lv_run
+            it_object_keys = lt_keys
+            iv_attempt     = 1
+            iv_batch_id    = 'B1' ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_exc).
+        cl_abap_unit_assert=>fail( msg = lx_exc->get_text( ) ).
+    ENDTRY.
+
+    " No run context exists, so DISPATCH_BATCH's own guard clause returns
+    " immediately without ever issuing a real CALL FUNCTION - MT_DISPATCH
+    " stays empty, proving the DD-buffer computation did not interfere
+    " with the pre-existing no-context short-circuit.
+    cl_abap_unit_assert=>assert_initial( zcl_abapgit_ortec_ser_orch=>mt_dispatch ).
   ENDMETHOD.
 ENDCLASS.

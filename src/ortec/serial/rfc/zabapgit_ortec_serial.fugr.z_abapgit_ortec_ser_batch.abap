@@ -39,10 +39,6 @@ FUNCTION Z_ABAPGIT_ORTEC_SER_BATCH.
 * done by the caller (ZCL_ABAPGIT_ORTEC_SER_ORCH) during result merge,
 * from its own already-known TADIR data - exactly mirroring how the
 * standard path's ADD_TO_RETURN assigns EV_PATH after the fact.
-*
-* IV_PREFETCH_BUFFER_DD is reserved for the SER-SLICE-3 DOMA/DTEL
-* provider, which does not exist yet - no caller populates it today, so
-* it is intentionally never injected here.
 
   DATA: ls_result       TYPE zaog_ser_batch_result,
         ls_item         TYPE zif_abapgit_definitions=>ty_item,
@@ -60,6 +56,17 @@ FUNCTION Z_ABAPGIT_ORTEC_SER_BATCH.
   ENDIF.
   IF iv_prefetch_buffer_oo IS NOT INITIAL.
     zcl_abapgit_ortec_ser_pref_oo=>inject_from_buffer( iv_prefetch_buffer_oo ).
+  ENDIF.
+  IF iv_prefetch_buffer_dd IS NOT INITIAL.
+    TRY.
+        zcl_abapgit_ortec_ser_pref_ext=>inject_batch_from_buffer( iv_prefetch_buffer_dd ).
+      CATCH zcx_abapgit_exception ##NO_HANDLER.
+        " Corrupt/unknown-version DOMA/DTEL batch buffer (SER-SLICE-3
+        " required behavior): treat as a full prefetch MISS for this
+        " buffer only - every object below still serializes via its own
+        " standard per-object read, exactly like a normal prefetch miss.
+        " Never propagate - the batch itself must still complete.
+    ENDTRY.
   ENDIF.
 
   ls_i18n_params-main_language         = iv_language.

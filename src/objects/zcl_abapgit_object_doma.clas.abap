@@ -217,6 +217,9 @@ CLASS zcl_abapgit_object_doma IMPLEMENTATION.
           lt_i18n_langs      TYPE TABLE OF langu,
           lt_dd01_texts      TYPE ty_dd01_texts,
           lt_dd07_texts      TYPE ty_dd07_texts,
+          lv_prefetched      TYPE abap_bool,
+          lt_dd01v_i18n      TYPE zcl_abapgit_ortec_ser_pref_ext=>ty_dd01v_i18n_tt,
+          lt_dd07v_i18n      TYPE dd07v_tab,
           lt_language_filter TYPE zif_abapgit_environment=>ty_system_language_filter.
 
     FIELD-SYMBOLS: <lv_lang>      LIKE LINE OF lt_i18n_langs,
@@ -234,40 +237,69 @@ CLASS zcl_abapgit_object_doma IMPLEMENTATION.
     " Collect additional languages, skip main lang - it was serialized already
     lt_language_filter = mo_i18n_params->build_language_filter( ).
 
-    SELECT DISTINCT ddlanguage AS langu INTO TABLE lt_i18n_langs
-      FROM dd01v
-      WHERE domname = lv_name
-      AND ddlanguage IN lt_language_filter
-      AND ddlanguage <> mv_language
-      ORDER BY langu.                                     "#EC CI_SUBRC
+    IF zcl_abapgit_ortec_git_switch=>is_serial_prefetch_active( ) = abap_true.
+      lv_prefetched = zcl_abapgit_ortec_ser_pref_ext=>get_doma_i18n(
+        EXPORTING
+          iv_domname    = lv_name
+        IMPORTING
+          et_i18n_langs = lt_i18n_langs
+          et_dd01v_i18n = lt_dd01v_i18n
+          et_dd07v_i18n = lt_dd07v_i18n ).
+    ENDIF.
 
-    SELECT DISTINCT ddlanguage AS langu APPENDING TABLE lt_i18n_langs
-      FROM dd07v
-      WHERE domname = lv_name
-      AND ddlanguage IN lt_language_filter
-      AND ddlanguage <> mv_language
-      ORDER BY langu.                                     "#EC CI_SUBRC
+    IF lv_prefetched = abap_true.
+      DELETE lt_i18n_langs WHERE table_line NOT IN lt_language_filter OR table_line = mv_language.
+      SORT lt_i18n_langs.
+      DELETE ADJACENT DUPLICATES FROM lt_i18n_langs.
+    ELSE.
+      SELECT DISTINCT ddlanguage AS langu INTO TABLE lt_i18n_langs
+        FROM dd01v
+        WHERE domname = lv_name
+        AND ddlanguage IN lt_language_filter
+        AND ddlanguage <> mv_language
+        ORDER BY langu.                                     "#EC CI_SUBRC
 
-    SORT lt_i18n_langs.
-    DELETE ADJACENT DUPLICATES FROM lt_i18n_langs.
+      SELECT DISTINCT ddlanguage AS langu APPENDING TABLE lt_i18n_langs
+        FROM dd07v
+        WHERE domname = lv_name
+        AND ddlanguage IN lt_language_filter
+        AND ddlanguage <> mv_language
+        ORDER BY langu.                                     "#EC CI_SUBRC
+
+      SORT lt_i18n_langs.
+      DELETE ADJACENT DUPLICATES FROM lt_i18n_langs.
+    ENDIF.
 
     LOOP AT lt_i18n_langs ASSIGNING <lv_lang>.
       lv_index = sy-tabix.
 
-      CALL FUNCTION 'DDIF_DOMA_GET'
-        EXPORTING
-          name          = lv_name
-          langu         = <lv_lang>
-        IMPORTING
-          dd01v_wa      = ls_dd01v
-        TABLES
-          dd07v_tab     = lt_dd07v
-        EXCEPTIONS
-          illegal_input = 1
-          OTHERS        = 2.
-      IF sy-subrc <> 0.
-        DELETE lt_i18n_langs INDEX lv_index. " Don't save this lang
-        CONTINUE.
+      IF lv_prefetched = abap_true.
+        READ TABLE lt_dd01v_i18n INTO ls_dd01v WITH KEY ddlanguage = <lv_lang>.
+        IF sy-subrc <> 0.
+          DELETE lt_i18n_langs INDEX lv_index. " Don't save this lang
+          CONTINUE.
+        ENDIF.
+
+        CLEAR lt_dd07v.
+        LOOP AT lt_dd07v_i18n INTO DATA(ls_dd07v_i18n) WHERE ddlanguage = <lv_lang>.
+          APPEND ls_dd07v_i18n TO lt_dd07v.
+        ENDLOOP.
+      ELSE.
+        CALL FUNCTION 'DDIF_DOMA_GET'
+          EXPORTING
+            name          = lv_name
+            langu         = <lv_lang>
+          IMPORTING
+            dd01v_wa      = ls_dd01v
+          TABLES
+            dd07v_tab     = lt_dd07v
+          EXCEPTIONS
+            illegal_input = 1
+            OTHERS        = 2.
+        IF sy-subrc <> 0.
+          DELETE lt_i18n_langs INDEX lv_index. " Don't save this lang
+          CONTINUE.
+        ENDIF.
       ENDIF.
 
       IF ls_dd01v-ddlanguage IS INITIAL.
@@ -482,33 +514,52 @@ CLASS zcl_abapgit_object_doma IMPLEMENTATION.
 
   METHOD zif_abapgit_object~serialize.
 
-    DATA: lv_name    TYPE ddobjname,
-          lv_state   TYPE ddgotstate,
-          ls_dd01v   TYPE dd01v,
-          ls_extra   TYPE ty_extra,
-          lv_masklen TYPE c LENGTH 4,
-          lt_dd07v   TYPE TABLE OF dd07v.
+    DATA: lv_name       TYPE ddobjname,
+          lv_state      TYPE ddgotstate,
+          ls_dd01v      TYPE dd01v,
+          ls_extra      TYPE ty_extra,
+          lv_masklen    TYPE c LENGTH 4,
+          lt_dd07v      TYPE TABLE OF dd07v,
+          lv_prefetched TYPE abap_bool.
 
     FIELD-SYMBOLS <ls_dd07v> TYPE dd07v.
     FIELD-SYMBOLS <lg_field> TYPE any.
 
     lv_name = ms_item-obj_name.
 
-    CALL FUNCTION 'DDIF_DOMA_GET'
-      EXPORTING
-        name          = lv_name
-        state         = 'A'
-        langu         = mv_language
-      IMPORTING
-        gotstate      = lv_state
-        dd01v_wa      = ls_dd01v
-      TABLES
-        dd07v_tab     = lt_dd07v
-      EXCEPTIONS
-        illegal_input = 1
-        OTHERS        = 2.
-    IF sy-subrc <> 0.
-      zcx_abapgit_exception=>raise_t100( ).
+    IF zcl_abapgit_ortec_git_switch=>is_serial_prefetch_active( ) = abap_true.
+      lv_prefetched = zcl_abapgit_ortec_ser_pref_ext=>get_doma_data(
+        EXPORTING
+          iv_domname   = lv_name
+          iv_language  = mv_language
+        IMPORTING
+          es_dd01v     = ls_dd01v
+          et_dd07v_tab = lt_dd07v ).
+      IF lv_prefetched = abap_true.
+        " GET_DOMA_DATA's own found=TRUE already proves an active row
+        " exists (PREPARE_DOMA's WHERE as4local='A' AND as4vers='0000' is
+        " the same predicate DDIF_DOMA_GET's state='A' enforces).
+        lv_state = 'A'.
+      ENDIF.
+    ENDIF.
+
+    IF lv_prefetched = abap_false.
+      CALL FUNCTION 'DDIF_DOMA_GET'
+        EXPORTING
+          name          = lv_name
+          state         = 'A'
+          langu         = mv_language
+        IMPORTING
+          gotstate      = lv_state
+          dd01v_wa      = ls_dd01v
+        TABLES
+          dd07v_tab     = lt_dd07v
+        EXCEPTIONS
+          illegal_input = 1
+          OTHERS        = 2.
+      IF sy-subrc <> 0.
+        zcx_abapgit_exception=>raise_t100( ).
+      ENDIF.
     ENDIF.
 
     IF ls_dd01v IS INITIAL OR lv_state <> 'A'.
