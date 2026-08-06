@@ -1,5 +1,61 @@
 # SER-SLICE-2 — Preflight, OD-14 Audit, Owner Object-Creation Checklist
 
+## Terminal-outcome closeout (2026-08-06, most current)
+
+```text
+PACKET=COMPACT_HANDOFF_V1
+TASK=SER_SLICE_2_TERMINAL_OUTCOME_CLOSEOUT
+BASELINE_HEAD=4907442934b61d5bd7355ca165ca956cda1dc744
+CHECKPOINT_COMMIT=8ce5de25 (ORTEC: harden serialization terminal outcomes)
+STATUS=LOCAL_REVIEW_CLEAN_AWAITING_OWNER_IT8
+SCOPE=src/ortec/serial/core/zcl_abapgit_ortec_ser_orch.clas.abap;
+  src/ortec/serial/core/zcl_abapgit_ortec_ser_orch.clas.testclasses.abap
+ROOT_CAUSE=The earlier Stage-A source could still treat "terminal" as
+  sufficient for successful return even when an expected object ended in
+  failure or a callback-side helper failure degraded into mere
+  incompleteness.
+IMPLEMENTED_FIX=
+  - explicit expected object count in TY_RUN_CONTEXT;
+  - separate success and failure sets (MT_RESOLVED vs MT_FAILED);
+  - ASSERT_SUCCESSFUL_RUN now requires wait_result = 0,
+    terminal_count = expected_count, and failed_count = 0 before RT_FILES
+    is ever copied out;
+  - callback-side DRAIN_QUEUE helper failures now become explicit failed
+    object outcomes, including the formerly vulnerable "selected batch
+    removed from queue before dispatch" window;
+  - terminal/failure counts moved to O(1) run-context counters so the
+    WAIT UNTIL completion predicate no longer rescans per-object tables on
+    every callback wake-up.
+LOCAL_VALIDATION=
+  - VS Code get_errors: clean on ORCH main class + testclasses include;
+  - focused unit coverage added for explicit queued-failure semantics and
+    the drain-queue pre-dispatch failure window (`queued_failures_block_return`,
+    `drain_fail_marks_batch`).
+INDEPENDENT_REVIEWS=
+  - correctness: APPROVE_WITH_MINOR_REVISIONS
+    (.memory/reviews/serialization_slice_2_terminal_outcome_correctness.md)
+  - adversarial: PASS
+    (.memory/reviews/serialization_slice_2_terminal_outcome_adversarial.md)
+  - regression: PASS_WITH_FINDINGS
+    (.memory/reviews/serialization_slice_2_terminal_outcome_regression.md)
+  - performance scan: PASS_WITH_FINDINGS
+    (.memory/reviews/serialization_slice_2_terminal_outcome_perf_scan.md)
+  - performance audit: PASS_WITH_MINOR_FINDINGS
+    (.memory/reviews/serialization_slice_2_terminal_outcome_performance.md)
+HONEST_VALIDATION_BOUNDARY=Full SAP/IT8 validation is still pending.
+  A local SAPDiagnose syntax dry-run against the current ORCH source got
+  past the repaired DISPATCH_BATCH/control-flow issues but still failed at
+  the live system's stale testclasses include (`C_STATE_ABANDONED`
+  reference on IT8), so this session did NOT produce a full clean live
+  class-pool syntax pass for ZCL_ABAPGIT_ORTEC_SER_ORCH. Treat that as an
+  import/activate prerequisite in IT8, not as a local-source blocker.
+SER_SLICE_2_STATUS=LOCAL_COMPLETE_AWAITING_FINAL_IT8
+SER_SLICE_3_STATUS=DISCOVERY_COMPLETE_IMPLEMENTATION_NOT_STARTED
+NEXT=owner IT8 import/activate of the current ORCH class pool, then run
+  the existing validation plan's ABAP Unit/ATC/fail-fast/late-callback/
+  parity cases before any SER-SLICE-3 productive provider work resumes.
+```
+
 ```text
 PACKET=COMPACT_HANDOFF_V1
 TASK=SERIALIZATION_SER_SLICE_2

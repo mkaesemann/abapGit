@@ -11,10 +11,10 @@ LATEST_SAP_VALIDATED_HEAD=3c77d898b62f3b0464e48cf59844e2e30c7b6e89
 ## Active topic
 
 ```text
-TOPIC=SERIALIZATION_PERFORMANCE
+TOPIC=SER_SLICE_2_TERMINAL_OUTCOME_CLOSEOUT
 STATUS=IN_PROGRESS
 SER_SLICE_2=LOCAL_COMPLETE_AWAITING_FINAL_IT8
-SER_SLICE_3=DISCOVERY_OR_IMPLEMENTATION_IN_PROGRESS
+SER_SLICE_3=DISCOVERY_COMPLETE_IMPLEMENTATION_NOT_STARTED
 ```
 
 SER-SLICE-0 and SER-SLICE-1: SAP_VALIDATED_COMPLETE (established prior
@@ -31,9 +31,31 @@ SER_SLICE_2_STATUS=LOCAL_COMPLETE_AWAITING_FINAL_IT8
 Do NOT report this as complete/enforced/validated until the IT8
 validation plan below is executed. Current local state:
 
+- Terminal-outcome correction (2026-08-06) is now locally review-clean:
+  successful return requires `wait_result = 0`, `terminal_count =
+  expected_count`, and `failed_count = 0`; callback-side `drain_queue`
+  helper failures now become explicit failed-object outcomes, including
+  the formerly vulnerable "selected batch removed from queue before
+  dispatch" window; terminal/failure counts are maintained as O(1)
+  run-context counters rather than rescanned per object in the `WAIT
+  UNTIL` completion predicate.
+- Current independent review state for that correction:
+  correctness = APPROVE_WITH_MINOR_REVISIONS,
+  adversarial = PASS,
+  regression = PASS_WITH_FINDINGS,
+  performance scan = PASS_WITH_FINDINGS,
+  performance audit = PASS_WITH_MINOR_FINDINGS.
+- Honest live-validation boundary: local `get_errors` is clean on ORCH
+  main + testclasses, but a full SAPDiagnose class-pool dry-run is still
+  pending import/activation of the CURRENT local testclasses include on
+  IT8. The latest local dry-run got past the repaired main-include syntax
+  issues and then failed on the live system's stale testclasses include
+  still referencing `C_STATE_ABANDONED`.
+
 - Phase 1/2 contracts + full ORCH state machine + minimal standard hook
-  implemented and locally verified (live `SAPDiagnose(action="syntax")`
-  dry-runs clean, local `get_errors` clean).
+  implemented and locally verified (`get_errors` clean; see the live
+  syntax boundary note above for why a full clean class-pool dry-run is
+  not yet claimed here).
 - Minimal-hook restoration done: `ZCL_ABAPGIT_SERIALIZE=>IS_NO_PARALLEL`
   reverted to its exact original PRIVATE instance form (confirmed via
   diff against the pre-SER-SLICE-2 parent `ada103d5` - only the hook
@@ -128,6 +150,10 @@ result (authoritative artifact:
 - smallest viable design shape: additive `EXTRACT_FOR_BATCH` methods on
   the existing prefetch classes plus one real versioned batch envelope.
 
+No SER-SLICE-3 productive provider implementation has started. Treat the
+current Slice-3 state as discovery complete / implementation not started
+until SER-SLICE-2 clears its owner IT8 gate.
+
 Do not start SER-SLICE-3 productive provider code until the SER-SLICE-2
 owner IT8 gate above is at least clearly handed off and no local Stage-A
 blocker remains.
@@ -197,8 +223,9 @@ them.
 - Package D1 owns bounded external delta-base resolution; Package D2
   owns attempt/transaction isolation (both SAP_VALIDATED_COMPLETE - do
   not reopen without new contradicting evidence).
-- WAPA is never batch-eligible in SER-SLICE-2 (structural exclusion,
-  separate from the ECTC/ECTD-only no-parallel denylist).
+- WAPA is batch-eligible in SER-SLICE-2 only as a singleton batch: never
+  mixed with any other WAPA and never mixed with any non-WAPA object
+  (separate from the ECTC/ECTD-only no-parallel denylist).
 - Any standard-abapGit-class change for an ORTEC hook must stay the
   smallest possible delegation - no unnecessary visibility/staticness
   changes to standard methods (see SER-SLICE-2's IS_NO_PARALLEL revert,

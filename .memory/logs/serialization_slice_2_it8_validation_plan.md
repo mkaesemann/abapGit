@@ -4,6 +4,14 @@
 PACKET=COMPACT_HANDOFF_V1
 TASK=SERIALIZATION_SER_SLICE_2_IT8_VALIDATION_PLAN
 STATUS=NOT_YET_EXECUTED — this is the plan, not a completed run
+LOCAL_2026_08_06_STATE=Terminal-outcome semantics are locally review-clean
+  again, but full IT8 validation is still pending. One SAPDiagnose dry-run
+  against the current ORCH source advanced beyond the repaired main-include
+  control-flow issues and then failed on the live system's stale
+  `zcl_abapgit_ortec_ser_orch` testclasses include (`C_STATE_ABANDONED`
+  still present there). Therefore this plan must begin by importing /
+  activating the CURRENT local class pool before any live syntax/unit/ATC
+  result is treated as meaningful.
 ```
 
 Perform in this exact dependency order. Do not claim SER-SLICE-2 complete
@@ -48,7 +56,10 @@ ZCL_ABAPGIT_ORTEC_SER_ORCH      - PASS required (object_key_sets_equal,
                                    no-parallel parity, next_task_name
                                    uniqueness, breaker gate at
                                    before_dispatch, merge failure
-                                   fallback (3 cases) - all testable
+                                   fallback (3 cases), queued-failure
+                                   explicit terminal accounting, and the
+                                   drain-queue pre-dispatch failure window
+                                   - all testable
                                    without live RFC via LOCAL FRIENDS
                                    access to private static state)
 ```
@@ -77,6 +88,9 @@ Required IT8 cases:
 - feature ON, induced missing-result condition (or equivalent forced
   incomplete terminal state) -> visible ZCX_ABAPGIT_EXCEPTION, NO partial
   result accepted
+- feature ON, callback-side helper failure while draining queued work
+  before dispatch completion -> visible failed-object or explicit fatal
+  outcome, NOT a generic unexplained missing-result condition
 - feature ON, induced timeout/no-completion case -> visible
   ZCX_ABAPGIT_EXCEPTION, NO partial result accepted
 - late callback after DISCARD_RUN_STATE -> no dump, RECEIVE+discard only,

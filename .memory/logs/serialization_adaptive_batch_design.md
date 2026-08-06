@@ -22,6 +22,16 @@ CURRENT_HEAD_SUPERSEDURE=The current Stage-A source descended from
   partial result discarded. Late callbacks after DISCARD_RUN_STATE are
   still safe via the unknown-task RECEIVE-and-discard path, but no
   successful-return drain window remains.
+TERMINAL_OUTCOME_SUPERSEDURE=Current Stage-A source also supersedes any
+  older prose that implicitly treated "terminal" as equivalent to
+  "successful". The active source now models terminal outcomes explicitly:
+  `MT_RESOLVED` is success only, `MT_FAILED` is failure only, each run
+  carries an `expected_count`, and successful return is allowed only when
+  `terminal_count = expected_count` and `failed_count = 0`. Callback-side
+  helper failures in `DRAIN_QUEUE` must become explicit failed-object
+  outcomes, not mere incompleteness. The production-scale completion check
+  is implemented with O(1) run-context counters (`terminal_count`,
+  `failed_count`), not repeated scans of the per-object tables.
 WAPA_SUPERSEDURE=This design's older "WAPA remains excluded from the
   batch worker" wording is also superseded for Stage A. Current source
   admits WAPA only as singleton batches, never mixed with any other
