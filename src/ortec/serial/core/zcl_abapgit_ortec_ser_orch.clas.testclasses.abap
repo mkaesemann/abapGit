@@ -39,6 +39,13 @@ CLASS ltcl_ser_orch DEFINITION FINAL
     METHODS wait_zero_incomplete           FOR TESTING.
     METHODS wait_subrc4_incomplete         FOR TESTING.
     METHODS wait_subrc8_timeout            FOR TESTING.
+    METHODS all_success_allows_return      FOR TESTING.
+    METHODS failure_blocks_return          FOR TESTING.
+    METHODS incomplete_blocks_return       FOR TESTING.
+    METHODS fallback_fail_marks_failed     FOR TESTING.
+    METHODS queued_failures_block_return   FOR TESTING.
+    METHODS drain_fail_marks_batch         FOR TESTING.
+    METHODS terminal_counts_isolated       FOR TESTING.
     METHODS wapa_partition_separates       FOR TESTING.
     METHODS wapa_batches_singletons        FOR TESTING.
 
@@ -59,9 +66,11 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
     " established pattern of clearing CLASS-DATA between tests.
     CLEAR zcl_abapgit_ortec_ser_orch=>mt_dispatch.
     CLEAR zcl_abapgit_ortec_ser_orch=>mt_resolved.
+    CLEAR zcl_abapgit_ortec_ser_orch=>mt_failed.
     CLEAR zcl_abapgit_ortec_ser_orch=>mt_task_outcomes.
     CLEAR zcl_abapgit_ortec_ser_orch=>mt_broken_runs.
     CLEAR zcl_abapgit_ortec_ser_orch=>mt_run_context.
+    CLEAR zcl_abapgit_ortec_ser_orch=>mv_test_raise_drain.
   ENDMETHOD.
 
   METHOD build_run_id.
@@ -297,6 +306,183 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
       act = zcl_abapgit_ortec_ser_orch=>interpret_wait_result(
               iv_wait_subrc   = 8
               iv_run_complete = abap_false ) ).
+  ENDMETHOD.
+
+  METHOD all_success_allows_return.
+    DATA(lv_run) = build_run_id( ).
+    INSERT VALUE #( run_id = lv_run expected_count = 2 )
+      INTO TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context.
+
+    zcl_abapgit_ortec_ser_orch=>mark_object_success(
+      iv_run_id = lv_run
+      is_tadir  = build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'A' ) ).
+    zcl_abapgit_ortec_ser_orch=>mark_object_success(
+      iv_run_id = lv_run
+      is_tadir  = build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'B' ) ).
+
+    zcl_abapgit_ortec_ser_orch=>assert_successful_run(
+      iv_run_id      = lv_run
+      iv_wait_result = 0 ).
+  ENDMETHOD.
+
+  METHOD failure_blocks_return.
+    DATA(lv_run) = build_run_id( ).
+    INSERT VALUE #( run_id = lv_run expected_count = 2 )
+      INTO TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context.
+
+    zcl_abapgit_ortec_ser_orch=>mark_object_success(
+      iv_run_id = lv_run
+      is_tadir  = build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'A' ) ).
+    zcl_abapgit_ortec_ser_orch=>mark_object_failures(
+      iv_run_id      = lv_run
+      it_object_keys = VALUE #( ( build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'B' ) ) ) ).
+
+    TRY.
+        zcl_abapgit_ortec_ser_orch=>assert_successful_run(
+          iv_run_id      = lv_run
+          iv_wait_result = 0 ).
+        cl_abap_unit_assert=>fail( msg = 'expected failure to block success' ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_failure).
+        cl_abap_unit_assert=>assert_true( act = boolc( lx_failure->get_text( ) CS 'object(s) failed' ) ).
+        cl_abap_unit_assert=>assert_true( act = boolc( lx_failure->get_text( ) CS 'CLAS B' ) ).
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD incomplete_blocks_return.
+    DATA(lv_run) = build_run_id( ).
+    INSERT VALUE #( run_id = lv_run expected_count = 2 )
+      INTO TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context.
+
+    zcl_abapgit_ortec_ser_orch=>mark_object_success(
+      iv_run_id = lv_run
+      is_tadir  = build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'A' ) ).
+
+    TRY.
+        zcl_abapgit_ortec_ser_orch=>assert_successful_run(
+          iv_run_id      = lv_run
+          iv_wait_result = 0 ).
+        cl_abap_unit_assert=>fail( msg = 'expected incomplete terminal count to fail' ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_incomplete).
+        cl_abap_unit_assert=>assert_true( act = boolc( lx_incomplete->get_text( ) CS 'missing batch result condition' ) ).
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD fallback_fail_marks_failed.
+    DATA(lv_run) = build_run_id( ).
+    INSERT VALUE #( run_id = lv_run expected_count = 1 )
+      INTO TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context.
+
+    zcl_abapgit_ortec_ser_orch=>route_to_sequential_fallback(
+      iv_run_id      = lv_run
+      it_object_keys = VALUE #( ( build_tadir( iv_obj_type = 'ZZZZ' iv_obj_name = 'NOPE' ) ) ) ).
+
+    READ TABLE zcl_abapgit_ortec_ser_orch=>mt_failed
+      WITH TABLE KEY run_id = lv_run obj_type = 'ZZZZ' obj_name = 'NOPE'
+      TRANSPORTING NO FIELDS.
+    cl_abap_unit_assert=>assert_subrc( exp = 0 act = sy-subrc ).
+
+    READ TABLE zcl_abapgit_ortec_ser_orch=>mt_resolved
+      WITH TABLE KEY run_id = lv_run obj_type = 'ZZZZ' obj_name = 'NOPE'
+      TRANSPORTING NO FIELDS.
+    cl_abap_unit_assert=>assert_subrc( exp = 4 act = sy-subrc ).
+  ENDMETHOD.
+
+  METHOD queued_failures_block_return.
+    DATA(lv_run) = build_run_id( ).
+    INSERT VALUE #(
+      run_id         = lv_run
+      expected_count = 2
+      queue          = VALUE zcl_abapgit_ortec_ser_planner=>tt_batch(
+                         ( items = VALUE #(
+                             ( tadir = build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'B' ) ) ) ) ) )
+      INTO TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context.
+
+    zcl_abapgit_ortec_ser_orch=>mark_object_success(
+      iv_run_id = lv_run
+      is_tadir  = build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'A' ) ).
+
+    zcl_abapgit_ortec_ser_orch=>mark_queued_failures( lv_run ).
+
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = zcl_abapgit_ortec_ser_orch=>count_terminal_objects( lv_run ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = zcl_abapgit_ortec_ser_orch=>count_failed_objects( lv_run ) ).
+    cl_abap_unit_assert=>assert_true( act = zcl_abapgit_ortec_ser_orch=>is_run_complete( lv_run ) ).
+
+    TRY.
+        zcl_abapgit_ortec_ser_orch=>assert_successful_run(
+          iv_run_id      = lv_run
+          iv_wait_result = 0 ).
+        cl_abap_unit_assert=>fail( msg = 'expected explicit queued failure to block success' ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_queued_failure).
+        cl_abap_unit_assert=>assert_true( act = boolc( lx_queued_failure->get_text( ) CS 'object(s) failed' ) ).
+        cl_abap_unit_assert=>assert_false( act = boolc( lx_queued_failure->get_text( ) CS 'missing batch result condition' ) ).
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD drain_fail_marks_batch.
+    DATA(lv_run) = build_run_id( ).
+    INSERT VALUE #(
+      run_id         = lv_run
+      worker_count   = 1
+      expected_count = 2
+      queue          = VALUE zcl_abapgit_ortec_ser_planner=>tt_batch(
+                         ( items = VALUE #(
+                             ( tadir = build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'B' ) ) ) ) ) )
+      INTO TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context.
+
+    zcl_abapgit_ortec_ser_orch=>mark_object_success(
+      iv_run_id = lv_run
+      is_tadir  = build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'A' ) ).
+
+    zcl_abapgit_ortec_ser_orch=>mv_test_raise_drain = abap_true.
+
+    TRY.
+        zcl_abapgit_ortec_ser_orch=>drain_queue( lv_run ).
+        cl_abap_unit_assert=>fail( msg = 'expected drain_queue seam failure' ).
+      CATCH zcx_abapgit_exception.
+    ENDTRY.
+
+    zcl_abapgit_ortec_ser_orch=>mark_queued_failures( lv_run ).
+
+    READ TABLE zcl_abapgit_ortec_ser_orch=>mt_failed
+      WITH TABLE KEY run_id = lv_run obj_type = 'CLAS' obj_name = 'B'
+      TRANSPORTING NO FIELDS.
+    cl_abap_unit_assert=>assert_subrc( exp = 0 act = sy-subrc ).
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = zcl_abapgit_ortec_ser_orch=>count_terminal_objects( lv_run ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = zcl_abapgit_ortec_ser_orch=>count_failed_objects( lv_run ) ).
+    cl_abap_unit_assert=>assert_true( act = zcl_abapgit_ortec_ser_orch=>is_run_complete( lv_run ) ).
+
+    TRY.
+        zcl_abapgit_ortec_ser_orch=>assert_successful_run(
+          iv_run_id      = lv_run
+          iv_wait_result = 0 ).
+        cl_abap_unit_assert=>fail( msg = 'expected drain failure to become explicit failed-object outcome' ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_drain_failure).
+        cl_abap_unit_assert=>assert_true( act = boolc( lx_drain_failure->get_text( ) CS 'object(s) failed' ) ).
+        cl_abap_unit_assert=>assert_false( act = boolc( lx_drain_failure->get_text( ) CS 'missing batch result condition' ) ).
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD terminal_counts_isolated.
+    DATA(lv_run_a) = build_run_id( ).
+    DATA(lv_run_b) = build_run_id( ).
+    INSERT VALUE #( run_id = lv_run_a expected_count = 1 )
+      INTO TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context.
+    INSERT VALUE #( run_id = lv_run_b expected_count = 1 )
+      INTO TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context.
+
+    zcl_abapgit_ortec_ser_orch=>mark_object_success(
+      iv_run_id = lv_run_a
+      is_tadir  = build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'A' ) ).
+    zcl_abapgit_ortec_ser_orch=>mark_object_failures(
+      iv_run_id      = lv_run_b
+      it_object_keys = VALUE #( ( build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'B' ) ) ) ).
+
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = zcl_abapgit_ortec_ser_orch=>count_terminal_objects( lv_run_a ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = zcl_abapgit_ortec_ser_orch=>count_terminal_objects( lv_run_b ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 0 act = zcl_abapgit_ortec_ser_orch=>count_failed_objects( lv_run_a ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = zcl_abapgit_ortec_ser_orch=>count_failed_objects( lv_run_b ) ).
+    cl_abap_unit_assert=>assert_true( act = zcl_abapgit_ortec_ser_orch=>is_run_complete( lv_run_a ) ).
+    cl_abap_unit_assert=>assert_true( act = zcl_abapgit_ortec_ser_orch=>is_run_complete( lv_run_b ) ).
   ENDMETHOD.
 
   METHOD wapa_partition_separates.

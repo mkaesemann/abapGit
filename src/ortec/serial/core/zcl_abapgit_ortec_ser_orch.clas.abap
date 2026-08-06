@@ -218,6 +218,21 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
       "! the SAME logical batch). Incremented once per planned batch, by
       "! both SERIALIZE's initial dispatch loop and DRAIN_QUEUE.
       TYPES batch_seq      TYPE i.
+      "! O(1) terminal-outcome counters for this run. Updated exactly at
+      "! the object mark sites so the wait-completion predicate never has
+      "! to rescan MT_RESOLVED/MT_FAILED on every callback wake-up.
+      TYPES terminal_count TYPE i.
+      TYPES failed_count   TYPE i.
+      "! Expected canonical object count for this run. Duplicates are
+      "! intentionally collapsed by OBJECT+OBJ_NAME at run start, matching
+      "! the existing duplicate-suppression model used everywhere else in
+      "! this class - successful return requires the full terminal count
+      "! to reach exactly this value.
+      TYPES expected_count TYPE i.
+      "! First failed object identity, if any terminal failure was
+      "! recorded. Used only for the final visible failure summary.
+      TYPES first_fail_type TYPE trobjtype.
+      TYPES first_fail_name TYPE sobj_name.
     TYPES END OF ty_run_context.
     TYPES ty_run_context_tt TYPE HASHED TABLE OF ty_run_context WITH UNIQUE KEY run_id.
 
@@ -361,9 +376,14 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! See TY_DISPATCH_TT and the class-level "WHAT MAY BE RETAINED"
     "! documentation.
     CLASS-DATA mt_dispatch      TYPE ty_dispatch_tt.
-    "! Objects already resolved (merged or terminally failed), keyed by
-    "! run, this session-wide. See TY_RESOLVED_TT.
+    "! Objects whose serialization result was ACCEPTED and whose output is
+    "! valid and merged exactly once, keyed by run. This is the SUCCESS
+    "! set only - failures never enter this table.
     CLASS-DATA mt_resolved      TYPE ty_resolved_tt.
+    "! Objects whose processing ended in a terminal FAILURE, keyed by run.
+    "! Failures are terminal, but never count as success and never allow a
+    "! successful overall return.
+    CLASS-DATA mt_failed        TYPE ty_resolved_tt.
     "! Sliding-window confirmed task outcomes, keyed by run, this
     "! session-wide. See TY_OUTCOME_TT.
     CLASS-DATA mt_task_outcomes TYPE ty_outcome_tt.
@@ -378,6 +398,10 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! replacing an earlier truncated-RUN_ID-hex scheme that had a real
     "! (if low-probability) collision risk. Never reset, never reused.
     CLASS-DATA mv_next_task_seq TYPE i.
+    "! ABAP Unit seam only: force DRAIN_QUEUE to raise after selecting a
+    "! queued batch but before dispatching/deleting it, so callback-side
+    "! queued-failure accounting can be tested deterministically.
+    CLASS-DATA mv_test_raise_drain TYPE abap_bool.
 
     "! Session-scoped table types and static state above; helper methods
     "! below.
@@ -416,7 +440,7 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
                 iv_max_processes           TYPE i
                 is_i18n_params             TYPE zif_abapgit_definitions=>ty_i18n_params
                 it_wo_translation_patterns TYPE string_table OPTIONAL
-      RETURNING VALUE(rs_partition)        TYPE ty_partition.
+      RETURNING VALUE(rs_partition)        TYPE ty_partition
       RAISING   zcx_abapgit_exception.
 
     "! Turns each WAPA object into its OWN one-object planned batch -
@@ -432,6 +456,46 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     CLASS-METHODS build_wapa_singleton_batches
       IMPORTING it_wapa           TYPE zif_abapgit_definitions=>ty_tadir_tt
       RETURNING VALUE(rt_batches) TYPE zcl_abapgit_ortec_ser_planner=>tt_batch.
+
+    "! Count canonical objects in the input by OBJ_TYPE+OBJ_NAME. This is
+    "! the run's expected object count contract - duplicate rows collapse
+    "! deterministically, matching the existing per-object identity model.
+    CLASS-METHODS count_expected_objects
+      IMPORTING it_tadir         TYPE zif_abapgit_definitions=>ty_tadir_tt
+      RETURNING VALUE(rv_count)  TYPE i.
+
+    "! Record one accepted successful terminal outcome exactly once.
+    CLASS-METHODS mark_object_success
+      IMPORTING iv_run_id TYPE sysuuid_x16
+                is_tadir  TYPE zif_abapgit_definitions=>ty_tadir.
+
+    "! Record one or more terminal failures exactly once. Objects already
+    "! marked successful are never downgraded.
+    CLASS-METHODS mark_object_failures
+      IMPORTING iv_run_id      TYPE sysuuid_x16
+                it_object_keys TYPE zif_abapgit_definitions=>ty_tadir_tt.
+
+    "! Total terminal-object count for this run: SUCCESS + FAILED.
+    CLASS-METHODS count_terminal_objects
+      IMPORTING iv_run_id      TYPE sysuuid_x16
+      RETURNING VALUE(rv_count) TYPE i.
+
+    "! FAILED-object count for this run.
+    CLASS-METHODS count_failed_objects
+      IMPORTING iv_run_id      TYPE sysuuid_x16
+      RETURNING VALUE(rv_count) TYPE i.
+
+    "! Mark every currently queued, not-yet-dispatched object for this
+    "! run as terminally failed, then clear the queue. Used when queue
+    "! draining itself fails inside the callback path.
+    CLASS-METHODS mark_queued_failures
+      IMPORTING iv_run_id TYPE sysuuid_x16.
+
+    "! Raise if the run did not end in all-successful terminal outcomes.
+    CLASS-METHODS assert_successful_run
+      IMPORTING iv_run_id      TYPE sysuuid_x16
+                iv_wait_result TYPE i
+      RAISING   zcx_abapgit_exception.
 
     "! Merges one resolved object's serialized files into this run's own
     "! MT_RUN_CONTEXT-FILES accumulator (serialization_adaptive_batch_
@@ -584,7 +648,7 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! queued batches, or no free capacity.
     "! @parameter iv_run_id | Owning run
     CLASS-METHODS drain_queue
-      IMPORTING iv_run_id TYPE sysuuid_x16.
+      IMPORTING iv_run_id TYPE sysuuid_x16
       RAISING   zcx_abapgit_exception.
 
     "! ABAP_TRUE iff IV_RUN_ID has nothing left to do: no queued planned
@@ -630,7 +694,7 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "!   incomplete; 8 = wait budget elapsed without completion/progress
     CLASS-METHODS wait_for_run_completion
       IMPORTING iv_run_id      TYPE sysuuid_x16
-      RETURNING VALUE(rv_result) TYPE i.
+      RETURNING VALUE(rv_result) TYPE i
       RAISING   zcx_abapgit_exception.
 
     "! Handles a confirmed RFC-level RECEIVE failure (communication/
@@ -744,77 +808,69 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
                      iv_group               = iv_group
                      is_i18n_params         = is_i18n_params
                      wo_translation_patterns = it_wo_translation_patterns
-                     worker_count           = iv_max_processes ) INTO TABLE mt_run_context.
+                     worker_count           = iv_max_processes
+                     expected_count         = count_expected_objects( it_tadir ) ) INTO TABLE mt_run_context.
     ASSIGN mt_run_context[ run_id = lv_run_id ] TO FIELD-SYMBOL(<ls_ctx>).
+    TRY.
+        ls_partition = partition_objects(
+          it_tadir                   = it_tadir
+          iv_max_processes           = iv_max_processes
+          is_i18n_params             = is_i18n_params
+          it_wo_translation_patterns = it_wo_translation_patterns ).
 
-    ls_partition = partition_objects(
-      it_tadir                   = it_tadir
-      iv_max_processes           = iv_max_processes
-      is_i18n_params             = is_i18n_params
-      it_wo_translation_patterns = it_wo_translation_patterns ).
+        route_to_sequential_fallback( iv_run_id = lv_run_id it_object_keys = ls_partition-forced_seq ).
 
-    route_to_sequential_fallback( iv_run_id = lv_run_id it_object_keys = ls_partition-forced_seq ).
+        IF <ls_ctx> IS ASSIGNED.
+          LOOP AT ls_partition-eligible INTO DATA(ls_key).
+            DATA(ls_estimate) = zcl_abapgit_ortec_ser_cost=>get_estimate(
+              iv_obj_type = ls_key-object
+              it_ewma     = <ls_ctx>-ewma ).
+            APPEND VALUE #( tadir      = ls_key
+                             est_ms     = ls_estimate-est_ms
+                             est_bytes  = ls_estimate-est_bytes
+                             est_source = ls_estimate-est_source ) TO lt_work_items.
+          ENDLOOP.
+        ENDIF.
 
-    IF <ls_ctx> IS ASSIGNED.
-      LOOP AT ls_partition-eligible INTO DATA(ls_key).
-        DATA(ls_estimate) = zcl_abapgit_ortec_ser_cost=>get_estimate(
-          iv_obj_type = ls_key-object
-          it_ewma     = <ls_ctx>-ewma ).
-        APPEND VALUE #( tadir      = ls_key
-                         est_ms     = ls_estimate-est_ms
-                         est_bytes  = ls_estimate-est_bytes
-                         est_source = ls_estimate-est_source ) TO lt_work_items.
-      ENDLOOP.
-    ENDIF.
+        lt_batches = zcl_abapgit_ortec_ser_planner=>build_initial_batches(
+          it_work_items   = lt_work_items
+          iv_worker_count = iv_max_processes
+          iv_row_limit    = c_max_batch_rows
+          iv_byte_limit   = c_max_batch_input_bytes_est ).
 
-    lt_batches = zcl_abapgit_ortec_ser_planner=>build_initial_batches(
-      it_work_items   = lt_work_items
-      iv_worker_count = iv_max_processes
-      iv_row_limit    = c_max_batch_rows
-      iv_byte_limit   = c_max_batch_input_bytes_est ).
+        APPEND LINES OF build_wapa_singleton_batches( ls_partition-wapa ) TO lt_batches.
 
-    APPEND LINES OF build_wapa_singleton_batches( ls_partition-wapa ) TO lt_batches.
+        LOOP AT lt_batches INTO DATA(ls_batch).
+          DATA(lt_keys) = VALUE zif_abapgit_definitions=>ty_tadir_tt( FOR ls_wi IN ls_batch-items ( ls_wi-tadir ) ).
+          DATA lv_batch_id TYPE char32.
+          lv_batch_id = |B{ sy-tabix }|.
+          IF lv_ready < iv_max_processes.
+            lv_ready = lv_ready + 1.
+            before_dispatch( iv_run_id      = lv_run_id
+                              it_object_keys = lt_keys
+                              iv_attempt     = 1
+                              iv_batch_id    = lv_batch_id ).
+          ELSEIF <ls_ctx> IS ASSIGNED.
+            APPEND ls_batch TO <ls_ctx>-queue.
+          ENDIF.
+        ENDLOOP.
 
-    LOOP AT lt_batches INTO DATA(ls_batch).
-      DATA(lt_keys) = VALUE zif_abapgit_definitions=>ty_tadir_tt( FOR ls_wi IN ls_batch-items ( ls_wi-tadir ) ).
-      DATA lv_batch_id TYPE char32.
-      lv_batch_id = |B{ sy-tabix }|.
-      IF lv_ready < iv_max_processes.
-        lv_ready = lv_ready + 1.
-        before_dispatch( iv_run_id      = lv_run_id
-                          it_object_keys = lt_keys
-                          iv_attempt     = 1
-                          iv_batch_id    = lv_batch_id ).
-      ELSEIF <ls_ctx> IS ASSIGNED.
-        APPEND ls_batch TO <ls_ctx>-queue.
-      ENDIF.
-    ENDLOOP.
+        IF <ls_ctx> IS ASSIGNED.
+          <ls_ctx>-batch_seq = lines( lt_batches ).
+        ENDIF.
 
-    " DRAIN_QUEUE's own BATCH_ID numbering continues from here, so later
-    " batches never reuse a "Bn" id already assigned above.
-    IF <ls_ctx> IS ASSIGNED.
-      <ls_ctx>-batch_seq = lines( lt_batches ).
-    ENDIF.
+        lv_wait_result = wait_for_run_completion( lv_run_id ).
+        assert_successful_run( iv_run_id = lv_run_id iv_wait_result = lv_wait_result ).
 
-    lv_wait_result = wait_for_run_completion( lv_run_id ).
-
-    IF lv_wait_result = 0.
-      IF <ls_ctx> IS ASSIGNED.
-        rt_files = <ls_ctx>-files.
-      ENDIF.
-      purge_run_state( lv_run_id ).
-    ELSE.
-      " Fail-fast (SER-SLICE-2 Stage A): never return a partial result -
-      " discard this run's entire state and raise, rather than silently
-      " losing objects that never reached a confirmed terminal outcome.
-      discard_run_state( lv_run_id ).
-      CLEAR rt_files.
-      zcx_abapgit_exception=>raise(
-        |ORTEC adaptive batch serialization did not complete: the result was incomplete | &&
-        |and has been discarded ({ COND string( WHEN lv_wait_result = 8 THEN 'wait budget exceeded'
-                                                 ELSE 'missing batch result' ) }). | &&
-        |Retry the operation, or reduce the number of objects, to work around this.| ).
-    ENDIF.
+        IF <ls_ctx> IS ASSIGNED.
+          rt_files = <ls_ctx>-files.
+        ENDIF.
+        purge_run_state( lv_run_id ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_run_failure).
+        discard_run_state( lv_run_id ).
+        CLEAR rt_files.
+        RAISE EXCEPTION lx_run_failure.
+    ENDTRY.
   ENDMETHOD.
 
   METHOD partition_objects.
@@ -839,6 +895,117 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     LOOP AT it_wapa INTO DATA(ls_wapa).
       APPEND VALUE #( items = VALUE #( ( tadir = ls_wapa ) ) ) TO rt_batches.
     ENDLOOP.
+  ENDMETHOD.
+
+  METHOD count_expected_objects.
+    TYPES ty_tadir_keys TYPE HASHED TABLE OF zif_abapgit_definitions=>ty_tadir WITH UNIQUE KEY object obj_name.
+    DATA lt_keys TYPE ty_tadir_keys.
+
+    LOOP AT it_tadir INTO DATA(ls_tadir).
+      INSERT ls_tadir INTO TABLE lt_keys.
+    ENDLOOP.
+
+    rv_count = lines( lt_keys ).
+  ENDMETHOD.
+
+  METHOD mark_object_success.
+    ASSIGN mt_run_context[ run_id = iv_run_id ] TO FIELD-SYMBOL(<ls_ctx>).
+
+    IF line_exists( mt_resolved[ run_id = iv_run_id obj_type = is_tadir-object obj_name = is_tadir-obj_name ] ).
+      RETURN.
+    ENDIF.
+
+    IF line_exists( mt_failed[ run_id = iv_run_id obj_type = is_tadir-object obj_name = is_tadir-obj_name ] ).
+      DELETE mt_failed WHERE run_id = iv_run_id
+        AND obj_type = is_tadir-object
+        AND obj_name = is_tadir-obj_name.
+      IF <ls_ctx> IS ASSIGNED AND <ls_ctx>-failed_count > 0.
+        <ls_ctx>-failed_count = <ls_ctx>-failed_count - 1.
+      ENDIF.
+    ELSEIF <ls_ctx> IS ASSIGNED.
+      <ls_ctx>-terminal_count = <ls_ctx>-terminal_count + 1.
+    ENDIF.
+
+    INSERT VALUE #( run_id = iv_run_id obj_type = is_tadir-object obj_name = is_tadir-obj_name )
+      INTO TABLE mt_resolved.
+  ENDMETHOD.
+
+  METHOD mark_object_failures.
+    ASSIGN mt_run_context[ run_id = iv_run_id ] TO FIELD-SYMBOL(<ls_ctx>).
+
+    LOOP AT it_object_keys INTO DATA(ls_key).
+      IF line_exists( mt_resolved[ run_id = iv_run_id obj_type = ls_key-object obj_name = ls_key-obj_name ] )
+         OR line_exists( mt_failed[ run_id = iv_run_id obj_type = ls_key-object obj_name = ls_key-obj_name ] ).
+        CONTINUE.
+      ENDIF.
+
+      INSERT VALUE #( run_id = iv_run_id obj_type = ls_key-object obj_name = ls_key-obj_name )
+        INTO TABLE mt_failed.
+
+      IF <ls_ctx> IS ASSIGNED.
+        <ls_ctx>-terminal_count = <ls_ctx>-terminal_count + 1.
+        <ls_ctx>-failed_count = <ls_ctx>-failed_count + 1.
+      ENDIF.
+
+      IF <ls_ctx> IS ASSIGNED AND <ls_ctx>-first_fail_type IS INITIAL.
+        <ls_ctx>-first_fail_type = ls_key-object.
+        <ls_ctx>-first_fail_name = ls_key-obj_name.
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD count_terminal_objects.
+    ASSIGN mt_run_context[ run_id = iv_run_id ] TO FIELD-SYMBOL(<ls_ctx>).
+    IF <ls_ctx> IS ASSIGNED.
+      rv_count = <ls_ctx>-terminal_count.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD count_failed_objects.
+    ASSIGN mt_run_context[ run_id = iv_run_id ] TO FIELD-SYMBOL(<ls_ctx>).
+    IF <ls_ctx> IS ASSIGNED.
+      rv_count = <ls_ctx>-failed_count.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD mark_queued_failures.
+    ASSIGN mt_run_context[ run_id = iv_run_id ] TO FIELD-SYMBOL(<ls_ctx>).
+    IF NOT <ls_ctx> IS ASSIGNED.
+      RETURN.
+    ENDIF.
+
+    LOOP AT <ls_ctx>-queue INTO DATA(ls_batch).
+      mark_object_failures(
+        iv_run_id      = iv_run_id
+        it_object_keys = VALUE #( FOR ls_wi IN ls_batch-items ( ls_wi-tadir ) ) ).
+    ENDLOOP.
+
+    CLEAR <ls_ctx>-queue.
+  ENDMETHOD.
+
+  METHOD assert_successful_run.
+    ASSIGN mt_run_context[ run_id = iv_run_id ] TO FIELD-SYMBOL(<ls_ctx>).
+    IF NOT <ls_ctx> IS ASSIGNED.
+      zcx_abapgit_exception=>raise(
+        'ORTEC adaptive batch serialization did not complete: the result was incomplete and was discarded (run context missing). Retry the operation, or reduce the scope; no partial result was accepted.' ).
+    ENDIF.
+
+    DATA(lv_terminal_count) = count_terminal_objects( iv_run_id ).
+    DATA(lv_failed_count) = count_failed_objects( iv_run_id ).
+
+    IF iv_wait_result = 8.
+      zcx_abapgit_exception=>raise(
+        'ORTEC adaptive batch serialization did not complete: the result was incomplete and was discarded (wait limit exceeded). Retry the operation, or reduce the scope; no partial result was accepted.' ).
+    ELSEIF iv_wait_result = 4 OR lv_terminal_count <> <ls_ctx>-expected_count.
+      zcx_abapgit_exception=>raise(
+        'ORTEC adaptive batch serialization did not complete: the result was incomplete and was discarded (missing batch result condition). Retry the operation, or reduce the scope; no partial result was accepted.' ).
+    ELSEIF lv_failed_count > 0.
+      zcx_abapgit_exception=>raise(
+        |ORTEC adaptive batch serialization failed: { lv_failed_count } object(s) failed| &&
+        |{ COND string( WHEN <ls_ctx>-first_fail_type IS NOT INITIAL
+                         THEN |; first failed object { <ls_ctx>-first_fail_type } { <ls_ctx>-first_fail_name }|
+                         ELSE '' ) }. The result was incomplete and discarded. Retry the operation, or reduce the scope; no partial result was accepted.| ).
+    ENDIF.
   ENDMETHOD.
 
   METHOD on_end_of_batch.
@@ -876,6 +1043,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
               IF <ls_rf_ctx> IS ASSIGNED AND <ls_rf_ctx>-ii_log IS BOUND.
                 <ls_rf_ctx>-ii_log->add_exception( lx_receive_fail_error ).
               ENDIF.
+              mark_object_failures( iv_run_id = <ls_d>-run_id it_object_keys = <ls_d>-object_keys ).
           ENDTRY.
           TRY.
               drain_queue( <ls_d>-run_id ).
@@ -883,6 +1051,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
               IF <ls_rf_ctx> IS ASSIGNED AND <ls_rf_ctx>-ii_log IS BOUND.
                 <ls_rf_ctx>-ii_log->add_exception( lx_receive_drain_error ).
               ENDIF.
+              mark_queued_failures( <ls_d>-run_id ).
           ENDTRY.
           RETURN.
         ENDIF.
@@ -904,6 +1073,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
               IF <ls_mismatch_ctx> IS ASSIGNED AND <ls_mismatch_ctx>-ii_log IS BOUND.
                 <ls_mismatch_ctx>-ii_log->add_exception( lx_mismatch_error ).
               ENDIF.
+              mark_object_failures( iv_run_id = <ls_d>-run_id it_object_keys = <ls_d>-object_keys ).
           ENDTRY.
           TRY.
               drain_queue( <ls_d>-run_id ).
@@ -911,6 +1081,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
               IF <ls_mismatch_ctx> IS ASSIGNED AND <ls_mismatch_ctx>-ii_log IS BOUND.
                 <ls_mismatch_ctx>-ii_log->add_exception( lx_mismatch_drain_error ).
               ENDIF.
+              mark_queued_failures( <ls_d>-run_id ).
           ENDTRY.
           RETURN.
         ENDIF.
@@ -920,14 +1091,16 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
         record_task_outcome( iv_run_id = <ls_d>-run_id iv_success = abap_true ).
 
         LOOP AT lt_result INTO DATA(ls_row).
-          IF line_exists( mt_resolved[ run_id = <ls_d>-run_id obj_type = ls_row-obj_type obj_name = ls_row-obj_name ] ).
+          IF line_exists( mt_resolved[ run_id = <ls_d>-run_id obj_type = ls_row-obj_type obj_name = ls_row-obj_name ] )
+             OR line_exists( mt_failed[ run_id = <ls_d>-run_id obj_type = ls_row-obj_type obj_name = ls_row-obj_name ] ).
             CONTINUE.
           ENDIF.
 
           READ TABLE <ls_d>-object_keys INTO DATA(ls_tadir_row)
             WITH KEY object = ls_row-obj_type obj_name = ls_row-obj_name.
+          DATA(lv_key_found) = xsdbool( sy-subrc = 0 ).
 
-          IF ls_row-rc = 0 AND sy-subrc = 0.
+          IF ls_row-rc = 0 AND lv_key_found = abap_true.
             IF merge_into_mt_files( iv_run_id = <ls_d>-run_id is_tadir = ls_tadir_row is_result = ls_row ) = abap_false.
               " AR-1-004 (independent adversarial audit): the batch
               " itself reported success (RC = 0), but this run's own
@@ -951,32 +1124,32 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
                   IF <ls_merge_fail_ctx> IS ASSIGNED AND <ls_merge_fail_ctx>-ii_log IS BOUND.
                     <ls_merge_fail_ctx>-ii_log->add_exception( lx_merge_fallback_error ).
                   ENDIF.
+                  mark_object_failures( iv_run_id = <ls_d>-run_id it_object_keys = VALUE #( ( ls_tadir_row ) ) ).
               ENDTRY.
               CONTINUE.
             ENDIF.
+            mark_object_success( iv_run_id = <ls_d>-run_id is_tadir = ls_tadir_row ).
           ELSE.
             ASSIGN mt_run_context[ run_id = <ls_d>-run_id ] TO FIELD-SYMBOL(<ls_fail_ctx>).
             IF <ls_fail_ctx> IS ASSIGNED AND <ls_fail_ctx>-ii_log IS BOUND.
               <ls_fail_ctx>-ii_log->add_error(
                 |ORTEC batch: { ls_row-obj_type } { ls_row-obj_name } failed ({ ls_row-msgid } { ls_row-msgno })| ).
             ENDIF.
+            IF lv_key_found = abap_true.
+              mark_object_failures( iv_run_id = <ls_d>-run_id it_object_keys = VALUE #( ( ls_tadir_row ) ) ).
+            ENDIF.
           ENDIF.
 
-          " EWMA is updated for EVERY resolved object regardless of
-          " success/failure (sect 5.5) - re-assigned fresh every
-          " iteration, never conditional on the (possibly stale) field
-          " symbol from the branch above.
-          ASSIGN mt_run_context[ run_id = <ls_d>-run_id ] TO FIELD-SYMBOL(<ls_ewma_ctx>).
-          IF <ls_ewma_ctx> IS ASSIGNED.
-            zcl_abapgit_ortec_ser_cost=>update_estimate(
-              EXPORTING iv_obj_type     = ls_row-obj_type
-                        iv_actual_ms    = ls_row-elapsed_ms
-                        iv_actual_bytes = ls_row-output_bytes
-              CHANGING  ct_ewma         = <ls_ewma_ctx>-ewma ).
+          IF ls_row-rc = 0.
+            ASSIGN mt_run_context[ run_id = <ls_d>-run_id ] TO FIELD-SYMBOL(<ls_ewma_ctx>).
+            IF <ls_ewma_ctx> IS ASSIGNED.
+              zcl_abapgit_ortec_ser_cost=>update_estimate(
+                EXPORTING iv_obj_type     = ls_row-obj_type
+                          iv_actual_ms    = ls_row-elapsed_ms
+                          iv_actual_bytes = ls_row-output_bytes
+                CHANGING  ct_ewma         = <ls_ewma_ctx>-ewma ).
+            ENDIF.
           ENDIF.
-
-          INSERT VALUE #( run_id = <ls_d>-run_id obj_type = ls_row-obj_type obj_name = ls_row-obj_name )
-            INTO TABLE mt_resolved.
         ENDLOOP.
         TRY.
             drain_queue( <ls_d>-run_id ).
@@ -985,6 +1158,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
             IF <ls_success_ctx> IS ASSIGNED AND <ls_success_ctx>-ii_log IS BOUND.
               <ls_success_ctx>-ii_log->add_exception( lx_success_drain_error ).
             ENDIF.
+            mark_queued_failures( <ls_d>-run_id ).
         ENDTRY.
     ENDCASE.
   ENDMETHOD.
@@ -1183,14 +1357,18 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
 
     WHILE lines( <ls_ctx>-queue ) > 0 AND <ls_ctx>-in_flight < <ls_ctx>-worker_count.
       READ TABLE <ls_ctx>-queue INDEX 1 INTO DATA(ls_next_batch).
-      DELETE <ls_ctx>-queue INDEX 1.
       <ls_ctx>-batch_seq = <ls_ctx>-batch_seq + 1.
       DATA(lt_next_keys) = VALUE zif_abapgit_definitions=>ty_tadir_tt(
         FOR ls_wi IN ls_next_batch-items ( ls_wi-tadir ) ).
+      IF mv_test_raise_drain = abap_true.
+        CLEAR mv_test_raise_drain.
+        zcx_abapgit_exception=>raise( 'ORTEC test seam: drain_queue failed before dispatch' ).
+      ENDIF.
       before_dispatch( iv_run_id      = iv_run_id
                         it_object_keys = lt_next_keys
                         iv_attempt     = 1
                         iv_batch_id    = |B{ <ls_ctx>-batch_seq }| ).
+      DELETE <ls_ctx>-queue INDEX 1.
     ENDWHILE.
   ENDMETHOD.
 
@@ -1198,12 +1376,22 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     rv_complete = abap_true.
 
     ASSIGN mt_run_context[ run_id = iv_run_id ] TO FIELD-SYMBOL(<ls_ctx>).
-    IF <ls_ctx> IS ASSIGNED AND lines( <ls_ctx>-queue ) > 0.
+    IF NOT <ls_ctx> IS ASSIGNED.
+      rv_complete = abap_false.
+      RETURN.
+    ENDIF.
+
+    IF lines( <ls_ctx>-queue ) > 0.
       rv_complete = abap_false.
       RETURN.
     ENDIF.
 
     IF line_exists( mt_dispatch[ run_id = iv_run_id state = c_state_awaiting ] ).
+      rv_complete = abap_false.
+      RETURN.
+    ENDIF.
+
+    IF count_terminal_objects( iv_run_id ) <> <ls_ctx>-expected_count.
       rv_complete = abap_false.
     ENDIF.
   ENDMETHOD.
@@ -1270,7 +1458,8 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     ENDIF.
 
     LOOP AT it_object_keys INTO DATA(ls_key).
-      IF line_exists( mt_resolved[ run_id = iv_run_id obj_type = ls_key-object obj_name = ls_key-obj_name ] ).
+      IF line_exists( mt_resolved[ run_id = iv_run_id obj_type = ls_key-object obj_name = ls_key-obj_name ] )
+         OR line_exists( mt_failed[ run_id = iv_run_id obj_type = ls_key-object obj_name = ls_key-obj_name ] ).
         CONTINUE.
       ENDIF.
 
@@ -1303,13 +1492,13 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
             <ls_return>-file-path = ls_key-path.
             <ls_return>-item = ls_serialization-item.
           ENDLOOP.
+          mark_object_success( iv_run_id = iv_run_id is_tadir = ls_key ).
         CATCH zcx_abapgit_exception INTO DATA(lx_error).
           IF <ls_ctx>-ii_log IS BOUND.
             <ls_ctx>-ii_log->add_exception( lx_error ).
           ENDIF.
+          mark_object_failures( iv_run_id = iv_run_id it_object_keys = VALUE #( ( ls_key ) ) ).
       ENDTRY.
-
-      INSERT VALUE #( run_id = iv_run_id obj_type = ls_key-object obj_name = ls_key-obj_name ) INTO TABLE mt_resolved.
     ENDLOOP.
   ENDMETHOD.
 
@@ -1355,6 +1544,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
       AND ( state = c_state_received OR state = c_state_received_failure ).
 
     DELETE mt_resolved WHERE run_id = iv_run_id.
+    DELETE mt_failed WHERE run_id = iv_run_id.
     DELETE mt_task_outcomes WHERE run_id = iv_run_id.
     DELETE mt_broken_runs WHERE table_line = iv_run_id.
     DELETE mt_run_context WHERE run_id = iv_run_id.
@@ -1363,6 +1553,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
   METHOD discard_run_state.
     DELETE mt_dispatch WHERE run_id = iv_run_id.
     DELETE mt_resolved WHERE run_id = iv_run_id.
+    DELETE mt_failed WHERE run_id = iv_run_id.
     DELETE mt_task_outcomes WHERE run_id = iv_run_id.
     DELETE mt_broken_runs WHERE table_line = iv_run_id.
     DELETE mt_run_context WHERE run_id = iv_run_id.
