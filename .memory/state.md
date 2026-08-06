@@ -2,7 +2,8 @@
 
 ```text
 BRANCH=ortec/abapgit_1_133-opt-rework
-CURRENT_HEAD=3a85b2863fb4a242504e86fd76919a0a72f837d4 (+ local Stage-A working tree)
+CURRENT_HEAD=c13dd83c (SER-SLICE-2 Stage A code + artifact checkpoints; local
+  SER-SLICE-3 discovery artifacts may still be unstaged)
 LATEST_SAP_VALIDATED_HEAD=3c77d898b62f3b0464e48cf59844e2e30c7b6e89
   (Package E checkpoint 1, 2026-07-29 - see Variant B backlog below)
 ```
@@ -12,6 +13,8 @@ LATEST_SAP_VALIDATED_HEAD=3c77d898b62f3b0464e48cf59844e2e30c7b6e89
 ```text
 TOPIC=SERIALIZATION_PERFORMANCE
 STATUS=IN_PROGRESS
+SER_SLICE_2=LOCAL_COMPLETE_AWAITING_FINAL_IT8
+SER_SLICE_3=DISCOVERY_OR_IMPLEMENTATION_IN_PROGRESS
 ```
 
 SER-SLICE-0 and SER-SLICE-1: SAP_VALIDATED_COMPLETE (established prior
@@ -111,6 +114,23 @@ callback/run isolation, output parity incl. WAPA + i18n-pattern cases,
 performance comparison) before enabling `is_serial_batch_active` outside
 controlled validation, or before reporting SER-SLICE-2 as SAP-
 validated/complete.
+
+SER-SLICE-3 has now started in DISCOVERY mode only. Current discovery
+result (authoritative artifact:
+`.memory/logs/serialization_slice_3_discovery.md`):
+
+- no `ZCL_ABAPGIT_ORTEC_SER_PROV_DD` class exists yet in source;
+- existing prefetch wire formats (`ser_pref`, `_ext`, `_oo`) are strictly
+  single-object EXPORT/IMPORT payloads and cannot be concatenated safely;
+- ordered static-evidence ranking: DTEL > DOMA > CLAS/INTF >
+  MSAG/TRAN/FUGR/PROG > TABL/TTYP > DDLS/DCLS > WAPA/ENQU/SHLP/VIEW;
+- first provider slice recommendation: DOMA/DTEL;
+- smallest viable design shape: additive `EXTRACT_FOR_BATCH` methods on
+  the existing prefetch classes plus one real versioned batch envelope.
+
+Do not start SER-SLICE-3 productive provider code until the SER-SLICE-2
+owner IT8 gate above is at least clearly handed off and no local Stage-A
+blocker remains.
 Do not resume Variant B / Package E/F backlog topics (below) without a
 new explicit owner instruction naming that topic.
 
