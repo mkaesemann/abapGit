@@ -50,9 +50,9 @@ CLASS zcl_abapgit_ortec_git_stage DEFINITION
 
     CLASS-METHODS has_stage_cache
       IMPORTING
-        !iv_repo_key     TYPE string
+        !iv_repo_key    TYPE string
       RETURNING
-        VALUE(rv_valid)  TYPE abap_bool.
+        VALUE(rv_valid) TYPE abap_bool.
 
     CLASS-METHODS cache_stage_files
       IMPORTING
@@ -106,7 +106,7 @@ CLASS zcl_abapgit_ortec_git_stage DEFINITION
         !it_transports TYPE zif_abapgit_cts_api=>ty_transport_list
         !it_changed_by TYPE zcl_abapgit_cts_integration=>ty_changed_by_tt
       EXPORTING
-        !ev_json TYPE string
+        !ev_json       TYPE string
         !ev_event_html TYPE string
       RAISING
         zcx_abapgit_exception.
@@ -619,26 +619,26 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
       lv_pattern = '*' && to_upper( iv_filter_value ) && '*'.
       lo_dot = ii_repo->get_dot_abapgit( ).
 
-" Use cached transport/changed-by when valid for this repo to avoid repeated DB round-trips.
-        IF gs_filter_cache-valid = abap_true AND gs_filter_cache-repo_key = ii_repo->get_key( ).
-          lt_filter_transports = gs_filter_cache-transports.
-          lt_filter_changed_by = gs_filter_cache-changed_by.
-        ELSE.
-          lt_filter_transports = find_transports( ii_repo = ii_repo it_files = it_files ).
-          DATA(lt_filter_trkorr_pf) = VALUE zif_abapgit_cts_api=>ty_trkorr_tt(
-            FOR ls_t IN lt_filter_transports ( ls_t-trkorr ) ).
-          SORT lt_filter_trkorr_pf.
-          DELETE ADJACENT DUPLICATES FROM lt_filter_trkorr_pf.
-          zcl_abapgit_factory=>get_cts_api( )->prefetch_descriptions( lt_filter_trkorr_pf ).
-          lt_filter_changed_by = find_changed_by(
-            ii_repo       = ii_repo
-            it_files      = it_files
-            it_transports = lt_filter_transports ).
-          gs_filter_cache-repo_key = ii_repo->get_key( ).
-          gs_filter_cache-transports = lt_filter_transports.
-          gs_filter_cache-changed_by = lt_filter_changed_by.
-          gs_filter_cache-valid = abap_true.
-        ENDIF.
+      " Use cached transport/changed-by when valid for this repo to avoid repeated DB round-trips.
+      IF gs_filter_cache-valid = abap_true AND gs_filter_cache-repo_key = ii_repo->get_key( ).
+        lt_filter_transports = gs_filter_cache-transports.
+        lt_filter_changed_by = gs_filter_cache-changed_by.
+      ELSE.
+        lt_filter_transports = find_transports( ii_repo = ii_repo it_files = it_files ).
+        DATA(lt_filter_trkorr_pf) = VALUE zif_abapgit_cts_api=>ty_trkorr_tt(
+          FOR ls_t IN lt_filter_transports ( ls_t-trkorr ) ).
+        SORT lt_filter_trkorr_pf.
+        DELETE ADJACENT DUPLICATES FROM lt_filter_trkorr_pf.
+        zcl_abapgit_factory=>get_cts_api( )->prefetch_descriptions( lt_filter_trkorr_pf ).
+        lt_filter_changed_by = find_changed_by(
+          ii_repo       = ii_repo
+          it_files      = it_files
+          it_transports = lt_filter_transports ).
+        gs_filter_cache-repo_key = ii_repo->get_key( ).
+        gs_filter_cache-transports = lt_filter_transports.
+        gs_filter_cache-changed_by = lt_filter_changed_by.
+        gs_filter_cache-valid = abap_true.
+      ENDIF.
 
       LOOP AT it_files-local ASSIGNING <ls_local>.
         CLEAR: ls_filter_transport, ls_filter_changed_by.
@@ -750,7 +750,7 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
       ENDLOOP.
     ENDIF.
 
-IF iv_filter_value IS NOT INITIAL.
+    IF iv_filter_value IS NOT INITIAL.
       " Reuse pre-pass data; transport descriptions were already prefetched above.
       lt_transports = lt_filter_transports.
       lt_changed_by = lt_filter_changed_by.
@@ -993,7 +993,7 @@ IF iv_filter_value IS NOT INITIAL.
     ri_html->add( '          }; })(userCell, data.userEventId); }' ).
     ri_html->add( '        row.appendChild(userCell);' ).
     "ri_html->add( '        var transportCell = document.createElement("td"); transportCell.className = "transport"; transportCell.style.whiteSpace = "nowrap"; transportCell.innerHTML = data.transportHtml || data.transport || ""; row.appendChild(transpor
-"tCell);' ).
+    "tCell);' ).
     ri_html->add( '        var transportCell = document.createElement("td");'
                && ' transportCell.className = "transport";'
                && ' transportCell.style.whiteSpace = "nowrap";'
@@ -1091,7 +1091,7 @@ IF iv_filter_value IS NOT INITIAL.
     ri_html->add( '    var pageNum = id("stageVirtualPageNum");' ).
     ri_html->add( '    if (pageNum && pageMeta.jumpAction) {' ).
     ri_html->add( '      pageNum.style.cursor = "pointer";' ).
-      ri_html->add( '      pageNum.title = "Click to jump to page or search by name";' ).
+    ri_html->add( '      pageNum.title = "Click to jump to page or search by name";' ).
     ri_html->add( '      pageNum.style.textDecoration = "underline dotted";' ).
     ri_html->add( '      pageNum.onclick = function() {' ).
     ri_html->add( '        var total = pageMeta.totalPages || 1;' ).

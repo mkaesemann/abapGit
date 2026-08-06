@@ -86,35 +86,35 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! "WHAT MAY BE RETAINED" documentation. Never carries a serialized
     "! payload.
     TYPES BEGIN OF ty_dispatch.
-      "! Globally unique (for the whole internal session) task name
-      "! used in "STARTING NEW TASK" / "RECEIVE RESULTS FROM
-      "! FUNCTION" - built by NEXT_TASK_NAME from a session-wide
-      "! monotonic counter (MV_NEXT_TASK_SEQ), NOT from any part of
-      "! RUN_ID (a truncated-RUN_ID scheme was found, via independent
-      "! adversarial audit AR-1-003, to be collision-prone: two
-      "! different runs could share the same first-8-hex-chars prefix
-      "! and dispatch_seq, corrupting MT_DISPATCH's UNIQUE KEY). Always
-      "! within the SAP task-ID length limit. Never reused, even for a
-      "! retry of the same logical work (a retry gets a NEW task name
-      "! and a NEW row).
-      TYPES task_name   TYPE char40.
-      "! Immutable run identity - see class-level "RUN IDENTITY"
-      "! documentation. MUST be set on every insert; every reader
-      "! MUST filter by it.
-      TYPES run_id      TYPE sysuuid_x16.
-      "! Logical grouping id, stable across an original dispatch
-      "! and its retries/bisections (telemetry/correlation only -
-      "! callback resolution always uses TASK_NAME, never this).
-      TYPES batch_id    TYPE char32.
-      "! 1 for a group's first dispatch, +1 per retry/bisection.
-      TYPES attempt     TYPE i.
-      "! Exact TADIR rows sent in this one dispatch.
-      TYPES object_keys TYPE zif_abapgit_definitions=>ty_tadir_tt.
-      "! Current lifecycle state - one of the C_STATE_* constants.
-      TYPES state       TYPE c LENGTH 1.
-      "! Timestamp this dispatch was issued, used to measure this run's
-      "! current fail-fast wait budget.
-      TYPES dispatch_ts TYPE timestampl.
+    "! Globally unique (for the whole internal session) task name
+    "! used in "STARTING NEW TASK" / "RECEIVE RESULTS FROM
+    "! FUNCTION" - built by NEXT_TASK_NAME from a session-wide
+    "! monotonic counter (MV_NEXT_TASK_SEQ), NOT from any part of
+    "! RUN_ID (a truncated-RUN_ID scheme was found, via independent
+    "! adversarial audit AR-1-003, to be collision-prone: two
+    "! different runs could share the same first-8-hex-chars prefix
+    "! and dispatch_seq, corrupting MT_DISPATCH's UNIQUE KEY). Always
+    "! within the SAP task-ID length limit. Never reused, even for a
+    "! retry of the same logical work (a retry gets a NEW task name
+    "! and a NEW row).
+    TYPES task_name   TYPE char40.
+    "! Immutable run identity - see class-level "RUN IDENTITY"
+    "! documentation. MUST be set on every insert; every reader
+    "! MUST filter by it.
+    TYPES run_id      TYPE sysuuid_x16.
+    "! Logical grouping id, stable across an original dispatch
+    "! and its retries/bisections (telemetry/correlation only -
+    "! callback resolution always uses TASK_NAME, never this).
+    TYPES batch_id    TYPE char32.
+    "! 1 for a group's first dispatch, +1 per retry/bisection.
+    TYPES attempt     TYPE i.
+    "! Exact TADIR rows sent in this one dispatch.
+    TYPES object_keys TYPE zif_abapgit_definitions=>ty_tadir_tt.
+    "! Current lifecycle state - one of the C_STATE_* constants.
+    TYPES state       TYPE c LENGTH 1.
+    "! Timestamp this dispatch was issued, used to measure this run's
+    "! current fail-fast wait budget.
+    TYPES dispatch_ts TYPE timestampl.
     TYPES END OF ty_dispatch.
     "! All dispatches currently owned by active runs, keyed for O(1)
     "! callback resolution by TASK_NAME.
@@ -125,9 +125,9 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! suspenders guard against ever merging the same object's result
     "! twice (duplicate/late callback safety).
     TYPES BEGIN OF ty_resolved.
-      TYPES run_id   TYPE sysuuid_x16.
-      TYPES obj_type TYPE trobjtype.
-      TYPES obj_name TYPE sobj_name.
+    TYPES run_id   TYPE sysuuid_x16.
+    TYPES obj_type TYPE trobjtype.
+    TYPES obj_name TYPE sobj_name.
     TYPES END OF ty_resolved.
     "! RUN_ID is part of the key so two DIFFERENT runs resolving the SAME
     "! OBJ_TYPE/OBJ_NAME (e.g. the same CLAS in two repositories in one
@@ -137,11 +137,11 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! One confirmed task outcome, for the per-run sliding-window circuit
     "! breaker.
     TYPES BEGIN OF ty_outcome.
-      TYPES run_id  TYPE sysuuid_x16.
-      "! Monotonic sequence number, scoped to this RUN_ID only (no
-      "! cross-run ordering is implied or needed).
-      TYPES seq     TYPE i.
-      TYPES success TYPE abap_bool.
+    TYPES run_id  TYPE sysuuid_x16.
+    "! Monotonic sequence number, scoped to this RUN_ID only (no
+    "! cross-run ordering is implied or needed).
+    TYPES seq     TYPE i.
+    TYPES success TYPE abap_bool.
     TYPES END OF ty_outcome.
     "! Windowed (see serialization_adaptive_batch_design.md &sect;5.8) PER
     "! RUN_ID - a systemic outage in one run can never trip or influence
@@ -171,68 +171,68 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! own real, actively-accumulating output, not speculative retention
     "! for a late callback.
     TYPES BEGIN OF ty_run_context.
-      TYPES run_id         TYPE sysuuid_x16.
-      TYPES files          TYPE zif_abapgit_definitions=>ty_files_item_tt.
-      TYPES ii_log         TYPE REF TO zif_abapgit_log.
-      TYPES iv_group       TYPE rzlli_apcl.
-      TYPES is_i18n_params TYPE zif_abapgit_definitions=>ty_i18n_params.
-      "! Same "objects without translation" path-pattern list as the
-      "! standard path's MT_WO_TRANSLATION_PATTERNS (see AR-1-001,
-      "! independent adversarial audit) - the run-level IS_I18N_PARAMS-
-      "! MAIN_LANGUAGE_ONLY flag alone is NOT enough for output parity:
-      "! the standard path recomputes MAIN_LANGUAGE_ONLY per object via
-      "! ZCL_ABAPGIT_I18N_PARAMS=>MATCH_OBJ_PATTERNS whenever the run-
-      "! level flag is FALSE and this list is non-empty. ROUTE_TO_
-      "! SEQUENTIAL_FALLBACK reproduces that exact per-object check.
-      TYPES wo_translation_patterns TYPE string_table.
-      "! Per-run monotonically increasing dispatch counter
-      "! (serialization_adaptive_batch_design.md &sect;5.1) - incremented
-      "! on EVERY dispatch including retries/bisections/refills, never
-      "! reused. Must be readable/writable from ON_END_OF_BATCH's retry
-      "! path, hence run-scoped rather than a SERIALIZE()-local variable.
-      TYPES dispatch_seq   TYPE i.
-      "! This run's own EWMA sample table
-      "! (ZCL_ABAPGIT_ORTEC_SER_COST=>TY_EWMA_TT) - per that class's own
-      "! documentation, "kept alive by the caller... keyed by RUN_ID".
-      "! Updated after every resolved object (&sect;5.5) and read by the
-      "! planner when sizing refills.
-      TYPES ewma           TYPE zcl_abapgit_ortec_ser_cost=>ty_ewma_tt.
-      "! Parallel worker budget for this run (mirrors the caller's own
-      "! DETERMINE_MAX_PROCESSES, unchanged) - bounds how many dispatches
-      "! may be simultaneously AWAITING (state C_STATE_AWAITING) at once.
-      TYPES worker_count   TYPE i.
-      "! Count of this run's dispatches currently AWAITING a callback.
-      "! Incremented by DISPATCH_BATCH, decremented by
-      "! RELEASE_IN_FLIGHT_BUDGET once a dispatch reaches any terminal
-      "! state - bounds concurrency at WORKER_COUNT, mirroring the
-      "! standard path's own MV_FREE semantics.
-      TYPES in_flight      TYPE i.
-      "! Planner-produced batches not yet dispatched (queued because they
-      "! exceeded WORKER_COUNT's immediately-ready slots, or produced by a
-      "! later REFILL) - drained by the poll loop as IN_FLIGHT capacity
-      "! frees up.
-      TYPES queue          TYPE zcl_abapgit_ortec_ser_planner=>tt_batch.
-      "! Monotonically increasing counter dedicated to BATCH_ID naming
-      "! ("B1", "B2", ...) - distinct from DISPATCH_SEQ (which counts
-      "! actual CALL FUNCTION dispatches, including retries/bisections of
-      "! the SAME logical batch). Incremented once per planned batch, by
-      "! both SERIALIZE's initial dispatch loop and DRAIN_QUEUE.
-      TYPES batch_seq      TYPE i.
-      "! O(1) terminal-outcome counters for this run. Updated exactly at
-      "! the object mark sites so the wait-completion predicate never has
-      "! to rescan MT_RESOLVED/MT_FAILED on every callback wake-up.
-      TYPES terminal_count TYPE i.
-      TYPES failed_count   TYPE i.
-      "! Expected canonical object count for this run. Duplicates are
-      "! intentionally collapsed by OBJECT+OBJ_NAME at run start, matching
-      "! the existing duplicate-suppression model used everywhere else in
-      "! this class - successful return requires the full terminal count
-      "! to reach exactly this value.
-      TYPES expected_count TYPE i.
-      "! First failed object identity, if any terminal failure was
-      "! recorded. Used only for the final visible failure summary.
-      TYPES first_fail_type TYPE trobjtype.
-      TYPES first_fail_name TYPE sobj_name.
+    TYPES run_id         TYPE sysuuid_x16.
+    TYPES files          TYPE zif_abapgit_definitions=>ty_files_item_tt.
+    TYPES ii_log         TYPE REF TO zif_abapgit_log.
+    TYPES iv_group       TYPE rzlli_apcl.
+    TYPES is_i18n_params TYPE zif_abapgit_definitions=>ty_i18n_params.
+    "! Same "objects without translation" path-pattern list as the
+    "! standard path's MT_WO_TRANSLATION_PATTERNS (see AR-1-001,
+    "! independent adversarial audit) - the run-level IS_I18N_PARAMS-
+    "! MAIN_LANGUAGE_ONLY flag alone is NOT enough for output parity:
+    "! the standard path recomputes MAIN_LANGUAGE_ONLY per object via
+    "! ZCL_ABAPGIT_I18N_PARAMS=>MATCH_OBJ_PATTERNS whenever the run-
+    "! level flag is FALSE and this list is non-empty. ROUTE_TO_
+    "! SEQUENTIAL_FALLBACK reproduces that exact per-object check.
+    TYPES wo_translation_patterns TYPE string_table.
+    "! Per-run monotonically increasing dispatch counter
+    "! (serialization_adaptive_batch_design.md &sect;5.1) - incremented
+    "! on EVERY dispatch including retries/bisections/refills, never
+    "! reused. Must be readable/writable from ON_END_OF_BATCH's retry
+    "! path, hence run-scoped rather than a SERIALIZE()-local variable.
+    TYPES dispatch_seq   TYPE i.
+    "! This run's own EWMA sample table
+    "! (ZCL_ABAPGIT_ORTEC_SER_COST=>TY_EWMA_TT) - per that class's own
+    "! documentation, "kept alive by the caller... keyed by RUN_ID".
+    "! Updated after every resolved object (&sect;5.5) and read by the
+    "! planner when sizing refills.
+    TYPES ewma           TYPE zcl_abapgit_ortec_ser_cost=>ty_ewma_tt.
+    "! Parallel worker budget for this run (mirrors the caller's own
+    "! DETERMINE_MAX_PROCESSES, unchanged) - bounds how many dispatches
+    "! may be simultaneously AWAITING (state C_STATE_AWAITING) at once.
+    TYPES worker_count   TYPE i.
+    "! Count of this run's dispatches currently AWAITING a callback.
+    "! Incremented by DISPATCH_BATCH, decremented by
+    "! RELEASE_IN_FLIGHT_BUDGET once a dispatch reaches any terminal
+    "! state - bounds concurrency at WORKER_COUNT, mirroring the
+    "! standard path's own MV_FREE semantics.
+    TYPES in_flight      TYPE i.
+    "! Planner-produced batches not yet dispatched (queued because they
+    "! exceeded WORKER_COUNT's immediately-ready slots, or produced by a
+    "! later REFILL) - drained by the poll loop as IN_FLIGHT capacity
+    "! frees up.
+    TYPES queue          TYPE zcl_abapgit_ortec_ser_planner=>tt_batch.
+    "! Monotonically increasing counter dedicated to BATCH_ID naming
+    "! ("B1", "B2", ...) - distinct from DISPATCH_SEQ (which counts
+    "! actual CALL FUNCTION dispatches, including retries/bisections of
+    "! the SAME logical batch). Incremented once per planned batch, by
+    "! both SERIALIZE's initial dispatch loop and DRAIN_QUEUE.
+    TYPES batch_seq      TYPE i.
+    "! O(1) terminal-outcome counters for this run. Updated exactly at
+    "! the object mark sites so the wait-completion predicate never has
+    "! to rescan MT_RESOLVED/MT_FAILED on every callback wake-up.
+    TYPES terminal_count TYPE i.
+    TYPES failed_count   TYPE i.
+    "! Expected canonical object count for this run. Duplicates are
+    "! intentionally collapsed by OBJECT+OBJ_NAME at run start, matching
+    "! the existing duplicate-suppression model used everywhere else in
+    "! this class - successful return requires the full terminal count
+    "! to reach exactly this value.
+    TYPES expected_count TYPE i.
+    "! First failed object identity, if any terminal failure was
+    "! recorded. Used only for the final visible failure summary.
+    TYPES first_fail_type TYPE trobjtype.
+    TYPES first_fail_name TYPE sobj_name.
     TYPES END OF ty_run_context.
     TYPES ty_run_context_tt TYPE HASHED TABLE OF ty_run_context WITH UNIQUE KEY run_id.
 
@@ -408,9 +408,9 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
 
     "! Result of PARTITION_OBJECTS - see that method's own documentation.
     TYPES BEGIN OF ty_partition.
-      TYPES forced_seq TYPE zif_abapgit_definitions=>ty_tadir_tt.
-      TYPES eligible   TYPE zif_abapgit_definitions=>ty_tadir_tt.
-      TYPES wapa       TYPE zif_abapgit_definitions=>ty_tadir_tt.
+    TYPES forced_seq TYPE zif_abapgit_definitions=>ty_tadir_tt.
+    TYPES eligible   TYPE zif_abapgit_definitions=>ty_tadir_tt.
+    TYPES wapa       TYPE zif_abapgit_definitions=>ty_tadir_tt.
     TYPES END OF ty_partition.
 
     "! Splits IT_TADIR into the three buckets SERIALIZE needs - extracted
@@ -461,8 +461,8 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! the run's expected object count contract - duplicate rows collapse
     "! deterministically, matching the existing per-object identity model.
     CLASS-METHODS count_expected_objects
-      IMPORTING it_tadir         TYPE zif_abapgit_definitions=>ty_tadir_tt
-      RETURNING VALUE(rv_count)  TYPE i.
+      IMPORTING it_tadir        TYPE zif_abapgit_definitions=>ty_tadir_tt
+      RETURNING VALUE(rv_count) TYPE i.
 
     "! Record one accepted successful terminal outcome exactly once.
     CLASS-METHODS mark_object_success
@@ -477,12 +477,12 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
 
     "! Total terminal-object count for this run: SUCCESS + FAILED.
     CLASS-METHODS count_terminal_objects
-      IMPORTING iv_run_id      TYPE sysuuid_x16
+      IMPORTING iv_run_id       TYPE sysuuid_x16
       RETURNING VALUE(rv_count) TYPE i.
 
     "! FAILED-object count for this run.
     CLASS-METHODS count_failed_objects
-      IMPORTING iv_run_id      TYPE sysuuid_x16
+      IMPORTING iv_run_id       TYPE sysuuid_x16
       RETURNING VALUE(rv_count) TYPE i.
 
     "! Mark every currently queued, not-yet-dispatched object for this
@@ -515,9 +515,9 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! @parameter rv_merged | ABAP_TRUE only if the run context was found
     "!   AND the IMPORT of IS_RESULT-FILES_XSTRING succeeded
     CLASS-METHODS merge_into_mt_files
-      IMPORTING iv_run_id       TYPE sysuuid_x16
-                is_tadir        TYPE zif_abapgit_definitions=>ty_tadir
-                is_result       TYPE zaog_ser_batch_result
+      IMPORTING iv_run_id        TYPE sysuuid_x16
+                is_tadir         TYPE zif_abapgit_definitions=>ty_tadir
+                is_result        TYPE zaog_ser_batch_result
       RETURNING VALUE(rv_merged) TYPE abap_bool.
 
     "! Set-equality check between an ET_RESULT row set and a dispatch's own
@@ -530,9 +530,9 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! @parameter rv_equal       | ABAP_TRUE only if both sides contain
     "!   EXACTLY the same OBJ_TYPE/OBJ_NAME pairs
     CLASS-METHODS object_key_sets_equal
-      IMPORTING it_result         TYPE zaog_ser_batch_result_tt
-                it_object_keys    TYPE zif_abapgit_definitions=>ty_tadir_tt
-      RETURNING VALUE(rv_equal)   TYPE abap_bool.
+      IMPORTING it_result       TYPE zaog_ser_batch_result_tt
+                it_object_keys  TYPE zif_abapgit_definitions=>ty_tadir_tt
+      RETURNING VALUE(rv_equal) TYPE abap_bool.
 
     "! Decrements this run's MT_RUN_CONTEXT-IN_FLIGHT counter, freeing one
     "! concurrency slot (serialization_adaptive_batch_design.md &sect;5.4/
@@ -658,7 +658,7 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! @parameter iv_run_id    | Run to check
     "! @parameter rv_complete  | ABAP_TRUE if the run has fully resolved
     CLASS-METHODS is_run_complete
-      IMPORTING iv_run_id       TYPE sysuuid_x16
+      IMPORTING iv_run_id          TYPE sysuuid_x16
       RETURNING VALUE(rv_complete) TYPE abap_bool.
 
     "! Pure, deterministic mapping from one "WAIT FOR ASYNCHRONOUS TASKS"
@@ -679,8 +679,8 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "!   though the completion condition is still false; 8 for any other
     "!   non-complete outcome (wait budget elapsed)
     CLASS-METHODS interpret_wait_result
-      IMPORTING iv_wait_subrc   TYPE sy-subrc
-                iv_run_complete TYPE abap_bool
+      IMPORTING iv_wait_subrc    TYPE sy-subrc
+                iv_run_complete  TYPE abap_bool
       RETURNING VALUE(rv_result) TYPE i.
 
     "! Fail-fast completion wait (SER-SLICE-2 Stage A) - the ONLY place
@@ -693,7 +693,7 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! @parameter rv_result  | 0 = complete; 4 = no callbacks remain but
     "!   incomplete; 8 = wait budget elapsed without completion/progress
     CLASS-METHODS wait_for_run_completion
-      IMPORTING iv_run_id      TYPE sysuuid_x16
+      IMPORTING iv_run_id        TYPE sysuuid_x16
       RETURNING VALUE(rv_result) TYPE i
       RAISING   zcx_abapgit_exception.
 
@@ -784,7 +784,12 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
       IMPORTING iv_object_type   TYPE tadir-object
       RETURNING VALUE(rv_result) TYPE abap_bool.
 
+    CLASS-METHODS has_no_pending_callbacks
+      IMPORTING !iv_run_id       TYPE sysuuid_x16
+      RETURNING VALUE(rv_result) TYPE abap_bool.
+
 ENDCLASS.
+
 
 
 CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
@@ -1045,14 +1050,6 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
               ENDIF.
               mark_object_failures( iv_run_id = <ls_d>-run_id it_object_keys = <ls_d>-object_keys ).
           ENDTRY.
-          TRY.
-              drain_queue( <ls_d>-run_id ).
-            CATCH zcx_abapgit_exception INTO DATA(lx_receive_drain_error).
-              IF <ls_rf_ctx> IS ASSIGNED AND <ls_rf_ctx>-ii_log IS BOUND.
-                <ls_rf_ctx>-ii_log->add_exception( lx_receive_drain_error ).
-              ENDIF.
-              mark_queued_failures( <ls_d>-run_id ).
-          ENDTRY.
           RETURN.
         ENDIF.
 
@@ -1074,14 +1071,6 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
                 <ls_mismatch_ctx>-ii_log->add_exception( lx_mismatch_error ).
               ENDIF.
               mark_object_failures( iv_run_id = <ls_d>-run_id it_object_keys = <ls_d>-object_keys ).
-          ENDTRY.
-          TRY.
-              drain_queue( <ls_d>-run_id ).
-            CATCH zcx_abapgit_exception INTO DATA(lx_mismatch_drain_error).
-              IF <ls_mismatch_ctx> IS ASSIGNED AND <ls_mismatch_ctx>-ii_log IS BOUND.
-                <ls_mismatch_ctx>-ii_log->add_exception( lx_mismatch_drain_error ).
-              ENDIF.
-              mark_queued_failures( <ls_d>-run_id ).
           ENDTRY.
           RETURN.
         ENDIF.
@@ -1151,15 +1140,6 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
             ENDIF.
           ENDIF.
         ENDLOOP.
-        TRY.
-            drain_queue( <ls_d>-run_id ).
-          CATCH zcx_abapgit_exception INTO DATA(lx_success_drain_error).
-            ASSIGN mt_run_context[ run_id = <ls_d>-run_id ] TO FIELD-SYMBOL(<ls_success_ctx>).
-            IF <ls_success_ctx> IS ASSIGNED AND <ls_success_ctx>-ii_log IS BOUND.
-              <ls_success_ctx>-ii_log->add_exception( lx_success_drain_error ).
-            ENDIF.
-            mark_queued_failures( <ls_d>-run_id ).
-        ENDTRY.
     ENDCASE.
   ENDMETHOD.
 
@@ -1411,17 +1391,28 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD wait_for_run_completion.
+    DATA lv_wait_subrc TYPE sy-subrc.
+
     drain_queue( iv_run_id ).
 
-    IF is_run_complete( iv_run_id ) = abap_true.
-      rv_result = 0.
-      RETURN.
-    ENDIF.
-
-    WAIT FOR ASYNCHRONOUS TASKS UNTIL is_run_complete( iv_run_id ) = abap_true UP TO c_batch_rfc_timeout_s SECONDS.
+    " Refill happens here only - the main path, after WAIT UNTIL has fully
+    " returned - never from inside ON_END_OF_BATCH's own callback context,
+    " where STARTING NEW TASK is illegal (RPERF_ILLEGAL_STATEMENT).
+    WHILE is_run_complete( iv_run_id ) = abap_false.
+      WAIT UNTIL has_no_pending_callbacks( iv_run_id ) = abap_true
+           UP TO c_batch_rfc_timeout_s SECONDS.
+      lv_wait_subrc = sy-subrc.
+      IF lv_wait_subrc <> 0.
+        EXIT.
+      ENDIF.
+      drain_queue( iv_run_id ).
+      IF has_no_pending_callbacks( iv_run_id ) = abap_true.
+        EXIT. " Refill found nothing to dispatch; let completion/failure be evaluated below.
+      ENDIF.
+    ENDWHILE.
 
     rv_result = interpret_wait_result(
-      iv_wait_subrc   = sy-subrc
+      iv_wait_subrc   = lv_wait_subrc
       iv_run_complete = is_run_complete( iv_run_id ) ).
   ENDMETHOD.
 
@@ -1429,6 +1420,8 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     DATA lt_half_1   TYPE zif_abapgit_definitions=>ty_tadir_tt.
     DATA lt_half_2   TYPE zif_abapgit_definitions=>ty_tadir_tt.
     DATA lv_split_at TYPE i.
+
+    ASSIGN mt_run_context[ run_id = iv_run_id ] TO FIELD-SYMBOL(<ls_ctx>).
 
     IF lines( is_dispatch-object_keys ) > 1.
       lv_split_at = lines( is_dispatch-object_keys ) DIV 2.
@@ -1439,10 +1432,12 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
           APPEND ls_key TO lt_half_2.
         ENDIF.
       ENDLOOP.
-      before_dispatch( iv_run_id = iv_run_id it_object_keys = lt_half_1
-                        iv_attempt = is_dispatch-attempt + 1 iv_batch_id = is_dispatch-batch_id ).
-      before_dispatch( iv_run_id = iv_run_id it_object_keys = lt_half_2
-                        iv_attempt = is_dispatch-attempt + 1 iv_batch_id = is_dispatch-batch_id ).
+      IF <ls_ctx> IS ASSIGNED.
+        APPEND VALUE #( items = VALUE #( FOR ls_half_key_1 IN lt_half_1 ( tadir = ls_half_key_1 ) ) ) TO <ls_ctx>-queue.
+        APPEND VALUE #( items = VALUE #( FOR ls_half_key_2 IN lt_half_2 ( tadir = ls_half_key_2 ) ) ) TO <ls_ctx>-queue.
+      ELSE.
+        route_to_sequential_fallback( iv_run_id = iv_run_id it_object_keys = is_dispatch-object_keys ).
+      ENDIF.
     ELSE.
       route_to_sequential_fallback( iv_run_id = iv_run_id it_object_keys = is_dispatch-object_keys ).
     ENDIF.
@@ -1568,5 +1563,14 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     ENDIF.
   ENDMETHOD.
 
-ENDCLASS.
 
+  METHOD has_no_pending_callbacks.
+    ASSIGN mt_run_context[ run_id = iv_run_id ] TO FIELD-SYMBOL(<ls_ctx>).
+    IF NOT <ls_ctx> IS ASSIGNED.
+      rv_result = abap_true.
+      RETURN.
+    ENDIF.
+    rv_result = boolc( <ls_ctx>-in_flight = 0 ).
+  ENDMETHOD.
+
+ENDCLASS.
