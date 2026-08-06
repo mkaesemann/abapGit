@@ -61,54 +61,27 @@ PLANNER clean before this Phase 2 pass began; PROV_GEN was already
 clean; re-verify after this commit's additive changes since ORCH's body
 grew substantially).
 
-## 4. T-DRAIN (PARTIAL SEAM ONLY - see disclosed limitation)
+## 4. Fail-fast WAIT/error contract (supersedes the old T-DRAIN gate)
 
 ```text
-STATUS=BLOCKED_ON_FOLLOW_UP_WORK
-REASON=IV_TEST_DELAY_S exists on Z_ABAPGIT_ORTEC_SER_BATCH (default 0,
-  test-only), but C_BATCH_RFC_TIMEOUT_S/C_MAX_DRAIN_WAIT_S have no
-  test-time override, so a real T-DRAIN-1..8 run would take 600s+ per
-  case.
+STATUS=REQUIRED_FOR_STAGE_A_IT8_CLOSEOUT
+REASON=Stage A intentionally replaced the old T/X/abandon/drain model
+  with a fail-fast WAIT contract. The obsolete long-running T-DRAIN gate
+  is therefore SUPERSEDED, not still pending. What now needs owner IT8
+  validation is the new visible-error/no-partial-success contract below.
 ```
 
-### T-DRAIN owner-decision options (Phase 3 recommendation)
+Required IT8 cases:
 
-**Option A - run it for real, no code change (RECOMMENDED).**
-Execute T-DRAIN-1..8 against the real 300s/300s constants as-is. Total
-cost ≈8 cases x up to 600s ≈ 80 minutes of real wall-clock time, once,
-as a one-time SER-SLICE-2 validation gate (not part of routine CI).
-Zero risk to the already-approved "HARD BOUND, compile-time CONSTANTS,
-never a variable" design guarantee for `C_BATCH_RFC_TIMEOUT_S`/
-`C_MAX_DRAIN_WAIT_S` (see their own ABAP Doc). No new contract surface.
-
-**Option B - convert the two constants to a variable get/set pair
-(NOT RECOMMENDED without explicit owner sign-off).** Would let a test
-shrink the timeouts directly, but converts a value the design doc calls
-a "HARD BOUND" into something mutable at runtime - this weakens an
-already-approved correctness property of the activated contract, which
-this mode's own rules treat as requiring a real design decision, not an
-implementation-level convenience.
-
-**Option C - add a separate, explicit TEST-MODE override (viable
-alternative to A if repeated re-validation is expected).** Mirror the
-existing `ZCL_ABAPGIT_ORTEC_GIT_SWITCH` feature-flag pattern: add a new,
-narrowly-scoped test-only static flag (e.g.
-`IS_SER_TEST_MODE_ACTIVE`/`SET_SER_TEST_MODE_ACTIVE` plus paired
-test-only timeout setters) that ONLY takes effect when a test explicitly
-arms it; `C_BATCH_RFC_TIMEOUT_S`/`C_MAX_DRAIN_WAIT_S` themselves stay
-untouched, real, compile-time constants for production - CHECK_TIMEOUTS
-would read an "effective timeout" through one small private helper that
-consults the test-mode override first. This preserves the hard-bound
-production guarantee while making repeat T-DRAIN runs fast, but is a
-NEW contract addition (even if test-only) and therefore requires the
-same design-review gate as any other productive ABAP change - NOT
-implemented in this pass.
-
-**Recommendation: Option A.** This is a one-time gate for a feature that
-is default-OFF and not yet enabled anywhere; the 80-minute one-time cost
-is acceptable and avoids any change to an already-approved hard-bound
-correctness property. Revisit Option C only if SER-SLICE-3+ work is
-expected to require re-running T-DRAIN repeatedly.
+- feature ON, complete run -> normal success, full output returned
+- feature ON, induced missing-result condition (or equivalent forced
+  incomplete terminal state) -> visible ZCX_ABAPGIT_EXCEPTION, NO partial
+  result accepted
+- feature ON, induced timeout/no-completion case -> visible
+  ZCX_ABAPGIT_EXCEPTION, NO partial result accepted
+- late callback after DISCARD_RUN_STATE -> no dump, RECEIVE+discard only,
+  no merge into any later run
+- feature OFF regression -> unchanged baseline behavior
 
 
 ## 5. Callback/run-registry isolation (manual or scripted IT8 test)
@@ -118,8 +91,8 @@ expected to require re-running T-DRAIN repeatedly.
   `IS_SERIAL_BATCH_ACTIVE` on. Confirm both repos' results are correct
   and neither's `MT_RESOLVED`/`MT_RUN_CONTEXT` rows leaked into the
   other (per-run_id isolation, sect 5.1).
-- Confirm a late/abandoned dispatch from an EARLIER run never merges
-  into a LATER run's output (drain-and-discard path, sect 5.5).
+- Confirm a late callback from an EARLIER, discarded run never merges
+  into a LATER run's output (unknown-task RECEIVE+discard path).
 
 ## 6. Output parity (mandatory, hard design requirement)
 
@@ -130,8 +103,9 @@ a BLOCKING correctness defect. Repeat for a repository containing:
 
 - a mix of CLAS/INTF (batch-eligible)
 - at least one WAPA object (must produce IDENTICAL output either way -
-  this is the WAPA-exclusion regression this session's review caught and
-  fixed; confirm empirically here, not just by code review)
+  WAPA is now batch-eligible only as a singleton batch, not forced-
+  sequential-only; confirm both parity and singleton-batch handling
+  empirically here, not just by code review)
 - at least one object type in `IS_NO_PARALLEL`'s denylist (ECTC/ECTD, if
   available) or `IV_MAX_PROCESSES = 1` forced-sequential case
 - **CLAS-only baseline** (single object type, simplest possible parity
@@ -157,9 +131,10 @@ effect ledger review already performed locally).
 
 ## 7. WAPA exclusion (explicit, in addition to output parity above)
 
-Confirm via a debugger breakpoint or log trace that no WAPA `TADIR` row
-ever appears in any `Z_ABAPGIT_ORTEC_SER_BATCH` dispatch's `IT_TADIR` -
-it must always be resolved via `ROUTE_TO_SEQUENTIAL_FALLBACK` instead.
+Confirm via a debugger breakpoint or trace that every WAPA `TADIR` row
+appears in the batch RFC path only as a SINGLETON `IT_TADIR` (exactly
+one row, object type WAPA) - never mixed with another WAPA and never
+mixed with any non-WAPA object.
 
 ## 8. Performance comparison
 
@@ -189,7 +164,5 @@ win materializes without measuring it:
 ## Sign-off
 
 SER-SLICE-2 may be marked complete only when ALL of sections 1, 1a, 2,
-3, 5, 6, 6a, and 7 pass, AND section 4 (T-DRAIN) is either executed per
-Option A/B/C above or the owner has explicitly accepted the disclosed
-limitation and decided how to proceed. Section 8 is informational, not
-a blocking gate.
+3, 4, 5, 6, 6a, and 7 pass. Section 8 is informational, not a blocking
+gate.

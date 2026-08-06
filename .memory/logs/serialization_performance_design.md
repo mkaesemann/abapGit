@@ -11,6 +11,29 @@ CHILD_DESIGNS=serialization_bulk_exists_design.md (SER-1),
   serialization_wapa_review.md (SER-5)
 ```
 
+## Current-source supersedure (2026-08-06)
+
+```text
+STATUS_OF_THIS_DOCUMENT=HISTORICAL_MASTER_ARCHITECTURE_RATIONALE
+HOOK_SUPERSEDURE=The older §2 hook contract in this document explicitly
+  wrapped the ORTEC call in TRY/CATCH and fell through to the unchanged
+  standard path on ZCX_ABAPGIT_EXCEPTION. Current Stage-A source
+  intentionally does NOT do that for feature-ON incomplete-batch cases:
+  fail-fast WAIT result 4/8 now raises a visible abapGit exception and
+  discards the partial result, per the owner brief's explicit "no
+  partial result accepted" requirement. This is a deliberate contract
+  change, not an omission.
+FEATURE_OFF_STILL_TRUE=Feature OFF remains unchanged because
+  MV_SERIAL_BATCH_ACTIVE is restored to ABAP_FALSE by default and the
+  minimal hook itself stays one direct delegation block only.
+WAPA_SUPERSEDURE=The older "WAPA is not part of the first batch
+  prototype" language is superseded by current Stage-A source: WAPA is
+  batch-eligible only as singleton batches.
+AUTHORITATIVE_SOURCE=Current source outranks stale prose. Keep using this
+  document for package/scope rationale, not as the active Stage-A wait/
+  fallback contract.
+```
+
 ## 0. Scope discipline (non-goals, restated from owner brief)
 
 - No Persistent Local Serialization Index / persistent serialized-object

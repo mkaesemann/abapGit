@@ -3,7 +3,7 @@
 ```text
 PACKET=COMPACT_HANDOFF_V1
 TASK=SERIALIZATION_SER_SLICE_2
-STATUS=IMPLEMENTATION_AUDITED_AWAITING_IT8_FEATURE_ON_VALIDATION
+STATUS=LOCAL_COMPLETE_AWAITING_FINAL_IT8
 SEE_ALSO=Minimal-hook restoration + independent audits section below
   (most current); this legacy STATUS block is Phase-2-local-only history.
 REASON=Phase 2 (ORCH state machine, minimal standard-abapGit hook,
@@ -85,6 +85,81 @@ PRODUCTIVE_CODE_CHANGED=YES (ORCH contract completion + full state-
   parameter on the RFC FM; new ORCH testclasses include)
 STATE_MD_CHANGED=NO
 PUSHED=NO
+```
+
+## Stage A closeout (most current)
+
+```text
+PACKET=COMPACT_HANDOFF_V1
+TASK=SER_SLICE_2_CLOSEOUT_STAGE_A
+BASELINE_HEAD=cdfcbe8b4b945ab5ed6034c5601592db737ddd01
+CURRENT_HEAD=3a85b2863fb4a242504e86fd76919a0a72f837d4 + local Stage-A working tree
+OWNER_CORRECTIONS_AFTER_CDFCBE8B=
+  3a85b286 :: src/ortec/serial/core/zcl_abapgit_ortec_ser_orch.clas.abap ->
+    SYNTAX_ONLY (IMPORT from FILES_XSTRING wrapped in explicit CATCH for
+    cx_sy_import_format_error / cx_sy_import_mismatch_error /
+    cx_sy_compression_error / cx_sy_conversion_codepage; preserves the
+    same semantic contract: bad payload means no merge, no false
+    resolution)
+  3a85b286 :: src/ortec/serial/core/zcl_abapgit_ortec_ser_orch.clas.testclasses.abap ->
+    TEST_FIX (ABAP syntax/format cleanup only; no production semantics)
+  3a85b286 :: src/ortec/git/zcl_abapgit_ortec_git_switch.clas.abap ->
+    SEMANTIC_CHANGE (MV_SERIAL_BATCH_ACTIVE default flipped to ABAP_TRUE;
+    Stage A restores ABAP_FALSE to preserve feature-OFF default safety)
+  3a85b286 :: src/ortec/git/zcl_abapgit_ortec_porcelain* ->
+    OTHER/UNRELATED_TO_SERIAL_STAGE_A (owner syntax/unit-test cleanup in a
+    separate ORTEC Git surface, not touched here)
+MERGE_INTO_MT_FILES_OWNER_FIX_REVIEW=PASS. The productive method under
+  review is still ZCL_ABAPGIT_ORTEC_SER_ORCH=>MERGE_INTO_MT_FILES (no
+  test-only reimplementation). FILES_XSTRING is still IMPORTed with the
+  exact `IMPORT data = ls_serialization FROM DATA BUFFER ...` field name
+  and serialization type the RFC worker writes (`EXPORT data =
+  ls_serialization TO DATA BUFFER ls_result-files_xstring`). Tests now
+  prove: good payload preserves PATH and ITEM metadata for EVERY file,
+  multiple files append, empty file list is a defined success with zero
+  appended rows, bad payload returns ABAP_FALSE and leaves pre-existing
+  accumulator rows untouched, and missing run context also returns
+  ABAP_FALSE. The owner's syntax correction did not widen visibility,
+  alter the field name, or weaken the method's contract - it only turned
+  a real SAP syntax/runtime dump risk into a clean no-merge failure.
+WAIT_MODEL=FAIL_FAST. Current source intentionally SUPERSEDES the older
+  T/X/abandon/drain model for Stage A: there is no C_STATE_TIMED_OUT, no
+  C_STATE_ABANDONED, no C_MAX_DRAIN_WAIT_S, no session-wide abandoned-
+  run ledger, and no T-DRAIN delay seam. WAIT_FOR_RUN_COMPLETION now
+  implements the only active lifecycle contract: successful return iff
+  IS_RUN_COMPLETE( ) becomes true; WAIT result 4 while incomplete means
+  missing-result inconsistency; WAIT result 8 means timeout; both discard
+  the entire partial run and raise a visible ZCX_ABAPGIT_EXCEPTION.
+VISIBLE_ERROR_PATH=IMPLEMENTED. Feature-ON incomplete batch results now
+  intentionally RAISE through the normal abapGit exception path instead
+  of silently falling through to the standard loop. This is a deliberate
+  Stage-A contract change, not an omission - it matches the owner brief's
+  explicit requirement that incomplete results be discarded with a user-
+  visible abapGit error and no partial success accepted.
+ABANDONMENT_DRAIN_MODEL=REMOVED_FOR_STAGE_A. Late callbacks after
+  DISCARD_RUN_STATE are still safe via the existing unknown-task
+  RECEIVE-and-discard branch, but the successful-return T/X/DRAIN state
+  machine and the long-running T-DRAIN gate are no longer part of the
+  current implementation contract.
+WAPA_POLICY=SINGLETON_BATCHES. WAPA is no longer blanket-excluded from
+  the batch RFC path; it is partitioned into its own WAPA bucket and each
+  WAPA object becomes exactly one one-object planned batch, never mixed
+  with another WAPA or any non-WAPA object. The actual serializer remains
+  the existing WAPA path reached indirectly through
+  zcl_abapgit_objects=>serialize in the worker/fallback path - no new or
+  duplicate serializer was introduced.
+CLAS_IT8_EVIDENCE_RECORDED=YES (owner-supplied SAT comparison,
+  percentages re-calculated locally rather than copied): old total
+  17.028811s, new total 9.138303s, total reduction 46.3%; old
+  serialization call 13.857502s, new 6.136730s, serialization reduction
+  55.7%; old RFC starts 459, new batch RFC starts 19, RFC-start
+  reduction 95.9%; average batch occupancy 24.16 of 25; CLAS output
+  parity PASS. This evidence applies to the measured CLAS subset only,
+  not every object type.
+SER_SLICE_2_STATUS=LOCAL_COMPLETE_AWAITING_FINAL_IT8
+NEXT=owner IT8 import/activate + ABAP Unit + ATC + parity/performance run
+  against the Stage-A source, then begin SER-SLICE-3 provider discovery
+  from the now-stable fail-fast/singleton-WAPA baseline.
 ```
 
 ## Minimal hook restoration + independent audits (most current)

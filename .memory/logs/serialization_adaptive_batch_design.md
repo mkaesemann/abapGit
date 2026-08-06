@@ -7,6 +7,29 @@ STATUS=DRAFT_FOR_REVIEW
 DEPENDS_ON=serialization_ser0_audit.md §1,§6,§7; serialization_performance_design.md §2-3
 ```
 
+## Current-source supersedure (2026-08-06)
+
+```text
+STATUS_OF_THIS_DOCUMENT=HISTORICAL_DESIGN_RATIONALE
+CURRENT_HEAD_SUPERSEDURE=The current Stage-A source descended from
+  cdfcbe8b/3a85b286 intentionally SUPERSEDES the older timeout lifecycle
+  specified in this document's §5.1a/§5.3/§5.4 and the associated
+  T-DRAIN closure gate: there is no longer any T/X/abandoned post-return
+  drain model in the active source. The active contract is now fail-fast
+  WAIT semantics only: successful return iff all planned objects are
+  complete; WAIT result 4 while incomplete => visible abapGit exception,
+  partial result discarded; WAIT result 8 => visible timeout exception,
+  partial result discarded. Late callbacks after DISCARD_RUN_STATE are
+  still safe via the unknown-task RECEIVE-and-discard path, but no
+  successful-return drain window remains.
+WAPA_SUPERSEDURE=This design's older "WAPA remains excluded from the
+  batch worker" wording is also superseded for Stage A. Current source
+  admits WAPA only as singleton batches, never mixed with any other
+  object.
+AUTHORITATIVE_SOURCE=Current source outranks stale prose. Use this
+  document as rationale/history unless a section matches the active code.
+```
+
 ## 1. Why (quantitative justification, not assumed)
 
 `SAT-WarmToColdBranchWithMinChanges.txt` (large-repo trace, 17,148
