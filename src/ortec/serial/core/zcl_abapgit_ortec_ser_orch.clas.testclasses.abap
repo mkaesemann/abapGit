@@ -206,7 +206,11 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
     INSERT lv_run INTO TABLE zcl_abapgit_ortec_ser_orch=>mt_broken_runs.
     INSERT VALUE #( run_id = lv_run ) INTO TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context.
 
-    zcl_abapgit_ortec_ser_orch=>discard_run_state( lv_run ).
+    TRY.
+        zcl_abapgit_ortec_ser_orch=>discard_run_state( lv_run ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_discard).
+        cl_abap_unit_assert=>fail( msg = lx_discard->get_text( ) ).
+    ENDTRY.
 
     READ TABLE zcl_abapgit_ortec_ser_orch=>mt_dispatch
          WITH TABLE KEY task_name = 'T1'
@@ -251,7 +255,11 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
     DATA(lv_run) = build_run_id( ).
     INSERT VALUE #( run_id = lv_run in_flight = 0 ) INTO TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context.
 
-    zcl_abapgit_ortec_ser_orch=>release_in_flight_budget( lv_run ).
+    TRY.
+        zcl_abapgit_ortec_ser_orch=>release_in_flight_budget( lv_run ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_release).
+        cl_abap_unit_assert=>fail( msg = lx_release->get_text( ) ).
+    ENDTRY.
 
     READ TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context INTO DATA(ls_ctx) WITH TABLE KEY run_id = lv_run.
     cl_abap_unit_assert=>assert_equals( exp = 0 act = ls_ctx-in_flight ).
@@ -313,16 +321,19 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
     INSERT VALUE #( run_id = lv_run expected_count = 2 )
       INTO TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context.
 
-    zcl_abapgit_ortec_ser_orch=>mark_object_success(
-      iv_run_id = lv_run
-      is_tadir  = build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'A' ) ).
-    zcl_abapgit_ortec_ser_orch=>mark_object_success(
-      iv_run_id = lv_run
-      is_tadir  = build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'B' ) ).
-
-    zcl_abapgit_ortec_ser_orch=>assert_successful_run(
-      iv_run_id      = lv_run
-      iv_wait_result = 0 ).
+    TRY.
+        zcl_abapgit_ortec_ser_orch=>mark_object_success(
+          iv_run_id = lv_run
+          is_tadir  = build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'A' ) ).
+        zcl_abapgit_ortec_ser_orch=>mark_object_success(
+          iv_run_id = lv_run
+          is_tadir  = build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'B' ) ).
+        zcl_abapgit_ortec_ser_orch=>assert_successful_run(
+          iv_run_id      = lv_run
+          iv_wait_result = 0 ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_all_success).
+        cl_abap_unit_assert=>fail( msg = lx_all_success->get_text( ) ).
+    ENDTRY.
   ENDMETHOD.
 
   METHOD failure_blocks_return.
@@ -330,12 +341,16 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
     INSERT VALUE #( run_id = lv_run expected_count = 2 )
       INTO TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context.
 
-    zcl_abapgit_ortec_ser_orch=>mark_object_success(
-      iv_run_id = lv_run
-      is_tadir  = build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'A' ) ).
-    zcl_abapgit_ortec_ser_orch=>mark_object_failures(
-      iv_run_id      = lv_run
-      it_object_keys = VALUE #( ( build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'B' ) ) ) ).
+    TRY.
+        zcl_abapgit_ortec_ser_orch=>mark_object_success(
+          iv_run_id = lv_run
+          is_tadir  = build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'A' ) ).
+        zcl_abapgit_ortec_ser_orch=>mark_object_failures(
+          iv_run_id      = lv_run
+          it_object_keys = VALUE #( ( build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'B' ) ) ) ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_mark_setup).
+        cl_abap_unit_assert=>fail( msg = lx_mark_setup->get_text( ) ).
+    ENDTRY.
 
     TRY.
         zcl_abapgit_ortec_ser_orch=>assert_successful_run(
@@ -353,9 +368,13 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
     INSERT VALUE #( run_id = lv_run expected_count = 2 )
       INTO TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context.
 
-    zcl_abapgit_ortec_ser_orch=>mark_object_success(
-      iv_run_id = lv_run
-      is_tadir  = build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'A' ) ).
+    TRY.
+        zcl_abapgit_ortec_ser_orch=>mark_object_success(
+          iv_run_id = lv_run
+          is_tadir  = build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'A' ) ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_mark_incomplete).
+        cl_abap_unit_assert=>fail( msg = lx_mark_incomplete->get_text( ) ).
+    ENDTRY.
 
     TRY.
         zcl_abapgit_ortec_ser_orch=>assert_successful_run(
@@ -372,9 +391,13 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
     INSERT VALUE #( run_id = lv_run expected_count = 1 )
       INTO TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context.
 
-    zcl_abapgit_ortec_ser_orch=>route_to_sequential_fallback(
-      iv_run_id      = lv_run
-      it_object_keys = VALUE #( ( build_tadir( iv_obj_type = 'ZZZZ' iv_obj_name = 'NOPE' ) ) ) ).
+    TRY.
+        zcl_abapgit_ortec_ser_orch=>route_to_sequential_fallback(
+          iv_run_id      = lv_run
+          it_object_keys = VALUE #( ( build_tadir( iv_obj_type = 'ZZZZ' iv_obj_name = 'NOPE' ) ) ) ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_fallback).
+        cl_abap_unit_assert=>fail( msg = lx_fallback->get_text( ) ).
+    ENDTRY.
 
     READ TABLE zcl_abapgit_ortec_ser_orch=>mt_failed
       WITH TABLE KEY run_id = lv_run obj_type = 'ZZZZ' obj_name = 'NOPE'
@@ -397,11 +420,14 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
                              ( tadir = build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'B' ) ) ) ) ) )
       INTO TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context.
 
-    zcl_abapgit_ortec_ser_orch=>mark_object_success(
-      iv_run_id = lv_run
-      is_tadir  = build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'A' ) ).
-
-    zcl_abapgit_ortec_ser_orch=>mark_queued_failures( lv_run ).
+    TRY.
+        zcl_abapgit_ortec_ser_orch=>mark_object_success(
+          iv_run_id = lv_run
+          is_tadir  = build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'A' ) ).
+        zcl_abapgit_ortec_ser_orch=>mark_queued_failures( lv_run ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_qf_setup).
+        cl_abap_unit_assert=>fail( msg = lx_qf_setup->get_text( ) ).
+    ENDTRY.
 
     cl_abap_unit_assert=>assert_equals( exp = 2 act = zcl_abapgit_ortec_ser_orch=>count_terminal_objects( lv_run ) ).
     cl_abap_unit_assert=>assert_equals( exp = 1 act = zcl_abapgit_ortec_ser_orch=>count_failed_objects( lv_run ) ).
@@ -429,9 +455,13 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
                              ( tadir = build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'B' ) ) ) ) ) )
       INTO TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context.
 
-    zcl_abapgit_ortec_ser_orch=>mark_object_success(
-      iv_run_id = lv_run
-      is_tadir  = build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'A' ) ).
+    TRY.
+        zcl_abapgit_ortec_ser_orch=>mark_object_success(
+          iv_run_id = lv_run
+          is_tadir  = build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'A' ) ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_drain_setup).
+        cl_abap_unit_assert=>fail( msg = lx_drain_setup->get_text( ) ).
+    ENDTRY.
 
     zcl_abapgit_ortec_ser_orch=>mv_test_raise_drain = abap_true.
 
@@ -441,7 +471,11 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
       CATCH zcx_abapgit_exception.
     ENDTRY.
 
-    zcl_abapgit_ortec_ser_orch=>mark_queued_failures( lv_run ).
+    TRY.
+        zcl_abapgit_ortec_ser_orch=>mark_queued_failures( lv_run ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_drain_mark).
+        cl_abap_unit_assert=>fail( msg = lx_drain_mark->get_text( ) ).
+    ENDTRY.
 
     READ TABLE zcl_abapgit_ortec_ser_orch=>mt_failed
       WITH TABLE KEY run_id = lv_run obj_type = 'CLAS' obj_name = 'B'
@@ -470,12 +504,16 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
     INSERT VALUE #( run_id = lv_run_b expected_count = 1 )
       INTO TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context.
 
-    zcl_abapgit_ortec_ser_orch=>mark_object_success(
-      iv_run_id = lv_run_a
-      is_tadir  = build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'A' ) ).
-    zcl_abapgit_ortec_ser_orch=>mark_object_failures(
-      iv_run_id      = lv_run_b
-      it_object_keys = VALUE #( ( build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'B' ) ) ) ).
+    TRY.
+        zcl_abapgit_ortec_ser_orch=>mark_object_success(
+          iv_run_id = lv_run_a
+          is_tadir  = build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'A' ) ).
+        zcl_abapgit_ortec_ser_orch=>mark_object_failures(
+          iv_run_id      = lv_run_b
+          it_object_keys = VALUE #( ( build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'B' ) ) ) ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_isolated).
+        cl_abap_unit_assert=>fail( msg = lx_isolated->get_text( ) ).
+    ENDTRY.
 
     cl_abap_unit_assert=>assert_equals( exp = 1 act = zcl_abapgit_ortec_ser_orch=>count_terminal_objects( lv_run_a ) ).
     cl_abap_unit_assert=>assert_equals( exp = 1 act = zcl_abapgit_ortec_ser_orch=>count_terminal_objects( lv_run_b ) ).
@@ -493,10 +531,14 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
       ( build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'ZCL_B' ) )
       ( build_tadir( iv_obj_type = 'WAPA' iv_obj_name = 'ZWAPA_B' ) ) ).
 
-    DATA(ls_partition) = zcl_abapgit_ortec_ser_orch=>partition_objects(
-      it_tadir         = lt_input
-      iv_max_processes = 4
-      is_i18n_params   = ls_params ).
+    TRY.
+        DATA(ls_partition) = zcl_abapgit_ortec_ser_orch=>partition_objects(
+          it_tadir         = lt_input
+          iv_max_processes = 4
+          is_i18n_params   = ls_params ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_partition).
+        cl_abap_unit_assert=>fail( msg = lx_partition->get_text( ) ).
+    ENDTRY.
 
     cl_abap_unit_assert=>assert_equals( exp = 0 act = lines( ls_partition-forced_seq ) ).
     cl_abap_unit_assert=>assert_equals( exp = 2 act = lines( ls_partition-eligible ) ).
@@ -521,20 +563,23 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
       ( build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'ZCL_B' ) )
       ( build_tadir( iv_obj_type = 'WAPA' iv_obj_name = 'ZWAPA_B' ) ) ).
 
-    DATA(ls_partition) = zcl_abapgit_ortec_ser_orch=>partition_objects(
-      it_tadir         = lt_input
-      iv_max_processes = 4
-      is_i18n_params   = ls_params ).
-
-    DATA(lt_eligible_work) = VALUE zcl_abapgit_ortec_ser_planner=>tt_work_item(
-      FOR ls_key IN ls_partition-eligible
-      ( tadir = ls_key est_ms = 10 est_bytes = 100 est_source = 'F' ) ).
-    DATA(lt_eligible_batches) = zcl_abapgit_ortec_ser_planner=>build_initial_batches(
-      it_work_items   = lt_eligible_work
-      iv_worker_count = 1
-      iv_row_limit    = 25
-      iv_byte_limit   = 1000 ).
-    DATA(lt_wapa_batches) = zcl_abapgit_ortec_ser_orch=>build_wapa_singleton_batches( ls_partition-wapa ).
+    TRY.
+        DATA(ls_partition) = zcl_abapgit_ortec_ser_orch=>partition_objects(
+          it_tadir         = lt_input
+          iv_max_processes = 4
+          is_i18n_params   = ls_params ).
+        DATA(lt_eligible_work) = VALUE zcl_abapgit_ortec_ser_planner=>tt_work_item(
+          FOR ls_key IN ls_partition-eligible
+          ( tadir = ls_key est_ms = 10 est_bytes = 100 est_source = 'F' ) ).
+        DATA(lt_eligible_batches) = zcl_abapgit_ortec_ser_planner=>build_initial_batches(
+          it_work_items   = lt_eligible_work
+          iv_worker_count = 1
+          iv_row_limit    = 25
+          iv_byte_limit   = 1000 ).
+        DATA(lt_wapa_batches) = zcl_abapgit_ortec_ser_orch=>build_wapa_singleton_batches( ls_partition-wapa ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_wapa_batch).
+        cl_abap_unit_assert=>fail( msg = lx_wapa_batch->get_text( ) ).
+    ENDTRY.
 
     cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( lt_eligible_batches ) ).
     READ TABLE lt_eligible_batches INDEX 1 INTO DATA(ls_eligible_batch).
@@ -556,8 +601,12 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
     " earlier truncated-RUN_ID-hex scheme could produce identical task
     " names for two different runs; the session-wide monotonic counter
     " cannot.
-    DATA(lv_name_1) = zcl_abapgit_ortec_ser_orch=>next_task_name( ).
-    DATA(lv_name_2) = zcl_abapgit_ortec_ser_orch=>next_task_name( ).
+    TRY.
+        DATA(lv_name_1) = zcl_abapgit_ortec_ser_orch=>next_task_name( ).
+        DATA(lv_name_2) = zcl_abapgit_ortec_ser_orch=>next_task_name( ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_task_name).
+        cl_abap_unit_assert=>fail( msg = lx_task_name->get_text( ) ).
+    ENDTRY.
 
     cl_abap_unit_assert=>assert_differs( exp = lv_name_1 act = lv_name_2 ).
   ENDMETHOD.
@@ -606,7 +655,10 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
     " as a successful merge.
     DATA(lv_run) = build_run_id( ).
     INSERT VALUE #( run_id = lv_run ) INTO TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context.
-    APPEND VALUE #( file-path = '/existing/' ) TO zcl_abapgit_ortec_ser_orch=>mt_run_context[ run_id = lv_run ]-files.
+    ASSIGN zcl_abapgit_ortec_ser_orch=>mt_run_context[ run_id = lv_run ] TO FIELD-SYMBOL(<ls_run_context>).
+    IF sy-subrc = 0.
+      INSERT VALUE #( file-path = '/existing/' ) INTO TABLE <ls_run_context>-files.
+    ENDIF.
 
     DATA(ls_result) = build_result( iv_obj_type = 'CLAS' iv_obj_name = 'A' ).
     ls_result-files_xstring = '0102030405'.
