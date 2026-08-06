@@ -899,12 +899,13 @@ CLASS zcl_abapgit_gui_page_stage IMPLEMENTATION.
       WHEN c_action-stage_virtual_filter.
 
         mv_filter_value = ii_event->form_data( )->get( 'filterValue' ).
-        mv_load_all = abap_true.
-        mv_virtual_offset = 0.
-        init_files( ).
-        rs_handled-state = zcl_abapgit_gui=>c_event_state-re_render.
-
-      WHEN c_action-stage_load_all.
+          mv_virtual_offset = 0.
+          IF zcl_abapgit_ortec_git_stage=>has_stage_cache( mi_repo->get_key( ) ) = abap_true.
+            ms_files = zcl_abapgit_ortec_git_stage=>restore_stage_files( mi_repo->get_key( ) ).
+          ELSE.
+            mv_load_all = abap_true.
+            init_files( ).
+          ENDIF.
 
         mv_load_all = abap_true.
         mv_virtual_offset = 0.

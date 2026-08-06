@@ -47,8 +47,43 @@ CLASS zcl_abapgit_ortec_git_stage DEFINITION
         !iv_window_size TYPE i DEFAULT c_default_window_size
       RETURNING
         VALUE(ri_html)  TYPE REF TO zif_abapgit_html.
+
+    CLASS-METHODS has_stage_cache
+      IMPORTING
+        !iv_repo_key     TYPE string
+      RETURNING
+        VALUE(rv_valid)  TYPE abap_bool.
+
+    CLASS-METHODS cache_stage_files
+      IMPORTING
+        !iv_repo_key TYPE string
+        !is_files    TYPE zif_abapgit_definitions=>ty_stage_files.
+
+    CLASS-METHODS restore_stage_files
+      IMPORTING
+        !iv_repo_key    TYPE string
+      RETURNING
+        VALUE(rs_files) TYPE zif_abapgit_definitions=>ty_stage_files.
   PROTECTED SECTION.
   PRIVATE SECTION.
+    TYPES:
+      BEGIN OF ty_filter_cache_s,
+        repo_key   TYPE string,
+        valid      TYPE abap_bool,
+        transports TYPE zif_abapgit_cts_api=>ty_transport_list,
+        changed_by TYPE zcl_abapgit_cts_integration=>ty_changed_by_tt,
+      END OF ty_filter_cache_s.
+    TYPES:
+      BEGIN OF ty_stage_cache_meta_s,
+        repo_key TYPE string,
+        valid    TYPE abap_bool,
+      END OF ty_stage_cache_meta_s.
+
+    " Survives across filter round-trips; keyed by repo_key to auto-invalidate on repo switch.
+    CLASS-DATA gs_filter_cache TYPE ty_filter_cache_s.
+    CLASS-DATA gs_stage_cache_meta TYPE ty_stage_cache_meta_s.
+    CONSTANTS c_stage_cache_max_files TYPE i VALUE 5000.
+
     CLASS-METHODS find_changed_by
       IMPORTING
         !ii_repo             TYPE REF TO zif_abapgit_repo
@@ -573,23 +608,37 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
     FIELD-SYMBOLS <ls_local> LIKE LINE OF it_files-local.
     FIELD-SYMBOLS <ls_remote> LIKE LINE OF it_files-remote.
 
+    " Update the cross-request ms_files cache on every full render (not on filter renders).
+    IF iv_filter_value IS INITIAL.
+      cache_stage_files( iv_repo_key = ii_repo->get_key( ) is_files = it_files ).
+    ENDIF.
+
     IF iv_filter_value IS INITIAL.
       ls_filtered = it_files.
     ELSE.
       lv_pattern = '*' && to_upper( iv_filter_value ) && '*'.
       lo_dot = ii_repo->get_dot_abapgit( ).
 
-      " Pre-fetch transports and changed-by for all files so they can be included in filter matching.
-      lt_filter_transports = find_transports( ii_repo = ii_repo it_files = it_files ).
-      DATA(lt_filter_trkorr_pf) = VALUE zif_abapgit_cts_api=>ty_trkorr_tt(
-        FOR ls_t IN lt_filter_transports ( ls_t-trkorr ) ).
-      SORT lt_filter_trkorr_pf.
-      DELETE ADJACENT DUPLICATES FROM lt_filter_trkorr_pf.
-      zcl_abapgit_factory=>get_cts_api( )->prefetch_descriptions( lt_filter_trkorr_pf ).
-      lt_filter_changed_by = find_changed_by(
-        ii_repo       = ii_repo
-        it_files      = it_files
-        it_transports = lt_filter_transports ).
+" Use cached transport/changed-by when valid for this repo to avoid repeated DB round-trips.
+        IF gs_filter_cache-valid = abap_true AND gs_filter_cache-repo_key = ii_repo->get_key( ).
+          lt_filter_transports = gs_filter_cache-transports.
+          lt_filter_changed_by = gs_filter_cache-changed_by.
+        ELSE.
+          lt_filter_transports = find_transports( ii_repo = ii_repo it_files = it_files ).
+          DATA(lt_filter_trkorr_pf) = VALUE zif_abapgit_cts_api=>ty_trkorr_tt(
+            FOR ls_t IN lt_filter_transports ( ls_t-trkorr ) ).
+          SORT lt_filter_trkorr_pf.
+          DELETE ADJACENT DUPLICATES FROM lt_filter_trkorr_pf.
+          zcl_abapgit_factory=>get_cts_api( )->prefetch_descriptions( lt_filter_trkorr_pf ).
+          lt_filter_changed_by = find_changed_by(
+            ii_repo       = ii_repo
+            it_files      = it_files
+            it_transports = lt_filter_transports ).
+          gs_filter_cache-repo_key = ii_repo->get_key( ).
+          gs_filter_cache-transports = lt_filter_transports.
+          gs_filter_cache-changed_by = lt_filter_changed_by.
+          gs_filter_cache-valid = abap_true.
+        ENDIF.
 
       LOOP AT it_files-local ASSIGNING <ls_local>.
         CLEAR: ls_filter_transport, ls_filter_changed_by.
@@ -701,17 +750,23 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
       ENDLOOP.
     ENDIF.
 
-    lt_transports = find_transports( ii_repo = ii_repo it_files = ls_window ).
-    lt_trkorr = VALUE zif_abapgit_cts_api=>ty_trkorr_tt(
-      FOR ls_transport IN lt_transports ( ls_transport-trkorr ) ).
-    SORT lt_trkorr.
-    DELETE ADJACENT DUPLICATES FROM lt_trkorr.
-    zcl_abapgit_factory=>get_cts_api( )->prefetch_descriptions( lt_trkorr ).
+IF iv_filter_value IS NOT INITIAL.
+      " Reuse pre-pass data; transport descriptions were already prefetched above.
+      lt_transports = lt_filter_transports.
+      lt_changed_by = lt_filter_changed_by.
+    ELSE.
+      lt_transports = find_transports( ii_repo = ii_repo it_files = ls_window ).
+      lt_trkorr = VALUE zif_abapgit_cts_api=>ty_trkorr_tt(
+        FOR ls_transport IN lt_transports ( ls_transport-trkorr ) ).
+      SORT lt_trkorr.
+      DELETE ADJACENT DUPLICATES FROM lt_trkorr.
+      zcl_abapgit_factory=>get_cts_api( )->prefetch_descriptions( lt_trkorr ).
 
-    lt_changed_by = find_changed_by(
-      ii_repo       = ii_repo
-      it_files      = ls_window
-      it_transports = lt_transports ).
+      lt_changed_by = find_changed_by(
+        ii_repo       = ii_repo
+        it_files      = ls_window
+        it_transports = lt_transports ).
+    ENDIF.
 
     render_stage_data_json(
       EXPORTING ii_repo = ii_repo it_files = ls_window it_transports = lt_transports it_changed_by = lt_changed_by
@@ -834,11 +889,23 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
     ri_html->add( '    function submitVirtualFilter() {' ).
     ri_html->add( '      var input = id(gStageParams.ids.objectSearch);' ).
     ri_html->add( '      var form = id("stageVirtualFilterForm"), field = id("stageVirtualFilterValue");' ).
-    ri_html->add( '      if (!form || !field) { return; } field.value = input ? input.value : ""; form.submit();' ).
+    ri_html->add( '      if (!form || !field) { return; }' ).
+    ri_html->add( '      field.value = input ? input.value : "";' ).
+    ri_html->add( '      if (input) { try { sessionStorage.setItem("ortec.stage.refocusPos", input.selectionStart != null ? input.selectionStart : input.value.length); } catch(e) {} }' ).
+    ri_html->add( '      if (input) { input.style.opacity = "1"; }' ).
+    ri_html->add( '      form.submit();' ).
+    ri_html->add( '    }' ).
+    ri_html->add( '    function getDebounceMs() {' ).
+    ri_html->add( '      var t = pageMeta.total || rows.length;' ).
+    ri_html->add( '      if (t < 500) { return 300; } if (t < 2000) { return 600; } if (t < 5000) { return 1000; } return 1500;' ).
     ri_html->add( '    }' ).
     ri_html->add( '    function applyFilter() {' ).
+    ri_html->add( '      var val = filterInput ? filterInput.value : "";' ).
+    ri_html->add( '      if (!val) { if (filterTimer) { clearTimeout(filterTimer); } submitVirtualFilter(); return; }' ).
+    ri_html->add( '      if (pageMeta.total > 2000 && val.length < 3) { return; }' ).
+    ri_html->add( '      if (filterInput) { filterInput.style.opacity = "0.6"; }' ).
     ri_html->add( '      if (filterTimer) { clearTimeout(filterTimer); }' ).
-    ri_html->add( '      filterTimer = setTimeout(submitVirtualFilter, 600);' ).
+    ri_html->add( '      filterTimer = setTimeout(submitVirtualFilter, getDebounceMs());' ).
     ri_html->add( '    }' ).
     ri_html->add( '    function updateButtons() {' ).
     ri_html->add( '      var n = selectedCount();' ).
@@ -1001,7 +1068,9 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
     ri_html->add( '      }' ).
     ri_html->add( '    }; }' ).
     ri_html->add( '    var filterInput = id(gStageParams.ids.objectSearch);' ).
-    ri_html->add( '    if (filterInput) { filterInput.oninput = applyFilter; filterInput.onkeyup = applyFilter; }' ).
+    ri_html->add( '    if (filterInput) { filterInput.oninput = applyFilter; filterInput.onkeyup = applyFilter;' ).
+    ri_html->add( '      filterInput.onkeydown = function(e) { if ((e.keyCode || e.which) === 13) { if (filterTimer) { clearTimeout(filterTimer); } submitVirtualFilter(); } };' ).
+    ri_html->add( '    }' ).
     ri_html->add( '    var meBtn = id("stageFilterByMe");' ).
     ri_html->add( '    if (meBtn) { meBtn.onclick = function(evt) {' ).
     ri_html->add( '      if (evt && evt.preventDefault) { evt.preventDefault(); }' ).
@@ -1044,12 +1113,56 @@ CLASS zcl_abapgit_ortec_git_stage IMPLEMENTATION.
     ri_html->add( '      };' ).
     ri_html->add( '    }' ).
     ri_html->add( '    render();' ).
+    ri_html->add( '    try {' ).
+    ri_html->add( '      var rp = sessionStorage.getItem("ortec.stage.refocusPos");' ).
+    ri_html->add( '      if (rp !== null) {' ).
+    ri_html->add( '        sessionStorage.removeItem("ortec.stage.refocusPos");' ).
+    ri_html->add( '        var rf = id(gStageParams.ids.objectSearch);' ).
+    ri_html->add( '        if (rf) { rf.focus(); var pp = parseInt(rp, 10); if (!isNaN(pp)) { rf.setSelectionRange(pp, pp); } }' ).
+    ri_html->add( '      }' ).
+    ri_html->add( '    } catch(e2) {}' ).
     ri_html->add( '  } catch (e) {' ).
     ri_html->add( '    var body = document.getElementById("stageVirtualBody");' ).
     ri_html->add( '    if (body) { body.innerHTML = "<tr><td colspan=\"7\" class=\"error\">Virtual stage initialization failed: " + (e && e.message ? e.message : e) + "</td></tr>"; }' ).
     ri_html->add( '  }' ).
     ri_html->add( '  }());' ).
     ri_html->add( '}' ).
+
+  ENDMETHOD.
+
+
+  METHOD has_stage_cache.
+
+    IF gs_stage_cache_meta-valid <> abap_true.
+      RETURN.
+    ENDIF.
+    IF gs_stage_cache_meta-repo_key <> iv_repo_key.
+      RETURN.
+    ENDIF.
+    rv_valid = abap_true.
+
+  ENDMETHOD.
+
+
+  METHOD cache_stage_files.
+
+    DATA lv_file_count TYPE i.
+
+    lv_file_count = lines( is_files-local ) + lines( is_files-remote ).
+    IF lv_file_count > c_stage_cache_max_files.
+      RETURN. " Too large — skip to avoid out-of-memory risk.
+    ENDIF.
+
+    EXPORT stage_files = is_files TO MEMORY ID 'ORTEC_STAGE_FILES'.
+    gs_stage_cache_meta-repo_key = iv_repo_key.
+    gs_stage_cache_meta-valid    = abap_true.
+
+  ENDMETHOD.
+
+
+  METHOD restore_stage_files.
+
+    IMPORT stage_files = rs_files FROM MEMORY ID 'ORTEC_STAGE_FILES'.
 
   ENDMETHOD.
 ENDCLASS.
