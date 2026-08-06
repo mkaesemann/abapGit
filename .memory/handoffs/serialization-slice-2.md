@@ -1,5 +1,52 @@
 # SER-SLICE-2 — Preflight, OD-14 Audit, Owner Object-Creation Checklist
 
+## Final IT8 validation and RPERF fix (2026-08-06, most current)
+
+```text
+PACKET=COMPACT_HANDOFF_V1
+TASK=SER_SLICE_2_FINAL_IT8_VALIDATION
+OWNER_EVIDENCE=
+  ATC=PASS
+  ABAP_UNIT=PASS
+  FEATURE_OFF_TEST=PASS
+  FEATURE_ON_AFTER_RPERF_FIX=PASS
+  NO_DUMP_AFTER_RPERF_FIX=YES
+  OUTPUT_PARITY_AFTER_RPERF_FIX=PASS
+  LATE_CALLBACK_TEST=DEFERRED_BY_OWNER
+SER_SLICE_2_STATUS=SAP_VALIDATED_COMPLETE_WITH_LATE_CALLBACK_TEST_DEFERRED
+LATE_CALLBACK_TEST=DEFERRED_OWNER_ACCEPTED (documented residual item, not
+  a blocker, not evidence the scenario was empirically exercised)
+OWNER_COMMITS_SINCE_c13dd83c=
+  e34c7e06 Fix Unit Tests -> TEST_FIX (ser_orch testclasses) +
+    SEMANTIC_CHANGE (zcl_abapgit_ortec_git_switch: mv_serial_batch_active
+    abap_false -> abap_true; confirmed INTENTIONAL and IT8-validated per
+    FEATURE_ON_AFTER_RPERF_FIX=PASS above - default is now ON) +
+    DOCUMENTATION (zabapgit_ortec_serial.fugr.xml whitespace-only)
+  daef510e Fix RPERF_ILLEGAL_STATEMENT -> RPERF_ILLEGAL_STATEMENT_FIX
+    (zcl_abapgit_ortec_ser_orch.clas.abap: STARTING NEW TASK was reached
+    from inside ON END OF TASK callback context, illegal in SAP; fix
+    moves all dispatch/refill to the main path only - handle_receive_
+    failure now enqueues split batches into the run's own queue instead
+    of calling before_dispatch synchronously from the callback;
+    wait_for_run_completion now loops WAIT UNTIL has_no_pending_
+    callbacks() then drain_queue() from the main path after each WAIT
+    fully returns; the three on_end_of_batch branches no longer call
+    drain_queue directly) + UNRELATED (zcl_abapgit_ortec_git_stage.clas.abap:
+    52 lines, whitespace/indentation-only reformatting, no logic change -
+    confirmed via diff, not reverted)
+RPERF_FIX_REVIEW=PASS (orchestrator sanity read: fail-fast WAIT/error
+  contract preserved - interpret_wait_result still receives the real
+  final wait subrc and is_run_complete state; a WAIT that times out or
+  resolves with no pending callbacks but an incomplete run still maps to
+  a non-zero rv_result and the existing visible-exception contract;
+  no partial-success path introduced. Not re-derived from first
+  principles beyond this diff read - owner IT8 evidence is the primary
+  authority.)
+OWNER_FIX_RECONCILIATION=No revert needed; current HEAD daef510e is the
+  new SER-SLICE-2 baseline for SER-SLICE-3.
+NEXT=SER-SLICE-3 implementation may proceed on top of daef510e.
+```
+
 ## Terminal-outcome closeout (2026-08-06, most current)
 
 ```text
