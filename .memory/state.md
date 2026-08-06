@@ -2,20 +2,33 @@
 
 ```text
 BRANCH=ortec/abapgit_1_133-opt-rework
-CURRENT_HEAD=c13dd83c (SER-SLICE-2 Stage A code + artifact checkpoints; local
-  SER-SLICE-3 discovery artifacts may still be unstaged)
-LATEST_SAP_VALIDATED_HEAD=3c77d898b62f3b0464e48cf59844e2e30c7b6e89
-  (Package E checkpoint 1, 2026-07-29 - see Variant B backlog below)
+CURRENT_HEAD=daef510e (Fix RPERF_ILLEGAL_STATEMENT; owner IT8-validated,
+  see handoffs/serialization-slice-2.md "Final IT8 validation" section)
+LATEST_SAP_VALIDATED_HEAD=daef510e9bd50cdef2adcfb26a3f2a01050bb401
+  (SER-SLICE-2 final: ATC/ABAP_UNIT/FEATURE_OFF/FEATURE_ON_AFTER_RPERF_FIX
+  all PASS; LATE_CALLBACK_TEST deferred by owner, non-blocking)
 ```
 
 ## Active topic
 
 ```text
-TOPIC=SER_SLICE_2_TERMINAL_OUTCOME_CLOSEOUT
+TOPIC=SER_SLICE_3_BATCH_PREFETCH_PROVIDERS
 STATUS=IN_PROGRESS
-SER_SLICE_2=LOCAL_COMPLETE_AWAITING_FINAL_IT8
-SER_SLICE_3=DISCOVERY_COMPLETE_IMPLEMENTATION_NOT_STARTED
+SER_SLICE_2=SAP_VALIDATED_COMPLETE_WITH_LATE_CALLBACK_TEST_DEFERRED
+SER_SLICE_3=LOCAL_COMPLETE_AWAITING_CONSOLIDATED_IT8 (DOMA/DTEL provider
+  implemented; CLAS/INTF and all other object families DEFERRED with
+  exact reasons - see serialization_slice_3_clas_intf.md and
+  serialization_slice_3_object_ranking.md)
 ```
+
+SER-SLICE-2 is now SAP_VALIDATED_COMPLETE (owner evidence: ATC=PASS,
+ABAP_UNIT=PASS, FEATURE_OFF_TEST=PASS, FEATURE_ON_AFTER_RPERF_FIX=PASS,
+NO_DUMP_AFTER_RPERF_FIX=YES, OUTPUT_PARITY_AFTER_RPERF_FIX=PASS).
+LATE_CALLBACK_TEST=DEFERRED_OWNER_ACCEPTED (documented residual, not a
+blocker). Do not reopen SER-SLICE-2 correctness/RPERF work without new
+contradicting evidence. Full detail:
+`.memory/handoffs/serialization-slice-2.md` ("Final IT8 validation"
+section, 2026-08-06).
 
 SER-SLICE-0 and SER-SLICE-1: SAP_VALIDATED_COMPLETE (established prior
 sessions, not revisited this pass).
@@ -25,11 +38,14 @@ batching via `ZCL_ABAPGIT_ORTEC_SER_ORCH`, gated behind
 `zcl_abapgit_ortec_git_switch=>is_serial_batch_active`, default OFF):
 
 ```text
-SER_SLICE_2_STATUS=LOCAL_COMPLETE_AWAITING_FINAL_IT8
+SER_SLICE_2_STATUS=SAP_VALIDATED_COMPLETE_WITH_LATE_CALLBACK_TEST_DEFERRED
 ```
 
-Do NOT report this as complete/enforced/validated until the IT8
-validation plan below is executed. Current local state:
+SAP-validated complete as of 2026-08-06 (owner evidence in the "Final IT8
+validation" section of `.memory/handoffs/serialization-slice-2.md`); the
+IT8 validation plan below is now historical record of how that result was
+reached, not an open gate. Historical local-review narrative retained
+below for context:
 
 - Terminal-outcome correction (2026-08-06) is now locally review-clean:
   successful return requires `wait_result = 0`, `terminal_count =
@@ -91,8 +107,12 @@ validation plan below is executed. Current local state:
 - Owner correction `3a85b286` classification: ORCH `MERGE_INTO_MT_FILES`
   IMPORT TRY/CATCH = SYNTAX_ONLY and semantically safe; ORCH testclasses
   adjustments = TEST_FIX; `mv_serial_batch_active VALUE abap_true` = real
-  SEMANTIC_CHANGE and therefore reverted in the current Stage-A working
-  tree back to default OFF; porcelain changes are unrelated to this topic.
+  SEMANTIC_CHANGE and was reverted in that pass's working tree back to
+  default OFF. SUPERSEDED 2026-08-06: owner commit `e34c7e06` flipped it
+  back to `abap_true` (default ON) after FEATURE_ON_AFTER_RPERF_FIX=PASS
+  IT8 evidence - this is now the confirmed, IT8-validated default; do not
+  revert it again without new contradicting evidence. Porcelain changes
+  remain unrelated to this topic.
 - Stage A local closeout changes (current working tree, not yet owner IT8-
   validated): fail-fast WAIT contract (successful return iff the run is
   complete; WAIT result 4/8 while incomplete raises a visible abapGit
@@ -130,15 +150,13 @@ checklist - nothing below may be claimed complete until this passes),
 
 ## Next action
 
-Run the SER-SLICE-2 IT8 validation plan in full (import/activate in
-dependency order, ABAP Unit, ATC, fail-fast WAIT/error-contract cases,
-callback/run isolation, output parity incl. WAPA + i18n-pattern cases,
-performance comparison) before enabling `is_serial_batch_active` outside
-controlled validation, or before reporting SER-SLICE-2 as SAP-
-validated/complete.
+SER-SLICE-2 IT8 validation plan executed and PASSED (see "Final IT8
+validation" section of `.memory/handoffs/serialization-slice-2.md`);
+`is_serial_batch_active` is now IT8-validated default ON. Do not re-run
+this gate absent new contradicting evidence.
 
-SER-SLICE-3 has now started in DISCOVERY mode only. Current discovery
-result (authoritative artifact:
+SER-SLICE-3 implementation is now IN_PROGRESS on top of `daef510e`.
+Discovery result remains authoritative for ranking (see
 `.memory/logs/serialization_slice_3_discovery.md`):
 
 - no `ZCL_ABAPGIT_ORTEC_SER_PROV_DD` class exists yet in source;
@@ -150,13 +168,49 @@ result (authoritative artifact:
 - smallest viable design shape: additive `EXTRACT_FOR_BATCH` methods on
   the existing prefetch classes plus one real versioned batch envelope.
 
-No SER-SLICE-3 productive provider implementation has started. Treat the
-current Slice-3 state as discovery complete / implementation not started
-until SER-SLICE-2 clears its owner IT8 gate.
+SER-SLICE-3 P2A (SER_SLICE_3_P2A_DD_PROVIDER_CORE, this pass) is
+IMPLEMENTED_LOCAL_NOT_IT8_VALIDATED: `ZCL_ABAPGIT_ORTEC_SER_PREF_EXT`
+gained `mt_doma`/`prepare_doma`/`get_doma_data`/`get_doma_i18n` (design
+&sect;1) and `extract_for_batch`/`inject_batch_from_buffer` (design &sect;2),
+plus new DDIC `ZAOG_SER_DD_BHDR` (structure), `ZAOG_SER_DD_BENTRY`
+(structure), `ZAOG_SER_DD_BENTRY_TT` (table type) in
+`src/ortec/serial/core/`.
 
-Do not start SER-SLICE-3 productive provider code until the SER-SLICE-2
-owner IT8 gate above is at least clearly handed off and no local Stage-A
-blocker remains.
+SER-SLICE-3 Phase 2 is now FULLY IMPLEMENTED (local, not yet IT8-
+validated) - the ORCH `BEFORE_DISPATCH`/`DISPATCH_BATCH` wiring and the
+`ZCL_ABAPGIT_OBJECT_DOMA` seam originally scoped out of P2A were completed
+in the same pass, plus the RFC worker's `iv_prefetch_buffer_dd` injection.
+An independent implementation-time correctness review found and this
+orchestrator fixed 1 BLOCKER (DR-001: a domain with no main-language
+DD01T/DD07T text row was silently dropped entirely - a real data-loss
+bug, unlike the unmodified standard DDIF_DOMA_GET path) plus 2 major/2
+minor test-coverage gaps (all fixed). Full detail, review verdicts, and
+the exact fix disposition:
+`.memory/handoffs/serialization-slice-3.md` (primary handoff),
+`.memory/logs/serialization_slice_3_provider_contract.md` (finalized
+Phase 1 wire format),
+`.memory/logs/serialization_slice_3_doma_dtel.md` (Phase 2 implementation
+log incl. owner DDIC creation manifest),
+`.memory/logs/serialization_slice_3_clas_intf.md` (Phase 3 - DEFERRED
+with exact reason, not implemented this run),
+`.memory/logs/serialization_slice_3_object_ranking.md` (Phase 4 - all
+other requested object families assessed and dispositioned),
+`.memory/reviews/serialization_slice_3_correctness.md`,
+`.memory/reviews/serialization_slice_3_performance.md`,
+`.memory/reviews/serialization_slice_3_adversarial.md`,
+`.memory/logs/serialization_slice_3_it8_validation_plan.md` (consolidated
+IT8 checklist - nothing above may be claimed SAP-validated until this
+passes).
+
+```text
+SER_SLICE_3_STATUS=LOCAL_COMPLETE_AWAITING_CONSOLIDATED_IT8
+```
+
+Do not start further SER-SLICE-3 provider work (CLAS/INTF or any family in
+the Phase 4 ranking) without a new explicit owner instruction, and do not
+report SER-SLICE-3 as SAP-validated/complete before the consolidated IT8
+plan above passes.
+
 Do not resume Variant B / Package E/F backlog topics (below) without a
 new explicit owner instruction naming that topic.
 
