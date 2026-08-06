@@ -85,12 +85,6 @@
        <OPTIONAL>X</OPTIONAL>
        <TYP>I</TYP>
       </RSIMP>
-      <RSIMP>
-       <PARAMETER>IV_TEST_DELAY_S</PARAMETER>
-       <DEFAULT>0</DEFAULT>
-       <OPTIONAL>X</OPTIONAL>
-       <TYP>I</TYP>
-      </RSIMP>
      </IMPORT>
      <EXPORT>
       <RSEXP>
@@ -176,11 +170,6 @@
        <KIND>P</KIND>
       </RSFDO>
       <RSFDO>
-       <PARAMETER>IV_TEST_DELAY_S</PARAMETER>
-       <KIND>P</KIND>
-       <STEXT>T-DRAIN test seam only - never set in production (default 0)</STEXT>
-      </RSFDO>
-      <RSFDO>
        <PARAMETER>ET_RESULT</PARAMETER>
        <KIND>P</KIND>
        <STEXT>One result row per object in IT_TADIR</STEXT>
@@ -206,7 +195,7 @@
       <TYP>T</TYP>
       <VERSION>0001</VERSION>
       <MASTERLANG>X</MASTERLANG>
-      <TXTLINES>00038</TXTLINES>
+    <TXTLINES>00033</TXTLINES>
       <DOKSTATE>A</DOKSTATE>
      </DOKIL>
      <HEAD>
@@ -284,14 +273,14 @@
       <TLINE>
        <TDFORMAT>AS</TDFORMAT>
       </TLINE>
-      <TLINE>
-       <TDFORMAT>AS</TDFORMAT>
-       <TDLINE>No WAPA object is ever processed here - WAPA remains on its</TDLINE>
-      </TLINE>
-      <TLINE>
-       <TDFORMAT>AS</TDFORMAT>
-       <TDLINE>existing, unchanged, single-object serialization path.</TDLINE>
-      </TLINE>
+    <TLINE>
+     <TDFORMAT>AS</TDFORMAT>
+     <TDLINE>WAPA may be processed here, but only as a singleton batch.</TDLINE>
+    </TLINE>
+    <TLINE>
+     <TDFORMAT>AS</TDFORMAT>
+     <TDLINE>It is never mixed with any other object in one dispatch.</TDLINE>
+    </TLINE>
       <TLINE>
        <TDFORMAT>U4</TDFORMAT>
        <TDLINE>&amp;EXAMPLE&amp;</TDLINE>
@@ -318,25 +307,6 @@
       <TLINE>
        <TDFORMAT>AS</TDFORMAT>
        <TDLINE>EV_OUTPUT_ROW_COUNT let both sides cross-check batch size.</TDLINE>
-      </TLINE>
-      <TLINE>
-       <TDFORMAT>AS</TDFORMAT>
-      </TLINE>
-      <TLINE>
-       <TDFORMAT>AS</TDFORMAT>
-       <TDLINE>IV_TEST_DELAY_S is a T-DRAIN test seam (sect 5.1b) only -</TDLINE>
-      </TLINE>
-      <TLINE>
-       <TDFORMAT>AS</TDFORMAT>
-       <TDLINE>sleeps this many seconds before returning, to simulate a</TDLINE>
-      </TLINE>
-      <TLINE>
-       <TDFORMAT>AS</TDFORMAT>
-       <TDLINE>slow/hung worker for orchestrator timeout/abandonment</TDLINE>
-      </TLINE>
-      <TLINE>
-       <TDFORMAT>AS</TDFORMAT>
-       <TDLINE>tests. Default 0, never set by any production caller.</TDLINE>
       </TLINE>
       <TLINE>
        <TDFORMAT>AS</TDFORMAT>

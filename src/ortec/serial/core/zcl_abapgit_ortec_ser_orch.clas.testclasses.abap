@@ -29,18 +29,25 @@ CLASS ltcl_ser_orch DEFINITION FINAL
     METHODS breaker_ignores_other_runs     FOR TESTING.
 
     METHODS purge_blocked_while_awaiting   FOR TESTING.
-    METHODS purge_keeps_abandoned_rows     FOR TESTING.
+    METHODS discard_clears_run_state       FOR TESTING.
     METHODS purge_removes_terminal_rows    FOR TESTING.
 
     METHODS release_budget_floors_at_zero  FOR TESTING.
 
     METHODS no_parallel_parity             FOR TESTING.
+    METHODS wait_complete_when_done        FOR TESTING.
+    METHODS wait_zero_incomplete           FOR TESTING.
+    METHODS wait_subrc4_incomplete         FOR TESTING.
+    METHODS wait_subrc8_timeout            FOR TESTING.
+    METHODS wapa_partition_separates       FOR TESTING.
+    METHODS wapa_batches_singletons        FOR TESTING.
 
     METHODS next_task_name_is_unique       FOR TESTING.
     METHODS breaker_gates_before_dispatch  FOR TESTING.
     METHODS merge_fails_without_context    FOR TESTING.
     METHODS merge_fails_on_bad_payload     FOR TESTING.
     METHODS merge_succeeds_with_payload    FOR TESTING.
+    METHODS merge_empty_file_list_ok       FOR TESTING.
 
 ENDCLASS.
 
@@ -177,25 +184,41 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
     cl_abap_unit_assert=>assert_subrc( exp = 0 act = sy-subrc ).
   ENDMETHOD.
 
-  METHOD purge_keeps_abandoned_rows.
+  METHOD discard_clears_run_state.
     DATA(lv_run) = build_run_id( ).
     INSERT VALUE #( task_name = 'T1'
                     run_id    = lv_run
-                    state     = zcl_abapgit_ortec_ser_orch=>c_state_abandoned )
+                    state     = zcl_abapgit_ortec_ser_orch=>c_state_awaiting )
            INTO TABLE zcl_abapgit_ortec_ser_orch=>mt_dispatch.
+    INSERT VALUE #( run_id = lv_run obj_type = 'CLAS' obj_name = 'A' )
+      INTO TABLE zcl_abapgit_ortec_ser_orch=>mt_resolved.
+    APPEND VALUE #( run_id = lv_run seq = 1 success = abap_true )
+      TO zcl_abapgit_ortec_ser_orch=>mt_task_outcomes.
+    INSERT lv_run INTO TABLE zcl_abapgit_ortec_ser_orch=>mt_broken_runs.
     INSERT VALUE #( run_id = lv_run ) INTO TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context.
 
-    zcl_abapgit_ortec_ser_orch=>purge_run_state( lv_run ).
+    zcl_abapgit_ortec_ser_orch=>discard_run_state( lv_run ).
 
     READ TABLE zcl_abapgit_ortec_ser_orch=>mt_dispatch
          WITH TABLE KEY task_name = 'T1'
          TRANSPORTING NO FIELDS.
-    cl_abap_unit_assert=>assert_subrc( exp = 0 act = sy-subrc ).
+    cl_abap_unit_assert=>assert_subrc( exp = 4 act = sy-subrc ).
 
-    " the run's OTHER state (context, resolved, outcomes) is still purged
     READ TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context
          WITH TABLE KEY run_id = lv_run
          TRANSPORTING NO FIELDS.
+    cl_abap_unit_assert=>assert_subrc( exp = 4 act = sy-subrc ).
+
+    READ TABLE zcl_abapgit_ortec_ser_orch=>mt_resolved
+      WITH TABLE KEY run_id = lv_run obj_type = 'CLAS' obj_name = 'A'
+      TRANSPORTING NO FIELDS.
+    cl_abap_unit_assert=>assert_subrc( exp = 4 act = sy-subrc ).
+
+    cl_abap_unit_assert=>assert_initial( zcl_abapgit_ortec_ser_orch=>mt_task_outcomes ).
+
+    READ TABLE zcl_abapgit_ortec_ser_orch=>mt_broken_runs
+      WITH TABLE KEY table_line = lv_run
+      TRANSPORTING NO FIELDS.
     cl_abap_unit_assert=>assert_subrc( exp = 4 act = sy-subrc ).
   ENDMETHOD.
 
@@ -242,6 +265,104 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
     cl_abap_unit_assert=>assert_false( act = zcl_abapgit_ortec_ser_orch=>is_standard_no_parallel_type( 'INTF' ) ).
     cl_abap_unit_assert=>assert_false( act = zcl_abapgit_ortec_ser_orch=>is_standard_no_parallel_type( 'DDLS' ) ).
     cl_abap_unit_assert=>assert_false( act = zcl_abapgit_ortec_ser_orch=>is_standard_no_parallel_type( 'WAPA' ) ).
+  ENDMETHOD.
+
+  METHOD wait_complete_when_done.
+    cl_abap_unit_assert=>assert_equals(
+      exp = 0
+      act = zcl_abapgit_ortec_ser_orch=>interpret_wait_result(
+              iv_wait_subrc   = 4
+              iv_run_complete = abap_true ) ).
+  ENDMETHOD.
+
+  METHOD wait_zero_incomplete.
+    cl_abap_unit_assert=>assert_equals(
+      exp = 4
+      act = zcl_abapgit_ortec_ser_orch=>interpret_wait_result(
+              iv_wait_subrc   = 0
+              iv_run_complete = abap_false ) ).
+  ENDMETHOD.
+
+  METHOD wait_subrc4_incomplete.
+    cl_abap_unit_assert=>assert_equals(
+      exp = 4
+      act = zcl_abapgit_ortec_ser_orch=>interpret_wait_result(
+              iv_wait_subrc   = 4
+              iv_run_complete = abap_false ) ).
+  ENDMETHOD.
+
+  METHOD wait_subrc8_timeout.
+    cl_abap_unit_assert=>assert_equals(
+      exp = 8
+      act = zcl_abapgit_ortec_ser_orch=>interpret_wait_result(
+              iv_wait_subrc   = 8
+              iv_run_complete = abap_false ) ).
+  ENDMETHOD.
+
+  METHOD wapa_partition_separates.
+    DATA ls_params TYPE zif_abapgit_definitions=>ty_i18n_params.
+    DATA(lt_input) = VALUE zif_abapgit_definitions=>ty_tadir_tt(
+      ( build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'ZCL_A' ) )
+      ( build_tadir( iv_obj_type = 'WAPA' iv_obj_name = 'ZWAPA_A' ) )
+      ( build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'ZCL_B' ) )
+      ( build_tadir( iv_obj_type = 'WAPA' iv_obj_name = 'ZWAPA_B' ) ) ).
+
+    DATA(ls_partition) = zcl_abapgit_ortec_ser_orch=>partition_objects(
+      it_tadir         = lt_input
+      iv_max_processes = 4
+      is_i18n_params   = ls_params ).
+
+    cl_abap_unit_assert=>assert_equals( exp = 0 act = lines( ls_partition-forced_seq ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = lines( ls_partition-eligible ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = lines( ls_partition-wapa ) ).
+
+    READ TABLE ls_partition-eligible INDEX 1 INTO DATA(ls_eligible_1).
+    READ TABLE ls_partition-eligible INDEX 2 INTO DATA(ls_eligible_2).
+    cl_abap_unit_assert=>assert_equals( exp = 'CLAS' act = ls_eligible_1-object ).
+    cl_abap_unit_assert=>assert_equals( exp = 'CLAS' act = ls_eligible_2-object ).
+
+    READ TABLE ls_partition-wapa INDEX 1 INTO DATA(ls_wapa_1).
+    READ TABLE ls_partition-wapa INDEX 2 INTO DATA(ls_wapa_2).
+    cl_abap_unit_assert=>assert_equals( exp = 'WAPA' act = ls_wapa_1-object ).
+    cl_abap_unit_assert=>assert_equals( exp = 'WAPA' act = ls_wapa_2-object ).
+  ENDMETHOD.
+
+  METHOD wapa_batches_singletons.
+    DATA ls_params TYPE zif_abapgit_definitions=>ty_i18n_params.
+    DATA(lt_input) = VALUE zif_abapgit_definitions=>ty_tadir_tt(
+      ( build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'ZCL_A' ) )
+      ( build_tadir( iv_obj_type = 'WAPA' iv_obj_name = 'ZWAPA_A' ) )
+      ( build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'ZCL_B' ) )
+      ( build_tadir( iv_obj_type = 'WAPA' iv_obj_name = 'ZWAPA_B' ) ) ).
+
+    DATA(ls_partition) = zcl_abapgit_ortec_ser_orch=>partition_objects(
+      it_tadir         = lt_input
+      iv_max_processes = 4
+      is_i18n_params   = ls_params ).
+
+    DATA(lt_eligible_work) = VALUE zcl_abapgit_ortec_ser_planner=>tt_work_item(
+      FOR ls_key IN ls_partition-eligible
+      ( tadir = ls_key est_ms = 10 est_bytes = 100 est_source = 'F' ) ).
+    DATA(lt_eligible_batches) = zcl_abapgit_ortec_ser_planner=>build_initial_batches(
+      it_work_items   = lt_eligible_work
+      iv_worker_count = 1
+      iv_row_limit    = 25
+      iv_byte_limit   = 1000 ).
+    DATA(lt_wapa_batches) = zcl_abapgit_ortec_ser_orch=>build_wapa_singleton_batches( ls_partition-wapa ).
+
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( lt_eligible_batches ) ).
+    READ TABLE lt_eligible_batches INDEX 1 INTO DATA(ls_eligible_batch).
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = lines( ls_eligible_batch-items ) ).
+
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = lines( lt_wapa_batches ) ).
+    READ TABLE lt_wapa_batches INDEX 1 INTO DATA(ls_wapa_batch_1).
+    READ TABLE lt_wapa_batches INDEX 2 INTO DATA(ls_wapa_batch_2).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( ls_wapa_batch_1-items ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( ls_wapa_batch_2-items ) ).
+    READ TABLE ls_wapa_batch_1-items INDEX 1 INTO DATA(ls_wapa_item_1).
+    READ TABLE ls_wapa_batch_2-items INDEX 1 INTO DATA(ls_wapa_item_2).
+    cl_abap_unit_assert=>assert_equals( exp = 'WAPA' act = ls_wapa_item_1-tadir-object ).
+    cl_abap_unit_assert=>assert_equals( exp = 'WAPA' act = ls_wapa_item_2-tadir-object ).
   ENDMETHOD.
 
   METHOD next_task_name_is_unique.
@@ -299,6 +420,7 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
     " as a successful merge.
     DATA(lv_run) = build_run_id( ).
     INSERT VALUE #( run_id = lv_run ) INTO TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context.
+    APPEND VALUE #( file-path = '/existing/' ) TO zcl_abapgit_ortec_ser_orch=>mt_run_context[ run_id = lv_run ]-files.
 
     DATA(ls_result) = build_result( iv_obj_type = 'CLAS' iv_obj_name = 'A' ).
     ls_result-files_xstring = '0102030405'.
@@ -309,6 +431,11 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
                           is_result = ls_result ).
 
     cl_abap_unit_assert=>assert_false( lv_merged ).
+
+    READ TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context INTO DATA(ls_bad_ctx) WITH TABLE KEY run_id = lv_run.
+    cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( ls_bad_ctx-files ) ).
+    READ TABLE ls_bad_ctx-files INDEX 1 INTO DATA(ls_bad_file).
+    cl_abap_unit_assert=>assert_equals( exp = '/existing/' act = ls_bad_file-file-path ).
   ENDMETHOD.
 
   METHOD merge_succeeds_with_payload.
@@ -322,20 +449,69 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
     ls_serialization-item-obj_name = 'ZCL_TEST'.
     APPEND INITIAL LINE TO ls_serialization-files ASSIGNING FIELD-SYMBOL(<ls_file>).
     <ls_file>-filename = 'zcl_test.clas.abap'.
+    <ls_file>-data = '4142'.
+    APPEND INITIAL LINE TO ls_serialization-files ASSIGNING FIELD-SYMBOL(<ls_file_2>).
+    <ls_file_2>-filename = 'zcl_test.clas.xml'.
+    <ls_file_2>-data = '4344'.
 
     EXPORT data = ls_serialization TO DATA BUFFER lv_buffer.
 
     DATA(ls_result) = build_result( iv_obj_type = 'CLAS' iv_obj_name = 'ZCL_TEST' ).
     ls_result-files_xstring = lv_buffer.
 
+    DATA(ls_tadir) = build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'ZCL_TEST' ).
+    ls_tadir-path = '/src/test/'.
+
     DATA(lv_merged) = zcl_abapgit_ortec_ser_orch=>merge_into_mt_files(
                           iv_run_id = lv_run
-                          is_tadir  = build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'ZCL_TEST' )
+                          is_tadir  = ls_tadir
                           is_result = ls_result ).
 
     cl_abap_unit_assert=>assert_true( lv_merged ).
 
     READ TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context INTO DATA(ls_ctx) WITH TABLE KEY run_id = lv_run.
-    cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( ls_ctx-files ) ).
+    cl_abap_unit_assert=>assert_equals( exp = 2 act = lines( ls_ctx-files ) ).
+
+    READ TABLE ls_ctx-files INDEX 1 INTO DATA(ls_ctx_file_1).
+    cl_abap_unit_assert=>assert_equals( exp = '/src/test/' act = ls_ctx_file_1-file-path ).
+    cl_abap_unit_assert=>assert_equals( exp = 'CLAS' act = ls_ctx_file_1-item-obj_type ).
+    cl_abap_unit_assert=>assert_equals( exp = 'ZCL_TEST' act = ls_ctx_file_1-item-obj_name ).
+    cl_abap_unit_assert=>assert_equals( exp = 'zcl_test.clas.abap' act = ls_ctx_file_1-file-filename ).
+    cl_abap_unit_assert=>assert_equals( exp = '4142' act = ls_ctx_file_1-file-data ).
+
+    READ TABLE ls_ctx-files INDEX 2 INTO DATA(ls_ctx_file_2).
+    cl_abap_unit_assert=>assert_equals( exp = '/src/test/' act = ls_ctx_file_2-file-path ).
+    cl_abap_unit_assert=>assert_equals( exp = 'CLAS' act = ls_ctx_file_2-item-obj_type ).
+    cl_abap_unit_assert=>assert_equals( exp = 'ZCL_TEST' act = ls_ctx_file_2-item-obj_name ).
+    cl_abap_unit_assert=>assert_equals( exp = 'zcl_test.clas.xml' act = ls_ctx_file_2-file-filename ).
+    cl_abap_unit_assert=>assert_equals( exp = '4344' act = ls_ctx_file_2-file-data ).
+  ENDMETHOD.
+
+  METHOD merge_empty_file_list_ok.
+    DATA ls_serialization TYPE zif_abapgit_objects=>ty_serialization.
+    DATA lv_buffer        TYPE xstring.
+
+    DATA(lv_run) = build_run_id( ).
+    INSERT VALUE #( run_id = lv_run ) INTO TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context.
+
+    ls_serialization-item-obj_type = 'CLAS'.
+    ls_serialization-item-obj_name = 'ZCL_EMPTY'.
+    EXPORT data = ls_serialization TO DATA BUFFER lv_buffer.
+
+    DATA(ls_result) = build_result( iv_obj_type = 'CLAS' iv_obj_name = 'ZCL_EMPTY' ).
+    ls_result-files_xstring = lv_buffer.
+
+    DATA(ls_tadir) = build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'ZCL_EMPTY' ).
+    ls_tadir-path = '/src/empty/'.
+
+    DATA(lv_merged) = zcl_abapgit_ortec_ser_orch=>merge_into_mt_files(
+                          iv_run_id = lv_run
+                          is_tadir  = ls_tadir
+                          is_result = ls_result ).
+
+    cl_abap_unit_assert=>assert_true( lv_merged ).
+
+    READ TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context INTO DATA(ls_empty_ctx) WITH TABLE KEY run_id = lv_run.
+    cl_abap_unit_assert=>assert_equals( exp = 0 act = lines( ls_empty_ctx-files ) ).
   ENDMETHOD.
 ENDCLASS.

@@ -35,30 +35,32 @@
 "! identity, object keys, state, a timestamp) - see TY_DISPATCH. Full
 "! serialized payloads (the actual FILES_XSTRING content) are NEVER
 "! retained here merely to wait for a late callback; a late callback for
-"! an already-purged or already-resolved dispatch is drained (RECEIVEd and
-"! discarded) rather than acted on. Retention is bounded by
-"! MAX_ABANDONED_TASKS_PER_RUN/_PER_INTERNAL_SESSION (see
-"! serialization_adaptive_batch_design.md &sect;5.1a) - once exceeded, the
-"! OLDEST abandoned rows are purged first.
+"! an already-purged or already-discarded dispatch is RECEIVEd and
+"! discarded rather than acted on. Under the Stage A fail-fast contract,
+"! run bookkeeping is retained only while the run is still active or
+"! until an explicit DISCARD_RUN_STATE happens after a failed wait.
 "!
-"! LOGICAL ABANDONMENT IS NOT RFC CANCELLATION: a dispatch that exceeds
-"! its wait budget becomes LOGICALLY_ABANDONED from THIS run's point of
-"! view (routed to sequential fallback so the run can complete) - this
-"! does NOT cancel the remote work process, does NOT reclaim its RFC
-"! resource, and does NOT guarantee its callback will never arrive. A late
-"! callback for a logically-abandoned dispatch is a NORMAL, EXPECTED,
-"! SAFE event, handled by draining it, never by treating it as an error.
+"! FAIL-FAST WAIT CONTRACT (SER-SLICE-2 Stage A): SERIALIZE returns
+"! successfully iff every planned dispatch reached exactly one accepted
+"! terminal outcome and the complete result is valid. WAIT_FOR_RUN_
+"! COMPLETION performs one bounded WAIT FOR ASYNCHRONOUS TASKS against
+"! the ACTUAL completion condition. A WAIT result of 4 while incomplete
+"! is treated as an internal missing-result inconsistency; a WAIT result
+"! of 8 is treated as a timeout. In both cases the ENTIRE partial run
+"! result is discarded (DISCARD_RUN_STATE) and SERIALIZE raises a visible
+"! ZCX_ABAPGIT_EXCEPTION - never a silent partial success.
 "!
-"! PURGE CONDITIONS: a run's own rows are purged
-"! (PURGE_RUN_STATE) once every dispatch belonging to that RUN_ID has
-"! reached a terminal state (RECEIVED, RECEIVED_FAILURE, or DRAINED) -
-"! any dispatch still LOGICALLY_ABANDONED at that point is deliberately
-"! LEFT behind (bounded, see above) so its eventual late callback still
-"! has a row to resolve against or safely miss.
+"! LATE CALLBACKS AFTER A DISCARDED RUN: DISCARD_RUN_STATE removes this
+"! run's MT_DISPATCH rows unconditionally, even ones still AWAITING. This
+"! does NOT cancel the remote work process - a real, late ON_END_OF_BATCH
+"! callback for a discarded dispatch is expected and safe: its task name
+"! no longer resolves in MT_DISPATCH, so it falls into the existing
+"! unknown-task RECEIVE-and-discard branch (see ON_END_OF_BATCH).
 "!
-"! WAPA IS NEVER ELIGIBLE: no WAPA object is ever included in any batch
-"! this class builds or dispatches - WAPA remains on its existing,
-"! unchanged, single-object serialization path (see the OD-14 audit).
+"! WAPA IS BATCH-ELIGIBLE, SINGLETON ONLY: WAPA objects use the same
+"! adaptive batch architecture as any other type, but are always planned
+"! as their OWN one-object batch, never mixed with non-WAPA objects or
+"! with each other (see SERIALIZE's partition logic).
 "!
 "! FALLBACK: any object this class cannot safely batch (unsupported type,
 "! feature disabled, ORTEC initialization failure, circuit breaker open
@@ -78,26 +80,6 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! bisection or single-object fallback, never a retry of the identical
     "! batch.
     CONSTANTS c_state_received_failure TYPE c LENGTH 1 VALUE 'F'.
-    "! Wait budget exceeded without a callback - LOGICAL ABANDONMENT, not
-    "! cancellation (see class-level documentation). The work is always
-    "! resubmitted/falls back; this state never blocks run completion.
-    CONSTANTS c_state_timed_out        TYPE c LENGTH 1 VALUE 'T'.
-    "! This run's own rows for a terminal dispatch have been purged
-    "! (retained only until PURGE_RUN_STATE runs for this RUN_ID).
-    CONSTANTS c_state_drained          TYPE c LENGTH 1 VALUE 'D'.
-    "! ABANDONED (serialization_adaptive_batch_design.md &sect;5.4).
-    "! Reached from C_STATE_TIMED_OUT once C_MAX_DRAIN_WAIT_S has ALSO
-    "! elapsed without a callback. Distinct from C_STATE_TIMED_OUT purely
-    "! for the poll loop's exit condition (&sect;5.3): a 'T' row still
-    "! blocks SERIALIZE() from returning (its RFC task may still be
-    "! genuinely running and could still deliver a late callback); an 'X'
-    "! row does NOT block return, but is otherwise handled identically to
-    "! 'T' if a callback ever does arrive (ON_END_OF_BATCH still drains
-    "! and discards it, &sect;5.5) - this state governs ONLY how long
-    "! THIS run waits, never whether the remote task is cancelled or its
-    "! resource reclaimed (see class-level "LOGICAL ABANDONMENT"
-    "! documentation, which applies equally to 'T' and 'X').
-    CONSTANTS c_state_abandoned        TYPE c LENGTH 1 VALUE 'X'.
 
     "! One outstanding or historical RFC dispatch. Retained metadata is
     "! deliberately small and TADIR-key-shaped only - see class-level
@@ -130,13 +112,12 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
       TYPES object_keys TYPE zif_abapgit_definitions=>ty_tadir_tt.
       "! Current lifecycle state - one of the C_STATE_* constants.
       TYPES state       TYPE c LENGTH 1.
-      "! Timestamp this dispatch was issued, used to detect wait-
-      "! budget expiry (logical abandonment).
+      "! Timestamp this dispatch was issued, used to measure this run's
+      "! current fail-fast wait budget.
       TYPES dispatch_ts TYPE timestampl.
     TYPES END OF ty_dispatch.
-    "! All dispatches, current run and any not-yet-purged abandoned
-    "! dispatches from earlier runs in the same internal session. Keyed
-    "! for O(1) callback resolution by TASK_NAME.
+    "! All dispatches currently owned by active runs, keyed for O(1)
+    "! callback resolution by TASK_NAME.
     TYPES ty_dispatch_tt TYPE HASHED TABLE OF ty_dispatch WITH UNIQUE KEY task_name.
 
     "! Records that one object's result has already been merged or
@@ -174,7 +155,7 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
 
     "! Per-run context shared by every method reachable from the async
     "! ON_END_OF_BATCH callback path (ON_END_OF_BATCH itself,
-    "! CHECK_TIMEOUTS, HANDLE_RECEIVE_FAILURE, ROUTE_TO_SEQUENTIAL_
+    "! HANDLE_RECEIVE_FAILURE, ROUTE_TO_SEQUENTIAL_
     "! FALLBACK, DISPATCH_BATCH/BEFORE_DISPATCH for retries). ON_END_OF_
     "! BATCH is invoked directly by the ABAP runtime and receives ONLY
     "! P_TASK - it has no access to SERIALIZE()'s own local variables
@@ -222,26 +203,21 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
       TYPES worker_count   TYPE i.
       "! Count of this run's dispatches currently AWAITING a callback.
       "! Incremented by DISPATCH_BATCH, decremented by
-      "! RELEASE_IN_FLIGHT_BUDGET once a dispatch reaches any terminal or
-      "! logically-abandoned state - bounds concurrency at WORKER_COUNT,
-      "! mirroring the standard path's own MV_FREE semantics.
+      "! RELEASE_IN_FLIGHT_BUDGET once a dispatch reaches any terminal
+      "! state - bounds concurrency at WORKER_COUNT, mirroring the
+      "! standard path's own MV_FREE semantics.
       TYPES in_flight      TYPE i.
       "! Planner-produced batches not yet dispatched (queued because they
       "! exceeded WORKER_COUNT's immediately-ready slots, or produced by a
       "! later REFILL) - drained by the poll loop as IN_FLIGHT capacity
       "! frees up.
       TYPES queue          TYPE zcl_abapgit_ortec_ser_planner=>tt_batch.
-      "! Set ABAP_TRUE by ON_END_OF_BATCH whenever a callback for this
-      "! run is processed (see PS-001, independent performance
-      "! implementation audit) - lets SERIALIZE()'s poll loop use
-      "! "WAIT FOR ASYNCHRONOUS TASKS UNTIL ... UP TO 5 SECONDS" instead
-      "! of a blind "WAIT UP TO 5 SECONDS" (which, per the ABAP Keyword
-      "! Documentation for that exact statement form, "does not wait for
-      "! callback routines" - i.e. NEVER returns early, always costing
-      "! the full 5 seconds even when every outstanding batch already
-      "! finished). Cleared by SERIALIZE() at the start of each poll
-      "! iteration.
-      TYPES changed        TYPE abap_bool.
+      "! Monotonically increasing counter dedicated to BATCH_ID naming
+      "! ("B1", "B2", ...) - distinct from DISPATCH_SEQ (which counts
+      "! actual CALL FUNCTION dispatches, including retries/bisections of
+      "! the SAME logical batch). Incremented once per planned batch, by
+      "! both SERIALIZE's initial dispatch loop and DRAIN_QUEUE.
+      TYPES batch_seq      TYPE i.
     TYPES END OF ty_run_context.
     TYPES ty_run_context_tt TYPE HASHED TABLE OF ty_run_context WITH UNIQUE KEY run_id.
 
@@ -254,14 +230,6 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! Failure ratio (of the last C_BREAKER_WINDOW_SIZE outcomes) that
     "! trips the breaker for a run.
     CONSTANTS c_breaker_failure_ratio       TYPE p LENGTH 4 DECIMALS 2 VALUE '0.70'.
-    "! Per-run cap on undrained LOGICALLY_ABANDONED dispatches before the
-    "! oldest are force-purged (bounded retained-metadata guarantee).
-    CONSTANTS c_max_abandoned_tasks_per_run TYPE i                     VALUE 50.
-    "! Session-wide cap across ALL runs' undrained abandoned dispatches.
-    CONSTANTS c_max_abandoned_tasks_sess    TYPE i                     VALUE 200.
-    "! Session-wide cap on distinct runs each holding >=1 undrained
-    "! abandoned dispatch before the OLDEST such run is force-purged.
-    CONSTANTS c_max_abandoned_runs_sess     TYPE i                     VALUE 20.
 
     "! Upper bound on work items per planned/dispatched batch
     "! (serialization_adaptive_batch_design.md &sect;9). Unit: TADIR rows.
@@ -291,17 +259,6 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! fragmented batch can be logged as a warning signal for later
     "! investigation, never as a reason to dispatch an over-limit group.
     CONSTANTS c_max_pre_dispatch_splits     TYPE i VALUE 3.
-    "! Additional bounded wait, ON TOP OF C_BATCH_RFC_TIMEOUT_S
-    "! (serialization_adaptive_batch_design.md &sect;5.3/&sect;5.4), before
-    "! a C_STATE_TIMED_OUT dispatch is reclassified C_STATE_ABANDONED and
-    "! stops blocking the poll loop's exit. Unit: seconds. HARD BOUND on
-    "! SERIALIZE()'s own worst-case return time for one straggler dispatch
-    "! (approx. C_BATCH_RFC_TIMEOUT_S + C_MAX_DRAIN_WAIT_S = 600s total by
-    "! default) - does not affect correctness (the straggler's objects are
-    "! already resolved via resubmit/fallback before this elapses), only
-    "! how long this run keeps waiting for its harmless, already-
-    "! superseded callback.
-    CONSTANTS c_max_drain_wait_s            TYPE i VALUE 300.
     "! Session-wide cap on total bytes across all currently in-flight
     "! dispatches (serialization_adaptive_batch_design.md &sect;9). Unit:
     "! bytes. TUNING value protecting overall RFC/memory pressure across
@@ -325,21 +282,13 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! slice (BUILD_INITIAL_BATCHES/COMPUTE_REFILL_SIZE do not yet consult
     "! it) - reserved for a future slice, not silently dropped.
     CONSTANTS c_oversized_threshold         TYPE i VALUE 3.
-    "! Wait budget for one dispatch's FIRST callback attempt before it is
-    "! marked C_STATE_TIMED_OUT (serialization_adaptive_batch_design.md
-    "! &sect;5.4) - matches the existing standard path's own avoid_timeout
-    "! window. Unit: seconds. HARD BOUND governing when CHECK_TIMEOUTS
-    "! (&sect;5.4) transitions an 'A' row to 'T'; does not by itself lose
-    "! any object (the object is immediately resubmitted or falls back).
+    "! Fail-fast wait budget (SER-SLICE-2 Stage A): one bounded
+    "! WAIT FOR ASYNCHRONOUS TASKS call blocks until the run is ACTUALLY
+    "! complete, no callback-enabled tasks remain, or this limit elapses.
+    "! On timeout the entire partial run is discarded and a visible
+    "! ZCX_ABAPGIT_EXCEPTION is raised - there is no retry-then-fallback
+    "! on timeout. Unit: seconds.
     CONSTANTS c_batch_rfc_timeout_s         TYPE i VALUE 300.
-    "! Maximum RFC-level retry attempts PER LOGICAL OBJECT GROUP before
-    "! that group is routed to sequential fallback instead of retried again
-    "! (serialization_adaptive_batch_design.md &sect;5.6). Unit: attempts.
-    "! HARD BOUND - each bisection half gets its OWN fresh budget (never
-    "! inherited from its parent group), so this never blocks eventual
-    "! completion, only how many RFC round trips are spent before falling
-    "! back to the always-safe in-process path.
-    CONSTANTS c_max_retries                 TYPE i VALUE 2.
 
     "! Serializes a set of objects using the adaptive batch path when
     "! eligible, falling back to the existing standard sequential/parallel
@@ -392,11 +341,11 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! ever invoke this directly.
     "!
     "! IDEMPOTENCY AND CORRELATION: P_TASK is looked up in MT_DISPATCH by
-    "! TASK_NAME. Unknown task names (already purged, or - defensively -
-    "! never recognized at all) are drained via a plain, exception-safe
-    "! RECEIVE and discarded, never treated as an error. A callback for a
-    "! dispatch already in state C_STATE_RECEIVED/DRAINED (a duplicate or
-    "! very-late callback) is likewise drained and discarded - a result is
+    "! TASK_NAME. Unknown task names (already purged/discarded, or -
+    "! defensively - never recognized at all) are drained via a plain,
+    "! exception-safe RECEIVE and discarded, never treated as an error. A
+    "! callback for a dispatch already in state C_STATE_RECEIVED (a
+    "! duplicate or very-late callback) is likewise a no-op - a result is
     "! merged into RT_FILES at most once per object per run, enforced via
     "! TY_RESOLVED. RECEIVE ownership: this method issues exactly one
     "! "RECEIVE RESULTS FROM FUNCTION" per invocation and is the ONLY place
@@ -432,6 +381,57 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
 
     "! Session-scoped table types and static state above; helper methods
     "! below.
+
+    "! Result of PARTITION_OBJECTS - see that method's own documentation.
+    TYPES BEGIN OF ty_partition.
+      TYPES forced_seq TYPE zif_abapgit_definitions=>ty_tadir_tt.
+      TYPES eligible   TYPE zif_abapgit_definitions=>ty_tadir_tt.
+      TYPES wapa       TYPE zif_abapgit_definitions=>ty_tadir_tt.
+    TYPES END OF ty_partition.
+
+    "! Splits IT_TADIR into the three buckets SERIALIZE needs - extracted
+    "! as a pure, deterministic helper (no run context, no dispatch, no
+    "! RFC) so the partitioning DECISION itself (in particular, that WAPA
+    "! lands in its own bucket rather than forced-sequential or the
+    "! general eligible pool) can be unit tested without a live aRFC
+    "! dispatch.
+    "! @parameter it_tadir                   | Objects to partition
+    "! @parameter iv_max_processes           | Same meaning as SERIALIZE's
+    "!   own parameter - 1 forces everything to FORCED_SEQ
+    "! @parameter is_i18n_params             | Same meaning as SERIALIZE's
+    "!   own parameter
+    "! @parameter it_wo_translation_patterns | Same meaning as SERIALIZE's
+    "!   own parameter
+    "! @parameter rs_partition-forced_seq | Objects routed to
+    "!   ROUTE_TO_SEQUENTIAL_FALLBACK (parallel disabled, a standard
+    "!   never-parallel type, or a per-object i18n override that a
+    "!   batch's single shared i18n flag cannot represent)
+    "! @parameter rs_partition-eligible   | Non-WAPA objects for the
+    "!   general adaptive planner (ZCL_ABAPGIT_ORTEC_SER_PLANNER)
+    "! @parameter rs_partition-wapa       | WAPA objects - always
+    "!   singleton-batched (see BUILD_WAPA_SINGLETON_BATCHES), never
+    "!   forced-sequential-only and never mixed into RS_PARTITION-ELIGIBLE
+    CLASS-METHODS partition_objects
+      IMPORTING it_tadir                   TYPE zif_abapgit_definitions=>ty_tadir_tt
+                iv_max_processes           TYPE i
+                is_i18n_params             TYPE zif_abapgit_definitions=>ty_i18n_params
+                it_wo_translation_patterns TYPE string_table OPTIONAL
+      RETURNING VALUE(rs_partition)        TYPE ty_partition.
+      RAISING   zcx_abapgit_exception.
+
+    "! Turns each WAPA object into its OWN one-object planned batch -
+    "! WAPA objects use the same adaptive batch architecture as any other
+    "! type, but only ever as singleton batches, never mixed with
+    "! non-WAPA objects or with each other. Never passed to
+    "! ZCL_ABAPGIT_ORTEC_SER_PLANNER (see that class's own "WAPA work
+    "! items must never be passed to this method" documentation).
+    "! @parameter it_wapa      | WAPA objects (typically
+    "!   PARTITION_OBJECTS-WAPA)
+    "! @parameter rt_batches   | One single-item batch per object in
+    "!   IT_WAPA, same order
+    CLASS-METHODS build_wapa_singleton_batches
+      IMPORTING it_wapa           TYPE zif_abapgit_definitions=>ty_tadir_tt
+      RETURNING VALUE(rt_batches) TYPE zcl_abapgit_ortec_ser_planner=>tt_batch.
 
     "! Merges one resolved object's serialized files into this run's own
     "! MT_RUN_CONTEXT-FILES accumulator (serialization_adaptive_batch_
@@ -473,8 +473,8 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! Decrements this run's MT_RUN_CONTEXT-IN_FLIGHT counter, freeing one
     "! concurrency slot (serialization_adaptive_batch_design.md &sect;5.4/
     "! &sect;5.5/&sect;5.6 all call this once a dispatch leaves state
-    "! C_STATE_AWAITING for any reason - resolved, confirmed failed, or
-    "! logically abandoned). Never lets the counter go below zero.
+    "! C_STATE_AWAITING for any reason - resolved or confirmed failed).
+    "! Never lets the counter go below zero.
     "! @parameter iv_run_id | Owning run
     CLASS-METHODS release_in_flight_budget
       IMPORTING iv_run_id TYPE sysuuid_x16.
@@ -482,7 +482,7 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! Actual-bytes admission check and recursive splitting before every
     "! dispatch (serialization_adaptive_batch_design.md &sect;5.9) -
     "! initial batches, refills, AND every retry/bisection from
-    "! CHECK_TIMEOUTS/HANDLE_RECEIVE_FAILURE all funnel through here, never
+    "! HANDLE_RECEIVE_FAILURE all funnel through here, never
     "! call DISPATCH_BATCH directly. Never depends on the planner's
     "! estimates - extracts the REAL provider buffers for IT_OBJECT_KEYS
     "! and compares their actual combined size against
@@ -515,9 +515,9 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! method routes IT_OBJECT_KEYS straight to ROUTE_TO_SEQUENTIAL_
     "! FALLBACK instead of splitting/dispatching - this is the SINGLE
     "! choke point for every dispatch source (initial batches, queue
-    "! drain, timeout retries, receive-failure bisection all funnel
-    "! through here), so a tripped breaker reliably stops ALL further RFC
-    "! dispatches for that run, not just new ones.
+    "! drain, receive-failure bisection all funnel through here), so a
+    "! tripped breaker reliably stops ALL further RFC dispatches for that
+    "! run, not just new ones.
     "! @parameter iv_run_id      | Owning run
     "! @parameter it_object_keys | Candidate objects for one dispatch (may
     "!   be split into smaller dispatches by this method)
@@ -577,15 +577,61 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     CLASS-METHODS next_task_name
       RETURNING VALUE(rv_task_name) TYPE char40.
 
-    "! Scans MT_DISPATCH for this run's C_STATE_AWAITING rows whose wait
-    "! budget has expired and marks them C_STATE_TIMED_OUT (logical
-    "! abandonment - see class-level documentation; this NEVER cancels the
-    "! remote work process or reclaims its RFC resource, it only lets THIS
-    "! run stop waiting and fall back).
-    "! @parameter iv_run_id | Run to check; other runs' dispatches are
-    "!   never touched by this call
-    CLASS-METHODS check_timeouts
+    "! Dispatches queued planned batches (TY_RUN_CONTEXT-QUEUE) into free
+    "! IN_FLIGHT capacity - extracted so both SERIALIZE's own initial
+    "! dispatch wave and WAIT_FOR_RUN_COMPLETION's per-iteration drain
+    "! share one implementation. A no-op if IV_RUN_ID has no context, no
+    "! queued batches, or no free capacity.
+    "! @parameter iv_run_id | Owning run
+    CLASS-METHODS drain_queue
       IMPORTING iv_run_id TYPE sysuuid_x16.
+      RAISING   zcx_abapgit_exception.
+
+    "! ABAP_TRUE iff IV_RUN_ID has nothing left to do: no queued planned
+    "! batches AND no MT_DISPATCH row still C_STATE_AWAITING. This is the
+    "! ONLY definition of "done" under the fail-fast contract - there is
+    "! no more separate timed-out/abandoned interim state.
+    "! @parameter iv_run_id    | Run to check
+    "! @parameter rv_complete  | ABAP_TRUE if the run has fully resolved
+    CLASS-METHODS is_run_complete
+      IMPORTING iv_run_id       TYPE sysuuid_x16
+      RETURNING VALUE(rv_complete) TYPE abap_bool.
+
+    "! Pure, deterministic mapping from one "WAIT FOR ASYNCHRONOUS TASKS"
+    "! outcome plus the run's own completion state to this class's
+    "! fail-fast result code - isolated from the real WAIT statement so
+    "! every case (0+complete, 0+incomplete, 4, 8/other) can be unit
+    "! tested without needing the kernel to actually produce each code.
+    "! IV_RUN_COMPLETE always wins: if the run is genuinely complete, the
+    "! result is always 0, regardless of IV_WAIT_SUBRC. A WAIT result 0
+    "! with IV_RUN_COMPLETE = ABAP_FALSE is treated as an internal
+    "! consistency failure, not "keep waiting".
+    "! @parameter iv_wait_subrc   | SY-SUBRC exactly as the preceding
+    "!   WAIT FOR ASYNCHRONOUS TASKS ... UP TO ... SECONDS statement set it
+    "! @parameter iv_run_complete | IS_RUN_COMPLETE( ) for the same run,
+    "!   evaluated immediately after that WAIT statement returned
+    "! @parameter rv_result | 0 if actually complete; 4 if not complete
+    "!   and no callback-enabled tasks remain OR the WAIT returned 0 even
+    "!   though the completion condition is still false; 8 for any other
+    "!   non-complete outcome (wait budget elapsed)
+    CLASS-METHODS interpret_wait_result
+      IMPORTING iv_wait_subrc   TYPE sy-subrc
+                iv_run_complete TYPE abap_bool
+      RETURNING VALUE(rv_result) TYPE i.
+
+    "! Fail-fast completion wait (SER-SLICE-2 Stage A) - the ONLY place
+    "! that issues "WAIT FOR ASYNCHRONOUS TASKS" for this run. Queue
+    "! refills happen from ON_END_OF_BATCH itself; this wait therefore
+    "! blocks only on the true completion condition, never a generic
+    "! "progress happened" flag. The caller (SERIALIZE) discards all of
+    "! this run's state on any non-zero result.
+    "! @parameter iv_run_id  | Run to wait for
+    "! @parameter rv_result  | 0 = complete; 4 = no callbacks remain but
+    "!   incomplete; 8 = wait budget elapsed without completion/progress
+    CLASS-METHODS wait_for_run_completion
+      IMPORTING iv_run_id      TYPE sysuuid_x16
+      RETURNING VALUE(rv_result) TYPE i.
+      RAISING   zcx_abapgit_exception.
 
     "! Handles a confirmed RFC-level RECEIVE failure (communication/
     "! system/resource failure - the whole call did not complete, as
@@ -628,13 +674,28 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
                 iv_success TYPE abap_bool.
 
     "! Removes IV_RUN_ID's own rows from MT_DISPATCH/MT_RESOLVED/
-    "! MT_TASK_OUTCOMES/MT_BROKEN_RUNS once every dispatch for that run has
-    "! reached a terminal state - see class-level "PURGE CONDITIONS"
-    "! documentation. A dispatch still C_STATE_TIMED_OUT is deliberately
-    "! left behind (bounded) so a late callback still has a row to
-    "! resolve against.
+    "! MT_TASK_OUTCOMES/MT_BROKEN_RUNS/MT_RUN_CONTEXT once every dispatch
+    "! for that run has reached a terminal state - called only from
+    "! SERIALIZE's success path (WAIT_FOR_RUN_COMPLETION returned 0), at
+    "! which point no C_STATE_AWAITING row can exist for this run. The
+    "! guard below is a defensive no-op, not a real code path.
     "! @parameter iv_run_id | Run to purge
     CLASS-METHODS purge_run_state
+      IMPORTING iv_run_id TYPE sysuuid_x16.
+
+    "! Unconditionally discards ALL of IV_RUN_ID's bookkeeping - dispatch
+    "! rows (even ones still C_STATE_AWAITING), resolved markers,
+    "! task-outcome history, the broken-run marker, and the run context -
+    "! used ONLY on SERIALIZE's fail-fast failure path (WAIT_FOR_RUN_
+    "! COMPLETION returned non-zero), where the entire partial run result
+    "! is deliberately discarded rather than returned. Unlike
+    "! PURGE_RUN_STATE, this never checks for outstanding work first - a
+    "! real, late ON_END_OF_BATCH callback for a dispatch discarded here
+    "! is expected and safe: its task name no longer resolves in
+    "! MT_DISPATCH, so it falls into the existing unknown-task
+    "! RECEIVE-and-discard branch.
+    "! @parameter iv_run_id | Run to discard
+    CLASS-METHODS discard_run_state
       IMPORTING iv_run_id TYPE sysuuid_x16.
 
     "! Deliberate LOCAL COPY of ZCL_ABAPGIT_SERIALIZE's PRIVATE instance
@@ -665,13 +726,12 @@ ENDCLASS.
 CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
 
   METHOD serialize.
-    DATA lv_run_id     TYPE sysuuid_x16.
-    DATA lt_forced_seq TYPE zif_abapgit_definitions=>ty_tadir_tt.
-    DATA lt_eligible   TYPE zif_abapgit_definitions=>ty_tadir_tt.
-    DATA lt_work_items TYPE zcl_abapgit_ortec_ser_planner=>tt_work_item.
-    DATA lt_batches    TYPE zcl_abapgit_ortec_ser_planner=>tt_batch.
-    DATA lv_ready      TYPE i.
-    DATA lv_batch_ctr  TYPE i.
+    DATA lv_run_id      TYPE sysuuid_x16.
+    DATA ls_partition   TYPE ty_partition.
+    DATA lt_work_items  TYPE zcl_abapgit_ortec_ser_planner=>tt_work_item.
+    DATA lt_batches     TYPE zcl_abapgit_ortec_ser_planner=>tt_batch.
+    DATA lv_ready       TYPE i.
+    DATA lv_wait_result TYPE i.
 
     TRY.
         lv_run_id = cl_system_uuid=>create_uuid_x16_static( ).
@@ -687,39 +747,16 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
                      worker_count           = iv_max_processes ) INTO TABLE mt_run_context.
     ASSIGN mt_run_context[ run_id = lv_run_id ] TO FIELD-SYMBOL(<ls_ctx>).
 
-    LOOP AT it_tadir INTO DATA(ls_tadir).
-      " WAPA is never batch-eligible (OD-14 audit) - IS_STANDARD_NO_
-      " PARALLEL_TYPE alone does not cover it (that denylist is only
-      " ECTC/ECTD). This routes WAPA through ROUTE_TO_SEQUENTIAL_FALLBACK,
-      " which calls the SAME generic zcl_abapgit_objects=>serialize()
-      " dispatch as the standard RUN_SEQUENTIAL - structurally identical,
-      " not a regression.
-      "
-      " AR-1-001 (independent adversarial audit): an object whose path
-      " matches IT_WO_TRANSLATION_PATTERNS needs its OWN, possibly
-      " different, MAIN_LANGUAGE_ONLY value (per the standard path's own
-      " MATCH_OBJ_PATTERNS check) - a batch dispatches ALL its objects
-      " with ONE shared i18n flag, so any such object is routed to forced
-      " sequential instead, where ROUTE_TO_SEQUENTIAL_FALLBACK recomputes
-      " the correct per-object flag exactly like the standard path does.
-      IF iv_max_processes = 1
-         OR ls_tadir-object = 'WAPA'
-         OR is_standard_no_parallel_type( ls_tadir-object ) = abap_true
-         OR ( is_i18n_params-main_language_only = abap_false
-              AND it_wo_translation_patterns IS NOT INITIAL
-              AND zcl_abapgit_i18n_params=>match_obj_patterns(
-                    is_tadir                   = ls_tadir
-                    it_wo_translation_patterns = it_wo_translation_patterns ) = abap_true ).
-        APPEND ls_tadir TO lt_forced_seq.
-      ELSE.
-        APPEND ls_tadir TO lt_eligible.
-      ENDIF.
-    ENDLOOP.
+    ls_partition = partition_objects(
+      it_tadir                   = it_tadir
+      iv_max_processes           = iv_max_processes
+      is_i18n_params             = is_i18n_params
+      it_wo_translation_patterns = it_wo_translation_patterns ).
 
-    route_to_sequential_fallback( iv_run_id = lv_run_id it_object_keys = lt_forced_seq ).
+    route_to_sequential_fallback( iv_run_id = lv_run_id it_object_keys = ls_partition-forced_seq ).
 
     IF <ls_ctx> IS ASSIGNED.
-      LOOP AT lt_eligible INTO DATA(ls_key).
+      LOOP AT ls_partition-eligible INTO DATA(ls_key).
         DATA(ls_estimate) = zcl_abapgit_ortec_ser_cost=>get_estimate(
           iv_obj_type = ls_key-object
           it_ewma     = <ls_ctx>-ewma ).
@@ -736,103 +773,91 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
       iv_row_limit    = c_max_batch_rows
       iv_byte_limit   = c_max_batch_input_bytes_est ).
 
+    APPEND LINES OF build_wapa_singleton_batches( ls_partition-wapa ) TO lt_batches.
+
     LOOP AT lt_batches INTO DATA(ls_batch).
-      lv_batch_ctr = lv_batch_ctr + 1.
       DATA(lt_keys) = VALUE zif_abapgit_definitions=>ty_tadir_tt( FOR ls_wi IN ls_batch-items ( ls_wi-tadir ) ).
+      DATA lv_batch_id TYPE char32.
+      lv_batch_id = |B{ sy-tabix }|.
       IF lv_ready < iv_max_processes.
         lv_ready = lv_ready + 1.
         before_dispatch( iv_run_id      = lv_run_id
                           it_object_keys = lt_keys
                           iv_attempt     = 1
-                          iv_batch_id    = |B{ lv_batch_ctr }| ).
+                          iv_batch_id    = lv_batch_id ).
       ELSEIF <ls_ctx> IS ASSIGNED.
         APPEND ls_batch TO <ls_ctx>-queue.
       ENDIF.
     ENDLOOP.
 
-    DO.
-      " AR-1-005 (independent adversarial audit): check the exit
-      " condition BEFORE waiting, not after - a run with nothing queued
-      " and no awaiting/timed-out dispatch (all objects forced-sequential,
-      " or an empty IT_TADIR) must return immediately, not pay one
-      " unavoidable 5-second wait for work that was never dispatched.
-      IF NOT ( <ls_ctx> IS ASSIGNED AND lines( <ls_ctx>-queue ) > 0 )
-         AND NOT line_exists( mt_dispatch[ run_id = lv_run_id state = c_state_awaiting ] )
-         AND NOT line_exists( mt_dispatch[ run_id = lv_run_id state = c_state_timed_out ] ).
-        EXIT.
-      ENDIF.
-
-      " PS-001 (independent performance implementation audit): a plain
-      " "WAIT UP TO 5 SECONDS" never returns early for an aRFC callback
-      " (confirmed against the ABAP Keyword Documentation) - use
-      " "WAIT FOR ASYNCHRONOUS TASKS UNTIL ... UP TO 5 SECONDS" against
-      " this run's own CHANGED flag instead, so a batch that finishes in
-      " milliseconds is observed immediately rather than up to 5s late.
-      " The 5-second ceiling is preserved as the existing safety net for
-      " a genuinely slow/hung batch.
-      IF <ls_ctx> IS ASSIGNED.
-        CLEAR <ls_ctx>-changed.
-        WAIT FOR ASYNCHRONOUS TASKS UNTIL <ls_ctx>-changed = abap_true UP TO 5 SECONDS.
-      ELSE.
-        WAIT UP TO 5 SECONDS.
-      ENDIF.
-      check_timeouts( lv_run_id ).
-
-      IF <ls_ctx> IS ASSIGNED.
-        WHILE lines( <ls_ctx>-queue ) > 0 AND <ls_ctx>-in_flight < <ls_ctx>-worker_count.
-          READ TABLE <ls_ctx>-queue INDEX 1 INTO DATA(ls_next_batch).
-          DELETE <ls_ctx>-queue INDEX 1.
-          lv_batch_ctr = lv_batch_ctr + 1.
-          DATA(lt_next_keys) = VALUE zif_abapgit_definitions=>ty_tadir_tt(
-            FOR ls_wi2 IN ls_next_batch-items ( ls_wi2-tadir ) ).
-          before_dispatch( iv_run_id      = lv_run_id
-                            it_object_keys = lt_next_keys
-                            iv_attempt     = 1
-                            iv_batch_id    = |B{ lv_batch_ctr }| ).
-        ENDWHILE.
-      ENDIF.
-    ENDDO.
-
+    " DRAIN_QUEUE's own BATCH_ID numbering continues from here, so later
+    " batches never reuse a "Bn" id already assigned above.
     IF <ls_ctx> IS ASSIGNED.
-      rt_files = <ls_ctx>-files.
+      <ls_ctx>-batch_seq = lines( lt_batches ).
     ENDIF.
 
-    purge_run_state( lv_run_id ).
+    lv_wait_result = wait_for_run_completion( lv_run_id ).
+
+    IF lv_wait_result = 0.
+      IF <ls_ctx> IS ASSIGNED.
+        rt_files = <ls_ctx>-files.
+      ENDIF.
+      purge_run_state( lv_run_id ).
+    ELSE.
+      " Fail-fast (SER-SLICE-2 Stage A): never return a partial result -
+      " discard this run's entire state and raise, rather than silently
+      " losing objects that never reached a confirmed terminal outcome.
+      discard_run_state( lv_run_id ).
+      CLEAR rt_files.
+      zcx_abapgit_exception=>raise(
+        |ORTEC adaptive batch serialization did not complete: the result was incomplete | &&
+        |and has been discarded ({ COND string( WHEN lv_wait_result = 8 THEN 'wait budget exceeded'
+                                                 ELSE 'missing batch result' ) }). | &&
+        |Retry the operation, or reduce the number of objects, to work around this.| ).
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD partition_objects.
+    LOOP AT it_tadir INTO DATA(ls_tadir).
+      IF iv_max_processes = 1
+         OR is_standard_no_parallel_type( ls_tadir-object ) = abap_true
+         OR ( is_i18n_params-main_language_only = abap_false
+              AND it_wo_translation_patterns IS NOT INITIAL
+              AND zcl_abapgit_i18n_params=>match_obj_patterns(
+                    is_tadir                   = ls_tadir
+                    it_wo_translation_patterns = it_wo_translation_patterns ) = abap_true ).
+        APPEND ls_tadir TO rs_partition-forced_seq.
+      ELSEIF ls_tadir-object = 'WAPA'.
+        APPEND ls_tadir TO rs_partition-wapa.
+      ELSE.
+        APPEND ls_tadir TO rs_partition-eligible.
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD build_wapa_singleton_batches.
+    LOOP AT it_wapa INTO DATA(ls_wapa).
+      APPEND VALUE #( items = VALUE #( ( tadir = ls_wapa ) ) ) TO rt_batches.
+    ENDLOOP.
   ENDMETHOD.
 
   METHOD on_end_of_batch.
     DATA lv_msg TYPE c LENGTH 100.
-    DATA lt_purged_discard TYPE zaog_ser_batch_result_tt.
     DATA lt_discard        TYPE zaog_ser_batch_result_tt.
     DATA lt_result         TYPE zaog_ser_batch_result_tt.
     DATA lv_out_rows       TYPE i.
 
     ASSIGN mt_dispatch[ task_name = p_task ] TO FIELD-SYMBOL(<ls_d>).
     IF sy-subrc <> 0.
-      " Defensive: unknown/already-purged task name - still RECEIVE to
+      " Defensive: unknown/already-discarded task name - still RECEIVE to
       " free the RFC resource, then discard (sect 5.5).
       RECEIVE RESULTS FROM FUNCTION 'Z_ABAPGIT_ORTEC_SER_BATCH'
-        IMPORTING et_result = lt_purged_discard
+        IMPORTING et_result = lt_discard
         EXCEPTIONS system_failure = 1 communication_failure = 2 OTHERS = 3.
       RETURN.
     ENDIF.
 
-    " PS-001 (independent performance implementation audit): signal this
-    " run's poll loop that something changed, regardless of which CASE
-    " branch below runs - see TY_RUN_CONTEXT-CHANGED's own doc.
-    ASSIGN mt_run_context[ run_id = <ls_d>-run_id ] TO FIELD-SYMBOL(<ls_changed_ctx>).
-    IF <ls_changed_ctx> IS ASSIGNED.
-      <ls_changed_ctx>-changed = abap_true.
-    ENDIF.
-
     CASE <ls_d>-state.
-      WHEN c_state_timed_out OR c_state_abandoned.
-        RECEIVE RESULTS FROM FUNCTION 'Z_ABAPGIT_ORTEC_SER_BATCH'
-          IMPORTING et_result = lt_discard
-          EXCEPTIONS system_failure = 1 communication_failure = 2 OTHERS = 3.
-        <ls_d>-state = c_state_drained.
-        RETURN.
-
       WHEN c_state_awaiting.
         RECEIVE RESULTS FROM FUNCTION 'Z_ABAPGIT_ORTEC_SER_BATCH'
           IMPORTING et_result = lt_result ev_output_row_count = lv_out_rows
@@ -850,6 +875,13 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
               ASSIGN mt_run_context[ run_id = <ls_d>-run_id ] TO FIELD-SYMBOL(<ls_rf_ctx>).
               IF <ls_rf_ctx> IS ASSIGNED AND <ls_rf_ctx>-ii_log IS BOUND.
                 <ls_rf_ctx>-ii_log->add_exception( lx_receive_fail_error ).
+              ENDIF.
+          ENDTRY.
+          TRY.
+              drain_queue( <ls_d>-run_id ).
+            CATCH zcx_abapgit_exception INTO DATA(lx_receive_drain_error).
+              IF <ls_rf_ctx> IS ASSIGNED AND <ls_rf_ctx>-ii_log IS BOUND.
+                <ls_rf_ctx>-ii_log->add_exception( lx_receive_drain_error ).
               ENDIF.
           ENDTRY.
           RETURN.
@@ -871,6 +903,13 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
             CATCH zcx_abapgit_exception INTO DATA(lx_mismatch_error).
               IF <ls_mismatch_ctx> IS ASSIGNED AND <ls_mismatch_ctx>-ii_log IS BOUND.
                 <ls_mismatch_ctx>-ii_log->add_exception( lx_mismatch_error ).
+              ENDIF.
+          ENDTRY.
+          TRY.
+              drain_queue( <ls_d>-run_id ).
+            CATCH zcx_abapgit_exception INTO DATA(lx_mismatch_drain_error).
+              IF <ls_mismatch_ctx> IS ASSIGNED AND <ls_mismatch_ctx>-ii_log IS BOUND.
+                <ls_mismatch_ctx>-ii_log->add_exception( lx_mismatch_drain_error ).
               ENDIF.
           ENDTRY.
           RETURN.
@@ -939,6 +978,14 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
           INSERT VALUE #( run_id = <ls_d>-run_id obj_type = ls_row-obj_type obj_name = ls_row-obj_name )
             INTO TABLE mt_resolved.
         ENDLOOP.
+        TRY.
+            drain_queue( <ls_d>-run_id ).
+          CATCH zcx_abapgit_exception INTO DATA(lx_success_drain_error).
+            ASSIGN mt_run_context[ run_id = <ls_d>-run_id ] TO FIELD-SYMBOL(<ls_success_ctx>).
+            IF <ls_success_ctx> IS ASSIGNED AND <ls_success_ctx>-ii_log IS BOUND.
+              <ls_success_ctx>-ii_log->add_exception( lx_success_drain_error ).
+            ENDIF.
+        ENDTRY.
     ENDCASE.
   ENDMETHOD.
 
@@ -1128,81 +1175,66 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     rv_task_name = |SER-{ mv_next_task_seq }|.
   ENDMETHOD.
 
-  METHOD check_timeouts.
-    DATA lv_now     TYPE timestampl.
-    DATA lv_elapsed TYPE i.
-    DATA lt_abandoned TYPE STANDARD TABLE OF ty_dispatch WITH EMPTY KEY.
-    DATA lt_seen_runs TYPE ty_broken_runs_tt.
-
-    GET TIME STAMP FIELD lv_now.
-
-    LOOP AT mt_dispatch ASSIGNING FIELD-SYMBOL(<ls_d>)
-         WHERE run_id = iv_run_id AND state = c_state_awaiting.
-      lv_elapsed = cl_abap_tstmp=>subtract( tstmp1 = lv_now tstmp2 = <ls_d>-dispatch_ts ).
-      IF lv_elapsed >= c_batch_rfc_timeout_s.
-        <ls_d>-state = c_state_timed_out.
-        release_in_flight_budget( iv_run_id ).
-        TRY.
-            IF <ls_d>-attempt < c_max_retries.
-              before_dispatch( iv_run_id      = iv_run_id
-                                it_object_keys = <ls_d>-object_keys
-                                iv_attempt     = <ls_d>-attempt + 1
-                                iv_batch_id    = <ls_d>-batch_id ).
-            ELSE.
-              route_to_sequential_fallback( iv_run_id = iv_run_id it_object_keys = <ls_d>-object_keys ).
-            ENDIF.
-          CATCH zcx_abapgit_exception INTO DATA(lx_timeout_error).
-            " never let an exception escape - see ON_END_OF_BATCH's same
-            " defensive pattern; log if a sink exists for this run.
-            ASSIGN mt_run_context[ run_id = iv_run_id ] TO FIELD-SYMBOL(<ls_to_ctx>).
-            IF <ls_to_ctx> IS ASSIGNED AND <ls_to_ctx>-ii_log IS BOUND.
-              <ls_to_ctx>-ii_log->add_exception( lx_timeout_error ).
-            ENDIF.
-        ENDTRY.
-      ENDIF.
-    ENDLOOP.
-
-    LOOP AT mt_dispatch ASSIGNING FIELD-SYMBOL(<ls_t>)
-         WHERE run_id = iv_run_id AND state = c_state_timed_out.
-      lv_elapsed = cl_abap_tstmp=>subtract( tstmp1 = lv_now tstmp2 = <ls_t>-dispatch_ts ).
-      IF lv_elapsed >= ( c_batch_rfc_timeout_s + c_max_drain_wait_s ).
-        <ls_t>-state = c_state_abandoned.
-      ENDIF.
-    ENDLOOP.
-
-    " Bounded retention (sect 5.1a) - memory/observability bounds only,
-    " never a correctness requirement (a purged run's late callback
-    " always safely hits the existing unknown-task_name path, sect 5.5).
-    LOOP AT mt_dispatch INTO DATA(ls_ab) WHERE state = c_state_abandoned.
-      APPEND ls_ab TO lt_abandoned.
-    ENDLOOP.
-
-    IF lines( lt_abandoned ) > c_max_abandoned_tasks_sess.
-      SORT lt_abandoned BY dispatch_ts ASCENDING.
-      DATA(lv_excess) = lines( lt_abandoned ) - c_max_abandoned_tasks_sess.
-      LOOP AT lt_abandoned INTO DATA(ls_old).
-        IF sy-tabix > lv_excess.
-          EXIT.
-        ENDIF.
-        DELETE mt_dispatch WHERE task_name = ls_old-task_name.
-      ENDLOOP.
+  METHOD drain_queue.
+    ASSIGN mt_run_context[ run_id = iv_run_id ] TO FIELD-SYMBOL(<ls_ctx>).
+    IF NOT <ls_ctx> IS ASSIGNED.
+      RETURN.
     ENDIF.
 
-    LOOP AT lt_abandoned INTO DATA(ls_a2).
-      INSERT ls_a2-run_id INTO TABLE lt_seen_runs.
-    ENDLOOP.
+    WHILE lines( <ls_ctx>-queue ) > 0 AND <ls_ctx>-in_flight < <ls_ctx>-worker_count.
+      READ TABLE <ls_ctx>-queue INDEX 1 INTO DATA(ls_next_batch).
+      DELETE <ls_ctx>-queue INDEX 1.
+      <ls_ctx>-batch_seq = <ls_ctx>-batch_seq + 1.
+      DATA(lt_next_keys) = VALUE zif_abapgit_definitions=>ty_tadir_tt(
+        FOR ls_wi IN ls_next_batch-items ( ls_wi-tadir ) ).
+      before_dispatch( iv_run_id      = iv_run_id
+                        it_object_keys = lt_next_keys
+                        iv_attempt     = 1
+                        iv_batch_id    = |B{ <ls_ctx>-batch_seq }| ).
+    ENDWHILE.
+  ENDMETHOD.
 
-    IF lines( lt_seen_runs ) > c_max_abandoned_runs_sess.
-      SORT lt_abandoned BY dispatch_ts ASCENDING.
-      READ TABLE lt_abandoned INTO DATA(ls_global_oldest) INDEX 1.
-      IF sy-subrc = 0.
-        DELETE mt_dispatch WHERE run_id = ls_global_oldest-run_id.
-        DELETE mt_resolved WHERE run_id = ls_global_oldest-run_id.
-        DELETE mt_task_outcomes WHERE run_id = ls_global_oldest-run_id.
-        DELETE mt_broken_runs WHERE table_line = ls_global_oldest-run_id.
-        DELETE mt_run_context WHERE run_id = ls_global_oldest-run_id.
-      ENDIF.
+  METHOD is_run_complete.
+    rv_complete = abap_true.
+
+    ASSIGN mt_run_context[ run_id = iv_run_id ] TO FIELD-SYMBOL(<ls_ctx>).
+    IF <ls_ctx> IS ASSIGNED AND lines( <ls_ctx>-queue ) > 0.
+      rv_complete = abap_false.
+      RETURN.
     ENDIF.
+
+    IF line_exists( mt_dispatch[ run_id = iv_run_id state = c_state_awaiting ] ).
+      rv_complete = abap_false.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD interpret_wait_result.
+    IF iv_run_complete = abap_true.
+      rv_result = 0.
+      RETURN.
+    ENDIF.
+
+    CASE iv_wait_subrc.
+      WHEN 0 OR 4.
+        rv_result = 4.
+      WHEN OTHERS.
+        rv_result = 8.
+    ENDCASE.
+  ENDMETHOD.
+
+  METHOD wait_for_run_completion.
+    drain_queue( iv_run_id ).
+
+    IF is_run_complete( iv_run_id ) = abap_true.
+      rv_result = 0.
+      RETURN.
+    ENDIF.
+
+    WAIT FOR ASYNCHRONOUS TASKS UNTIL is_run_complete( iv_run_id ) = abap_true UP TO c_batch_rfc_timeout_s SECONDS.
+
+    rv_result = interpret_wait_result(
+      iv_wait_subrc   = sy-subrc
+      iv_run_complete = is_run_complete( iv_run_id ) ).
   ENDMETHOD.
 
   METHOD handle_receive_failure.
@@ -1315,17 +1347,21 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD purge_run_state.
-    IF line_exists( mt_dispatch[ run_id = iv_run_id state = c_state_awaiting ] )
-       OR line_exists( mt_dispatch[ run_id = iv_run_id state = c_state_timed_out ] ).
+    IF line_exists( mt_dispatch[ run_id = iv_run_id state = c_state_awaiting ] ).
       RETURN.
     ENDIF.
 
-    " Only R/F/D are removed - 'X' (ABANDONED) rows are deliberately left
-    " behind so a late callback still has a row to drain against (bounded
-    " by MAX_ABANDONED_*, enforced in CHECK_TIMEOUTS).
     DELETE mt_dispatch WHERE run_id = iv_run_id
-      AND ( state = c_state_received OR state = c_state_received_failure OR state = c_state_drained ).
+      AND ( state = c_state_received OR state = c_state_received_failure ).
 
+    DELETE mt_resolved WHERE run_id = iv_run_id.
+    DELETE mt_task_outcomes WHERE run_id = iv_run_id.
+    DELETE mt_broken_runs WHERE table_line = iv_run_id.
+    DELETE mt_run_context WHERE run_id = iv_run_id.
+  ENDMETHOD.
+
+  METHOD discard_run_state.
+    DELETE mt_dispatch WHERE run_id = iv_run_id.
     DELETE mt_resolved WHERE run_id = iv_run_id.
     DELETE mt_task_outcomes WHERE run_id = iv_run_id.
     DELETE mt_broken_runs WHERE table_line = iv_run_id.
