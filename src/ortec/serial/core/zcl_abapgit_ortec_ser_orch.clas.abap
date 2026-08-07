@@ -894,6 +894,20 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
                      worker_count           = iv_max_processes
                      expected_count         = count_expected_objects( it_tadir ) ) INTO TABLE mt_run_context.
     ASSIGN mt_run_context[ run_id = lv_run_id ] TO FIELD-SYMBOL(<ls_ctx>).
+
+    " SER-SLICE-3 DTEL/DOMA parity fix: mirror ZCL_ABAPGIT_SERIALIZE~SERIALIZE's own
+    " non-batch PREPARE() call so batch-dispatched DOMA/DTEL objects get the same
+    " prefetch-HIT data ZCL_ABAPGIT_ORTEC_SER_PREF_EXT=>EXTRACT_FOR_BATCH expects to
+    " find - without this, every DOMA/DTEL object silently falls back to each
+    " object's own raw DB read, which is not proven byte-identical to the prefetched
+    " result and caused a real output-parity regression (see
+    " serialization_slice_3_dtel_doma_parity.md).
+    IF zcl_abapgit_ortec_git_switch=>is_serial_prefetch_active( ) = abap_true.
+      zcl_abapgit_ortec_ser_pref_ext=>prepare(
+        it_tadir    = it_tadir
+        iv_language = is_i18n_params-main_language ).
+    ENDIF.
+
     TRY.
         ls_partition = partition_objects(
           it_tadir                   = it_tadir
@@ -1298,7 +1312,11 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
       <ls_return>-item = ls_serialization-item.
     ENDLOOP.
 
-    rv_merged = abap_true.
+    " SER-SLICE-3 (H5/H11): a batch worker reporting RC=0 with ZERO files is not a
+    " valid merge - treat it like a failed merge so the caller reroutes through
+    " ROUTE_TO_SEQUENTIAL_FALLBACK instead of silently accepting an empty result as
+    " success (see serialization_slice_3_dtel_doma_parity.md).
+    rv_merged = boolc( lines( ls_serialization-files ) > 0 ).
   ENDMETHOD.
 
   METHOD object_key_sets_equal.

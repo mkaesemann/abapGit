@@ -97,6 +97,31 @@ FUNCTION z_abapgit_ortec_ser_batch.
         ls_item-origlang              = ls_tadir-masterlang.
         ls_item-abap_language_version = iv_abap_language_vers.
 
+        " SER-SLICE-3 (H4 provider contract): report which case actually
+        " applied for THIS object. DOMA/DTEL are the only types with a
+        " batch-scoped prefetch provider today - every other type always
+        " falls back to its own per-object read, with no provider consulted.
+        CASE ls_tadir-object.
+          WHEN 'DTEL'.
+            IF zcl_abapgit_ortec_ser_pref_ext=>get_dtel_data(
+                 iv_rollname = CONV #( ls_tadir-obj_name )
+                 iv_language = iv_language ) = abap_true.
+              ls_result-provider_hit = 1.
+            ELSE.
+              ls_result-provider_miss = 1.
+            ENDIF.
+          WHEN 'DOMA'.
+            IF zcl_abapgit_ortec_ser_pref_ext=>get_doma_data(
+                 iv_domname  = CONV #( ls_tadir-obj_name )
+                 iv_language = iv_language ) = abap_true.
+              ls_result-provider_hit = 1.
+            ELSE.
+              ls_result-provider_miss = 1.
+            ENDIF.
+          WHEN OTHERS.
+            ls_result-provider_fallback = 1.
+        ENDCASE.
+
         ls_serialization = zcl_abapgit_objects=>serialize(
           is_item        = ls_item
           io_i18n_params = zcl_abapgit_i18n_params=>new( is_params = ls_i18n_params ) ).
