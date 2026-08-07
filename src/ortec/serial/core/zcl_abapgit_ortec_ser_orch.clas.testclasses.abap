@@ -61,6 +61,12 @@ CLASS ltcl_ser_orch DEFINITION FINAL
     METHODS split_depth_above_cap_true      FOR TESTING.
     METHODS before_dispatch_dd_buf_empty    FOR TESTING.
 
+    METHODS zero_file_success_flagged    FOR TESTING.
+    METHODS nonzero_file_not_flagged      FOR TESTING.
+    METHODS zero_file_but_failed_row_ok   FOR TESTING.
+    METHODS zero_file_unmatched_row_ok    FOR TESTING.
+    METHODS fallback_zero_files_fails      FOR TESTING.
+
 ENDCLASS.
 
 
@@ -411,6 +417,38 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
 
     READ TABLE zcl_abapgit_ortec_ser_orch=>mt_resolved
       WITH TABLE KEY run_id = lv_run obj_type = 'ZZZZ' obj_name = 'NOPE'
+      TRANSPORTING NO FIELDS.
+    cl_abap_unit_assert=>assert_subrc( exp = 4 act = sy-subrc ).
+  ENDMETHOD.
+
+  METHOD fallback_zero_files_fails.
+    " SER-SLICE-3 parity incident fix (serialization_slice_3_dtel_doma_
+    " parity.md, AR-3-002): a REAL, valid object type (DOMA) whose object
+    " does not exist reaches ZCL_ABAPGIT_OBJECT_DOMA's own defensive
+    " "IF ls_dd01v IS INITIAL...RETURN" branch - NO exception, zero files.
+    " Before this fix, ROUTE_TO_SEQUENTIAL_FALLBACK would have marked this
+    " as a bare SUCCESS (MT_RESOLVED) despite producing no output at all -
+    " exactly the silent-loss shape of the parity incident. It must now be
+    " marked FAILED instead.
+    DATA(lv_run) = build_run_id( ).
+    INSERT VALUE #( run_id = lv_run expected_count = 1 )
+      INTO TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context.
+
+    TRY.
+        zcl_abapgit_ortec_ser_orch=>route_to_sequential_fallback(
+          iv_run_id      = lv_run
+          it_object_keys = VALUE #( ( build_tadir( iv_obj_type = 'DOMA' iv_obj_name = 'ZZZZ_SLICE3_NOT_A_REAL_DOMAIN' ) ) ) ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_fallback).
+        cl_abap_unit_assert=>fail( msg = lx_fallback->get_text( ) ).
+    ENDTRY.
+
+    READ TABLE zcl_abapgit_ortec_ser_orch=>mt_failed
+      WITH TABLE KEY run_id = lv_run obj_type = 'DOMA' obj_name = 'ZZZZ_SLICE3_NOT_A_REAL_DOMAIN'
+      TRANSPORTING NO FIELDS.
+    cl_abap_unit_assert=>assert_subrc( exp = 0 act = sy-subrc ).
+
+    READ TABLE zcl_abapgit_ortec_ser_orch=>mt_resolved
+      WITH TABLE KEY run_id = lv_run obj_type = 'DOMA' obj_name = 'ZZZZ_SLICE3_NOT_A_REAL_DOMAIN'
       TRANSPORTING NO FIELDS.
     cl_abap_unit_assert=>assert_subrc( exp = 4 act = sy-subrc ).
   ENDMETHOD.
@@ -808,5 +846,54 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
     " stays empty, proving the DD-buffer computation did not interfere
     " with the pre-existing no-context short-circuit.
     cl_abap_unit_assert=>assert_initial( zcl_abapgit_ortec_ser_orch=>mt_dispatch ).
+  ENDMETHOD.
+
+  METHOD zero_file_success_flagged.
+    " SER-SLICE-3 parity incident (serialization_slice_3_dtel_doma_
+    " parity.md, H5) - the exact suspicious combination: worker reports
+    " success (RC = 0) for a REQUESTED object, but zero files.
+    DATA(ls_row) = build_result( iv_obj_type = 'DTEL' iv_obj_name = 'A' iv_rc = 0 ).
+    ls_row-output_file_count = 0.
+
+    cl_abap_unit_assert=>assert_true(
+      zcl_abapgit_ortec_ser_orch=>is_zero_file_success_bad(
+        is_row       = ls_row
+        iv_key_found = abap_true ) ).
+  ENDMETHOD.
+
+  METHOD nonzero_file_not_flagged.
+    DATA(ls_row) = build_result( iv_obj_type = 'DTEL' iv_obj_name = 'A' iv_rc = 0 ).
+    ls_row-output_file_count = 1.
+
+    cl_abap_unit_assert=>assert_false(
+      zcl_abapgit_ortec_ser_orch=>is_zero_file_success_bad(
+        is_row       = ls_row
+        iv_key_found = abap_true ) ).
+  ENDMETHOD.
+
+  METHOD zero_file_but_failed_row_ok.
+    " RC <> 0 already goes through the ordinary failure branch - the
+    " zero-file guard must not double-trigger for a real, reported
+    " failure (it is not a "success with no files" case at all).
+    DATA(ls_row) = build_result( iv_obj_type = 'DTEL' iv_obj_name = 'A' iv_rc = 4 ).
+    ls_row-output_file_count = 0.
+
+    cl_abap_unit_assert=>assert_false(
+      zcl_abapgit_ortec_ser_orch=>is_zero_file_success_bad(
+        is_row       = ls_row
+        iv_key_found = abap_true ) ).
+  ENDMETHOD.
+
+  METHOD zero_file_unmatched_row_ok.
+    " An unrequested/unmatched row (IV_KEY_FOUND = FALSE) is handled by
+    " the pre-existing object_key_sets_equal mismatch gate upstream, not
+    " this guard - must not double-trigger here.
+    DATA(ls_row) = build_result( iv_obj_type = 'DTEL' iv_obj_name = 'A' iv_rc = 0 ).
+    ls_row-output_file_count = 0.
+
+    cl_abap_unit_assert=>assert_false(
+      zcl_abapgit_ortec_ser_orch=>is_zero_file_success_bad(
+        is_row       = ls_row
+        iv_key_found = abap_false ) ).
   ENDMETHOD.
 ENDCLASS.

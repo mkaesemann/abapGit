@@ -185,6 +185,8 @@ CLASS ltcl_dd_batch_wire DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHO
     METHODS reject_corrupt_import       FOR TESTING.
     METHODS unexpected_entry_ignored    FOR TESTING RAISING zcx_abapgit_exception.
     METHODS empty_payload_is_hit        FOR TESTING RAISING zcx_abapgit_exception.
+    METHODS extract_all_miss_still_empty FOR TESTING.
+    METHODS clear_dd_cache_clears_both   FOR TESTING.
 
 ENDCLASS.
 
@@ -215,6 +217,22 @@ CLASS ltcl_dd_batch_wire IMPLEMENTATION.
     zcl_abapgit_ortec_ser_pref_ext=>clear( ).
     DATA(lv_buffer) = zcl_abapgit_ortec_ser_pref_ext=>extract_for_batch(
       VALUE #( ( object = 'PROG' obj_name = 'SAPMZ_TEST' ) ) ).
+
+    cl_abap_unit_assert=>assert_initial( lv_buffer ).
+  ENDMETHOD.
+
+  METHOD extract_all_miss_still_empty.
+    " SER-SLICE-3 parity incident fix (serialization_slice_3_dtel_doma_
+    " parity.md, Fix B) - PREPARE() was never called (mt_doma/mt_dtel
+    " are empty), yet the batch's IT_OBJECT_KEYS genuinely contains DOMA/
+    " DTEL objects. Before the fix, EXTRACT_FOR_BATCH still appended one
+    " PRESENT = ABAP_FALSE entry per object and built a non-empty
+    " envelope anyway, forcing an unnecessary INJECT_BATCH_FROM_BUFFER
+    " call on every dispatch even though nothing was ever cached.
+    zcl_abapgit_ortec_ser_pref_ext=>clear( ).
+    DATA(lv_buffer) = zcl_abapgit_ortec_ser_pref_ext=>extract_for_batch(
+      VALUE #( ( object = 'DOMA' obj_name = 'XFELD' )
+                ( object = 'DTEL' obj_name = 'MANDT' ) ) ).
 
     cl_abap_unit_assert=>assert_initial( lv_buffer ).
   ENDMETHOD.
@@ -405,6 +423,29 @@ CLASS ltcl_dd_batch_wire IMPLEMENTATION.
 
     cl_abap_unit_assert=>assert_true( rv_found ).
     cl_abap_unit_assert=>assert_initial( et_dd07v ).
+  ENDMETHOD.
+
+  METHOD clear_dd_cache_clears_both.
+    " SER-SLICE-3 parity incident fix (serialization_slice_3_dtel_doma_
+    " parity.md, AR-3-001/Fix D): CLEAR_DD_CACHE must unconditionally
+    " clear MT_DOMA and MT_DTEL, independent of INJECT_BATCH_FROM_BUFFER -
+    " this is what the RFC worker now calls on EVERY invocation, so a
+    " pooled/reused session can never keep a prior dispatch's DOMA/DTEL
+    " data when the current dispatch's own buffer is legitimately empty.
+    zcl_abapgit_ortec_ser_pref_ext=>prepare(
+      it_tadir    = VALUE #( ( object = 'DOMA' obj_name = 'XFELD' ) ( object = 'DTEL' obj_name = 'MANDT' ) )
+      iv_language = 'E' ).
+    cl_abap_unit_assert=>assert_true(
+      zcl_abapgit_ortec_ser_pref_ext=>get_doma_data( iv_domname = 'XFELD' iv_language = 'E' ) ).
+    cl_abap_unit_assert=>assert_true(
+      zcl_abapgit_ortec_ser_pref_ext=>get_dtel_data( iv_rollname = 'MANDT' iv_language = 'E' ) ).
+
+    zcl_abapgit_ortec_ser_pref_ext=>clear_dd_cache( ).
+
+    cl_abap_unit_assert=>assert_false(
+      zcl_abapgit_ortec_ser_pref_ext=>get_doma_data( iv_domname = 'XFELD' iv_language = 'E' ) ).
+    cl_abap_unit_assert=>assert_false(
+      zcl_abapgit_ortec_ser_pref_ext=>get_dtel_data( iv_rollname = 'MANDT' iv_language = 'E' ) ).
   ENDMETHOD.
 
 ENDCLASS.
