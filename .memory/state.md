@@ -2,24 +2,38 @@
 
 ```text
 BRANCH=ortec/abapgit_1_133-opt-rework
-CURRENT_HEAD=daef510e (Fix RPERF_ILLEGAL_STATEMENT; owner IT8-validated,
-  see handoffs/serialization-slice-2.md "Final IT8 validation" section)
+CURRENT_HEAD=40934176 (owner "Fix Syntax Issues for SER_SLICE-3" - IT8
+  import/activation corrections, pulled back into local repo)
 LATEST_SAP_VALIDATED_HEAD=daef510e9bd50cdef2adcfb26a3f2a01050bb401
   (SER-SLICE-2 final: ATC/ABAP_UNIT/FEATURE_OFF/FEATURE_ON_AFTER_RPERF_FIX
-  all PASS; LATE_CALLBACK_TEST deferred by owner, non-blocking)
+  all PASS; LATE_CALLBACK_TEST deferred by owner, non-blocking).
+  SER-SLICE-3's own DOMA/DTEL provider is NOT YET SAP-validated - see
+  Active topic below and .memory/incidents/serialization_slice_3_dtel_
+  doma_parity.md.
 ```
 
 ## Active topic
 
 ```text
 TOPIC=SER_SLICE_3_BATCH_PREFETCH_PROVIDERS
-STATUS=IN_PROGRESS
+STATUS=BLOCKED_PENDING_RETEST
 SER_SLICE_2=SAP_VALIDATED_COMPLETE_WITH_LATE_CALLBACK_TEST_DEFERRED
-SER_SLICE_3=LOCAL_COMPLETE_AWAITING_CONSOLIDATED_IT8 (DOMA/DTEL provider
-  implemented; CLAS/INTF and all other object families DEFERRED with
-  exact reasons - see serialization_slice_3_clas_intf.md and
-  serialization_slice_3_object_ranking.md)
+SER_SLICE_3=BLOCKED_BY_DTEL_DOMA_PARITY
 ```
+
+SER-SLICE-3's DOMA/DTEL batch provider hit a real output-parity incident
+on owner IT8 import (Feature ON produced 2 files instead of 113 for a
+real repository). Root cause (two confirmed defects: prepare() never
+called in ORCH's batch path; extract_for_batch built a non-empty envelope
+with nothing cached) plus three additional adversarially-found latent
+defects (stale worker cache, zero-file success accepted by the fallback
+path, zero-file success accepted by the merge path) are ALL FIXED locally
+and independently re-reviewed (adversarial cycle 2: APPROVE, 0/0/0).
+Full detail: `.memory/incidents/serialization_slice_3_dtel_doma_parity.md`.
+Do NOT report SER-SLICE-3 as SAP-validated/complete until the owner
+re-runs the parity retest (IT8 validation plan section 0) against the
+exact repository/scope from the incident and confirms byte-identical
+Feature ON/OFF output.
 
 SER-SLICE-2 is now SAP_VALIDATED_COMPLETE (owner evidence: ATC=PASS,
 ABAP_UNIT=PASS, FEATURE_OFF_TEST=PASS, FEATURE_ON_AFTER_RPERF_FIX=PASS,
@@ -202,14 +216,27 @@ other requested object families assessed and dispositioned),
 IT8 checklist - nothing above may be claimed SAP-validated until this
 passes).
 
+**SUPERSEDED BY THE PARITY INCIDENT BELOW - do not treat the paragraph
+above as current status.**
+
+Owner IT8 import of the above surfaced a real output-parity failure
+(Feature ON produced 2 files instead of 113 for a real repository). Root
+cause, 6 applied fixes, and 2 review cycles (correctness
+APPROVE_WITH_MINOR_REVISIONS; adversarial cycle 1 REJECT -> cycle 2
+APPROVE) are fully recorded in
+`.memory/incidents/serialization_slice_3_dtel_doma_parity.md`. Current
+HEAD `40934176` plus this session's uncommitted/committed fixes are LOCAL
+ONLY - not yet re-validated on IT8.
+
 ```text
-SER_SLICE_3_STATUS=LOCAL_COMPLETE_AWAITING_CONSOLIDATED_IT8
+SER_SLICE_3_STATUS=BLOCKED_BY_DTEL_DOMA_PARITY
 ```
 
 Do not start further SER-SLICE-3 provider work (CLAS/INTF or any family in
 the Phase 4 ranking) without a new explicit owner instruction, and do not
-report SER-SLICE-3 as SAP-validated/complete before the consolidated IT8
-plan above passes.
+report SER-SLICE-3 as SAP-validated/complete before the owner re-runs the
+parity retest (IT8 validation plan section 0) and confirms byte-identical
+Feature ON/OFF output for the incident's own repository/scope.
 
 Do not resume Variant B / Package E/F backlog topics (below) without a
 new explicit owner instruction naming that topic.

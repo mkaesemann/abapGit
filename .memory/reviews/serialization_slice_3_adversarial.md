@@ -58,3 +58,46 @@ Repurposing an existing constant's semantics without checking for other
   conflict) is not exploitable today and was not further adversarially
   probed beyond confirming it is unreachable in the current call graph.
 ```
+
+## Addendum: parity-incident adversarial review, 2 cycles (2026-08-07)
+
+See `.memory/incidents/serialization_slice_3_dtel_doma_parity.md` for the
+full incident. A dedicated adversarial review actively attempted to
+reproduce the reported 113-vs-2 file loss (and equivalent silent-loss
+shapes) against the parity-incident fixes:
+
+```text
+CYCLE 1 VERDICT=REJECT (2 blocker, 1 major)
+AR-3-001 (BLOCKER) - RFC worker only cleared mt_doma/mt_dtel as a side
+  effect of INJECT_BATCH_FROM_BUFFER running (only when the buffer was
+  non-initial) - a pooled/reused worker session could carry a PRIOR
+  dispatch's real DOMA/DTEL cache into a LATER dispatch whose own buffer
+  was legitimately empty. FIXED via new CLEAR_DD_CACHE, called
+  unconditionally at the top of every Z_ABAPGIT_ORTEC_SER_BATCH
+  invocation.
+AR-3-002 (BLOCKER) - ROUTE_TO_SEQUENTIAL_FALLBACK (the last-resort
+  recovery path, used both directly and as the recovery mechanism for
+  every other guard in this class) unconditionally called
+  mark_object_success after a successful serialize() call even with zero
+  files - the "safety net" itself had the same hole as the original
+  incident. FIXED via an explicit zero-file check routing to
+  mark_object_failures instead.
+AR-3-003 (MAJOR) - MERGE_INTO_MT_FILES returned success without checking
+  the imported file list was non-empty. FIXED via an explicit empty-list
+  check returning rv_merged = ABAP_FALSE (routes to the existing
+  ROUTE_TO_SEQUENTIAL_FALLBACK recovery, which is itself now also
+  guarded).
+
+CYCLE 2 VERDICT=APPROVE (0 blocker, 0 major, 0 minor)
+All three findings independently re-verified CLOSED. End-to-end chain
+re-traced for the exact original incident shape (a DTEL object silently
+producing zero files with RC=0 inside the RFC worker): now terminates
+EITHER in real non-empty output OR a definite FAILURE that trips
+ASSERT_SUCCESSFUL_RUN and discards the whole run with a visible
+exception - never a silent "success, but this object contributed
+nothing." No new regression risk identified from fixes D/E/F themselves
+(no known legitimate zero-file abapGit object type found in source).
+Truncation/collision/missing-entry/partial-hit/stale-cache/merge-loss/
+terminal-miscount all re-attempted against the post-fix source and ruled
+out.
+```

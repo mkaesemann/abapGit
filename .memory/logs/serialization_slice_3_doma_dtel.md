@@ -162,3 +162,33 @@ objects first, IF this repo's own abapGit-on-abapGit import path is used
 for this branch. If a manual empty-object pre-creation step is preferred
 instead (matching this project's established "owner creates empty active
 objects" convention for other slices), the fields above are the exact spec.
+
+## Parity incident and follow-up fixes (2026-08-07)
+
+The owner imported this implementation into IT8 and reported a real
+output-parity failure: Feature ON produced only 2 files instead of 113
+for a real repository (see
+`.memory/incidents/serialization_slice_3_dtel_doma_parity.md` for the full
+investigation). Root-caused to two confirmed defects plus three additional
+latent defects found by adversarial re-review, all fixed:
+
+```text
+Defect A (confirmed) - SERIALIZE never called prepare() on any prefetch
+  class, so mt_doma/mt_dtel were always empty on this path -> FIXED.
+Defect B (confirmed) - extract_for_batch built a non-empty envelope even
+  with nothing cached -> FIXED (returns INITIAL when lt_doma/lt_dtel are
+  both empty).
+AR-3-001 (adversarial, blocker) - worker cache only cleared conditionally
+  -> FIXED (new unconditional CLEAR_DD_CACHE, called every invocation).
+AR-3-002 (adversarial, blocker) - ROUTE_TO_SEQUENTIAL_FALLBACK accepted
+  zero-file success -> FIXED (explicit zero-file check -> failure).
+AR-3-003 (adversarial, major) - MERGE_INTO_MT_FILES accepted an empty
+  imported file list as success -> FIXED (explicit empty-list check).
+```
+
+`ZCL_ABAPGIT_ORTEC_SER_ORCH` also gained a new pure helper
+`IS_ZERO_FILE_SUCCESS_BAD` and `ZCL_ABAPGIT_ORTEC_SER_PREF_EXT` gained
+`CLEAR_DD_CACHE`, both covered by new unit tests. See the incident file for
+the complete fix list, review verdicts (correctness
+APPROVE_WITH_MINOR_REVISIONS, adversarial APPROVE after 2 cycles), and the
+updated owner retest plan.

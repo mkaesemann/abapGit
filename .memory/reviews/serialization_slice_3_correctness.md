@@ -85,3 +85,26 @@ exact wording; `get_errors` re-run clean after each fix. Not re-submitted
 for a second independent subagent review pass (see STATUS above) - flagged
 as an explicit IT8 pre-condition in the consolidated validation plan
 (`.memory/logs/serialization_slice_3_it8_validation_plan.md`).
+
+## Addendum: parity-incident fix review (2026-08-07)
+
+See `.memory/incidents/serialization_slice_3_dtel_doma_parity.md` for the
+full incident. A dedicated correctness+regression review of the parity-
+incident fixes (Fix A/B/C, prepare()/clear() wiring, extract_for_batch's
+all-miss guard, and the zero-file-success guard) was run:
+
+```text
+VERDICT=APPROVE_WITH_MINOR_REVISIONS (0 blocker, 1 major, 1 minor)
+DR-001 (major, ACCEPTED as disclosed scope boundary) - ser_pref/ser_pref_
+  oo (MSAG/CLAS/INTF families) are now prepare()'d/clear()'d on every
+  SERIALIZE() call, matching the classic path's own cost, but are still
+  never extracted/injected into Z_ABAPGIT_ORTEC_SER_BATCH (only pref_ext's
+  DOMA/DTEL envelope is wired) - the bulk SELECTs for those two families
+  benefit only the forced_seq/WAPA/in-process-fallback subset, not the
+  RFC-dispatched majority. Pre-existing SER-SLICE-2 scope boundary,
+  unchanged by this incident fix, not a correctness defect.
+DR-002 (minor, FIXED) - the run-id UUID-generation-failure path in
+  SERIALIZE (before any run context exists) did not call clear() on the
+  three prefetch classes before re-raising - fixed by adding the same
+  three clear() calls to that CATCH block.
+```

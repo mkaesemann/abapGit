@@ -38,3 +38,18 @@ project's existing precedent (SER-SLICE-2's own PS-002/PS-003 were
 similarly accepted without code change). Revisit only if a future slice
 raises the batch-row cap materially or DOMA/DTEL prevalence in a single
 repository proves unusually high in a real IT8 trace.
+
+## Addendum: parity-incident fix performance impact (2026-08-07)
+
+The parity-incident Fix A (`.memory/incidents/serialization_slice_3_dtel_
+doma_parity.md`) makes `ZCL_ABAPGIT_ORTEC_SER_ORCH=>SERIALIZE` call
+`prepare()` on all three existing prefetch classes (MSAG/EXT/OO) - a REAL,
+new bulk-SELECT cost on the adaptive batch path that did not exist before
+(previously `prepare()` was never called there at all). This EXACTLY
+matches the cost the classic/OFF path already pays unconditionally
+whenever `is_serial_prefetch_active()` is on, so it is not a NEW class of
+cost, only newly paid on a path that skipped it. Per the correctness
+review's DR-001 (accepted, disclosed), the MSAG/OO families' bulk reads
+currently benefit only the forced_seq/WAPA/in-process-fallback subset of
+objects on this path, not the RFC-dispatched majority - a known,
+non-blocking inefficiency, not a correctness issue.

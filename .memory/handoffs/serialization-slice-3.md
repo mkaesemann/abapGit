@@ -3,10 +3,27 @@
 ```text
 PACKET=COMPACT_HANDOFF_V1
 TASK=SER_SLICE_3_BATCH_PREFETCH_PROVIDERS
-STATUS=LOCAL_COMPLETE_AWAITING_CONSOLIDATED_IT8
+STATUS=BLOCKED_BY_DTEL_DOMA_PARITY_FIXES_APPLIED_AWAITING_RETEST
 BASELINE_HEAD=daef510e9bd50cdef2adcfb26a3f2a01050bb401
 SER_SLICE_2_STATUS=SAP_VALIDATED_COMPLETE_WITH_LATE_CALLBACK_TEST_DEFERRED
 ```
+
+## Parity incident (2026-08-07)
+
+The owner's IT8 import surfaced a real output-parity failure: Feature ON
+produced 2 files instead of 113 for a real repository. Full investigation,
+root cause, fixes, and review verdicts:
+`.memory/incidents/serialization_slice_3_dtel_doma_parity.md`. Six
+corrections applied (prepare()/clear() wiring, extract_for_batch's
+all-miss guard, a new zero-file-success guard in ON_END_OF_BATCH, an
+unconditional worker-side DD-cache clear, and hardened zero-file guards in
+ROUTE_TO_SEQUENTIAL_FALLBACK and MERGE_INTO_MT_FILES). Adversarial review
+cycle 1 REJECTED the first pass (2 blockers found via active attack);
+cycle 2 APPROVED after fixes. Correctness review: APPROVE_WITH_MINOR_
+REVISIONS (1 disclosed, non-blocking performance trade-off). Do NOT
+report SER-SLICE-3 as SAP-validated/complete until the owner re-runs the
+parity retest (IT8 validation plan section 0) against this exact
+repository/scope and confirms byte-identical Feature ON/OFF output.
 
 ## Summary
 
@@ -100,9 +117,12 @@ ADVERSARIAL_COVERAGE=covered via the design review (one cycle, fixed) and
 
 ## Next action
 
-Owner runs the consolidated IT8 validation plan
-(`.memory/logs/serialization_slice_3_it8_validation_plan.md`): create the
-3 new DDIC objects, import/activate in the stated order, run ABAP Unit +
-ATC, execute the functional/performance parity runs, then report back
-using that file's decision matrix. Do not report SER-SLICE-3 as SAP-
-validated/complete before that.
+Owner runs the mandatory parity retest FIRST (section 0 of
+`.memory/logs/serialization_slice_3_it8_validation_plan.md`) against the
+exact same repository/scope as the incident screenshots, confirming
+byte-identical Feature ON/OFF output. Only then proceed to the rest of the
+consolidated IT8 validation plan (create the 3 new DDIC objects,
+import/activate in the stated order, run ABAP Unit + ATC, execute the
+functional/performance parity runs, then report back using that file's
+decision matrix). Do not report SER-SLICE-3 as SAP-validated/complete
+before that.

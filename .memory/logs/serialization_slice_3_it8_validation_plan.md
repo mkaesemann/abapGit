@@ -7,7 +7,38 @@ SCOPE=DOMA/DTEL batch prefetch provider only (CLAS/INTF and all other
   families are DEFERRED, not part of this validation pass - see
   serialization_slice_3_clas_intf.md and serialization_slice_3_object_
   ranking.md)
-STATUS=LOCAL_COMPLETE_AWAITING_CONSOLIDATED_IT8
+STATUS=SUPERSEDED_BY_PARITY_INCIDENT_RETEST - the original IT8 run using
+  this plan surfaced a real output-parity failure (Feature ON produced 2
+  files instead of 113 for a real repository). Root cause, fixes, and
+  reviews are recorded in
+  `.memory/incidents/serialization_slice_3_dtel_doma_parity.md`. THIS
+  PLAN NOW REQUIRES A FULL RE-RUN (not just a delta) against the fixed
+  source, using the EXACT SAME repository/branch/scope as the incident
+  screenshots, before SER-SLICE-3 can be considered SAP-validated.
+```
+
+## 0. Mandatory parity retest (do this FIRST, before re-running sections 1-7 below)
+
+```text
+SCOPE=the exact same repository/branch/filter scope as the incident
+  screenshots (OS4 6.0, development/6.0.x, /LOT/OS)
+STEPS=
+  1. Activate the corrected DDIC/classes/includes in dependency order
+     (section 1 below, unchanged).
+  2. Run Feature OFF (mv_serial_batch_active = abap_false) - record the
+     exact file count and full file list/paths for this scope. This is
+     now the REQUIRED baseline (previously implicitly assumed correct -
+     now must be explicitly re-captured for a byte-level comparison).
+  3. Run Feature ON (mv_serial_batch_active = abap_true) for the SAME
+     scope - record the exact file count and full file list/paths.
+  4. Compare: same requested object set, same generated file set, same
+     paths/filenames, byte-identical payloads, same item metadata, no
+     duplicate or missing files. "More than 2 files" is NOT the
+     acceptance criterion - full parity with step 2's baseline is.
+  5. If parity holds, proceed to sections 1-7 below (ABAP Unit/ATC/
+     functional runs) as originally planned. If parity FAILS again,
+     STOP and report the new failure shape (file counts, which specific
+     objects differ) rather than assuming it is the same root cause.
 ```
 
 Do not report SER-SLICE-3 as SAP-validated/complete until every step below
@@ -271,11 +302,17 @@ DOMA/DTEL provider:
 ## 8. Owner action required
 
 ```text
-OWNER_ACTION_REQUIRED=RUN_CONSOLIDATED_IT8_VALIDATION
-NEXT=create the 3 new DDIC objects (section 1), import/activate in the
-  stated order, run ABAP Unit + ATC (sections 2-3), execute the
-  functional/performance runs (sections 4-5), confirm section 6, then
-  report back using the decision matrix (section 7) so this file's
-  STATUS can be updated to SAP_VALIDATED_COMPLETE (or FIX_AND_RETEST with
-  the specific failing case attached).
+OWNER_ACTION_REQUIRED=RUN_PARITY_RETEST_THEN_CONSOLIDATED_IT8_VALIDATION
+NEXT=run section 0 (mandatory parity retest) FIRST against the fixed
+  source (import the 3 corrections in this pass: CLEAR_DD_CACHE +
+  unconditional worker-side clear, ROUTE_TO_SEQUENTIAL_FALLBACK's
+  zero-file guard, MERGE_INTO_MT_FILES's empty-import guard, plus the
+  original prepare()/extract_for_batch fixes). Only once section 0 shows
+  byte-identical Feature ON/OFF output for the incident's own repository
+  scope, proceed to create the 3 new DDIC objects (section 1),
+  import/activate in the stated order, run ABAP Unit + ATC (sections
+  2-3), execute the remaining functional/performance runs (sections 4-5),
+  confirm section 6, then report back using the decision matrix (section
+  7) so this file's STATUS can be updated to SAP_VALIDATED_COMPLETE (or
+  FIX_AND_RETEST with the specific failing case attached).
 ```
