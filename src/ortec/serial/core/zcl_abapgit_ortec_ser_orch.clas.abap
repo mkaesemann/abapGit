@@ -647,17 +647,29 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "!   DOMA/DTEL batch envelope (SER-SLICE-3, serialization_slice_3_
     "!   provider_contract.md &sect;4) - computed once by BEFORE_DISPATCH
     "!   via EXTRACT_FOR_BATCH and threaded through unchanged.
+    "! @parameter iv_prefetch_buffer_oo_batch | ZCL_ABAPGIT_ORTEC_SER_PREF_OO's
+    "!   CLAS/INTF batch envelope (SER-SLICE-3 Phase 4,
+    "!   serialization_slice_3_clas_intf.md) - computed once by
+    "!   BEFORE_DISPATCH via EXTRACT_FOR_BATCH and threaded through
+    "!   unchanged, mirroring IV_PREFETCH_BUFFER_DD exactly.
+    "! @parameter iv_prefetch_buffer_msag | ZCL_ABAPGIT_ORTEC_SER_PREF's
+    "!   MSAG batch envelope (SER-SLICE-3 Phase 6,
+    "!   serialization_slice_3_msag.md) - computed once by BEFORE_DISPATCH
+    "!   via EXTRACT_FOR_BATCH and threaded through unchanged, mirroring
+    "!   IV_PREFETCH_BUFFER_DD/IV_PREFETCH_BUFFER_OO_BATCH exactly.
     "! @raising zcx_abapgit_exception | Batch-level dispatch failure (e.g.
     "!   STARTING NEW TASK could not be issued at all)
     CLASS-METHODS dispatch_batch
-      IMPORTING iv_run_id              TYPE sysuuid_x16
-                it_object_keys         TYPE zif_abapgit_definitions=>ty_tadir_tt
-                iv_attempt             TYPE i
-                iv_batch_id            TYPE char32
-                iv_prefetch_buffer     TYPE xstring OPTIONAL
-                iv_prefetch_buffer_ext TYPE xstring OPTIONAL
-                iv_prefetch_buffer_oo  TYPE xstring OPTIONAL
-                iv_prefetch_buffer_dd  TYPE xstring OPTIONAL
+      IMPORTING iv_run_id                   TYPE sysuuid_x16
+                it_object_keys              TYPE zif_abapgit_definitions=>ty_tadir_tt
+                iv_attempt                  TYPE i
+                iv_batch_id                 TYPE char32
+                iv_prefetch_buffer          TYPE xstring OPTIONAL
+                iv_prefetch_buffer_ext      TYPE xstring OPTIONAL
+                iv_prefetch_buffer_oo       TYPE xstring OPTIONAL
+                iv_prefetch_buffer_dd       TYPE xstring OPTIONAL
+                iv_prefetch_buffer_oo_batch TYPE xstring OPTIONAL
+                iv_prefetch_buffer_msag     TYPE xstring OPTIONAL
       RAISING   zcx_abapgit_exception.
 
     "! Builds a globally unique TASK_NAME by incrementing MV_NEXT_TASK_
@@ -848,7 +860,6 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     DATA lt_batches     TYPE zcl_abapgit_ortec_ser_planner=>tt_batch.
     DATA lv_ready       TYPE i.
     DATA lv_wait_result TYPE i.
-    DATA lv_use_ortec_prefetch TYPE abap_bool.
 
     " SER-SLICE-3 parity incident fix (serialization_slice_3_dtel_doma_
     " parity.md): this entry point never called PREPARE on any of the
@@ -857,18 +868,18 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     " DTEL/CLAS/INTF/MSAG/etc. object on the adaptive batch path was an
     " unconditional MISS, exactly mirroring what the standard sequential/
     " parallel path already does before its own per-object loop.
-    lv_use_ortec_prefetch = zcl_abapgit_ortec_git_switch=>is_serial_prefetch_active( ).
-    IF lv_use_ortec_prefetch = abap_true.
-      zcl_abapgit_ortec_ser_pref=>prepare(
-        it_tadir    = it_tadir
-        iv_language = is_i18n_params-main_language ).
-      zcl_abapgit_ortec_ser_pref_ext=>prepare(
-        it_tadir    = it_tadir
-        iv_language = is_i18n_params-main_language ).
-      zcl_abapgit_ortec_ser_pref_oo=>prepare(
-        it_tadir    = it_tadir
-        iv_language = is_i18n_params-main_language ).
-    ENDIF.
+    " SER-SLICE-3 Phase 7: this is the only production caller that ever
+    " turns the shared prefetch/WAPA gate on - always unconditional here.
+    zcl_abapgit_ortec_ser_pref=>prepare(
+      it_tadir    = it_tadir
+      iv_language = is_i18n_params-main_language ).
+    zcl_abapgit_ortec_ser_pref_ext=>prepare(
+      it_tadir    = it_tadir
+      iv_language = is_i18n_params-main_language ).
+    zcl_abapgit_ortec_ser_pref_oo=>prepare(
+      it_tadir    = it_tadir
+      iv_language = is_i18n_params-main_language ).
+    zcl_abapgit_ortec_git_switch=>set_serial_prefetch_active( abap_true ).
 
     TRY.
         lv_run_id = cl_system_uuid=>create_uuid_x16_static( ).
@@ -878,11 +889,10 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
         " nothing for DISCARD_RUN_STATE to clean up, but the providers
         " were already PREPARE()'d above - CLEAR them here too, not only
         " on the run-established failure path below.
-        IF lv_use_ortec_prefetch = abap_true.
-          zcl_abapgit_ortec_ser_pref=>clear( ).
-          zcl_abapgit_ortec_ser_pref_ext=>clear( ).
-          zcl_abapgit_ortec_ser_pref_oo=>clear( ).
-        ENDIF.
+        zcl_abapgit_ortec_ser_pref=>clear( ).
+        zcl_abapgit_ortec_ser_pref_ext=>clear( ).
+        zcl_abapgit_ortec_ser_pref_oo=>clear( ).
+        zcl_abapgit_ortec_git_switch=>set_serial_prefetch_active( abap_false ).
         zcx_abapgit_exception=>raise( 'ORTEC batch: could not generate a run id' ).
     ENDTRY.
 
@@ -894,19 +904,6 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
                      worker_count           = iv_max_processes
                      expected_count         = count_expected_objects( it_tadir ) ) INTO TABLE mt_run_context.
     ASSIGN mt_run_context[ run_id = lv_run_id ] TO FIELD-SYMBOL(<ls_ctx>).
-
-    " SER-SLICE-3 DTEL/DOMA parity fix: mirror ZCL_ABAPGIT_SERIALIZE~SERIALIZE's own
-    " non-batch PREPARE() call so batch-dispatched DOMA/DTEL objects get the same
-    " prefetch-HIT data ZCL_ABAPGIT_ORTEC_SER_PREF_EXT=>EXTRACT_FOR_BATCH expects to
-    " find - without this, every DOMA/DTEL object silently falls back to each
-    " object's own raw DB read, which is not proven byte-identical to the prefetched
-    " result and caused a real output-parity regression (see
-    " serialization_slice_3_dtel_doma_parity.md).
-    IF zcl_abapgit_ortec_git_switch=>is_serial_prefetch_active( ) = abap_true.
-      zcl_abapgit_ortec_ser_pref_ext=>prepare(
-        it_tadir    = it_tadir
-        iv_language = is_i18n_params-main_language ).
-    ENDIF.
 
     TRY.
         ls_partition = partition_objects(
@@ -963,18 +960,16 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
           rt_files = <ls_ctx>-files.
         ENDIF.
         purge_run_state( lv_run_id ).
-        IF lv_use_ortec_prefetch = abap_true.
-          zcl_abapgit_ortec_ser_pref=>clear( ).
-          zcl_abapgit_ortec_ser_pref_ext=>clear( ).
-          zcl_abapgit_ortec_ser_pref_oo=>clear( ).
-        ENDIF.
+        zcl_abapgit_ortec_ser_pref=>clear( ).
+        zcl_abapgit_ortec_ser_pref_ext=>clear( ).
+        zcl_abapgit_ortec_ser_pref_oo=>clear( ).
+        zcl_abapgit_ortec_git_switch=>set_serial_prefetch_active( abap_false ).
       CATCH zcx_abapgit_exception INTO DATA(lx_run_failure).
         discard_run_state( lv_run_id ).
-        IF lv_use_ortec_prefetch = abap_true.
-          zcl_abapgit_ortec_ser_pref=>clear( ).
-          zcl_abapgit_ortec_ser_pref_ext=>clear( ).
-          zcl_abapgit_ortec_ser_pref_oo=>clear( ).
-        ENDIF.
+        zcl_abapgit_ortec_ser_pref=>clear( ).
+        zcl_abapgit_ortec_ser_pref_ext=>clear( ).
+        zcl_abapgit_ortec_ser_pref_oo=>clear( ).
+        zcl_abapgit_ortec_git_switch=>set_serial_prefetch_active( abap_false ).
         CLEAR rt_files.
         RAISE EXCEPTION lx_run_failure.
     ENDTRY.
@@ -1369,6 +1364,20 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     DATA(lv_prefetch_buffer_dd) = zcl_abapgit_ortec_ser_pref_ext=>extract_for_batch( it_object_keys ).
     lv_actual_bytes = xstrlen( lv_prefetch_buffer_dd ).
 
+    " SER-SLICE-3 Phase 4 (serialization_slice_3_clas_intf.md): the CLAS/
+    " INTF batch buffer is computed the same way (once, reused) but is NOT
+    " yet folded into the C_MAX_ACTUAL_BATCH_BYTES admission check below -
+    " that gate remains scoped to the DD buffer only, exactly as it was
+    " before this slice (disclosed limitation, not a silent gap).
+    DATA(lv_prefetch_buffer_oo_batch) = zcl_abapgit_ortec_ser_pref_oo=>extract_for_batch( it_object_keys ).
+
+    " SER-SLICE-3 Phase 6 (serialization_slice_3_msag.md): the MSAG batch
+    " buffer is computed the same way (once, reused) and is likewise NOT
+    " folded into the C_MAX_ACTUAL_BATCH_BYTES admission check below -
+    " same disclosed limitation as IV_PREFETCH_BUFFER_OO_BATCH, not a
+    " silent gap.
+    DATA(lv_prefetch_buffer_msag) = zcl_abapgit_ortec_ser_pref=>extract_for_batch( it_object_keys ).
+
     IF lv_actual_bytes > c_max_actual_batch_bytes AND lines( it_object_keys ) > 1.
       IF split_depth_at_cap( iv_split_depth ) = abap_true.
         route_to_sequential_fallback( iv_run_id = iv_run_id it_object_keys = it_object_keys ).
@@ -1396,11 +1405,13 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    dispatch_batch( iv_run_id             = iv_run_id
-                     it_object_keys        = it_object_keys
-                     iv_attempt            = iv_attempt
-                     iv_batch_id           = iv_batch_id
-                     iv_prefetch_buffer_dd = lv_prefetch_buffer_dd ).
+    dispatch_batch( iv_run_id                   = iv_run_id
+                     it_object_keys              = it_object_keys
+                     iv_attempt                  = iv_attempt
+                     iv_batch_id                 = iv_batch_id
+                     iv_prefetch_buffer_dd       = lv_prefetch_buffer_dd
+                     iv_prefetch_buffer_oo_batch = lv_prefetch_buffer_oo_batch
+                     iv_prefetch_buffer_msag     = lv_prefetch_buffer_msag ).
   ENDMETHOD.
 
   METHOD split_depth_at_cap.
@@ -1471,6 +1482,8 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
           iv_prefetch_buffer_ext  = iv_prefetch_buffer_ext
           iv_prefetch_buffer_oo   = iv_prefetch_buffer_oo
           iv_prefetch_buffer_dd   = iv_prefetch_buffer_dd
+          iv_prefetch_buffer_oo_batch = iv_prefetch_buffer_oo_batch
+          iv_prefetch_buffer_msag = iv_prefetch_buffer_msag
           iv_input_row_count      = lines( it_object_keys )
           iv_input_version        = 1
         EXCEPTIONS

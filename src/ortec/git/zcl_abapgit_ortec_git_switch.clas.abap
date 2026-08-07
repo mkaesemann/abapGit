@@ -15,6 +15,11 @@ CLASS zcl_abapgit_ortec_git_switch DEFINITION
           label TYPE string VALUE 'Use Persistent Object Cache',
           hint  TYPE string VALUE 'Use ZAOG_* persisted object cache for this repository (per user setting)',
         END OF settings,
+        BEGIN OF serial_batch_settings,
+          name  TYPE string VALUE 'use_serial_batch',
+          label TYPE string VALUE 'Use ORTEC Adaptive Batch Serialization',
+          hint  TYPE string VALUE 'Use the ORTEC adaptive batch serializer for this repository (per-repository setting, default off)',
+        END OF serial_batch_settings,
       END OF cs_info.
 
     "! Local-object bulk-exists optimization switches.
@@ -90,22 +95,34 @@ CLASS zcl_abapgit_ortec_git_switch DEFINITION
 
     "! Check if serializer prefetch is enabled in this internal session.
     "! Defaults to ABAP_FALSE so standard abapGit behavior is unchanged.
+    "! In normal production execution, only ZCL_ABAPGIT_ORTEC_SER_ORCH=>
+    "! SERIALIZE turns this on, for the duration of its own run (mirroring
+    "! its existing prepare()/clear() lifecycle) - see SER-SLICE-3 Phase 7.
     "! @parameter rv_active |
     "! ABAP_TRUE if serializer prefetch is enabled.
     CLASS-METHODS is_serial_prefetch_active
       RETURNING VALUE(rv_active) TYPE abap_bool.
 
+    "! Delegates to the same flag as IS_SERIAL_PREFETCH_ACTIVE (SER-SLICE-3
+    "! Phase 7): WAPA replacement is only active for the duration of an
+    "! ORCH batch run, the single source of truth for both gates.
     CLASS-METHODS is_wapa_active
       RETURNING VALUE(rv_active) TYPE abap_bool.
 
     "! Check if the SER-SLICE-2 adaptive batch serialization path is
-    "! enabled in this internal session. Defaults to ABAP_FALSE - this is
-    "! new, not-yet-IT8-validated behavior, so it must be explicitly
-    "! opted into; the existing sequential/parallel path is always used
-    "! when this is off.
+    "! enabled for a repository. When IV_URL is supplied, this reads the
+    "! persisted per-repository "Use ORTEC Adaptive Batch Serialization"
+    "! setting (default OFF). Production callers must always pass IV_URL.
+    "! The no-URL fallback (returning the legacy MV_SERIAL_BATCH_ACTIVE
+    "! CLASS-DATA) exists only as a test seam for the small number of
+    "! existing unit tests/callers that construct a controlled state
+    "! without a repository URL.
+    "! @parameter iv_url |
+    "! Repository URL. Optional test-seam-only fallback when omitted.
     "! @parameter rv_active |
     "! ABAP_TRUE if the adaptive batch path is enabled.
     CLASS-METHODS is_serial_batch_active
+      IMPORTING iv_url           TYPE string OPTIONAL
       RETURNING VALUE(rv_active) TYPE abap_bool.
 
     "! Enable or disable the SER-SLICE-2 adaptive batch serialization path
@@ -132,6 +149,8 @@ CLASS zcl_abapgit_ortec_git_switch DEFINITION
     CLASS-METHODS avoid_timeout.
 
     "! Enable or disable serializer prefetch in this internal session.
+    "! Production caller is exclusively ZCL_ABAPGIT_ORTEC_SER_ORCH=>SERIALIZE,
+    "! which sets this TRUE on entry and FALSE again on every exit path.
     "! @parameter iv_active |
     "! ABAP_TRUE enables the guarded serialization prefetch hook.
     CLASS-METHODS set_serial_prefetch_active
@@ -155,9 +174,30 @@ CLASS zcl_abapgit_ortec_git_switch DEFINITION
       IMPORTING iv_url     TYPE string
                 iv_enabled TYPE abap_bool.
 
+    "! Read persisted ORTEC adaptive batch serialization flag for a repository.
+    "! @parameter iv_url |
+    "! Repository URL.
+    "! @parameter rv_enabled |
+    "! ABAP_TRUE if adaptive batch serialization is enabled for the repository.
+    CLASS-METHODS get_repo_use_serial_batch
+      IMPORTING iv_url            TYPE string
+      RETURNING VALUE(rv_enabled) TYPE abap_bool.
+
+    "! Persist ORTEC adaptive batch serialization flag for a repository.
+    "! @parameter iv_url |
+    "! Repository URL.
+    "! @parameter iv_enabled |
+    "! ABAP_TRUE to enable adaptive batch serialization.
+    CLASS-METHODS set_repo_use_serial_batch
+      IMPORTING iv_url     TYPE string
+                iv_enabled TYPE abap_bool.
+
   PRIVATE SECTION.
     CLASS-DATA mv_bulk_exists_active TYPE abap_bool VALUE abap_true.
-    CLASS-DATA mv_serial_prefetch_active TYPE abap_bool VALUE abap_true.
+    "! SER-SLICE-3 Phase 7 (Finding F-1 fix): defaults OFF so the classic
+    "! per-object path never consults ORTEC caches; only ORCH's own run
+    "! window flips this TRUE, via set_serial_prefetch_active.
+    CLASS-DATA mv_serial_prefetch_active TYPE abap_bool VALUE abap_false.
     CLASS-DATA mv_avoid_timeout_active TYPE abap_bool VALUE abap_true.
     CLASS-DATA mv_serial_batch_active TYPE abap_bool VALUE abap_false.
 
@@ -221,16 +261,38 @@ CLASS zcl_abapgit_ortec_git_switch IMPLEMENTATION.
     ENDTRY.
   ENDMETHOD.
 
+  METHOD get_repo_use_serial_batch.
+    TRY.
+        rv_enabled = zcl_abapgit_persistence_ortec=>get_instance( )->get_repo_use_serial_batch( iv_url ).
+      CATCH cx_root.
+        rv_enabled = abap_false.
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD set_repo_use_serial_batch.
+    TRY.
+        zcl_abapgit_persistence_ortec=>get_instance( )->set_repo_use_serial_batch(
+            iv_url              = iv_url
+            iv_use_serial_batch = iv_enabled ).
+      CATCH cx_root.
+        RETURN.
+    ENDTRY.
+  ENDMETHOD.
+
   METHOD is_active_for_repo.
     rv_active = get_use_repo_cache( iv_url ).
   ENDMETHOD.
 
   METHOD is_wapa_active.
-    rv_active = abap_true.
+    rv_active = mv_serial_prefetch_active.
   ENDMETHOD.
 
   METHOD is_serial_batch_active.
-    rv_active = mv_serial_batch_active.
+    IF iv_url IS NOT INITIAL.
+      rv_active = get_repo_use_serial_batch( iv_url ).
+    ELSE.
+      rv_active = mv_serial_batch_active.
+    ENDIF.
   ENDMETHOD.
 
   METHOD set_serial_batch_active.

@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_TABL" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values>
+   <DD02V>
+    <TABNAME>ZAOG_SER_ENV_BHDR</TABNAME>
+    <DDLANGUAGE>E</DDLANGUAGE>
+    <TABCLASS>INTTAB</TABCLASS>
+    <DDTEXT>ORTEC serialization generic batch prefetch buffer header</DDTEXT>
+    <MASTERLANG>E</MASTERLANG>
+    <EXCLASS>1</EXCLASS>
+   </DD02V>
+   <DD03P_TABLE>
+    <DD03P>
+     <FIELDNAME>WIRE_FORMAT_VERSION</FIELDNAME>
+     <ADMINFIELD>0</ADMINFIELD>
+     <INTTYPE>X</INTTYPE>
+     <INTLEN>000004</INTLEN>
+     <DATATYPE>INT4</DATATYPE>
+     <LENG>000010</LENG>
+     <MASK>  INT4</MASK>
+     <DDTEXT>Wire format version - unknown value rejects the whole buffer</DDTEXT>
+    </DD03P>
+    <DD03P>
+     <FIELDNAME>PROVIDER_ID</FIELDNAME>
+     <ADMINFIELD>0</ADMINFIELD>
+     <INTTYPE>C</INTTYPE>
+     <INTLEN>000016</INTLEN>
+     <DATATYPE>CHAR</DATATYPE>
+     <LENG>000008</LENG>
+     <MASK>  CHAR</MASK>
+     <DDTEXT>Producer identifier, e.g. SER_OO01</DDTEXT>
+    </DD03P>
+    <DD03P>
+     <FIELDNAME>BATCH_ID</FIELDNAME>
+     <ADMINFIELD>0</ADMINFIELD>
+     <INTTYPE>C</INTTYPE>
+     <INTLEN>000064</INTLEN>
+     <DATATYPE>CHAR</DATATYPE>
+     <LENG>000032</LENG>
+     <MASK>  CHAR</MASK>
+     <DDTEXT>Correlation id only, never used for lookup</DDTEXT>
+    </DD03P>
+    <DD03P>
+     <FIELDNAME>OBJECT_COUNT</FIELDNAME>
+     <ADMINFIELD>0</ADMINFIELD>
+     <INTTYPE>X</INTTYPE>
+     <INTLEN>000004</INTLEN>
+     <DATATYPE>INT4</DATATYPE>
+     <LENG>000010</LENG>
+     <MASK>  INT4</MASK>
+     <DDTEXT>Declared entry-row count, cross-checked against ENTRIES</DDTEXT>
+    </DD03P>
+   </DD03P_TABLE>
+  </asx:values>
+ </asx:abap>
+</abapGit>

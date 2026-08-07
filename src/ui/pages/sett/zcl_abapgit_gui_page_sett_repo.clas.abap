@@ -247,7 +247,11 @@ CLASS zcl_abapgit_gui_page_sett_repo IMPLEMENTATION.
     ro_form->checkbox(
       iv_name  = zcl_abapgit_ortec_git_switch=>cs_info-settings-name
       iv_label = zcl_abapgit_ortec_git_switch=>cs_info-settings-label
-      iv_hint  = zcl_abapgit_ortec_git_switch=>cs_info-settings-hint ).
+      iv_hint  = zcl_abapgit_ortec_git_switch=>cs_info-settings-hint
+    )->checkbox(
+      iv_name  = zcl_abapgit_ortec_git_switch=>cs_info-serial_batch_settings-name
+      iv_label = zcl_abapgit_ortec_git_switch=>cs_info-serial_batch_settings-label
+      iv_hint  = zcl_abapgit_ortec_git_switch=>cs_info-serial_batch_settings-hint ).
 
     ro_form->command(
       iv_label       = 'Save Settings'
@@ -374,6 +378,10 @@ CLASS zcl_abapgit_gui_page_sett_repo IMPLEMENTATION.
       iv_key = zcl_abapgit_ortec_git_switch=>cs_info-settings-name
       iv_val = |{ zcl_abapgit_ortec_git_switch=>get_use_repo_cache( mi_repo->ms_data-url ) }| ).
 
+    ro_form_data->set(
+      iv_key = zcl_abapgit_ortec_git_switch=>cs_info-serial_batch_settings-name
+      iv_val = |{ zcl_abapgit_ortec_git_switch=>get_repo_use_serial_batch( mi_repo->ms_data-url ) }| ).
+
   ENDMETHOD.
 
 
@@ -402,6 +410,10 @@ CLASS zcl_abapgit_gui_page_sett_repo IMPLEMENTATION.
     zcl_abapgit_ortec_git_switch=>set_use_repo_cache(
       iv_url     = mi_repo->ms_data-url
       iv_enabled = CONV abap_bool( mo_form_data->get( zcl_abapgit_ortec_git_switch=>cs_info-settings-name ) ) ).
+
+    zcl_abapgit_ortec_git_switch=>set_repo_use_serial_batch(
+      iv_url     = mi_repo->ms_data-url
+      iv_enabled = CONV abap_bool( mo_form_data->get( zcl_abapgit_ortec_git_switch=>cs_info-serial_batch_settings-name ) ) ).
 
     lt_i18n_langs = zcl_abapgit_lxe_texts=>convert_lang_string_to_table(
       iv_langs              = mo_form_data->get( c_id-i18n_langs )

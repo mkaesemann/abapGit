@@ -60,6 +60,7 @@ CLASS ltcl_ser_orch DEFINITION FINAL
     METHODS split_depth_at_cap_true         FOR TESTING.
     METHODS split_depth_above_cap_true      FOR TESTING.
     METHODS before_dispatch_dd_buf_empty    FOR TESTING.
+    METHODS before_dispatch_oo_buf_empty    FOR TESTING.
 
     METHODS zero_file_success_flagged    FOR TESTING.
     METHODS nonzero_file_not_flagged      FOR TESTING.
@@ -848,7 +849,34 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
     cl_abap_unit_assert=>assert_initial( zcl_abapgit_ortec_ser_orch=>mt_dispatch ).
   ENDMETHOD.
 
-  METHOD zero_file_success_flagged.
+  METHOD before_dispatch_oo_buf_empty.
+    " SER-SLICE-3 Phase 4 (serialization_slice_3_clas_intf.md) - mirrors
+    " BEFORE_DISPATCH_DD_BUF_EMPTY exactly, for the new CLAS/INTF batch
+    " buffer: PREPARE() was never called on ZCL_ABAPGIT_ORTEC_SER_PREF_OO,
+    " so EXTRACT_FOR_BATCH must extract to an INITIAL (0-byte) buffer with
+    " no DB access, and BEFORE_DISPATCH must still reach DISPATCH_BATCH's
+    " real MT_DISPATCH insert for a broken (non-existent) run.
+    zcl_abapgit_ortec_ser_pref_oo=>clear( ).
+
+    DATA(lv_run) = build_run_id( ).
+    DATA(lt_keys) = VALUE zif_abapgit_definitions=>ty_tadir_tt(
+                              ( build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'ZZZ' ) ) ).
+
+    cl_abap_unit_assert=>assert_initial(
+      zcl_abapgit_ortec_ser_pref_oo=>extract_for_batch( lt_keys ) ).
+
+    TRY.
+        zcl_abapgit_ortec_ser_orch=>before_dispatch(
+            iv_run_id      = lv_run
+            it_object_keys = lt_keys
+            iv_attempt     = 1
+            iv_batch_id    = 'B1' ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_exc_oo).
+        cl_abap_unit_assert=>fail( msg = lx_exc_oo->get_text( ) ).
+    ENDTRY.
+
+    cl_abap_unit_assert=>assert_initial( zcl_abapgit_ortec_ser_orch=>mt_dispatch ).
+  ENDMETHOD.
     " SER-SLICE-3 parity incident (serialization_slice_3_dtel_doma_
     " parity.md, H5) - the exact suspicious combination: worker reports
     " success (RC = 0) for a REQUESTED object, but zero files.

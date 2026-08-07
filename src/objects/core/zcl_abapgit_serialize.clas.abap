@@ -8,6 +8,7 @@ CLASS zcl_abapgit_serialize DEFINITION
       IMPORTING
         !io_dot_abapgit    TYPE REF TO zcl_abapgit_dot_abapgit OPTIONAL
         !is_local_settings TYPE zif_abapgit_persistence=>ty_repo-local_settings OPTIONAL
+        !iv_repo_url       TYPE string OPTIONAL
       RAISING
         zcx_abapgit_exception .
     METHODS on_end_of_task
@@ -57,6 +58,7 @@ CLASS zcl_abapgit_serialize DEFINITION
     DATA mo_abap_language_version TYPE REF TO zcl_abapgit_abap_language_vers.
     DATA mt_wo_translation_patterns TYPE string_table.
     DATA mv_parallel_broken TYPE abap_bool.
+    DATA mv_repo_url TYPE string.
 
     METHODS add_apack
       IMPORTING
@@ -280,6 +282,7 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
 
     mo_dot_abapgit = io_dot_abapgit.
     ms_local_settings = is_local_settings.
+    mv_repo_url = iv_repo_url.
 
     IF io_dot_abapgit IS BOUND.
       ms_i18n_params = io_dot_abapgit->determine_i18n_parameters( is_local_settings-main_language_only ).
@@ -758,8 +761,7 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
           lv_use_redispatch      TYPE abap_bool,
           lv_last_redispatch_ts  TYPE timestampl,
           lv_current_ts          TYPE timestampl,
-          lv_elapsed_seconds     TYPE i,
-          lv_use_ortec_prefetch  TYPE abap_bool.
+          lv_elapsed_seconds     TYPE i.
 
     FIELD-SYMBOLS: <ls_tadir> LIKE LINE OF it_tadir.
 
@@ -784,7 +786,7 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
       CHANGING
         ct_tadir   = lt_tadir ).
 
-    IF zcl_abapgit_ortec_git_switch=>is_serial_batch_active( ) = abap_true
+    IF zcl_abapgit_ortec_git_switch=>is_serial_batch_active( iv_url = mv_repo_url ) = abap_true
        AND lv_max > 1
        AND mv_parallel_broken = abap_false.
       " ORTEC SER-SLICE-2 minimal hook: delegate the whole call to the
@@ -802,78 +804,51 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    lv_use_ortec_prefetch = zcl_abapgit_ortec_git_switch=>is_serial_prefetch_active( ).
-    IF lv_use_ortec_prefetch = abap_true.
-      zcl_abapgit_ortec_ser_pref=>prepare(
-        it_tadir    = lt_tadir
-        iv_language = ms_i18n_params-main_language ).
-      zcl_abapgit_ortec_ser_pref_ext=>prepare(
-        it_tadir    = lt_tadir
-        iv_language = ms_i18n_params-main_language ).
-      zcl_abapgit_ortec_ser_pref_oo=>prepare(
-        it_tadir    = lt_tadir
-        iv_language = ms_i18n_params-main_language ).
-    ENDIF.
+    lv_count = lines( lt_tadir ).
 
-    TRY.
-        lv_count = lines( lt_tadir ).
+    li_progress = zcl_abapgit_progress=>get_instance( lv_count ).
 
-        li_progress = zcl_abapgit_progress=>get_instance( lv_count ).
+    lo_timer = zcl_abapgit_timer=>create(
+      iv_text  = 'Serialize:'
+      iv_count = lv_count )->start( ).
 
-        lo_timer = zcl_abapgit_timer=>create(
-          iv_text  = 'Serialize:'
-          iv_count = lv_count )->start( ).
+    LOOP AT lt_tadir ASSIGNING <ls_tadir>.
 
-        LOOP AT lt_tadir ASSIGNING <ls_tadir>.
+      IF lv_use_redispatch = abap_true.
+        GET TIME STAMP FIELD lv_current_ts.
+        lv_elapsed_seconds = cl_abap_tstmp=>subtract(
+          tstmp1 = lv_current_ts
+          tstmp2 = lv_last_redispatch_ts ).
 
-          IF lv_use_redispatch = abap_true.
-            GET TIME STAMP FIELD lv_current_ts.
-            lv_elapsed_seconds = cl_abap_tstmp=>subtract(
-              tstmp1 = lv_current_ts
-              tstmp2 = lv_last_redispatch_ts ).
-
-            IF lv_elapsed_seconds >= 300.
-              zcl_abapgit_ortec_git_switch=>avoid_timeout( ).
-              GET TIME STAMP FIELD lv_last_redispatch_ts.
-            ENDIF.
-          ENDIF.
-
-          IF lv_max = 1 OR mv_parallel_broken = abap_true OR is_no_parallel( <ls_tadir>-object ) = abap_true.
-            li_progress->show(
-              iv_current = sy-tabix
-              iv_text    = |Serialize { <ls_tadir>-obj_name }, { lv_max } thread| ).
-            run_sequential( <ls_tadir> ).
-          ELSE.
-            li_progress->show(
-              iv_current = sy-tabix
-              iv_text    = |Serialize { <ls_tadir>-obj_name }, { lv_max } threads| ).
-            run_parallel(
-              is_tadir = <ls_tadir>
-              iv_task  = |{ sy-tabix }| ).
-            WAIT UNTIL mv_free > 0 UP TO 120 SECONDS.
-          ENDIF.
-        ENDLOOP.
-
-        li_progress->off( ).
-
-        WAIT UNTIL mv_free = lv_max UP TO 120 SECONDS.
-        rt_files = mt_files.
-        FREE mt_files.
-
-        lo_timer->end( abap_true ).
-      CLEANUP.
-        IF lv_use_ortec_prefetch = abap_true.
-          zcl_abapgit_ortec_ser_pref=>clear( ).
-          zcl_abapgit_ortec_ser_pref_ext=>clear( ).
-          zcl_abapgit_ortec_ser_pref_oo=>clear( ).
+        IF lv_elapsed_seconds >= 300.
+          zcl_abapgit_ortec_git_switch=>avoid_timeout( ).
+          GET TIME STAMP FIELD lv_last_redispatch_ts.
         ENDIF.
-    ENDTRY.
+      ENDIF.
 
-    IF lv_use_ortec_prefetch = abap_true.
-      zcl_abapgit_ortec_ser_pref=>clear( ).
-      zcl_abapgit_ortec_ser_pref_ext=>clear( ).
-      zcl_abapgit_ortec_ser_pref_oo=>clear( ).
-    ENDIF.
+      IF lv_max = 1 OR mv_parallel_broken = abap_true OR is_no_parallel( <ls_tadir>-object ) = abap_true.
+        li_progress->show(
+          iv_current = sy-tabix
+          iv_text    = |Serialize { <ls_tadir>-obj_name }, { lv_max } thread| ).
+        run_sequential( <ls_tadir> ).
+      ELSE.
+        li_progress->show(
+          iv_current = sy-tabix
+          iv_text    = |Serialize { <ls_tadir>-obj_name }, { lv_max } threads| ).
+        run_parallel(
+          is_tadir = <ls_tadir>
+          iv_task  = |{ sy-tabix }| ).
+        WAIT UNTIL mv_free > 0 UP TO 120 SECONDS.
+      ENDIF.
+    ENDLOOP.
+
+    li_progress->off( ).
+
+    WAIT UNTIL mv_free = lv_max UP TO 120 SECONDS.
+    rt_files = mt_files.
+    FREE mt_files.
+
+    lo_timer->end( abap_true ).
 
   ENDMETHOD.
 ENDCLASS.

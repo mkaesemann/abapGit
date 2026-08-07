@@ -59,6 +59,41 @@ CLASS zcl_abapgit_ortec_ser_pref DEFINITION
     CLASS-METHODS inject_from_buffer
       IMPORTING iv_buffer TYPE xstring.
 
+    "! SER-SLICE-3 Phase 6 (serialization_slice_3_msag.md): extract the
+    "! MSAG batch prefetch envelope for an entire dispatch's TADIR rows in
+    "! ONE call, mirroring ZCL_ABAPGIT_ORTEC_SER_PREF_OO's
+    "! EXTRACT_FOR_BATCH. Filters IT_OBJECT_KEYS to MSAG internally;
+    "! returns an INITIAL buffer with no DB access when none are present,
+    "! when PREPARE() was never called, or when every entry would be a
+    "! MISS (nothing genuinely useful to send). MT_DOKIL long-text
+    "! documentation is explicitly OUT OF SCOPE for this envelope
+    "! (disclosed scope boundary, see serialization_slice_3_msag.md) -
+    "! ACTUAL_BYTES measurement reuses EXTRACT_FOR_OBJECT's own wire shape
+    "! for sizing only, which may itself include DOKIL bytes for this
+    "! object; that does not leak DOKIL data into this envelope's payload.
+    CLASS-METHODS extract_for_batch
+      IMPORTING it_object_keys   TYPE zif_abapgit_definitions=>ty_tadir_tt
+      RETURNING VALUE(rv_buffer) TYPE xstring.
+
+    "! SER-SLICE-3 Phase 6: inject an MSAG batch prefetch envelope
+    "! (produced by EXTRACT_FOR_BATCH) into this session's MT_MSAG cache.
+    "! Unknown wire format version, a failed IMPORT, or a duplicate
+    "! ENTRIES row all reject the WHOLE buffer by raising
+    "! ZCX_ABAPGIT_EXCEPTION - callers must treat this as a full prefetch
+    "! MISS for this buffer only, never propagate. Only MT_MSAG is
+    "! touched - MT_DOKIL/MV_DOKIL_PREPARED are out of scope for this
+    "! envelope and are left completely untouched.
+    CLASS-METHODS inject_batch_from_buffer
+      IMPORTING iv_buffer TYPE xstring
+      RAISING   zcx_abapgit_exception.
+
+    "! SER-SLICE-3 Phase 6 (parity pattern, AR-3-001 / CLEAR_OO_CACHE):
+    "! unconditional CLEAR of MT_MSAG only - narrower than CLEAR, which
+    "! also clears MT_DOKIL/MV_DOKIL_PREPARED/MV_LANGUAGE. The RFC worker
+    "! calls this FIRST, on EVERY invocation, before conditionally
+    "! injecting a new buffer.
+    CLASS-METHODS clear_msag_cache.
+
   PRIVATE SECTION.
     TYPES:
       BEGIN OF ty_msag_cache,
@@ -328,6 +363,127 @@ CLASS zcl_abapgit_ortec_ser_pref IMPLEMENTATION.
     IF lv_language IS NOT INITIAL.
       mv_language = lv_language.
     ENDIF.
+  ENDMETHOD.
+
+
+  METHOD extract_for_batch.
+    DATA lt_entries TYPE zaog_ser_env_bentry_tt.
+    DATA lt_msag    TYPE ty_msag_cache_tt.
+    DATA ls_hdr     TYPE zaog_ser_env_bhdr.
+    DATA lv_any_hit TYPE abap_bool.
+
+    LOOP AT it_object_keys INTO DATA(ls_tadir) WHERE object = 'MSAG'.
+      DATA(ls_entry) = VALUE zaog_ser_env_bentry(
+        obj_type = ls_tadir-object
+        obj_name = ls_tadir-obj_name ).
+
+      READ TABLE mt_msag INTO DATA(ls_msag)
+        WITH TABLE KEY msg_id = CONV rglif-message_id( ls_tadir-obj_name ).
+      IF sy-subrc = 0.
+        ls_entry-state        = 'P'.
+        " Cheapest correct per-object byte measure available: reuse
+        " EXTRACT_FOR_OBJECT's own single-object wire shape purely to
+        " measure this object's serialized size (see this method's own
+        " class-level doc comment for the DOKIL sizing caveat).
+        ls_entry-actual_bytes = xstrlen( extract_for_object( ls_tadir ) ).
+        INSERT ls_msag INTO TABLE lt_msag.
+        lv_any_hit = abap_true.
+      ELSE.
+        ls_entry-state        = 'M'.
+        ls_entry-actual_bytes = 0.
+      ENDIF.
+
+      APPEND ls_entry TO lt_entries.
+    ENDLOOP.
+
+    " A batch with ZERO MSAG objects, or where EVERY entry would be a
+    " MISS (including PREPARE() never having been called at all - MT_MSAG
+    " would then be empty and every lookup above would MISS), has nothing
+    " genuinely useful to send - mirrors ZCL_ABAPGIT_ORTEC_SER_PREF_OO's
+    " and ZCL_ABAPGIT_ORTEC_SER_PREF_EXT's identical EXTRACT_FOR_BATCH
+    " guard (SER-SLICE-3 parity incident Fix B).
+    IF lt_entries IS INITIAL OR lv_any_hit = abap_false.
+      CLEAR rv_buffer.
+      RETURN.
+    ENDIF.
+
+    ls_hdr-wire_format_version = 1.
+    ls_hdr-provider_id         = 'SER_MSAG'.
+    ls_hdr-object_count        = lines( lt_entries ).
+
+    EXPORT hdr      = ls_hdr
+           entries  = lt_entries
+           msag     = lt_msag
+           language = mv_language
+      TO DATA BUFFER rv_buffer COMPRESSION ON.
+  ENDMETHOD.
+
+
+  METHOD inject_batch_from_buffer.
+    DATA ls_hdr            TYPE zaog_ser_env_bhdr.
+    DATA lt_entries        TYPE zaog_ser_env_bentry_tt.
+    DATA lt_msag           TYPE ty_msag_cache_tt.
+    DATA lt_entries_sorted TYPE STANDARD TABLE OF zaog_ser_env_bentry WITH DEFAULT KEY.
+    DATA lv_lines_before   TYPE i.
+    DATA lv_language       TYPE spras.
+
+    CHECK iv_buffer IS NOT INITIAL.
+
+    TRY.
+        IMPORT hdr      = ls_hdr
+               entries  = lt_entries
+               msag     = lt_msag
+               language = lv_language
+          FROM DATA BUFFER iv_buffer.
+      CATCH cx_root INTO DATA(lx_import).
+        zcx_abapgit_exception=>raise(
+          |ORTEC MSAG batch prefetch buffer is corrupt: { lx_import->get_text( ) }| ).
+    ENDTRY.
+    IF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise( 'ORTEC MSAG batch prefetch buffer: IMPORT failed' ).
+    ENDIF.
+
+    IF ls_hdr-wire_format_version <> 1.
+      zcx_abapgit_exception=>raise(
+        |ORTEC MSAG batch prefetch buffer: unknown wire_format_version { ls_hdr-wire_format_version }| ).
+    ENDIF.
+
+    IF ls_hdr-object_count <> lines( lt_entries ).
+      zcx_abapgit_exception=>raise(
+        'ORTEC MSAG batch prefetch buffer: object_count does not match ENTRIES' ).
+    ENDIF.
+
+    " Duplicate check MUST happen before any INSERT INTO mt_msag - a
+    " HASHED TABLE INSERT would otherwise silently collapse a duplicate
+    " instead of rejecting the whole buffer.
+    lt_entries_sorted = CORRESPONDING #( lt_entries ).
+    SORT lt_entries_sorted BY obj_type obj_name.
+    lv_lines_before = lines( lt_entries_sorted ).
+    DELETE ADJACENT DUPLICATES FROM lt_entries_sorted COMPARING obj_type obj_name.
+    IF lines( lt_entries_sorted ) <> lv_lines_before.
+      zcx_abapgit_exception=>raise(
+        'ORTEC MSAG batch prefetch buffer: duplicate entry in ENTRIES' ).
+    ENDIF.
+
+    " Unconditional clear of MT_MSAG only - MT_DOKIL/MV_DOKIL_PREPARED are
+    " out of scope for this envelope (serialization_slice_3_msag.md) and
+    " must survive untouched, unlike CLEAR( )'s full reset. A parallel RFC
+    " worker session can also be reused across many unrelated dispatches
+    " over its lifetime, so MT_MSAG must not keep stale rows either.
+    CLEAR mt_msag.
+
+    LOOP AT lt_msag INTO DATA(ls_msag).
+      INSERT ls_msag INTO TABLE mt_msag.
+    ENDLOOP.
+
+    IF lv_language IS NOT INITIAL.
+      mv_language = lv_language.
+    ENDIF.
+  ENDMETHOD.
+
+
+  METHOD clear_msag_cache.
+    CLEAR mt_msag.
   ENDMETHOD.
 
 

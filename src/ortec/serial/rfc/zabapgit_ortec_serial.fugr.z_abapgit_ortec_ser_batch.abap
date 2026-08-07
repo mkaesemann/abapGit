@@ -16,6 +16,8 @@ FUNCTION z_abapgit_ortec_ser_batch.
 *"     VALUE(IV_PREFETCH_BUFFER_EXT) TYPE  XSTRING OPTIONAL
 *"     VALUE(IV_PREFETCH_BUFFER_OO) TYPE  XSTRING OPTIONAL
 *"     VALUE(IV_PREFETCH_BUFFER_DD) TYPE  XSTRING OPTIONAL
+*"     VALUE(IV_PREFETCH_BUFFER_OO_BATCH) TYPE  XSTRING OPTIONAL
+*"     VALUE(IV_PREFETCH_BUFFER_MSAG) TYPE  XSTRING OPTIONAL
 *"     VALUE(IV_INPUT_ROW_COUNT) TYPE  I
 *"     VALUE(IV_INPUT_VERSION) TYPE  I DEFAULT 1
 *"  EXPORTING
@@ -75,6 +77,37 @@ FUNCTION z_abapgit_ortec_ser_batch.
     ENDTRY.
   ENDIF.
 
+  " SER-SLICE-3 Phase 4 (serialization_slice_3_clas_intf.md): same
+  " unconditional-clear-first pattern as CLEAR_DD_CACHE above - a pooled/
+  " reused worker session must never keep a PRIOR dispatch's CLAS/INTF
+  " cache when THIS dispatch's own buffer is legitimately empty.
+  zcl_abapgit_ortec_ser_pref_oo=>clear_oo_cache( ).
+  IF iv_prefetch_buffer_oo_batch IS NOT INITIAL.
+    TRY.
+        zcl_abapgit_ortec_ser_pref_oo=>inject_batch_from_buffer( iv_prefetch_buffer_oo_batch ).
+      CATCH zcx_abapgit_exception ##NO_HANDLER.
+        " Corrupt/unknown-version CLAS/INTF batch buffer: treat as a full
+        " prefetch MISS for this buffer only - never propagate, the batch
+        " itself must still complete.
+    ENDTRY.
+  ENDIF.
+
+  " SER-SLICE-3 Phase 6 (serialization_slice_3_msag.md): same
+  " unconditional-clear-first pattern as CLEAR_OO_CACHE/CLEAR_DD_CACHE
+  " above - a pooled/reused worker session must never keep a PRIOR
+  " dispatch's MSAG cache when THIS dispatch's own buffer is legitimately
+  " empty. MT_DOKIL/MV_DOKIL_PREPARED are untouched by this call.
+  zcl_abapgit_ortec_ser_pref=>clear_msag_cache( ).
+  IF iv_prefetch_buffer_msag IS NOT INITIAL.
+    TRY.
+        zcl_abapgit_ortec_ser_pref=>inject_batch_from_buffer( iv_prefetch_buffer_msag ).
+      CATCH zcx_abapgit_exception ##NO_HANDLER.
+        " Corrupt/unknown-version MSAG batch buffer: treat as a full
+        " prefetch MISS for this buffer only - never propagate, the batch
+        " itself must still complete.
+    ENDTRY.
+  ENDIF.
+
   ls_i18n_params-main_language         = iv_language.
   ls_i18n_params-main_language_only    = iv_main_language_only.
   ls_i18n_params-suppress_po_comments  = iv_suppress_po_comments.
@@ -98,9 +131,10 @@ FUNCTION z_abapgit_ortec_ser_batch.
         ls_item-abap_language_version = iv_abap_language_vers.
 
         " SER-SLICE-3 (H4 provider contract): report which case actually
-        " applied for THIS object. DOMA/DTEL are the only types with a
-        " batch-scoped prefetch provider today - every other type always
-        " falls back to its own per-object read, with no provider consulted.
+        " applied for THIS object. DOMA/DTEL/CLAS/INTF are the only types
+        " with a batch-scoped prefetch provider today - every other type
+        " always falls back to its own per-object read, with no provider
+        " consulted.
         CASE ls_tadir-object.
           WHEN 'DTEL'.
             IF zcl_abapgit_ortec_ser_pref_ext=>get_dtel_data(
@@ -113,6 +147,32 @@ FUNCTION z_abapgit_ortec_ser_batch.
           WHEN 'DOMA'.
             IF zcl_abapgit_ortec_ser_pref_ext=>get_doma_data(
                  iv_domname  = CONV #( ls_tadir-obj_name )
+                 iv_language = iv_language ) = abap_true.
+              ls_result-provider_hit = 1.
+            ELSE.
+              ls_result-provider_miss = 1.
+            ENDIF.
+          WHEN 'CLAS' OR 'INTF'.
+            " HIT iff ANY of the three description caches found something
+            " for this object - one hit/miss per object, never per
+            " description type (a class legitimately missing all three is
+            " a normal, expected MISS, not a defect).
+            IF zcl_abapgit_ortec_ser_pref_oo=>get_descriptions_class(
+                 iv_clsname  = CONV #( ls_tadir-obj_name )
+                 iv_language = iv_language ) = abap_true
+            OR zcl_abapgit_ortec_ser_pref_oo=>get_descriptions_compo(
+                 iv_clsname  = CONV #( ls_tadir-obj_name )
+                 iv_language = iv_language ) = abap_true
+            OR zcl_abapgit_ortec_ser_pref_oo=>get_descriptions_subco(
+                 iv_clsname  = CONV #( ls_tadir-obj_name )
+                 iv_language = iv_language ) = abap_true.
+              ls_result-provider_hit = 1.
+            ELSE.
+              ls_result-provider_miss = 1.
+            ENDIF.
+          WHEN 'MSAG'.
+            IF zcl_abapgit_ortec_ser_pref=>get_msag_data(
+                 iv_msg_id   = CONV #( ls_tadir-obj_name )
                  iv_language = iv_language ) = abap_true.
               ls_result-provider_hit = 1.
             ELSE.

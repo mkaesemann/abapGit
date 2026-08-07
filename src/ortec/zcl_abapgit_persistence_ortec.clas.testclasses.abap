@@ -48,3 +48,89 @@ CLASS ltcl_user IMPLEMENTATION.
     CALL FUNCTION 'DB_COMMIT'.
   ENDMETHOD.
 ENDCLASS.
+
+CLASS ltcl_serial_batch_setting DEFINITION
+  FOR TESTING
+  RISK LEVEL HARMLESS
+  DURATION SHORT FINAL.
+
+  PRIVATE SECTION.
+    CONSTANTS:
+      c_abap_user TYPE sy-uname VALUE 'ABAPGIT_TEST',
+      c_url_a     TYPE string VALUE 'https://test-serial-batch-a.example.com/repo.git',
+      c_url_b     TYPE string VALUE 'https://test-serial-batch-b.example.com/repo.git'.
+
+    METHODS:
+      roundtrip_set_then_get FOR TESTING RAISING zcx_abapgit_exception,
+      default_off_unknown_url FOR TESTING RAISING zcx_abapgit_exception,
+      repo_a_on_repo_b_off_isolated FOR TESTING RAISING zcx_abapgit_exception,
+      teardown RAISING zcx_abapgit_exception.
+
+ENDCLASS.
+
+CLASS ltcl_serial_batch_setting IMPLEMENTATION.
+
+  METHOD roundtrip_set_then_get.
+
+    DATA mi_user TYPE REF TO zcl_abapgit_persistence_ortec.
+
+    mi_user = zcl_abapgit_persistence_ortec=>get_instance( c_abap_user ).
+    mi_user->set_repo_use_serial_batch(
+      iv_url              = c_url_a
+      iv_use_serial_batch = abap_true ).
+
+    FREE mi_user.
+    mi_user = zcl_abapgit_persistence_ortec=>get_instance( c_abap_user ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = mi_user->get_repo_use_serial_batch( c_url_a )
+      exp = abap_true ).
+
+  ENDMETHOD.
+
+  METHOD default_off_unknown_url.
+
+    DATA mi_user TYPE REF TO zcl_abapgit_persistence_ortec.
+
+    mi_user = zcl_abapgit_persistence_ortec=>get_instance( c_abap_user ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = mi_user->get_repo_use_serial_batch( 'https://never-configured.example.com/repo.git' )
+      exp = abap_false ).
+
+  ENDMETHOD.
+
+  METHOD repo_a_on_repo_b_off_isolated.
+
+    DATA mi_user TYPE REF TO zcl_abapgit_persistence_ortec.
+
+    mi_user = zcl_abapgit_persistence_ortec=>get_instance( c_abap_user ).
+    mi_user->set_repo_use_serial_batch(
+      iv_url              = c_url_a
+      iv_use_serial_batch = abap_true ).
+    mi_user->set_repo_use_serial_batch(
+      iv_url              = c_url_b
+      iv_use_serial_batch = abap_false ).
+
+    FREE mi_user.
+    mi_user = zcl_abapgit_persistence_ortec=>get_instance( c_abap_user ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = mi_user->get_repo_use_serial_batch( c_url_a )
+      exp = abap_true ).
+    cl_abap_unit_assert=>assert_equals(
+      act = mi_user->get_repo_use_serial_batch( c_url_b )
+      exp = abap_false ).
+
+  ENDMETHOD.
+
+  METHOD teardown.
+    " Delete test user settings (correct type, unlike the sibling
+    " ltcl_user teardown above which deletes the wrong DB type).
+    zcl_abapgit_persistence_db=>get_instance( )->delete(
+      iv_type  = zcl_abapgit_persistence_ortec=>c_type_ortec
+      iv_value = c_abap_user ).
+    CALL FUNCTION 'DB_COMMIT'.
+  ENDMETHOD.
+
+ENDCLASS.
