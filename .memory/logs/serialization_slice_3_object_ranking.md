@@ -32,9 +32,34 @@ family.
 | SHLP | None found | Standard DDIC reads only, not currently intercepted | Plausible | Low | Low | Feasible | Low prevalence | Low | DEFER |
 | VIEW | None found | Standard DDIC reads only, not currently intercepted | Plausible but VIEW's own active/inactive semantics need the same care DOMA's DD01V-vs-DD01L distinction required | Low-Medium | Low | Feasible with care | Moderate prevalence | Moderate | DESIGN_REQUIRED (needs its own version-semantics resolution pass, analogous to SER-SLICE-1's DOMA work, before any bulk-read design) |
 
-## Updated ordered ranking (supersedes the discovery-time ranking only in
-that DOMA/DTEL are now IMPLEMENTED and CLAS/INTF are DEFERRED-WITH-REASON,
-not merely "next")
+## Updated ordered ranking (Phase 5, SER-SLICE-3 continuation - supersedes
+the SER-SLICE-3-Phase-4 ranking below only in that CLAS/INTF are now
+IMPLEMENTED and MSAG is IMPLEMENT_NEXT/implemented in Phase 6)
+
+```text
+1. DOMA/DTEL - IMPLEMENTED (owner IT8-debug-validated)
+2. CLAS/INTF - IMPLEMENTED this run (Phase 4)
+3. MSAG - IMPLEMENTED this run (Phase 6) - see
+   .memory/logs/serialization_mandatory_family_assessment.md
+4. TABL/TTYP - DESIGN_REQUIRED, highest-prevalence remaining untouched pair
+5. TRAN - DESIGN_REQUIRED, same low-risk shape as MSAG, not selected this
+   run (MSAG was prioritized per the owner's own explicit naming)
+6. PROG (narrow PROG_LANGS slice only) - GENERIC_BATCH_ONLY
+7. FUGR - MEASURE_FIRST (real trace needed before design)
+8. VIEW - DESIGN_REQUIRED (needs its own version-semantics pass first)
+9. WAPA - ALREADY_OPTIMIZED_IN_BATCH_PATH (singleton-only policy; gate
+   corrected in Phase 7, not a batch-provider candidate)
+10. ENQU/SHLP - DEFER (low prevalence)
+11. DDLS/DCLS - DEFER (needs dedicated discovery, structurally different)
+```
+
+Full field-by-field decision records for all 10 mandatory families
+(DTEL/TABL/TTYP/PROG/DOMA/CLAS/FUGR/MSAG/INTF/WAPA) are in
+`.memory/logs/serialization_mandatory_family_assessment.md` - this file
+retains the original discovery-time ranking table above as historical
+evidence (CONFIRMED_CURRENT for every row not superseded above).
+
+## Original SER-SLICE-3-Phase-4 ranking (superseded only where noted above)
 
 ```text
 1. DOMA/DTEL - IMPLEMENTED this run (Phase 2)
@@ -50,4 +75,4 @@ not merely "next")
 ```
 
 No implementation was authorized or performed for any family in this list
-beyond DOMA/DTEL in this run.
+beyond DOMA/DTEL/CLAS/INTF/MSAG across the full SER-SLICE-3 effort.

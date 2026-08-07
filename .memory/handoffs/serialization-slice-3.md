@@ -1,4 +1,140 @@
-# SER-SLICE-3 — batch prefetch providers (DOMA/DTEL implemented, CLAS/INTF deferred)
+# SER-SLICE-3 — final two-path architecture (repository setting, CLAS/INTF, MSAG, Path 3 removal)
+
+```text
+PACKET=COMPACT_HANDOFF_V1
+TASK=SER_SLICE_3_FINAL_TWO_PATH_ARCHITECTURE
+STATUS=LOCAL_COMPLETE_AWAITING_CONSOLIDATED_IT8
+BASELINE_HEAD=bf436db0632de0098875d97b4a28a8f246eb50a5
+```
+
+## Summary (this continuation)
+
+The DOMA/DTEL parity incident recorded below is `SUPERSEDED_FALSE_ORACLE`
+- owner IT8 debug evidence established the batch serializer's DOMA/DTEL
+output was correct all along; the "113 files" oracle came from the
+legacy ORTEC non-batch path (Path 3), independently confirmed to report
+false MODIFIED results. See
+`.memory/incidents/serialization_slice_3_dtel_doma_parity.md`.
+
+This continuation completed, locally, all 8 authorized phases:
+
+```text
+Phase 0/1: reconciled HEAD, corrected state.md/incident memory.
+Phase 2: full path/hook inventory, `.memory/logs/
+  serialization_final_two_path_audit.md` (Findings F-1/F-2/F-3, binding
+  routing design).
+Phase 3: repository-scoped "Use ORTEC Adaptive Batch Serialization"
+  setting, replacing the global is_serial_batch_active toggle as the
+  production routing decision (default OFF, per-repository, persisted).
+Phase 4: CLAS/INTF batch prefetch provider (versioned multi-object
+  envelope, 21 local tests).
+Phase 5: mandatory 10-family assessment (`.memory/logs/
+  serialization_mandatory_family_assessment.md`) - every family
+  dispositioned, none silently omitted.
+Phase 6: MSAG batch prefetch provider (T100/T100A/T100T only, DOKIL
+  explicitly out of scope, 15 local tests).
+Phase 7: removed the legacy ORTEC non-batch (Path 3) optimization path -
+  is_serial_prefetch_active now defaults OFF and is only turned on by
+  ZCL_ABAPGIT_ORTEC_SER_ORCH for the duration of its own run;
+  is_wapa_active now delegates to the same flag instead of being
+  unconditionally TRUE; the classic path's own prepare()/clear() block
+  is deleted entirely.
+Phase 8: correctness/adversarial/performance reviews (all APPROVE/
+  APPROVE_WITH_MINOR_REVISIONS, 0 blockers/majors), this handoff, the
+  consolidated IT8 validation plan.
+```
+
+## Final architecture
+
+```text
+Repository setting OFF -> pure standard abapGit path only (no ORTEC
+  PREF/PREF_EXT/PREF_OO prepare/inject/lookup, no ORTEC WAPA
+  replacement, no ORTEC batch RFC).
+Repository setting ON  -> ORTEC adaptive batch path only (reviewed
+  providers: DOMA, DTEL, CLAS, INTF, MSAG; ORTEC WAPA replacement as a
+  singleton batch).
+No third hybrid path is reachable - Path 3's own code (the classic
+  path's prefetch prepare()/clear() block) no longer exists.
+```
+
+## What changed (files, this continuation)
+
+```text
+MODIFIED:
+  src/objects/core/zcl_abapgit_serialize.clas.abap
+  src/ortec/git/zcl_abapgit_ortec_git_switch.clas.abap (+.xml)
+  src/ortec/serial/core/zcl_abapgit_ortec_ser_orch.clas.abap
+    (+.testclasses.abap)
+  src/ortec/serial/rfc/zabapgit_ortec_serial.fugr.z_abapgit_ortec_ser_batch.abap
+    (+.xml)
+  src/ortec/serial/zcl_abapgit_ortec_ser_pref_oo.clas.abap
+  src/ortec/serial/zcl_abapgit_ortec_ser_pref.clas.abap
+  src/ortec/zcl_abapgit_persistence_ortec.clas.abap
+    (+.testclasses.abap)
+  src/repo/zcl_abapgit_repo.clas.abap
+  src/ui/pages/sett/zcl_abapgit_gui_page_sett_repo.clas.abap
+CREATED:
+  src/ortec/git/zcl_abapgit_ortec_git_switch.clas.testclasses.abap
+  src/ortec/serial/zcl_abapgit_ortec_ser_pref_oo.clas.testclasses.abap
+  src/ortec/serial/zcl_abapgit_ortec_ser_pref.clas.testclasses.abap
+  src/ortec/serial/core/zaog_ser_env_bhdr.tabl.xml
+  src/ortec/serial/core/zaog_ser_env_bentry.tabl.xml
+  src/ortec/serial/core/zaog_ser_env_bentry_tt.ttyp.xml
+  .memory/logs/serialization_final_two_path_audit.md
+  .memory/logs/serialization_mandatory_family_assessment.md
+  .memory/logs/serialization_repository_setting.md
+  .memory/logs/serialization_slice_3_msag.md
+UPDATED (memory):
+  .memory/incidents/serialization_slice_3_dtel_doma_parity.md
+  .memory/logs/serialization_slice_3_clas_intf.md (now IMPLEMENTED)
+  .memory/logs/serialization_slice_3_object_ranking.md
+  .memory/logs/serialization_slice_3_it8_validation_plan.md (fully
+    consolidated for the whole scope)
+  .memory/reviews/serialization_slice_3_correctness.md
+  .memory/reviews/serialization_slice_3_adversarial.md
+  .memory/reviews/serialization_slice_3_performance.md
+  .memory/state.md
+```
+
+## Honest validation boundary
+
+```text
+GET_ERRORS=CLEAN on every touched/created file
+LIVE_SYNTAX_DRY_RUN=NOT_RUN this session (no live SAP connectivity)
+ABAP_UNIT=NOT_RUN_LIVE this session
+CORRECTNESS_REVIEW=APPROVE_WITH_MINOR_REVISIONS (0 blocker/0 major - see
+  serialization_slice_3_correctness.md)
+ADVERSARIAL_REVIEW=APPROVE_WITH_MINOR_REVISIONS (0 blocker/0 major - see
+  serialization_slice_3_adversarial.md)
+PERFORMANCE_REVIEW=APPROVE (see serialization_slice_3_performance.md,
+  Phase 8 section)
+DIRECT SERIALIZED FILE-SET PARITY for CLAS/INTF/MSAG against a real live
+  object was NOT run (no live connectivity) - this is the primary
+  remaining IT8-only validation gap, same class of boundary DOMA/DTEL had
+  before its own owner-debug validation.
+```
+
+## Global object creation required before IT8
+
+```text
+OWNER_ACTION_REQUIRED=CREATE_GLOBAL_OBJECTS (see section 1 of
+`.memory/logs/serialization_slice_3_it8_validation_plan.md` for the full
+dependency-sorted manifest - this includes both the pre-existing
+ZAOG_SER_DD_* objects, still not yet created on IT8, and the new generic
+ZAOG_SER_ENV_* objects this continuation introduced).
+```
+
+## Next action
+
+Owner creates the global DDIC objects per the manifest, imports/activates
+in the stated order, then runs the consolidated IT8 validation plan
+(`.memory/logs/serialization_slice_3_it8_validation_plan.md`) sections
+1-10 in full. Do not report SER-SLICE-3 as SAP-validated/complete before
+that.
+
+---
+
+## Original DOMA/DTEL-scoped handoff (prior pass, retained for history)
 
 ```text
 PACKET=COMPACT_HANDOFF_V1
