@@ -2,38 +2,57 @@
 
 ```text
 BRANCH=ortec/abapgit_1_133-opt-rework
-CURRENT_HEAD=40934176 (owner "Fix Syntax Issues for SER_SLICE-3" - IT8
-  import/activation corrections, pulled back into local repo)
-LATEST_SAP_VALIDATED_HEAD=daef510e9bd50cdef2adcfb26a3f2a01050bb401
-  (SER-SLICE-2 final: ATC/ABAP_UNIT/FEATURE_OFF/FEATURE_ON_AFTER_RPERF_FIX
-  all PASS; LATE_CALLBACK_TEST deferred by owner, non-blocking).
-  SER-SLICE-3's own DOMA/DTEL provider is NOT YET SAP-validated - see
-  Active topic below and .memory/incidents/serialization_slice_3_dtel_
-  doma_parity.md.
+CURRENT_HEAD=bf436db0632de0098875d97b4a28a8f246eb50a5 (owner "DTEL/DOMA
+  Serialization Fix Helper Changes" - adds a second PREPARE() call on
+  ZCL_ABAPGIT_ORTEC_SER_PREF_EXT and a zero-file MERGE_INTO_MT_FILES
+  guard, on top of this session's own Fix A-F in 5ff237b9)
+LATEST_SAP_VALIDATED_HEAD=bf436db0632de0098875d97b4a28a8f246eb50a5
+  (owner IT8 evidence, SER-SLICE-3 kickoff prompt 2026-08-07:
+  SER_SLICE_2_ATC=PASS, SER_SLICE_2_ABAP_UNIT=PASS,
+  FEATURE_OFF_PURE_STANDARD_PATH=VERIFIED_CORRECT,
+  FEATURE_ON_ADAPTIVE_BATCH_PATH=VERIFIED_CORRECT_FOR_IMPLEMENTED_
+  FAMILIES, RPERF_ILLEGAL_STATEMENT_FIX=PASS,
+  LATE_CALLBACK_TEST=DEFERRED_OWNER_ACCEPTED). The DTEL/DOMA parity
+  incident below is SUPERSEDED_FALSE_ORACLE - do not treat it as an open
+  blocker.
+```
+
+```text
+SERIALIZATION_TARGET_ARCHITECTURE=TWO_PATH_ONLY
+PURE_STANDARD_PATH=VERIFIED_CORRECT_KEEP
+ADAPTIVE_BATCH_PATH=KEEP_AND_EXTEND
+LEGACY_ORTEC_NON_BATCH_PATH=REMOVE_DO_NOT_REPAIR
+DOMA_DTEL_PROVIDER=ACCEPTED
+ACTIVE_PROVIDER_BLOCK=CLAS_INTF_AND_MANDATORY_FAMILY_ASSESSMENT
+REPOSITORY_SETTING_CHECKBOX=OPEN_REQUIRED
+FINAL_PATH_ISOLATION=OPEN_REQUIRED
+LATE_CALLBACK_TEST=DEFERRED_OWNER_ACCEPTED
 ```
 
 ## Active topic
 
 ```text
-TOPIC=SER_SLICE_3_BATCH_PREFETCH_PROVIDERS
-STATUS=BLOCKED_PENDING_RETEST
+TOPIC=SER_SLICE_3_FINAL_TWO_PATH_ARCHITECTURE
+STATUS=IN_PROGRESS
 SER_SLICE_2=SAP_VALIDATED_COMPLETE_WITH_LATE_CALLBACK_TEST_DEFERRED
-SER_SLICE_3=BLOCKED_BY_DTEL_DOMA_PARITY
+SER_SLICE_3=IN_PROGRESS_TWO_PATH_ARCHITECTURE
 ```
 
-SER-SLICE-3's DOMA/DTEL batch provider hit a real output-parity incident
-on owner IT8 import (Feature ON produced 2 files instead of 113 for a
-real repository). Root cause (two confirmed defects: prepare() never
-called in ORCH's batch path; extract_for_batch built a non-empty envelope
-with nothing cached) plus three additional adversarially-found latent
-defects (stale worker cache, zero-file success accepted by the fallback
-path, zero-file success accepted by the merge path) are ALL FIXED locally
-and independently re-reviewed (adversarial cycle 2: APPROVE, 0/0/0).
-Full detail: `.memory/incidents/serialization_slice_3_dtel_doma_parity.md`.
-Do NOT report SER-SLICE-3 as SAP-validated/complete until the owner
-re-runs the parity retest (IT8 validation plan section 0) against the
-exact repository/scope from the incident and confirms byte-identical
-Feature ON/OFF output.
+DOMA/DTEL parity incident: SUPERSEDED_FALSE_ORACLE (owner IT8 debug
+evidence, 2026-08-07). The batch serializer's DOMA/DTEL data was correct
+all along; the previously-trusted "113 files" Feature-OFF oracle came
+from the legacy ORTEC non-batch path (Path 3), which is independently
+known to report false MODIFIED results and is being removed, not
+repaired. Full detail (kept as history, not an open blocker):
+`.memory/incidents/serialization_slice_3_dtel_doma_parity.md`.
+`DOMA_DTEL_PROVIDER=IMPLEMENTED_AND_OWNER_DEBUG_VALIDATED`.
+
+Current work: complete the two-path architecture (pure standard path OFF
+/ adaptive batch path ON, no third hybrid path reachable), a
+repository-scoped setting to replace the global `is_serial_batch_active`/
+`is_serial_prefetch_active` session switches, a CLAS/INTF batch provider,
+the mandatory 10-family assessment, and removal of Path 3. See
+`.memory/handoffs/serialization-slice-3.md` for the live handoff.
 
 SER-SLICE-2 is now SAP_VALIDATED_COMPLETE (owner evidence: ATC=PASS,
 ABAP_UNIT=PASS, FEATURE_OFF_TEST=PASS, FEATURE_ON_AFTER_RPERF_FIX=PASS,
@@ -216,27 +235,31 @@ other requested object families assessed and dispositioned),
 IT8 checklist - nothing above may be claimed SAP-validated until this
 passes).
 
-**SUPERSEDED BY THE PARITY INCIDENT BELOW - do not treat the paragraph
-above as current status.**
+This paragraph and the P2A/Phase-2 paragraphs above it remain accurate for
+what was implemented (DOMA/DTEL provider, wire format, ORCH wiring) -
+only the *incident interpretation* below them changed.
 
-Owner IT8 import of the above surfaced a real output-parity failure
-(Feature ON produced 2 files instead of 113 for a real repository). Root
-cause, 6 applied fixes, and 2 review cycles (correctness
-APPROVE_WITH_MINOR_REVISIONS; adversarial cycle 1 REJECT -> cycle 2
-APPROVE) are fully recorded in
-`.memory/incidents/serialization_slice_3_dtel_doma_parity.md`. Current
-HEAD `40934176` plus this session's uncommitted/committed fixes are LOCAL
-ONLY - not yet re-validated on IT8.
+The DTEL/DOMA parity incident recorded in
+`.memory/incidents/serialization_slice_3_dtel_doma_parity.md` is
+`SUPERSEDED_FALSE_ORACLE` (owner IT8 debug evidence, 2026-08-07): the
+batch serializer's DOMA/DTEL output was correct; the "113 files" oracle
+came from the legacy ORTEC non-batch path (Path 3), independently known
+to report false MODIFIED results. `DOMA_DTEL_PROVIDER=IMPLEMENTED_AND_
+OWNER_DEBUG_VALIDATED`. Current HEAD `bf436db0` includes this session's
+Fix A-F (`5ff237b9`) plus the owner's own follow-up hardening commit.
 
 ```text
-SER_SLICE_3_STATUS=BLOCKED_BY_DTEL_DOMA_PARITY
+SER_SLICE_3_STATUS=IN_PROGRESS_TWO_PATH_ARCHITECTURE
 ```
 
-Do not start further SER-SLICE-3 provider work (CLAS/INTF or any family in
-the Phase 4 ranking) without a new explicit owner instruction, and do not
-report SER-SLICE-3 as SAP-validated/complete before the owner re-runs the
-parity retest (IT8 validation plan section 0) and confirms byte-identical
-Feature ON/OFF output for the incident's own repository/scope.
+Authorized and in progress (this session, explicit owner instruction
+SER-SLICE-3 continuation): final two-path inventory/audit, a
+repository-scoped adaptive-batch setting, CLAS/INTF batch provider, the
+mandatory 10-family assessment, further justified providers, and removal
+of the legacy ORTEC non-batch (Path 3) optimization path. See
+`.memory/handoffs/serialization-slice-3.md` for the live handoff and
+`.memory/logs/serialization_final_two_path_audit.md` for the path/hook
+inventory.
 
 Do not resume Variant B / Package E/F backlog topics (below) without a
 new explicit owner instruction naming that topic.

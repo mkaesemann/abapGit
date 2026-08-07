@@ -3,9 +3,48 @@
 ```text
 PACKET=COMPACT_HANDOFF_V1
 TASK=SER_SLICE_3_DTEL_DOMA_PARITY_INCIDENT
-STATUS=FIXES_APPLIED_LOCAL_AWAITING_OWNER_IT8_PARITY_RETEST
+STATUS=SUPERSEDED_FALSE_ORACLE
+SUPERSEDED_BY=OWNER_IT8_DEBUG_EVIDENCE
+BATCH_SERIALIZER_DATA=CORRECT
+LEGACY_ORTEC_NON_BATCH_DELTA=INCORRECT_FALSE_MODIFIED
+ROOT_CAUSE_ANALYSIS_REQUIRED=NO
+DO_NOT_RESUME=YES
 BASELINE_HEAD_AT_REPORT=40934176deee5935f1ab62b556aaf42044c46d15
+BASELINE_HEAD_AT_SUPERSEDE=bf436db0632de0098875d97b4a28a8f246eb50a5
 ```
+
+## SER-SLICE-3 correction (2026-08-07, owner IT8 debug evidence)
+
+The apparent Feature-OFF/Feature-ON Stage mismatch investigated below was
+not a lost-output defect in the batch serializer. The owner established
+through IT8 activation, tests, runtime execution, and manual debugging:
+
+> The removed hybrid ORTEC non-batch path (Path 3: standard abapGit
+> orchestration with legacy ORTEC serialization optimizations but without
+> adaptive batching) exhibited false MODIFIED results - it incorrectly
+> reported many unchanged DTEL/DOMA files as MODIFIED in Stage. The
+> adaptive batch serializer (Path 2) returned the complete, correct
+> DTEL/DOMA serialized data all along; the smaller Feature-ON Stage result
+> was correct because those files were identical to Remote and therefore
+> correctly absent from the MODIFIED list. The Feature-OFF hybrid ORTEC
+> result was never a valid serializer-parity oracle. It is intentionally
+> removed rather than repaired (see `.memory/logs/
+> serialization_final_two_path_audit.md` and SER-SLICE-3 Phase 7).
+
+DOMA/DTEL provider status: `DOMA_DTEL_PROVIDER=IMPLEMENTED_AND_OWNER_
+DEBUG_VALIDATED`. Do not reopen DOMA/DTEL as broken without new direct
+serializer evidence (not Stage/MODIFIED-list evidence from the removed
+path). The fixes recorded below (Fix A-F, plus the owner's own follow-up
+commit `bf436db0` adding a second, redundant `PREPARE()` call and
+tightening `MERGE_INTO_MT_FILES`'s zero-file guard) are retained as
+genuine defensive/lifecycle hardening - they are safe, non-regressive,
+and independently justified regardless of which hypothesis explained the
+original symptom. Open a new incident only if equivalent false-MODIFIED
+or data-loss behavior appears in one of the two retained paths (Path 1
+pure standard, or Path 2 adaptive batch).
+
+The original investigation, hypotheses, and fixes are retained below
+unchanged as historical record.
 
 ## Reproduction (owner-reported, primary evidence)
 
