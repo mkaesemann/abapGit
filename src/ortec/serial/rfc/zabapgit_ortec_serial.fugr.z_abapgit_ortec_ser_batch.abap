@@ -1,4 +1,4 @@
-FUNCTION Z_ABAPGIT_ORTEC_SER_BATCH.
+FUNCTION z_abapgit_ortec_ser_batch.
 *"----------------------------------------------------------------------
 *"*"Local Interface:
 *"  IMPORTING
@@ -118,5 +118,6 @@ FUNCTION Z_ABAPGIT_ORTEC_SER_BATCH.
   ENDLOOP.
 
   ev_output_row_count = lines( et_result ).
+
 
 ENDFUNCTION.
