@@ -818,6 +818,23 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
       IMPORTING !iv_run_id       TYPE sysuuid_x16
       RETURNING VALUE(rv_result) TYPE abap_bool.
 
+    "! SER-SLICE-3 parity incident fix (serialization_slice_3_dtel_doma_
+    "! parity.md, H5): pure, deterministic guard extracted so the exact
+    "! boundary can be unit tested without a live aRFC round trip. An
+    "! ordinary requested object can never legitimately serialize to ZERO
+    "! output files while the worker also reports RC = 0 - that
+    "! combination is treated as suspicious and must never be silently
+    "! accepted as success.
+    "! @parameter is_row       | One worker result row
+    "! @parameter iv_key_found | Whether IS_ROW's identity matches a
+    "!   requested object key for this dispatch
+    "! @parameter rv_yes       | ABAP_TRUE iff this row must be routed to
+    "!   the single-object fallback instead of being trusted as-is
+    CLASS-METHODS is_zero_file_success_bad
+      IMPORTING is_row           TYPE zaog_ser_batch_result
+                iv_key_found     TYPE abap_bool
+      RETURNING VALUE(rv_yes)    TYPE abap_bool.
+
 ENDCLASS.
 
 
@@ -831,10 +848,41 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     DATA lt_batches     TYPE zcl_abapgit_ortec_ser_planner=>tt_batch.
     DATA lv_ready       TYPE i.
     DATA lv_wait_result TYPE i.
+    DATA lv_use_ortec_prefetch TYPE abap_bool.
+
+    " SER-SLICE-3 parity incident fix (serialization_slice_3_dtel_doma_
+    " parity.md): this entry point never called PREPARE on any of the
+    " three existing prefetch classes, so EXTRACT_FOR_BATCH/EXTRACT_FOR_
+    " OBJECT always operated on a permanently-empty cache - every DOMA/
+    " DTEL/CLAS/INTF/MSAG/etc. object on the adaptive batch path was an
+    " unconditional MISS, exactly mirroring what the standard sequential/
+    " parallel path already does before its own per-object loop.
+    lv_use_ortec_prefetch = zcl_abapgit_ortec_git_switch=>is_serial_prefetch_active( ).
+    IF lv_use_ortec_prefetch = abap_true.
+      zcl_abapgit_ortec_ser_pref=>prepare(
+        it_tadir    = it_tadir
+        iv_language = is_i18n_params-main_language ).
+      zcl_abapgit_ortec_ser_pref_ext=>prepare(
+        it_tadir    = it_tadir
+        iv_language = is_i18n_params-main_language ).
+      zcl_abapgit_ortec_ser_pref_oo=>prepare(
+        it_tadir    = it_tadir
+        iv_language = is_i18n_params-main_language ).
+    ENDIF.
 
     TRY.
         lv_run_id = cl_system_uuid=>create_uuid_x16_static( ).
       CATCH cx_uuid_error.
+        " Correctness review DR-002 (serialization_slice_3_dtel_doma_
+        " parity.md): no run context exists yet on this path, so there is
+        " nothing for DISCARD_RUN_STATE to clean up, but the providers
+        " were already PREPARE()'d above - CLEAR them here too, not only
+        " on the run-established failure path below.
+        IF lv_use_ortec_prefetch = abap_true.
+          zcl_abapgit_ortec_ser_pref=>clear( ).
+          zcl_abapgit_ortec_ser_pref_ext=>clear( ).
+          zcl_abapgit_ortec_ser_pref_oo=>clear( ).
+        ENDIF.
         zcx_abapgit_exception=>raise( 'ORTEC batch: could not generate a run id' ).
     ENDTRY.
 
@@ -901,8 +949,18 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
           rt_files = <ls_ctx>-files.
         ENDIF.
         purge_run_state( lv_run_id ).
+        IF lv_use_ortec_prefetch = abap_true.
+          zcl_abapgit_ortec_ser_pref=>clear( ).
+          zcl_abapgit_ortec_ser_pref_ext=>clear( ).
+          zcl_abapgit_ortec_ser_pref_oo=>clear( ).
+        ENDIF.
       CATCH zcx_abapgit_exception INTO DATA(lx_run_failure).
         discard_run_state( lv_run_id ).
+        IF lv_use_ortec_prefetch = abap_true.
+          zcl_abapgit_ortec_ser_pref=>clear( ).
+          zcl_abapgit_ortec_ser_pref_ext=>clear( ).
+          zcl_abapgit_ortec_ser_pref_oo=>clear( ).
+        ENDIF.
         CLEAR rt_files.
         RAISE EXCEPTION lx_run_failure.
     ENDTRY.
@@ -1119,6 +1177,33 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
             WITH KEY object = ls_row-obj_type obj_name = ls_row-obj_name.
           DATA(lv_key_found) = xsdbool( sy-subrc = 0 ).
 
+          IF is_zero_file_success_bad( is_row = ls_row iv_key_found = lv_key_found ) = abap_true.
+            " SER-SLICE-3 parity incident fix (serialization_slice_3_
+            " dtel_doma_parity.md, H5): an ordinary object can never
+            " legitimately serialize to ZERO files while still reporting
+            " RC = 0 - a worker-side per-object RETURN-with-no-exception
+            " (e.g. a standard object class's own defensive "not found"
+            " early exit) must never be silently accepted as success here.
+            " Force the always-correct, single-object standard path to
+            " re-confirm the result instead of trusting a suspicious
+            " empty-but-successful row.
+            ASSIGN mt_run_context[ run_id = <ls_d>-run_id ] TO FIELD-SYMBOL(<ls_zero_file_ctx>).
+            IF <ls_zero_file_ctx> IS ASSIGNED AND <ls_zero_file_ctx>-ii_log IS BOUND.
+              <ls_zero_file_ctx>-ii_log->add_warning(
+                |ORTEC batch { p_task }: { ls_row-obj_type } { ls_row-obj_name } reported success with | &&
+                |zero output files - falling back to per-object serialization| ).
+            ENDIF.
+            TRY.
+                route_to_sequential_fallback( iv_run_id = <ls_d>-run_id it_object_keys = VALUE #( ( ls_tadir_row ) ) ).
+              CATCH zcx_abapgit_exception INTO DATA(lx_zero_file_error).
+                IF <ls_zero_file_ctx> IS ASSIGNED AND <ls_zero_file_ctx>-ii_log IS BOUND.
+                  <ls_zero_file_ctx>-ii_log->add_exception( lx_zero_file_error ).
+                ENDIF.
+                mark_object_failures( iv_run_id = <ls_d>-run_id it_object_keys = VALUE #( ( ls_tadir_row ) ) ).
+            ENDTRY.
+            CONTINUE.
+          ENDIF.
+
           IF ls_row-rc = 0 AND lv_key_found = abap_true.
             IF merge_into_mt_files( iv_run_id = <ls_d>-run_id is_tadir = ls_tadir_row is_result = ls_row ) = abap_false.
               " AR-1-004 (independent adversarial audit): the batch
@@ -1190,6 +1275,19 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
         RETURN.
     ENDTRY.
     IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+
+    " SER-SLICE-3 parity incident fix (serialization_slice_3_dtel_doma_
+    " parity.md, AR-3-003): guard against a genuine metadata/payload
+    " mismatch - IS_RESULT-OUTPUT_FILE_COUNT already passed IS_ZERO_FILE_
+    " SUCCESS_BAD's check by the time this is called, but the ACTUAL
+    " imported file list could still disagree (a corrupted/truncated
+    " FILES_XSTRING). Never accept an empty imported file list as a
+    " successful merge - the caller's own RV_MERGED = ABAP_FALSE recovery
+    " (route via ROUTE_TO_SEQUENTIAL_FALLBACK) already exists for exactly
+    " this shape of failure.
+    IF ls_serialization-files IS INITIAL.
       RETURN.
     ENDIF.
 
@@ -1289,6 +1387,10 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
 
   METHOD split_depth_at_cap.
     rv_yes = boolc( iv_split_depth >= c_max_pre_dispatch_splits ).
+  ENDMETHOD.
+
+  METHOD is_zero_file_success_bad.
+    rv_yes = boolc( is_row-rc = 0 AND iv_key_found = abap_true AND is_row-output_file_count = 0 ).
   ENDMETHOD.
 
   METHOD dispatch_batch.
@@ -1535,6 +1637,23 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
           DATA(ls_serialization) = zcl_abapgit_objects=>serialize(
             is_item        = ls_item
             io_i18n_params = zcl_abapgit_i18n_params=>new( is_params = ls_i18n_params ) ).
+
+          IF ls_serialization-files IS INITIAL.
+            " SER-SLICE-3 parity incident fix (serialization_slice_3_
+            " dtel_doma_parity.md, AR-3-002): this method is the LAST-
+            " RESORT recovery path (called directly for forced-sequential
+            " objects, and as the recovery mechanism for a suspicious
+            " batch/merge result) - it must never itself silently accept
+            " a zero-file "success", or the whole fail-fast contract's
+            " "no successful partial output" guarantee has a hole. Treat
+            " exactly like an exception: no file added, marked failed.
+            IF <ls_ctx>-ii_log IS BOUND.
+              <ls_ctx>-ii_log->add_warning(
+                |ORTEC fallback: { ls_key-object } { ls_key-obj_name } serialized to zero files - treating as failed| ).
+            ENDIF.
+            mark_object_failures( iv_run_id = iv_run_id it_object_keys = VALUE #( ( ls_key ) ) ).
+            CONTINUE.
+          ENDIF.
 
           LOOP AT ls_serialization-files INTO DATA(ls_file).
             APPEND INITIAL LINE TO <ls_ctx>-files ASSIGNING FIELD-SYMBOL(<ls_return>).

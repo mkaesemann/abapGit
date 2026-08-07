@@ -210,6 +210,16 @@ CLASS zcl_abapgit_ortec_ser_pref_ext DEFINITION
       IMPORTING iv_buffer TYPE xstring
       RAISING   zcx_abapgit_exception.
 
+    "! SER-SLICE-3 parity incident fix (serialization_slice_3_dtel_doma_
+    "! parity.md, AR-3-001): unconditionally clears MT_DOMA/MT_DTEL, unlike
+    "! INJECT_BATCH_FROM_BUFFER which only clears as a side effect of a
+    "! successful import. A pooled/reused RFC worker session must never
+    "! carry DOMA/DTEL data from a PRIOR dispatch into a batch whose OWN
+    "! IV_PREFETCH_BUFFER_DD is legitimately empty (e.g. a batch with no
+    "! DOMA/DTEL objects at all) - callers must call this FIRST, on EVERY
+    "! worker invocation, before conditionally injecting a new buffer.
+    CLASS-METHODS clear_dd_cache.
+
   PRIVATE SECTION.
     TYPES ty_dtel_keys TYPE HASHED TABLE OF dd04l-rollname
       WITH UNIQUE KEY table_line.
@@ -1329,7 +1339,15 @@ CLASS zcl_abapgit_ortec_ser_pref_ext IMPLEMENTATION.
       APPEND ls_entry TO lt_entries.
     ENDLOOP.
 
-    IF lt_entries IS INITIAL.
+    " SER-SLICE-3 parity incident fix (serialization_slice_3_dtel_doma_
+    " parity.md): a batch with DOMA/DTEL objects but NOTHING actually
+    " cached (e.g. PREPARE was never called, or none of these objects
+    " were found) must still return an INITIAL buffer, per this method's
+    " own documented contract - LT_ENTRIES alone being non-empty (every
+    " row PRESENT = ABAP_FALSE) is not sufficient reason to build and
+    " transmit a real envelope.
+    IF lt_entries IS INITIAL OR ( lt_doma IS INITIAL AND lt_dtel IS INITIAL ).
+      CLEAR rv_buffer.
       RETURN.
     ENDIF.
 
@@ -1413,6 +1431,11 @@ CLASS zcl_abapgit_ortec_ser_pref_ext IMPLEMENTATION.
     IF lv_language IS NOT INITIAL.
       mv_language = lv_language.
     ENDIF.
+  ENDMETHOD.
+
+  METHOD clear_dd_cache.
+    CLEAR mt_doma.
+    CLEAR mt_dtel.
   ENDMETHOD.
 
 ENDCLASS.

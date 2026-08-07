@@ -57,6 +57,12 @@ FUNCTION z_abapgit_ortec_ser_batch.
   IF iv_prefetch_buffer_oo IS NOT INITIAL.
     zcl_abapgit_ortec_ser_pref_oo=>inject_from_buffer( iv_prefetch_buffer_oo ).
   ENDIF.
+  " SER-SLICE-3 parity incident fix (serialization_slice_3_dtel_doma_
+  " parity.md, AR-3-001): unconditional clear FIRST, on every worker
+  " invocation - a pooled/reused session must never keep a PRIOR
+  " dispatch's DOMA/DTEL cache when THIS dispatch's own buffer is
+  " legitimately empty (e.g. no DOMA/DTEL objects in this batch at all).
+  zcl_abapgit_ortec_ser_pref_ext=>clear_dd_cache( ).
   IF iv_prefetch_buffer_dd IS NOT INITIAL.
     TRY.
         zcl_abapgit_ortec_ser_pref_ext=>inject_batch_from_buffer( iv_prefetch_buffer_dd ).
