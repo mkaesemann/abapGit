@@ -2,19 +2,32 @@
 
 ```text
 BRANCH=ortec/abapgit_1_133-opt-rework
-CURRENT_HEAD=bf436db0632de0098875d97b4a28a8f246eb50a5 (owner "DTEL/DOMA
-  Serialization Fix Helper Changes" - adds a second PREPARE() call on
-  ZCL_ABAPGIT_ORTEC_SER_PREF_EXT and a zero-file MERGE_INTO_MT_FILES
-  guard, on top of this session's own Fix A-F in 5ff237b9)
-LATEST_SAP_VALIDATED_HEAD=bf436db0632de0098875d97b4a28a8f246eb50a5
-  (owner IT8 evidence, SER-SLICE-3 kickoff prompt 2026-08-07:
-  SER_SLICE_2_ATC=PASS, SER_SLICE_2_ABAP_UNIT=PASS,
-  FEATURE_OFF_PURE_STANDARD_PATH=VERIFIED_CORRECT,
-  FEATURE_ON_ADAPTIVE_BATCH_PATH=VERIFIED_CORRECT_FOR_IMPLEMENTED_
-  FAMILIES, RPERF_ILLEGAL_STATEMENT_FIX=PASS,
-  LATE_CALLBACK_TEST=DEFERRED_OWNER_ACCEPTED). The DTEL/DOMA parity
+CURRENT_HEAD=f54860d18bb9c8e7c3ca6dd04f04d1c9e73b455c ("Syntax und Unit Test
+  Fixes" - final IT8 syntax/ABAP Unit fixes, owner-confirmed source for
+  SER-SLICE-4 closeout) plus this session's SER-SLICE-5 memory + the
+  SLICE5-001 productive fix (see below)
+LATEST_SAP_VALIDATED_HEAD=f54860d18bb9c8e7c3ca6dd04f04d1c9e73b455c
+  (owner IT8 evidence, SER-SLICE-5 kickoff prompt 2026-08-08:
+  ACTIVATION/ATC/ABAP_UNIT/MULTI_REPOSITORY/MULTI_SLICE/OUTPUT_PARITY/
+  FULL_REPOSITORY_BATCH_RUN=PASS, INDIVIDUAL_PROVIDER_OFF_ON_BENCHMARKS=
+  WAIVED_BY_OWNER, ALL_ENABLED_PROVIDERS_INTEGRATED_RUN=PASS,
+  LATE_CALLBACK_TEST=DEFERRED_OWNER_ACCEPTED). SER-SLICE-5 discovery
+  found and fixed SLICE5-001 (batch RFC worker never activated the
+  provider/WAPA gate) - NOT yet IT8-validated, see
+  `.memory/handoffs/serialization-slice-5.md`. The DTEL/DOMA parity
   incident below is SUPERSEDED_FALSE_ORACLE - do not treat it as an open
   blocker.
+```
+
+```text
+SER_SLICE_4=SAP_VALIDATED_COMPLETE
+SER_SLICE_5=LOCAL_COMPLETE_AWAITING_IT8
+  (`.memory/handoffs/serialization-slice-5.md`) - discovery for FUGR
+  (REPAIR_EXISTING_PROVIDER_COVERAGE, fix applied), DDLS (MEASURE_FIRST),
+  WAPA (KEEP_SINGLETON_WITH_EVIDENCE), tail latency
+  (NO_ACTION_WAIT_REFLECTS_REAL_WORK, provisional). OWNER_ACTION_REQUIRED:
+  rerun the SER-SLICE-4 IT8 SAT comparison with the SLICE5-001 fix before
+  any further FUGR/DDLS/WAPA implementation work.
 ```
 
 ```text
@@ -32,11 +45,30 @@ LATE_CALLBACK_TEST=DEFERRED_OWNER_ACCEPTED
 ## Active topic
 
 ```text
-TOPIC=SER_SLICE_3_FINAL_TWO_PATH_ARCHITECTURE
-STATUS=IN_PROGRESS
-SER_SLICE_2=SAP_VALIDATED_COMPLETE_WITH_LATE_CALLBACK_TEST_DEFERRED
-SER_SLICE_3=IN_PROGRESS_TWO_PATH_ARCHITECTURE
+TOPIC=SER_SLICE_5_CLOSEOUT_AND_DISCOVERY
+STATUS=LOCAL_COMPLETE_AWAITING_IT8
+SER_SLICE_3=SAP_VALIDATED_COMPLETE_WITH_LATE_CALLBACK_TEST_DEFERRED
+SER_SLICE_4=SAP_VALIDATED_COMPLETE
+SER_SLICE_5=LOCAL_COMPLETE_AWAITING_IT8
 ```
+
+SER-SLICE-5 (2026-08-08): closed SER-SLICE-4 from owner IT8 evidence, verified
+the final two-path architecture against two full-repository SAT traces (both
+read in full), and ran trace-grounded FUGR/DDLS/WAPA/tail-latency discovery.
+Found and fixed SLICE5-001: the ORTEC batch RFC worker
+(`Z_ABAPGIT_ORTEC_SER_BATCH`) never activated `is_serial_prefetch_active`/
+`is_wapa_active` in its own aRFC session, so every one of the 8 built provider
+families and the WAPA batch-path replacement silently fell back to per-object
+reads in every real production batch dispatch - a confirmed, source- and
+trace-verified regression, fixed with a 2-line precedented change (mirrors the
+existing standard RFC's own activation pattern). Correctness was never at
+risk. `OWNER_ACTION_REQUIRED`: rerun the SER-SLICE-4 IT8 SAT comparison with
+this fix before any further FUGR/DDLS/WAPA work. See
+`.memory/handoffs/serialization-slice-5.md` for full detail and
+`.memory/reviews/serialization_final_two_path_trace_audit.md` for the finding.
+
+Do not resume Variant B / Package E/F backlog topics (below) without a
+new explicit owner instruction naming that topic.
 
 DOMA/DTEL parity incident: SUPERSEDED_FALSE_ORACLE (owner IT8 debug
 evidence, 2026-08-07). The batch serializer's DOMA/DTEL data was correct
