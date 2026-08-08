@@ -12,7 +12,7 @@ CLASS ltcl_msag_batch_wire DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION S
   " test is deterministic and independent of live SAP Basis DDIC content.
   " MT_DOKIL/MV_DOKIL_PREPARED are explicitly OUT OF SCOPE for this batch
   " envelope - see INJECT_DOES_NOT_TOUCH_DOKIL for the regression proving
-  " that boundary.
+  " that boundary
 
   PRIVATE SECTION.
     METHODS setup.

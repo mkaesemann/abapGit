@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <abapGit version="v1.0.0" serializer="LCL_OBJECT_TABL" serializer_version="v1.0.0">
  <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
   <asx:values>
@@ -42,7 +42,7 @@
      <DATATYPE>INT4</DATATYPE>
      <LENG>000010</LENG>
      <MASK>  INT4</MASK>
-     <DDTEXT>Actual cached payload byte count for this entry, 0 if MISS/FALLBACK</DDTEXT>
+     <DDTEXT>Actual cached payload byte count for this entry, 0 if MISS/F</DDTEXT>
     </DD03P>
    </DD03P_TABLE>
   </asx:values>

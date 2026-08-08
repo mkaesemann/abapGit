@@ -1,6 +1,6 @@
 "! <p class="shorttext synchronized">ORTEC serializer prefetch for CLAS/INTF</p>
 "! Holds OO description data loaded before the abapGit serialization loop so
-"! CLAS and INTF serializers can avoid repeated single-object SELECTs.
+"! CLAS and INTF serializers can avoid repeated single-object SELECTs
 CLASS zcl_abapgit_ortec_ser_pref_oo DEFINITION
   PUBLIC FINAL
   CREATE PRIVATE.

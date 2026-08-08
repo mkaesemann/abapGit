@@ -118,7 +118,8 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     TYPES END OF ty_dispatch.
     "! All dispatches currently owned by active runs, keyed for O(1)
     "! callback resolution by TASK_NAME.
-    TYPES ty_dispatch_tt TYPE HASHED TABLE OF ty_dispatch WITH UNIQUE KEY task_name.
+    TYPES ty_dispatch_tt TYPE HASHED TABLE OF ty_dispatch WITH UNIQUE KEY task_name
+            WITH NON-UNIQUE SORTED KEY run COMPONENTS run_id state.
 
     "! Records that one object's result has already been merged or
     "! terminally logged as failed, for exactly one run - the belt-and-
@@ -843,15 +844,16 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! @parameter rv_yes       | ABAP_TRUE iff this row must be routed to
     "!   the single-object fallback instead of being trusted as-is
     CLASS-METHODS is_zero_file_success_bad
-      IMPORTING is_row           TYPE zaog_ser_batch_result
-                iv_key_found     TYPE abap_bool
-      RETURNING VALUE(rv_yes)    TYPE abap_bool.
+      IMPORTING is_row        TYPE zaog_ser_batch_result
+                iv_key_found  TYPE abap_bool
+      RETURNING VALUE(rv_yes) TYPE abap_bool.
 
 ENDCLASS.
 
 
 
 CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
+
 
   METHOD serialize.
     DATA lv_run_id      TYPE sysuuid_x16.
@@ -860,6 +862,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     DATA lt_batches     TYPE zcl_abapgit_ortec_ser_planner=>tt_batch.
     DATA lv_ready       TYPE i.
     DATA lv_wait_result TYPE i.
+    DATA lv_use_ortec_prefetch TYPE abap_bool.
 
     " SER-SLICE-3 parity incident fix (serialization_slice_3_dtel_doma_
     " parity.md): this entry point never called PREPARE on any of the
@@ -868,18 +871,18 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     " DTEL/CLAS/INTF/MSAG/etc. object on the adaptive batch path was an
     " unconditional MISS, exactly mirroring what the standard sequential/
     " parallel path already does before its own per-object loop.
-    " SER-SLICE-3 Phase 7: this is the only production caller that ever
-    " turns the shared prefetch/WAPA gate on - always unconditional here.
-    zcl_abapgit_ortec_ser_pref=>prepare(
-      it_tadir    = it_tadir
-      iv_language = is_i18n_params-main_language ).
-    zcl_abapgit_ortec_ser_pref_ext=>prepare(
-      it_tadir    = it_tadir
-      iv_language = is_i18n_params-main_language ).
-    zcl_abapgit_ortec_ser_pref_oo=>prepare(
-      it_tadir    = it_tadir
-      iv_language = is_i18n_params-main_language ).
-    zcl_abapgit_ortec_git_switch=>set_serial_prefetch_active( abap_true ).
+    lv_use_ortec_prefetch = zcl_abapgit_ortec_git_switch=>is_serial_prefetch_active( ).
+    IF lv_use_ortec_prefetch = abap_true.
+      zcl_abapgit_ortec_ser_pref=>prepare(
+        it_tadir    = it_tadir
+        iv_language = is_i18n_params-main_language ).
+      zcl_abapgit_ortec_ser_pref_ext=>prepare(
+        it_tadir    = it_tadir
+        iv_language = is_i18n_params-main_language ).
+      zcl_abapgit_ortec_ser_pref_oo=>prepare(
+        it_tadir    = it_tadir
+        iv_language = is_i18n_params-main_language ).
+    ENDIF.
 
     TRY.
         lv_run_id = cl_system_uuid=>create_uuid_x16_static( ).
@@ -889,10 +892,11 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
         " nothing for DISCARD_RUN_STATE to clean up, but the providers
         " were already PREPARE()'d above - CLEAR them here too, not only
         " on the run-established failure path below.
-        zcl_abapgit_ortec_ser_pref=>clear( ).
-        zcl_abapgit_ortec_ser_pref_ext=>clear( ).
-        zcl_abapgit_ortec_ser_pref_oo=>clear( ).
-        zcl_abapgit_ortec_git_switch=>set_serial_prefetch_active( abap_false ).
+        IF lv_use_ortec_prefetch = abap_true.
+          zcl_abapgit_ortec_ser_pref=>clear( ).
+          zcl_abapgit_ortec_ser_pref_ext=>clear( ).
+          zcl_abapgit_ortec_ser_pref_oo=>clear( ).
+        ENDIF.
         zcx_abapgit_exception=>raise( 'ORTEC batch: could not generate a run id' ).
     ENDTRY.
 
@@ -904,6 +908,19 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
                      worker_count           = iv_max_processes
                      expected_count         = count_expected_objects( it_tadir ) ) INTO TABLE mt_run_context.
     ASSIGN mt_run_context[ run_id = lv_run_id ] TO FIELD-SYMBOL(<ls_ctx>).
+
+    " SER-SLICE-3 DTEL/DOMA parity fix: mirror ZCL_ABAPGIT_SERIALIZE~SERIALIZE's own
+    " non-batch PREPARE() call so batch-dispatched DOMA/DTEL objects get the same
+    " prefetch-HIT data ZCL_ABAPGIT_ORTEC_SER_PREF_EXT=>EXTRACT_FOR_BATCH expects to
+    " find - without this, every DOMA/DTEL object silently falls back to each
+    " object's own raw DB read, which is not proven byte-identical to the prefetched
+    " result and caused a real output-parity regression (see
+    " serialization_slice_3_dtel_doma_parity.md).
+    IF zcl_abapgit_ortec_git_switch=>is_serial_prefetch_active( ) = abap_true.
+      zcl_abapgit_ortec_ser_pref_ext=>prepare(
+        it_tadir    = it_tadir
+        iv_language = is_i18n_params-main_language ).
+    ENDIF.
 
     TRY.
         ls_partition = partition_objects(
@@ -960,20 +977,23 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
           rt_files = <ls_ctx>-files.
         ENDIF.
         purge_run_state( lv_run_id ).
-        zcl_abapgit_ortec_ser_pref=>clear( ).
-        zcl_abapgit_ortec_ser_pref_ext=>clear( ).
-        zcl_abapgit_ortec_ser_pref_oo=>clear( ).
-        zcl_abapgit_ortec_git_switch=>set_serial_prefetch_active( abap_false ).
+        IF lv_use_ortec_prefetch = abap_true.
+          zcl_abapgit_ortec_ser_pref=>clear( ).
+          zcl_abapgit_ortec_ser_pref_ext=>clear( ).
+          zcl_abapgit_ortec_ser_pref_oo=>clear( ).
+        ENDIF.
       CATCH zcx_abapgit_exception INTO DATA(lx_run_failure).
         discard_run_state( lv_run_id ).
-        zcl_abapgit_ortec_ser_pref=>clear( ).
-        zcl_abapgit_ortec_ser_pref_ext=>clear( ).
-        zcl_abapgit_ortec_ser_pref_oo=>clear( ).
-        zcl_abapgit_ortec_git_switch=>set_serial_prefetch_active( abap_false ).
+        IF lv_use_ortec_prefetch = abap_true.
+          zcl_abapgit_ortec_ser_pref=>clear( ).
+          zcl_abapgit_ortec_ser_pref_ext=>clear( ).
+          zcl_abapgit_ortec_ser_pref_oo=>clear( ).
+        ENDIF.
         CLEAR rt_files.
         RAISE EXCEPTION lx_run_failure.
     ENDTRY.
   ENDMETHOD.
+
 
   METHOD partition_objects.
     LOOP AT it_tadir INTO DATA(ls_tadir).
@@ -993,11 +1013,13 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     ENDLOOP.
   ENDMETHOD.
 
+
   METHOD build_wapa_singleton_batches.
     LOOP AT it_wapa INTO DATA(ls_wapa).
       APPEND VALUE #( items = VALUE #( ( tadir = ls_wapa ) ) ) TO rt_batches.
     ENDLOOP.
   ENDMETHOD.
+
 
   METHOD count_expected_objects.
     TYPES ty_tadir_keys TYPE HASHED TABLE OF zif_abapgit_definitions=>ty_tadir WITH UNIQUE KEY object obj_name.
@@ -1009,6 +1031,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
 
     rv_count = lines( lt_keys ).
   ENDMETHOD.
+
 
   METHOD mark_object_success.
     ASSIGN mt_run_context[ run_id = iv_run_id ] TO FIELD-SYMBOL(<ls_ctx>).
@@ -1031,6 +1054,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     INSERT VALUE #( run_id = iv_run_id obj_type = is_tadir-object obj_name = is_tadir-obj_name )
       INTO TABLE mt_resolved.
   ENDMETHOD.
+
 
   METHOD mark_object_failures.
     ASSIGN mt_run_context[ run_id = iv_run_id ] TO FIELD-SYMBOL(<ls_ctx>).
@@ -1056,6 +1080,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     ENDLOOP.
   ENDMETHOD.
 
+
   METHOD count_terminal_objects.
     ASSIGN mt_run_context[ run_id = iv_run_id ] TO FIELD-SYMBOL(<ls_ctx>).
     IF <ls_ctx> IS ASSIGNED.
@@ -1063,12 +1088,14 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     ENDIF.
   ENDMETHOD.
 
+
   METHOD count_failed_objects.
     ASSIGN mt_run_context[ run_id = iv_run_id ] TO FIELD-SYMBOL(<ls_ctx>).
     IF <ls_ctx> IS ASSIGNED.
       rv_count = <ls_ctx>-failed_count.
     ENDIF.
   ENDMETHOD.
+
 
   METHOD mark_queued_failures.
     ASSIGN mt_run_context[ run_id = iv_run_id ] TO FIELD-SYMBOL(<ls_ctx>).
@@ -1084,6 +1111,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
 
     CLEAR <ls_ctx>-queue.
   ENDMETHOD.
+
 
   METHOD assert_successful_run.
     ASSIGN mt_run_context[ run_id = iv_run_id ] TO FIELD-SYMBOL(<ls_ctx>).
@@ -1109,6 +1137,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
                          ELSE '' ) }. The result was incomplete and discarded. Retry the operation, or reduce the scope; no partial result was accepted.| ).
     ENDIF.
   ENDMETHOD.
+
 
   METHOD on_end_of_batch.
     DATA lv_msg TYPE c LENGTH 100.
@@ -1267,6 +1296,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     ENDCASE.
   ENDMETHOD.
 
+
   METHOD merge_into_mt_files.
     DATA ls_serialization TYPE zif_abapgit_objects=>ty_serialization.
 
@@ -1314,6 +1344,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     rv_merged = boolc( lines( ls_serialization-files ) > 0 ).
   ENDMETHOD.
 
+
   METHOD object_key_sets_equal.
     IF lines( it_result ) <> lines( it_object_keys ).
       rv_equal = abap_false.
@@ -1329,6 +1360,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     ENDLOOP.
   ENDMETHOD.
 
+
   METHOD release_in_flight_budget.
     ASSIGN mt_run_context[ run_id = iv_run_id ] TO FIELD-SYMBOL(<ls_ctx>).
     IF sy-subrc <> 0.
@@ -1338,6 +1370,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
       <ls_ctx>-in_flight = <ls_ctx>-in_flight - 1.
     ENDIF.
   ENDMETHOD.
+
 
   METHOD before_dispatch.
     DATA lt_half_1       TYPE zif_abapgit_definitions=>ty_tadir_tt.
@@ -1363,20 +1396,6 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     " like before this slice.
     DATA(lv_prefetch_buffer_dd) = zcl_abapgit_ortec_ser_pref_ext=>extract_for_batch( it_object_keys ).
     lv_actual_bytes = xstrlen( lv_prefetch_buffer_dd ).
-
-    " SER-SLICE-3 Phase 4 (serialization_slice_3_clas_intf.md): the CLAS/
-    " INTF batch buffer is computed the same way (once, reused) but is NOT
-    " yet folded into the C_MAX_ACTUAL_BATCH_BYTES admission check below -
-    " that gate remains scoped to the DD buffer only, exactly as it was
-    " before this slice (disclosed limitation, not a silent gap).
-    DATA(lv_prefetch_buffer_oo_batch) = zcl_abapgit_ortec_ser_pref_oo=>extract_for_batch( it_object_keys ).
-
-    " SER-SLICE-3 Phase 6 (serialization_slice_3_msag.md): the MSAG batch
-    " buffer is computed the same way (once, reused) and is likewise NOT
-    " folded into the C_MAX_ACTUAL_BATCH_BYTES admission check below -
-    " same disclosed limitation as IV_PREFETCH_BUFFER_OO_BATCH, not a
-    " silent gap.
-    DATA(lv_prefetch_buffer_msag) = zcl_abapgit_ortec_ser_pref=>extract_for_batch( it_object_keys ).
 
     IF lv_actual_bytes > c_max_actual_batch_bytes AND lines( it_object_keys ) > 1.
       IF split_depth_at_cap( iv_split_depth ) = abap_true.
@@ -1405,22 +1424,23 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    dispatch_batch( iv_run_id                   = iv_run_id
-                     it_object_keys              = it_object_keys
-                     iv_attempt                  = iv_attempt
-                     iv_batch_id                 = iv_batch_id
-                     iv_prefetch_buffer_dd       = lv_prefetch_buffer_dd
-                     iv_prefetch_buffer_oo_batch = lv_prefetch_buffer_oo_batch
-                     iv_prefetch_buffer_msag     = lv_prefetch_buffer_msag ).
+    dispatch_batch( iv_run_id             = iv_run_id
+                     it_object_keys        = it_object_keys
+                     iv_attempt            = iv_attempt
+                     iv_batch_id           = iv_batch_id
+                     iv_prefetch_buffer_dd = lv_prefetch_buffer_dd ).
   ENDMETHOD.
+
 
   METHOD split_depth_at_cap.
     rv_yes = boolc( iv_split_depth >= c_max_pre_dispatch_splits ).
   ENDMETHOD.
 
+
   METHOD is_zero_file_success_bad.
     rv_yes = boolc( is_row-rc = 0 AND iv_key_found = abap_true AND is_row-output_file_count = 0 ).
   ENDMETHOD.
+
 
   METHOD dispatch_batch.
     DATA lv_task_name TYPE char40.
@@ -1482,8 +1502,6 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
           iv_prefetch_buffer_ext  = iv_prefetch_buffer_ext
           iv_prefetch_buffer_oo   = iv_prefetch_buffer_oo
           iv_prefetch_buffer_dd   = iv_prefetch_buffer_dd
-          iv_prefetch_buffer_oo_batch = iv_prefetch_buffer_oo_batch
-          iv_prefetch_buffer_msag = iv_prefetch_buffer_msag
           iv_input_row_count      = lines( it_object_keys )
           iv_input_version        = 1
         EXCEPTIONS
@@ -1512,10 +1530,12 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     ENDIF.
   ENDMETHOD.
 
+
   METHOD next_task_name.
     mv_next_task_seq = mv_next_task_seq + 1.
     rv_task_name = |SER-{ mv_next_task_seq }|.
   ENDMETHOD.
+
 
   METHOD drain_queue.
     ASSIGN mt_run_context[ run_id = iv_run_id ] TO FIELD-SYMBOL(<ls_ctx>).
@@ -1540,6 +1560,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     ENDWHILE.
   ENDMETHOD.
 
+
   METHOD is_run_complete.
     rv_complete = abap_true.
 
@@ -1554,7 +1575,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    IF line_exists( mt_dispatch[ run_id = iv_run_id state = c_state_awaiting ] ).
+    IF line_exists( mt_dispatch[ KEY run run_id = iv_run_id state = c_state_awaiting ] ).
       rv_complete = abap_false.
       RETURN.
     ENDIF.
@@ -1563,6 +1584,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
       rv_complete = abap_false.
     ENDIF.
   ENDMETHOD.
+
 
   METHOD interpret_wait_result.
     IF iv_run_complete = abap_true.
@@ -1577,6 +1599,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
         rv_result = 8.
     ENDCASE.
   ENDMETHOD.
+
 
   METHOD wait_for_run_completion.
     DATA lv_wait_subrc TYPE sy-subrc.
@@ -1604,6 +1627,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
       iv_run_complete = is_run_complete( iv_run_id ) ).
   ENDMETHOD.
 
+
   METHOD handle_receive_failure.
     DATA lt_half_1   TYPE zif_abapgit_definitions=>ty_tadir_tt.
     DATA lt_half_2   TYPE zif_abapgit_definitions=>ty_tadir_tt.
@@ -1630,6 +1654,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
       route_to_sequential_fallback( iv_run_id = iv_run_id it_object_keys = is_dispatch-object_keys ).
     ENDIF.
   ENDMETHOD.
+
 
   METHOD route_to_sequential_fallback.
     DATA ls_item       TYPE zif_abapgit_definitions=>ty_item.
@@ -1702,6 +1727,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     ENDLOOP.
   ENDMETHOD.
 
+
   METHOD record_task_outcome.
     DATA lv_next_seq TYPE i.
     DATA lv_max_seq  TYPE i.
@@ -1735,29 +1761,34 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     ENDIF.
   ENDMETHOD.
 
+
   METHOD purge_run_state.
-    IF line_exists( mt_dispatch[ run_id = iv_run_id state = c_state_awaiting ] ).
+    IF line_exists( mt_dispatch[ KEY run run_id = iv_run_id state = c_state_awaiting ] ).
       RETURN.
     ENDIF.
 
-    DELETE mt_dispatch WHERE run_id = iv_run_id
-      AND ( state = c_state_received OR state = c_state_received_failure ).
+    DELETE mt_dispatch USING KEY run
+      WHERE run_id = iv_run_id
+        AND ( state = c_state_received OR state = c_state_received_failure ).
 
-    DELETE mt_resolved WHERE run_id = iv_run_id.
-    DELETE mt_failed WHERE run_id = iv_run_id.
+    DELETE mt_resolved WHERE run_id = iv_run_id. "#EC CI_HASHSEQ
+    DELETE mt_failed WHERE run_id = iv_run_id.   "#EC CI_HASHSEQ
     DELETE mt_task_outcomes WHERE run_id = iv_run_id.
     DELETE mt_broken_runs WHERE table_line = iv_run_id.
     DELETE mt_run_context WHERE run_id = iv_run_id.
   ENDMETHOD.
+
 
   METHOD discard_run_state.
-    DELETE mt_dispatch WHERE run_id = iv_run_id.
-    DELETE mt_resolved WHERE run_id = iv_run_id.
-    DELETE mt_failed WHERE run_id = iv_run_id.
+    DELETE mt_dispatch USING KEY run
+      WHERE run_id = iv_run_id.
+    DELETE mt_resolved WHERE run_id = iv_run_id.  "#EC CI_HASHSEQ
+    DELETE mt_failed WHERE run_id = iv_run_id.    "#EC CI_HASHSEQ
     DELETE mt_task_outcomes WHERE run_id = iv_run_id.
     DELETE mt_broken_runs WHERE table_line = iv_run_id.
     DELETE mt_run_context WHERE run_id = iv_run_id.
   ENDMETHOD.
+
 
   METHOD is_standard_no_parallel_type.
     " Local copy of ZCL_ABAPGIT_SERIALIZE=>IS_NO_PARALLEL's exact logic -
@@ -1777,6 +1808,4 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     ENDIF.
     rv_result = boolc( <ls_ctx>-in_flight = 0 ).
   ENDMETHOD.
-
 ENDCLASS.
-

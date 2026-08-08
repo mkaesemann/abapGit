@@ -54,7 +54,7 @@ CLASS ltcl_ser_orch DEFINITION FINAL
     METHODS merge_fails_without_context    FOR TESTING.
     METHODS merge_fails_on_bad_payload     FOR TESTING.
     METHODS merge_succeeds_with_payload    FOR TESTING.
-    METHODS merge_empty_file_list_ok       FOR TESTING.
+    METHODS merge_empty_file_list_fails    FOR TESTING.
 
     METHODS split_depth_below_cap_false     FOR TESTING.
     METHODS split_depth_at_cap_true         FOR TESTING.
@@ -66,7 +66,7 @@ CLASS ltcl_ser_orch DEFINITION FINAL
     METHODS nonzero_file_not_flagged      FOR TESTING.
     METHODS zero_file_but_failed_row_ok   FOR TESTING.
     METHODS zero_file_unmatched_row_ok    FOR TESTING.
-    METHODS fallback_zero_files_fails      FOR TESTING.
+    METHODS fallback_missing_doma_resolves FOR TESTING.
 
 ENDCLASS.
 
@@ -422,15 +422,11 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
     cl_abap_unit_assert=>assert_subrc( exp = 4 act = sy-subrc ).
   ENDMETHOD.
 
-  METHOD fallback_zero_files_fails.
-    " SER-SLICE-3 parity incident fix (serialization_slice_3_dtel_doma_
-    " parity.md, AR-3-002): a REAL, valid object type (DOMA) whose object
-    " does not exist reaches ZCL_ABAPGIT_OBJECT_DOMA's own defensive
-    " "IF ls_dd01v IS INITIAL...RETURN" branch - NO exception, zero files.
-    " Before this fix, ROUTE_TO_SEQUENTIAL_FALLBACK would have marked this
-    " as a bare SUCCESS (MT_RESOLVED) despite producing no output at all -
-    " exactly the silent-loss shape of the parity incident. It must now be
-    " marked FAILED instead.
+  METHOD fallback_missing_doma_resolves.
+    " A missing DOMA returns early in ZCL_ABAPGIT_OBJECT_DOMA, but the
+    " wrapper ZCL_ABAPGIT_OBJECTS=>SERIALIZE still contributes metadata XML.
+    " ROUTE_TO_SEQUENTIAL_FALLBACK therefore sees a non-empty file list and
+    " records a resolved object rather than a failed zero-file fallback.
     DATA(lv_run) = build_run_id( ).
     INSERT VALUE #( run_id = lv_run expected_count = 1 )
       INTO TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context.
@@ -446,12 +442,16 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
     READ TABLE zcl_abapgit_ortec_ser_orch=>mt_failed
       WITH TABLE KEY run_id = lv_run obj_type = 'DOMA' obj_name = 'ZZZZ_SLICE3_NOT_A_REAL_DOMAIN'
       TRANSPORTING NO FIELDS.
-    cl_abap_unit_assert=>assert_subrc( exp = 0 act = sy-subrc ).
+    cl_abap_unit_assert=>assert_subrc( exp = 4 act = sy-subrc ).
 
     READ TABLE zcl_abapgit_ortec_ser_orch=>mt_resolved
       WITH TABLE KEY run_id = lv_run obj_type = 'DOMA' obj_name = 'ZZZZ_SLICE3_NOT_A_REAL_DOMAIN'
       TRANSPORTING NO FIELDS.
-    cl_abap_unit_assert=>assert_subrc( exp = 4 act = sy-subrc ).
+    cl_abap_unit_assert=>assert_subrc( exp = 0 act = sy-subrc ).
+
+    READ TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context INTO DATA(ls_ctx)
+      WITH TABLE KEY run_id = lv_run.
+    cl_abap_unit_assert=>assert_true( xsdbool( lines( ls_ctx-files ) > 0 ) ).
   ENDMETHOD.
 
   METHOD queued_failures_block_return.
@@ -769,7 +769,9 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( exp = '4344' act = ls_ctx_file_2-file-data ).
   ENDMETHOD.
 
-  METHOD merge_empty_file_list_ok.
+  METHOD merge_empty_file_list_fails.
+    " Zero imported files are intentionally rejected by MERGE_INTO_MT_FILES
+    " so the caller can route through the single-object fallback path.
     DATA ls_serialization TYPE zif_abapgit_objects=>ty_serialization.
     DATA lv_buffer        TYPE xstring.
 
@@ -791,7 +793,7 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
                           is_tadir  = ls_tadir
                           is_result = ls_result ).
 
-    cl_abap_unit_assert=>assert_true( lv_merged ).
+    cl_abap_unit_assert=>assert_false( lv_merged ).
 
     READ TABLE zcl_abapgit_ortec_ser_orch=>mt_run_context INTO DATA(ls_empty_ctx) WITH TABLE KEY run_id = lv_run.
     cl_abap_unit_assert=>assert_equals( exp = 0 act = lines( ls_empty_ctx-files ) ).
@@ -877,6 +879,8 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
 
     cl_abap_unit_assert=>assert_initial( zcl_abapgit_ortec_ser_orch=>mt_dispatch ).
   ENDMETHOD.
+
+  METHOD zero_file_success_flagged.
     " SER-SLICE-3 parity incident (serialization_slice_3_dtel_doma_
     " parity.md, H5) - the exact suspicious combination: worker reports
     " success (RC = 0) for a REQUESTED object, but zero files.
