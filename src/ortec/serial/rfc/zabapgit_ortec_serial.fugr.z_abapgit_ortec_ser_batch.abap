@@ -20,6 +20,7 @@ FUNCTION z_abapgit_ortec_ser_batch.
 *"     VALUE(IV_PREFETCH_BUFFER_MSAG) TYPE  XSTRING OPTIONAL
 *"     VALUE(IV_PREFETCH_BUFFER_TABL) TYPE  XSTRING OPTIONAL
 *"     VALUE(IV_PREFETCH_BUFFER_PROG) TYPE  XSTRING OPTIONAL
+*"     VALUE(IV_PREFETCH_BUFFER_FUGR) TYPE  XSTRING OPTIONAL
 *"     VALUE(IV_INPUT_ROW_COUNT) TYPE  I
 *"     VALUE(IV_INPUT_VERSION) TYPE  I DEFAULT 1
 *"  EXPORTING
@@ -142,6 +143,22 @@ FUNCTION z_abapgit_ortec_ser_batch.
     ENDTRY.
   ENDIF.
 
+  " SER-SLICE-4 Package C (serialization_slice_4_fugr_design.md &sect;7):
+  " same unconditional-clear-first pattern as CLEAR_PROG_CACHE/CLEAR_
+  " TABL_CACHE/CLEAR_MSAG_CACHE/CLEAR_OO_CACHE/CLEAR_DD_CACHE above - a
+  " pooled/reused worker session must never keep a PRIOR dispatch's FUGR
+  " cache when THIS dispatch's own buffer is legitimately empty.
+  zcl_abapgit_ortec_ser_pref_ext=>clear_fugr_cache( ).
+  IF iv_prefetch_buffer_fugr IS NOT INITIAL.
+    TRY.
+        zcl_abapgit_ortec_ser_pref_ext=>inject_batch_from_buffer_fugr( iv_prefetch_buffer_fugr ).
+      CATCH zcx_abapgit_exception ##NO_HANDLER.
+        " Corrupt/unknown-version FUGR batch buffer: treat as a full
+        " prefetch MISS for this buffer only - never propagate, the batch
+        " itself must still complete.
+    ENDTRY.
+  ENDIF.
+
   ls_i18n_params-main_language         = iv_language.
   ls_i18n_params-main_language_only    = iv_main_language_only.
   ls_i18n_params-suppress_po_comments  = iv_suppress_po_comments.
@@ -227,6 +244,16 @@ FUNCTION z_abapgit_ortec_ser_batch.
                  iv_program  = CONV #( ls_tadir-obj_name )
                  iv_language = iv_language
                  IMPORTING et_tpool_i18n = DATA(lt_ignored_tpool) ) = abap_true.
+              ls_result-provider_hit = 1.
+            ELSE.
+              ls_result-provider_miss = 1.
+            ENDIF.
+          WHEN 'FUGR'.
+            IF zcl_abapgit_ortec_ser_pref_ext=>get_fugr_areat(
+                 iv_area     = CONV #( ls_tadir-obj_name )
+                 iv_language = iv_language ) = abap_true
+            OR zcl_abapgit_ortec_ser_pref_ext=>get_fugr_enlfdir(
+                 iv_area     = CONV #( ls_tadir-obj_name ) ) = abap_true.
               ls_result-provider_hit = 1.
             ELSE.
               ls_result-provider_miss = 1.

@@ -696,6 +696,12 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "!   BEFORE_DISPATCH via EXTRACT_FOR_BATCH_PROG and threaded through
     "!   unchanged, mirroring IV_PREFETCH_BUFFER_DD/_OO_BATCH/_MSAG/_TABL
     "!   exactly.
+    "! @parameter iv_prefetch_buffer_fugr | ZCL_ABAPGIT_ORTEC_SER_PREF_EXT's
+    "!   FUGR batch envelope (SER-SLICE-4 Package C,
+    "!   serialization_slice_4_fugr_design.md) - computed once by
+    "!   BEFORE_DISPATCH via EXTRACT_FOR_BATCH_FUGR and threaded through
+    "!   unchanged, mirroring IV_PREFETCH_BUFFER_DD/_OO_BATCH/_MSAG/_TABL/
+    "!   _PROG exactly.
     "! @raising zcx_abapgit_exception | Batch-level dispatch failure (e.g.
     "!   STARTING NEW TASK could not be issued at all)
     CLASS-METHODS dispatch_batch
@@ -711,6 +717,7 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
                 iv_prefetch_buffer_msag     TYPE xstring OPTIONAL
                 iv_prefetch_buffer_tabl     TYPE xstring OPTIONAL
                 iv_prefetch_buffer_prog     TYPE xstring OPTIONAL
+                iv_prefetch_buffer_fugr     TYPE xstring OPTIONAL
       RAISING   zcx_abapgit_exception.
 
     "! Builds a globally unique TASK_NAME by incrementing MV_NEXT_TASK_
@@ -1462,6 +1469,14 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     " LV_PREFETCH_BUFFER_DD/_OO_BATCH/_MSAG/_TABL exactly.
     DATA(lv_prefetch_buffer_prog) = zcl_abapgit_ortec_ser_pref_ext=>extract_for_batch_prog( it_object_keys ).
 
+    " SER-SLICE-4 Package C (serialization_slice_4_fugr_design.md &sect;9):
+    " the FUGR batch prefetch envelope (per-area TLIBT text, per-area
+    " ENLFDIR directory, per-function TFDIR RFCSCOPE/RFCVERS) for this
+    " dispatch's objects - computed once and reused for the final
+    " DISPATCH_BATCH call below, mirroring LV_PREFETCH_BUFFER_DD/
+    " _OO_BATCH/_MSAG/_TABL/_PROG exactly.
+    DATA(lv_prefetch_buffer_fugr) = zcl_abapgit_ortec_ser_pref_ext=>extract_for_batch_fugr( it_object_keys ).
+
     " Overflow-safe aggregate sum (TYPE int8, not the c_max_actual_batch_
     " bytes constant's own TYPE i) - never counts an empty buffer as
     " payload (XSTRLEN of an INITIAL xstring is exactly 0, contributing
@@ -1475,7 +1490,8 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
       iv_buffer_oo_batch = lv_prefetch_buffer_oo_batch
       iv_buffer_msag     = lv_prefetch_buffer_msag
       iv_buffer_tabl     = lv_prefetch_buffer_tabl
-      iv_buffer_prog     = lv_prefetch_buffer_prog ).
+      iv_buffer_prog     = lv_prefetch_buffer_prog
+      iv_buffer_fugr     = lv_prefetch_buffer_fugr ).
 
     IF lv_actual_bytes > c_max_actual_batch_bytes AND lines( it_object_keys ) > 1.
       IF split_depth_at_cap( iv_split_depth ) = abap_true.
@@ -1512,7 +1528,8 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
                      iv_prefetch_buffer_oo_batch = lv_prefetch_buffer_oo_batch
                      iv_prefetch_buffer_msag     = lv_prefetch_buffer_msag
                      iv_prefetch_buffer_tabl     = lv_prefetch_buffer_tabl
-                     iv_prefetch_buffer_prog     = lv_prefetch_buffer_prog ).
+                     iv_prefetch_buffer_prog     = lv_prefetch_buffer_prog
+                     iv_prefetch_buffer_fugr     = lv_prefetch_buffer_fugr ).
   ENDMETHOD.
 
 
@@ -1600,6 +1617,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
           iv_prefetch_buffer_msag = iv_prefetch_buffer_msag
           iv_prefetch_buffer_tabl = iv_prefetch_buffer_tabl
           iv_prefetch_buffer_prog = iv_prefetch_buffer_prog
+          iv_prefetch_buffer_fugr = iv_prefetch_buffer_fugr
           iv_input_row_count      = lines( it_object_keys )
           iv_input_version        = 1
         EXCEPTIONS

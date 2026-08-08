@@ -35,6 +35,15 @@ CLASS zcl_abapgit_ortec_ser_pref_ext DEFINITION
       BEGIN OF ty_fugr_func_meta,
         funcname          TYPE rs38l_fnam,
         exception_classes TYPE abap_bool,
+        "! SER-SLICE-4 Package C (FG-001 fix): release-stable primitive
+        "! types, matching ZCL_ABAPGIT_OBJECT_FUGR's own TY_FUNCTION-
+        "! RFCSCOPE/RFCVERS EXACTLY - never typed against TFDIR itself.
+        rfcscope          TYPE c LENGTH 1,
+        rfcvers           TYPE c LENGTH 10,
+        "! ABAP_TRUE iff this release's TFDIR actually has RFCSCOPE/
+        "! RFCVERS (mirrors the existing TRY/CATCH cx_sy_dynamic_osql_
+        "! semantics release gate in PREPARE_FUGR/SERIALIZE_FUNCTIONS).
+        rfc_fields_valid  TYPE abap_bool,
       END OF ty_fugr_func_meta.
 
     TYPES:
@@ -132,11 +141,14 @@ CLASS zcl_abapgit_ortec_ser_pref_ext DEFINITION
 
     CLASS-METHODS get_fugr_func_metadata
       IMPORTING
-        iv_funcname     TYPE rs38l_fnam
+        iv_funcname          TYPE rs38l_fnam
       EXPORTING
-        es_metadata     TYPE ty_fugr_func_meta
+        es_metadata          TYPE ty_fugr_func_meta
+        ev_rfcscope          TYPE c LENGTH 1
+        ev_rfcvers           TYPE c LENGTH 10
+        ev_rfc_fields_valid  TYPE abap_bool
       RETURNING
-        VALUE(rv_found) TYPE abap_bool.
+        VALUE(rv_found)      TYPE abap_bool.
 
     CLASS-METHODS get_prog_tpool_languages
       IMPORTING
@@ -308,6 +320,39 @@ CLASS zcl_abapgit_ortec_ser_pref_ext DEFINITION
     "! legitimately empty. Callers must call this FIRST, on EVERY worker
     "! invocation, before conditionally injecting a new buffer.
     CLASS-METHODS clear_prog_cache.
+
+    "! SER-SLICE-4 Package C (serialization_slice_4_fugr_design.md &sect;3):
+    "! extract the FUGR batch prefetch envelope (per-area TLIBT text,
+    "! per-area ENLFDIR directory, per-function TFDIR RFCSCOPE/RFCVERS)
+    "! for an entire dispatch's TADIR rows in ONE call, reusing the SAME
+    "! generic ZAOG_SER_ENV_BHDR/BENTRY envelope as the TABL/PROG/CLAS/
+    "! INTF/MSAG providers. Filters IT_OBJECT_KEYS to FUGR rows
+    "! internally; returns an INITIAL buffer with no DB access when none
+    "! are present. A group's state is 'P' iff EITHER MT_FUGR_AREAT OR
+    "! MT_FUGR_ENLFDIR has a row for its area.
+    CLASS-METHODS extract_for_batch_fugr
+      IMPORTING it_object_keys   TYPE zif_abapgit_definitions=>ty_tadir_tt
+      RETURNING VALUE(rv_buffer) TYPE xstring.
+
+    "! SER-SLICE-4 Package C: inject a FUGR batch prefetch envelope
+    "! (produced by EXTRACT_FOR_BATCH_FUGR) into this session's caches.
+    "! Unknown wire format version, a failed IMPORT, an unexpected
+    "! provider_id/entry type/state, an initial LANGUAGE, or a payload
+    "! row that does not correlate with its ENTRIES/ENLFDIR context all
+    "! reject the WHOLE buffer by raising ZCX_ABAPGIT_EXCEPTION - callers
+    "! must treat this as a full prefetch MISS for this buffer only,
+    "! never propagate it into aborting the batch.
+    CLASS-METHODS inject_batch_from_buffer_fugr
+      IMPORTING iv_buffer TYPE xstring
+      RAISING   zcx_abapgit_exception.
+
+    "! SER-SLICE-4 Package C: unconditionally clears MT_FUGR_AREAT/
+    "! MT_FUGR_ENLFDIR/MT_FUGR_FUNC_META - a pooled/reused RFC worker
+    "! session must never carry FUGR data from a PRIOR dispatch into a
+    "! batch whose OWN IV_PREFETCH_BUFFER_FUGR is legitimately empty.
+    "! Callers must call this FIRST, on EVERY worker invocation, before
+    "! conditionally injecting a new buffer.
+    CLASS-METHODS clear_fugr_cache.
 
   PRIVATE SECTION.
     TYPES ty_dtel_keys TYPE HASHED TABLE OF dd04l-rollname
@@ -701,10 +746,13 @@ CLASS zcl_abapgit_ortec_ser_pref_ext IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD get_fugr_func_metadata.
-    CLEAR es_metadata.
+    CLEAR: es_metadata, ev_rfcscope, ev_rfcvers, ev_rfc_fields_valid.
     READ TABLE mt_fugr_func_meta INTO es_metadata WITH TABLE KEY funcname = iv_funcname.
     IF sy-subrc = 0.
-      rv_found = abap_true.
+      rv_found            = abap_true.
+      ev_rfcscope         = es_metadata-rfcscope.
+      ev_rfcvers          = es_metadata-rfcvers.
+      ev_rfc_fields_valid = es_metadata-rfc_fields_valid.
     ENDIF.
   ENDMETHOD.
 
@@ -1092,6 +1140,50 @@ CLASS zcl_abapgit_ortec_ser_pref_ext IMPLEMENTATION.
         funcname          = <ls_enlfdir>-funcname
         exception_classes = <ls_enlfdir>-exten3 ) INTO TABLE mt_fugr_func_meta.
     ENDLOOP.
+
+    " SER-SLICE-4 Package C (design.md &sect;6, FG-001/PF-002 fixed):
+    " release-stable LOCAL target structure - NEVER typed from TFDIR's
+    " own fields, so this declaration activates identically on every
+    " release regardless of whether TFDIR itself has RFCSCOPE/RFCVERS.
+    " The TRY/CATCH below protects only the DYNAMIC SELECT's runtime
+    " execution, never a type/DDIC declaration.
+    TYPES: BEGIN OF ty_tfdir_rfc_row,
+             funcname TYPE rs38l_fnam,
+             rfcscope TYPE c LENGTH 1,
+             rfcvers  TYPE c LENGTH 10,
+           END OF ty_tfdir_rfc_row.
+    DATA lt_tfdir TYPE STANDARD TABLE OF ty_tfdir_rfc_row WITH DEFAULT KEY.
+    DATA lt_funcnames TYPE STANDARD TABLE OF rs38l_fnam WITH DEFAULT KEY.
+
+    " PF-002 fix: explicit driver-table population + empty-driver guard,
+    " matching every sibling FOR ALL ENTRIES read's own guard convention.
+    lt_funcnames = VALUE #( FOR ls_meta IN mt_fugr_func_meta
+                             ( ls_meta-funcname ) ).
+    IF lt_funcnames IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    TRY.
+        SELECT funcname, rfcscope, rfcvers
+          FROM ('TFDIR')
+          FOR ALL ENTRIES IN @lt_funcnames
+          WHERE funcname = @lt_funcnames-table_line
+          INTO CORRESPONDING FIELDS OF TABLE @lt_tfdir.
+        LOOP AT lt_tfdir INTO DATA(ls_tfdir).
+          READ TABLE mt_fugr_func_meta ASSIGNING FIELD-SYMBOL(<ls_meta>)
+            WITH TABLE KEY funcname = ls_tfdir-funcname.
+          IF sy-subrc = 0.
+            <ls_meta>-rfcscope = ls_tfdir-rfcscope.
+            <ls_meta>-rfcvers  = ls_tfdir-rfcvers.
+            <ls_meta>-rfc_fields_valid = abap_true.
+          ENDIF.
+        ENDLOOP.
+      CATCH cx_sy_dynamic_osql_semantics.
+        " release does not have RFCSCOPE/RFCVERS on TFDIR at all - every
+        " mt_fugr_func_meta row keeps rfc_fields_valid = abap_false
+        " (initial); the worker-side consumer must fall back to the
+        " existing per-object dynamic SELECT exactly as today.
+    ENDTRY.
   ENDMETHOD.
 
   METHOD prepare_prog_langs.
@@ -1994,6 +2086,234 @@ CLASS zcl_abapgit_ortec_ser_pref_ext IMPLEMENTATION.
 
   METHOD clear_prog_cache.
     CLEAR mt_prog_langs.
+  ENDMETHOD.
+
+  METHOD extract_for_batch_fugr.
+    DATA lt_entries  TYPE zaog_ser_env_bentry_tt.
+    DATA lt_areat    TYPE ty_fugr_areat_cache_tt.
+    DATA lt_enlfdir  TYPE ty_fugr_enlfdir_cache_tt.
+    DATA lt_func     TYPE ty_fugr_func_meta_tt.
+    DATA ls_hdr      TYPE zaog_ser_env_bhdr.
+    DATA lv_any_hit  TYPE abap_bool.
+
+    IF mv_language IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    LOOP AT it_object_keys INTO DATA(ls_tadir) WHERE object = 'FUGR'.
+      DATA(lv_area) = CONV tlibt-area( ls_tadir-obj_name ).
+      DATA(lv_found) = abap_false.
+
+      READ TABLE mt_fugr_areat INTO DATA(ls_areat) WITH TABLE KEY area = lv_area.
+      IF sy-subrc = 0.
+        INSERT ls_areat INTO TABLE lt_areat.
+        lv_found = abap_true.
+      ENDIF.
+
+      READ TABLE mt_fugr_enlfdir INTO DATA(ls_enlfdir) WITH TABLE KEY area = lv_area.
+      IF sy-subrc = 0.
+        INSERT ls_enlfdir INTO TABLE lt_enlfdir.
+        lv_found = abap_true.
+        " per-function-module metadata for every FM in THIS group only -
+        " mirrors EXTRACT_FOR_OBJECT's own FUGR branch's nested LOOP.
+        LOOP AT ls_enlfdir-enlfdir INTO DATA(ls_fm).
+          READ TABLE mt_fugr_func_meta INTO DATA(ls_meta)
+            WITH TABLE KEY funcname = ls_fm-funcname.
+          IF sy-subrc = 0.
+            INSERT ls_meta INTO TABLE lt_func.
+          ENDIF.
+        ENDLOOP.
+      ENDIF.
+
+      DATA(ls_entry) = VALUE zaog_ser_env_bentry(
+        obj_type = ls_tadir-object obj_name = ls_tadir-obj_name ).
+      IF lv_found = abap_true.
+        ls_entry-state        = 'P'.
+        ls_entry-actual_bytes = xstrlen( extract_for_object( ls_tadir ) ).
+        lv_any_hit = abap_true.
+      ELSE.
+        ls_entry-state        = 'M'.
+        ls_entry-actual_bytes = 0.
+      ENDIF.
+      APPEND ls_entry TO lt_entries.
+    ENDLOOP.
+
+    " A batch with ZERO FUGR objects, or where EVERY entry would be a
+    " MISS, has nothing genuinely useful to send - mirrors the identical
+    " EXTRACT_FOR_BATCH_TABL/_PROG guard.
+    IF lt_entries IS INITIAL OR lv_any_hit = abap_false.
+      CLEAR rv_buffer.
+      RETURN.
+    ENDIF.
+
+    ls_hdr-wire_format_version = 1.
+    ls_hdr-provider_id         = 'SER_FUGR'.
+    ls_hdr-object_count        = lines( lt_entries ).
+
+    EXPORT hdr      = ls_hdr
+           entries  = lt_entries
+           areat    = lt_areat
+           enlfdir  = lt_enlfdir
+           func     = lt_func
+           language = mv_language
+      TO DATA BUFFER rv_buffer COMPRESSION ON.
+  ENDMETHOD.
+
+
+  METHOD inject_batch_from_buffer_fugr.
+    DATA ls_hdr             TYPE zaog_ser_env_bhdr.
+    DATA lt_entries         TYPE zaog_ser_env_bentry_tt.
+    DATA lt_areat           TYPE ty_fugr_areat_cache_tt.
+    DATA lt_enlfdir         TYPE ty_fugr_enlfdir_cache_tt.
+    DATA lt_func            TYPE ty_fugr_func_meta_tt.
+    DATA lt_entries_sorted  TYPE STANDARD TABLE OF zaog_ser_env_bentry WITH DEFAULT KEY.
+    DATA lv_lines_before    TYPE i.
+    DATA lv_language        TYPE spras.
+    DATA lt_valid_funcnames TYPE HASHED TABLE OF rs38l_fnam WITH UNIQUE KEY table_line.
+
+    CHECK iv_buffer IS NOT INITIAL.
+
+    TRY.
+        IMPORT hdr      = ls_hdr
+               entries  = lt_entries
+               areat    = lt_areat
+               enlfdir  = lt_enlfdir
+               func     = lt_func
+               language = lv_language
+          FROM DATA BUFFER iv_buffer.
+      CATCH cx_root INTO DATA(lx_import).
+        zcx_abapgit_exception=>raise(
+          |ORTEC FUGR batch prefetch buffer is corrupt: { lx_import->get_text( ) }| ).
+    ENDTRY.
+    IF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise( 'ORTEC FUGR batch prefetch buffer: IMPORT failed' ).
+    ENDIF.
+
+    IF ls_hdr-wire_format_version <> 1.
+      zcx_abapgit_exception=>raise(
+        |ORTEC FUGR batch prefetch buffer: unknown wire_format_version { ls_hdr-wire_format_version }| ).
+    ENDIF.
+
+    IF ls_hdr-provider_id <> 'SER_FUGR'.
+      zcx_abapgit_exception=>raise(
+        'ORTEC FUGR batch prefetch buffer: unexpected provider_id' ).
+    ENDIF.
+
+    IF ls_hdr-object_count <> lines( lt_entries ).
+      zcx_abapgit_exception=>raise(
+        'ORTEC FUGR batch prefetch buffer: object_count does not match ENTRIES' ).
+    ENDIF.
+
+    " PR-005-style guard: EXTRACT_FOR_BATCH_FUGR can only ever export a
+    " non-initial MV_LANGUAGE (its own entry guard above), so an initial
+    " LANGUAGE here is itself proof of a corrupt/foreign buffer - reject
+    " BEFORE any cache mutation, so a pooled worker's PRIOR mv_language
+    " can never be silently reused to serve this buffer's data.
+    IF lv_language IS INITIAL.
+      zcx_abapgit_exception=>raise(
+        'ORTEC FUGR batch prefetch buffer: language must not be initial' ).
+    ENDIF.
+
+    " every ENTRIES row must be FUGR with a known state - reject anything
+    " else as corrupt.
+    LOOP AT lt_entries INTO DATA(ls_check_entry).
+      IF ls_check_entry-obj_type <> 'FUGR' OR
+         ( ls_check_entry-state <> 'P' AND ls_check_entry-state <> 'M' ).
+        zcx_abapgit_exception=>raise(
+          'ORTEC FUGR batch prefetch buffer: unexpected entry type or state' ).
+      ENDIF.
+    ENDLOOP.
+
+    " duplicate check MUST happen before any INSERT INTO mt_fugr_areat/
+    " mt_fugr_enlfdir/mt_fugr_func_meta - a HASHED TABLE INSERT would
+    " otherwise silently collapse a duplicate instead of rejecting the
+    " whole buffer. Note LT_AREAT/LT_ENLFDIR/LT_FUNC themselves cannot
+    " contain a duplicate key (all three are HASHED WITH UNIQUE KEY, so
+    " a duplicate could not have been exported in the first place) -
+    " only the generic ENTRIES table needs this check.
+    lt_entries_sorted = CORRESPONDING #( lt_entries ).
+    SORT lt_entries_sorted BY obj_type obj_name.
+    lv_lines_before = lines( lt_entries_sorted ).
+    DELETE ADJACENT DUPLICATES FROM lt_entries_sorted COMPARING obj_type obj_name.
+    IF lines( lt_entries_sorted ) <> lv_lines_before.
+      zcx_abapgit_exception=>raise(
+        'ORTEC FUGR batch prefetch buffer: duplicate entry in ENTRIES' ).
+    ENDIF.
+
+    " canonical object-key correlation: a 'P' entry's HIT rule is
+    " "EITHER areat OR enlfdir has a row for its area" (design.md
+    " &sect;2) - unlike TABL/PROG's single-cache 1:1 shape, a payload
+    " row here need only belong to SOME real 'P' entry, and a 'P' entry
+    " needs SOME payload row in at least one of the two caches; func
+    " rows are validated against the accepted enlfdir function-module
+    " set instead of ENTRIES directly, mirroring EXTRACT_FOR_BATCH_
+    " FUGR's own nested-loop population rule.
+    DATA(lt_p_entries) = lt_entries.
+    DELETE lt_p_entries WHERE state <> 'P'.
+
+    LOOP AT lt_areat INTO DATA(ls_areat_check).
+      READ TABLE lt_p_entries TRANSPORTING NO FIELDS WITH KEY obj_name = ls_areat_check-area.
+      IF sy-subrc <> 0.
+        zcx_abapgit_exception=>raise(
+          'ORTEC FUGR batch prefetch buffer: areat payload key not in P entries' ).
+      ENDIF.
+    ENDLOOP.
+
+    LOOP AT lt_enlfdir INTO DATA(ls_enlfdir_check).
+      READ TABLE lt_p_entries TRANSPORTING NO FIELDS WITH KEY obj_name = ls_enlfdir_check-area.
+      IF sy-subrc <> 0.
+        zcx_abapgit_exception=>raise(
+          'ORTEC FUGR batch prefetch buffer: enlfdir payload key not in P entries' ).
+      ENDIF.
+      LOOP AT ls_enlfdir_check-enlfdir INTO DATA(ls_fm_check).
+        INSERT ls_fm_check-funcname INTO TABLE lt_valid_funcnames.
+      ENDLOOP.
+    ENDLOOP.
+
+    LOOP AT lt_p_entries INTO DATA(ls_p_check).
+      READ TABLE lt_areat TRANSPORTING NO FIELDS
+        WITH TABLE KEY area = CONV tlibt-area( ls_p_check-obj_name ).
+      IF sy-subrc <> 0.
+        READ TABLE lt_enlfdir TRANSPORTING NO FIELDS
+          WITH TABLE KEY area = CONV enlfdir-area( ls_p_check-obj_name ).
+        IF sy-subrc <> 0.
+          zcx_abapgit_exception=>raise(
+            'ORTEC FUGR batch prefetch buffer: P entry has no areat or enlfdir payload' ).
+        ENDIF.
+      ENDIF.
+    ENDLOOP.
+
+    LOOP AT lt_func INTO DATA(ls_func_check).
+      READ TABLE lt_valid_funcnames TRANSPORTING NO FIELDS
+        WITH TABLE KEY table_line = ls_func_check-funcname.
+      IF sy-subrc <> 0.
+        zcx_abapgit_exception=>raise(
+          'ORTEC FUGR batch prefetch buffer: func payload key not found in enlfdir' ).
+      ENDIF.
+    ENDLOOP.
+
+    " CLEAR first: a parallel RFC worker session can be reused across many
+    " unrelated dispatches over its lifetime - see INJECT_FROM_BUFFER's own
+    " identical clear-before-insert rationale.
+    CLEAR mt_fugr_areat.
+    CLEAR mt_fugr_enlfdir.
+    CLEAR mt_fugr_func_meta.
+    LOOP AT lt_areat INTO DATA(ls_areat_ins).
+      INSERT ls_areat_ins INTO TABLE mt_fugr_areat.
+    ENDLOOP.
+    LOOP AT lt_enlfdir INTO DATA(ls_enlfdir_ins).
+      INSERT ls_enlfdir_ins INTO TABLE mt_fugr_enlfdir.
+    ENDLOOP.
+    LOOP AT lt_func INTO DATA(ls_func_ins).
+      INSERT ls_func_ins INTO TABLE mt_fugr_func_meta.
+    ENDLOOP.
+    mv_language = lv_language.
+  ENDMETHOD.
+
+  METHOD clear_fugr_cache.
+    CLEAR mt_fugr_areat.
+    CLEAR mt_fugr_enlfdir.
+    CLEAR mt_fugr_func_meta.
   ENDMETHOD.
 
 ENDCLASS.

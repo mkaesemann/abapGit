@@ -941,7 +941,8 @@ CLASS ZCL_ABAPGIT_OBJECT_FUGR IMPLEMENTATION.
       lt_functab    TYPE ty_rs38l_incl_tt,
       lt_new_source TYPE rsfb_source,
       ls_function   LIKE LINE OF rt_functions.
-    DATA ls_metadata TYPE zcl_abapgit_ortec_ser_pref_ext=>ty_fugr_func_meta.
+    DATA ls_metadata      TYPE zcl_abapgit_ortec_ser_pref_ext=>ty_fugr_func_meta.
+    DATA lv_rfc_prefetched TYPE abap_bool.
 
     FIELD-SYMBOLS: <ls_func>          LIKE LINE OF lt_functab,
                    <ls_documentation> TYPE LINE OF ty_function-documentation.
@@ -1005,11 +1006,25 @@ CLASS ZCL_ABAPGIT_OBJECT_FUGR IMPLEMENTATION.
       ENDIF.
 
       " Scope and Interface Contract only for 7.55 or higher
-      TRY.
-          SELECT SINGLE rfcscope rfcvers INTO CORRESPONDING FIELDS OF ls_function FROM ('TFDIR')
-            WHERE funcname = <ls_func>-funcname.          "#EC CI_SUBRC
-        CATCH cx_sy_dynamic_osql_semantics ##NO_HANDLER.
-      ENDTRY.
+      IF zcl_abapgit_ortec_git_switch=>is_serial_prefetch_active( ) = abap_true.
+        zcl_abapgit_ortec_ser_pref_ext=>get_fugr_func_metadata(
+          EXPORTING
+            iv_funcname         = <ls_func>-funcname
+          IMPORTING
+            es_metadata         = ls_metadata
+            ev_rfc_fields_valid = lv_rfc_prefetched ).
+        IF lv_rfc_prefetched = abap_true.
+          ls_function-rfcscope = ls_metadata-rfcscope.
+          ls_function-rfcvers  = ls_metadata-rfcvers.
+        ENDIF.
+      ENDIF.
+      IF lv_rfc_prefetched = abap_false.
+        TRY.
+            SELECT SINGLE rfcscope rfcvers INTO CORRESPONDING FIELDS OF ls_function FROM ('TFDIR')
+              WHERE funcname = <ls_func>-funcname.            "#EC CI_SUBRC
+          CATCH cx_sy_dynamic_osql_semantics ##NO_HANDLER.
+        ENDTRY.
+      ENDIF.
 
       APPEND ls_function TO rt_functions.
 
@@ -1083,6 +1098,7 @@ CLASS ZCL_ABAPGIT_OBJECT_FUGR IMPLEMENTATION.
   METHOD serialize_texts.
     DATA: lt_tpool_i18n TYPE zif_abapgit_lang_definitions=>ty_i18n_tpools,
           lt_tpool      TYPE textpool_table.
+    DATA lv_fugr_i18n_prefetched TYPE abap_bool.
 
     FIELD-SYMBOLS <ls_tpool> LIKE LINE OF lt_tpool_i18n.
 
@@ -1093,13 +1109,21 @@ CLASS ZCL_ABAPGIT_OBJECT_FUGR IMPLEMENTATION.
     " Table d010tinf stores info. on languages in which program is maintained
     " Select all active translations of program texts
     " Skip main language - it was already serialized
-    SELECT DISTINCT language
-      INTO CORRESPONDING FIELDS OF TABLE lt_tpool_i18n
-      FROM d010tinf
-      WHERE r3state = 'A'
-      AND prog = iv_prog_name
-      AND language <> mv_language
-      ORDER BY language ##TOO_MANY_ITAB_FIELDS.
+    IF zcl_abapgit_ortec_git_switch=>is_serial_prefetch_active( ) = abap_true.
+      lv_fugr_i18n_prefetched = zcl_abapgit_ortec_ser_pref_ext=>get_prog_tpool_languages(
+        EXPORTING iv_program    = CONV #( iv_prog_name )
+                  iv_language   = mv_language
+        IMPORTING et_tpool_i18n = lt_tpool_i18n ).
+    ENDIF.
+    IF lv_fugr_i18n_prefetched = abap_false.
+      SELECT DISTINCT language
+        INTO CORRESPONDING FIELDS OF TABLE lt_tpool_i18n
+        FROM d010tinf
+        WHERE r3state = 'A'
+        AND prog = iv_prog_name
+        AND language <> mv_language
+        ORDER BY language ##TOO_MANY_ITAB_FIELDS.
+    ENDIF.
 
     mo_i18n_params->trim_saplang_keyed_table(
       EXPORTING

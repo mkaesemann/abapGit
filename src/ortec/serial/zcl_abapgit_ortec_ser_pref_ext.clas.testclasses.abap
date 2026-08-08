@@ -1,4 +1,4 @@
-CLASS zcl_abapgit_ortec_ser_pref_ext DEFINITION LOCAL FRIENDS ltcl_dd_batch_wire ltcl_tabl_batch_wire ltcl_prog_batch_wire.
+CLASS zcl_abapgit_ortec_ser_pref_ext DEFINITION LOCAL FRIENDS ltcl_dd_batch_wire ltcl_tabl_batch_wire ltcl_prog_batch_wire ltcl_fugr_batch_wire.
 
 CLASS ltcl_doma_parity DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINAL.
 
@@ -994,6 +994,219 @@ CLASS ltcl_prog_batch_wire IMPLEMENTATION.
       zcl_abapgit_ortec_ser_pref_ext=>get_prog_tpool_languages(
         EXPORTING iv_program = c_program iv_language = 'E'
         IMPORTING et_tpool_i18n = et_tpool_i18n ) ).
+  ENDMETHOD.
+
+ENDCLASS.
+
+
+CLASS ltcl_fugr_batch_wire DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINAL.
+
+  " SER-SLICE-4 Package C (serialization_slice_4_fugr_design.md):
+  " EXTRACT_FOR_BATCH_FUGR / INJECT_BATCH_FROM_BUFFER_FUGR wire-envelope
+  " contract. Uses a fabricated area name and direct friend-access cache
+  " manipulation throughout, independent of any real system's live TLIBT/
+  " ENLFDIR/TFDIR content (mirrors LTCL_TABL_BATCH_WIRE's checked-empty
+  " test technique).
+
+  PRIVATE SECTION.
+    CONSTANTS c_area TYPE tlibt-area VALUE 'ZZZ_SLICE4_TEST_AREA'.
+
+    METHODS setup.
+    METHODS teardown.
+
+    METHODS build_raw_buffer
+      IMPORTING is_hdr           TYPE zaog_ser_env_bhdr
+                it_entries       TYPE zaog_ser_env_bentry_tt
+      RETURNING VALUE(rv_buffer) TYPE xstring.
+
+    METHODS extract_no_fugr_objects_empty  FOR TESTING.
+    METHODS batch_round_trip_finds_data    FOR TESTING RAISING zcx_abapgit_exception.
+    METHODS reject_unknown_provider_id     FOR TESTING.
+    METHODS reject_p_entry_without_payload FOR TESTING.
+    METHODS reject_initial_language        FOR TESTING.
+    METHODS no_cross_batch_leakage         FOR TESTING RAISING zcx_abapgit_exception.
+    METHODS clear_fugr_cache_clears_all    FOR TESTING.
+    METHODS rfc_fields_invalid_is_safe     FOR TESTING.
+
+ENDCLASS.
+
+
+CLASS ltcl_fugr_batch_wire IMPLEMENTATION.
+
+  METHOD setup.
+    zcl_abapgit_ortec_ser_pref_ext=>clear( ).
+  ENDMETHOD.
+
+  METHOD teardown.
+    zcl_abapgit_ortec_ser_pref_ext=>clear( ).
+  ENDMETHOD.
+
+  METHOD build_raw_buffer.
+    DATA lt_areat   TYPE zcl_abapgit_ortec_ser_pref_ext=>ty_fugr_areat_cache_tt.
+    DATA lt_enlfdir TYPE zcl_abapgit_ortec_ser_pref_ext=>ty_fugr_enlfdir_cache_tt.
+    DATA lt_func    TYPE zcl_abapgit_ortec_ser_pref_ext=>ty_fugr_func_meta_tt.
+
+    EXPORT hdr      = is_hdr
+           entries  = it_entries
+           areat    = lt_areat
+           enlfdir  = lt_enlfdir
+           func     = lt_func
+           language = 'E'
+      TO DATA BUFFER rv_buffer COMPRESSION ON.
+  ENDMETHOD.
+
+  METHOD extract_no_fugr_objects_empty.
+    DATA(lv_buffer) = zcl_abapgit_ortec_ser_pref_ext=>extract_for_batch_fugr(
+      VALUE #( ( object = 'PROG' obj_name = 'SAPMZ_TEST' ) ) ).
+
+    cl_abap_unit_assert=>assert_initial( lv_buffer ).
+  ENDMETHOD.
+
+  METHOD batch_round_trip_finds_data.
+    zcl_abapgit_ortec_ser_pref_ext=>mv_language = 'E'.
+    INSERT VALUE zcl_abapgit_ortec_ser_pref_ext=>ty_fugr_areat_cache(
+        area = c_area areat = 'Test area' )
+      INTO TABLE zcl_abapgit_ortec_ser_pref_ext=>mt_fugr_areat.
+
+    DATA(lv_buffer) = zcl_abapgit_ortec_ser_pref_ext=>extract_for_batch_fugr(
+      VALUE #( ( object = 'FUGR' obj_name = c_area ) ) ).
+    cl_abap_unit_assert=>assert_not_initial( lv_buffer ).
+
+    zcl_abapgit_ortec_ser_pref_ext=>clear( ).
+    zcl_abapgit_ortec_ser_pref_ext=>inject_batch_from_buffer_fugr( lv_buffer ).
+
+    cl_abap_unit_assert=>assert_true(
+      zcl_abapgit_ortec_ser_pref_ext=>get_fugr_areat( iv_area = c_area iv_language = 'E' ) ).
+  ENDMETHOD.
+
+  METHOD reject_unknown_provider_id.
+    DATA(ls_hdr) = VALUE zaog_ser_env_bhdr(
+      wire_format_version = 1
+      provider_id         = 'SER_XXXX'
+      object_count        = 0 ).
+    DATA(lv_buffer) = build_raw_buffer( is_hdr = ls_hdr it_entries = VALUE #( ) ).
+
+    TRY.
+        zcl_abapgit_ortec_ser_pref_ext=>inject_batch_from_buffer_fugr( lv_buffer ).
+        cl_abap_unit_assert=>fail( 'expected zcx_abapgit_exception' ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_error).
+        cl_abap_unit_assert=>assert_char_cp(
+          act = lx_error->get_text( ) exp = '*provider_id*' ).
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD reject_p_entry_without_payload.
+    DATA(ls_hdr) = VALUE zaog_ser_env_bhdr(
+      wire_format_version = 1
+      provider_id         = 'SER_FUGR'
+      object_count        = 1 ).
+    DATA(lt_entries) = VALUE zaog_ser_env_bentry_tt(
+      ( obj_type = 'FUGR' obj_name = c_area state = 'P' ) ).
+    DATA(lv_buffer) = build_raw_buffer( is_hdr = ls_hdr it_entries = lt_entries ).
+
+    TRY.
+        zcl_abapgit_ortec_ser_pref_ext=>inject_batch_from_buffer_fugr( lv_buffer ).
+        cl_abap_unit_assert=>fail( 'expected zcx_abapgit_exception' ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_error).
+        cl_abap_unit_assert=>assert_char_cp(
+          act = lx_error->get_text( ) exp = '*no areat or enlfdir payload*' ).
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD reject_initial_language.
+    DATA(ls_hdr) = VALUE zaog_ser_env_bhdr(
+      wire_format_version = 1
+      provider_id         = 'SER_FUGR'
+      object_count        = 0 ).
+    DATA lt_areat   TYPE zcl_abapgit_ortec_ser_pref_ext=>ty_fugr_areat_cache_tt.
+    DATA lt_enlfdir TYPE zcl_abapgit_ortec_ser_pref_ext=>ty_fugr_enlfdir_cache_tt.
+    DATA lt_func    TYPE zcl_abapgit_ortec_ser_pref_ext=>ty_fugr_func_meta_tt.
+    DATA lv_buffer  TYPE xstring.
+
+    EXPORT hdr      = ls_hdr
+           entries  = VALUE zaog_ser_env_bentry_tt( )
+           areat    = lt_areat
+           enlfdir  = lt_enlfdir
+           func     = lt_func
+           language = space
+      TO DATA BUFFER lv_buffer COMPRESSION ON.
+
+    TRY.
+        zcl_abapgit_ortec_ser_pref_ext=>inject_batch_from_buffer_fugr( lv_buffer ).
+        cl_abap_unit_assert=>fail( 'expected zcx_abapgit_exception' ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_error).
+        cl_abap_unit_assert=>assert_char_cp(
+          act = lx_error->get_text( ) exp = '*language*' ).
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD no_cross_batch_leakage.
+    zcl_abapgit_ortec_ser_pref_ext=>mv_language = 'E'.
+    INSERT VALUE zcl_abapgit_ortec_ser_pref_ext=>ty_fugr_areat_cache(
+        area = 'ZZZ_SLICE4_AREA_ONE' areat = 'One' )
+      INTO TABLE zcl_abapgit_ortec_ser_pref_ext=>mt_fugr_areat.
+    DATA(lv_buffer_a) = zcl_abapgit_ortec_ser_pref_ext=>extract_for_batch_fugr(
+      VALUE #( ( object = 'FUGR' obj_name = 'ZZZ_SLICE4_AREA_ONE' ) ) ).
+
+    zcl_abapgit_ortec_ser_pref_ext=>clear( ).
+    zcl_abapgit_ortec_ser_pref_ext=>mv_language = 'E'.
+    INSERT VALUE zcl_abapgit_ortec_ser_pref_ext=>ty_fugr_areat_cache(
+        area = 'ZZZ_SLICE4_AREA_TWO' areat = 'Two' )
+      INTO TABLE zcl_abapgit_ortec_ser_pref_ext=>mt_fugr_areat.
+    DATA(lv_buffer_b) = zcl_abapgit_ortec_ser_pref_ext=>extract_for_batch_fugr(
+      VALUE #( ( object = 'FUGR' obj_name = 'ZZZ_SLICE4_AREA_TWO' ) ) ).
+
+    zcl_abapgit_ortec_ser_pref_ext=>clear( ).
+    zcl_abapgit_ortec_ser_pref_ext=>inject_batch_from_buffer_fugr( lv_buffer_a ).
+    cl_abap_unit_assert=>assert_true(
+      zcl_abapgit_ortec_ser_pref_ext=>get_fugr_areat( iv_area = 'ZZZ_SLICE4_AREA_ONE' iv_language = 'E' ) ).
+    cl_abap_unit_assert=>assert_false(
+      zcl_abapgit_ortec_ser_pref_ext=>get_fugr_areat( iv_area = 'ZZZ_SLICE4_AREA_TWO' iv_language = 'E' ) ).
+
+    zcl_abapgit_ortec_ser_pref_ext=>inject_batch_from_buffer_fugr( lv_buffer_b ).
+    cl_abap_unit_assert=>assert_true(
+      zcl_abapgit_ortec_ser_pref_ext=>get_fugr_areat( iv_area = 'ZZZ_SLICE4_AREA_TWO' iv_language = 'E' ) ).
+    cl_abap_unit_assert=>assert_false(
+      zcl_abapgit_ortec_ser_pref_ext=>get_fugr_areat( iv_area = 'ZZZ_SLICE4_AREA_ONE' iv_language = 'E' ) ).
+  ENDMETHOD.
+
+  METHOD clear_fugr_cache_clears_all.
+    zcl_abapgit_ortec_ser_pref_ext=>mv_language = 'E'.
+    INSERT VALUE zcl_abapgit_ortec_ser_pref_ext=>ty_fugr_areat_cache( area = c_area areat = 'X' )
+      INTO TABLE zcl_abapgit_ortec_ser_pref_ext=>mt_fugr_areat.
+    INSERT VALUE zcl_abapgit_ortec_ser_pref_ext=>ty_fugr_enlfdir_cache( area = c_area )
+      INTO TABLE zcl_abapgit_ortec_ser_pref_ext=>mt_fugr_enlfdir.
+    INSERT VALUE zcl_abapgit_ortec_ser_pref_ext=>ty_fugr_func_meta( funcname = 'ZZZ_SLICE4_FM' )
+      INTO TABLE zcl_abapgit_ortec_ser_pref_ext=>mt_fugr_func_meta.
+
+    cl_abap_unit_assert=>assert_true(
+      zcl_abapgit_ortec_ser_pref_ext=>get_fugr_areat( iv_area = c_area iv_language = 'E' ) ).
+
+    zcl_abapgit_ortec_ser_pref_ext=>clear_fugr_cache( ).
+
+    cl_abap_unit_assert=>assert_false(
+      zcl_abapgit_ortec_ser_pref_ext=>get_fugr_areat( iv_area = c_area iv_language = 'E' ) ).
+    cl_abap_unit_assert=>assert_false(
+      zcl_abapgit_ortec_ser_pref_ext=>get_fugr_enlfdir( iv_area = c_area ) ).
+    cl_abap_unit_assert=>assert_false(
+      zcl_abapgit_ortec_ser_pref_ext=>get_fugr_func_metadata( iv_funcname = 'ZZZ_SLICE4_FM' ) ).
+  ENDMETHOD.
+
+  METHOD rfc_fields_invalid_is_safe.
+    " FG-001 regression: a func_meta row with RFC_FIELDS_VALID = ABAP_FALSE
+    " (simulating a release without TFDIR-RFCSCOPE/RFCVERS) must be
+    " reported safely by GET_FUGR_FUNC_METADATA, never raise/dump.
+    INSERT VALUE zcl_abapgit_ortec_ser_pref_ext=>ty_fugr_func_meta(
+        funcname         = 'ZZZ_SLICE4_FM'
+        rfc_fields_valid = abap_false )
+      INTO TABLE zcl_abapgit_ortec_ser_pref_ext=>mt_fugr_func_meta.
+
+    DATA ev_rfc_fields_valid TYPE abap_bool.
+    zcl_abapgit_ortec_ser_pref_ext=>get_fugr_func_metadata(
+      EXPORTING iv_funcname         = 'ZZZ_SLICE4_FM'
+      IMPORTING ev_rfc_fields_valid = ev_rfc_fields_valid ).
+
+    cl_abap_unit_assert=>assert_false( ev_rfc_fields_valid ).
   ENDMETHOD.
 
 ENDCLASS.
