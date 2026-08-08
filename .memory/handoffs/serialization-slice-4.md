@@ -145,3 +145,78 @@ per the mandatory implementation flow (design review already done here;
 next would be senior implementation + junior mechanical subtasks +
 performance static scan + performance implementation audit + regression
 validation).
+
+---
+
+## IMPLEMENTATION UPDATE (post-design, this session)
+
+```text
+PACKET=COMPACT_HANDOFF_V1
+TASK=SER_SLICE_4_IMPLEMENTATION
+AUTHORITATIVE_BASELINE=8c9e5df4f9dd4fdaa4e05103cc0ac1e773758a32
+STATUS=LOCAL_COMPLETE_AWAITING_CONSOLIDATED_IT8
+```
+
+The owner authorized implementation of Package A (TABL partial), Package
+B (PROG), Package C (FUGR), and the shared aggregate-byte-admission
+prerequisite (TTYP and all full-provider follow-ups above remain
+DEFERRED_BY_APPROVED_DESIGN, unchanged). All three packages plus the
+prerequisite are now implemented, get_errors-clean, unit-tested locally,
+and committed:
+
+```text
+CHECKPOINT_COMMITS (in order):
+370ebbdb - design phase (memory-only)
+9a67c8ee - Phase 2 (aggregate byte admission + drift restoration) +
+  Package A (TABL)
+bf11d559 - Package B (PROG)
+f545fc45 - Package C (FUGR)
+070a8775 - IC-002 fix: aggregate byte-admission I-precision overflow
+f75f1e87 - PS-001 fix: O(K^2) batch-entry correlation lookups
+```
+
+Two real defects were found and fixed during post-implementation review
+(NOT present in the approved design, both introduced during coding):
+
+1. **IC-002** (correctness, BLOCKING, fixed): `sum_provider_buffer_bytes`
+   summed six `xstrlen()` (`TYPE i`) results with a bare `+` chain into a
+   `TYPE int8` target - ABAP computes the intermediate sum in 32-bit `I`
+   precision regardless of the target type, so the running total could
+   overflow before ever reaching int8, defeating the whole point of the
+   int8 accumulator. Fixed by wrapping every term in `CONV int8( ... )`.
+   See `.memory/reviews/serialization_slice_4_implementation_correctness.md`.
+2. **PS-001** (performance, MAJOR, fixed): `inject_batch_from_buffer_
+   tabl/_prog/_fugr` each did an O(K) linear `READ TABLE ... WITH KEY`
+   inside a loop over payload rows for the entry-correlation check,
+   giving O(K^2) per inject call. Fixed with an O(1) HASHED secondary
+   lookup table. See `.memory/logs/performance_scan_serialization_slice_4.md`
+   and `.memory/reviews/serialization_slice_4_implementation_performance.md`.
+
+Post-implementation correctness review (8 invariants, IC-001..IC-008)
+and performance IMPLEMENTATION_AUDIT both verdict **APPROVE** after the
+two fixes above. Full detail in:
+
+```text
+.memory/reviews/serialization_slice_4_implementation_correctness.md
+.memory/reviews/serialization_slice_4_implementation_performance.md
+.memory/logs/serialization_slice_4_tabl_ttyp_implementation.md
+.memory/logs/serialization_slice_4_prog_implementation.md
+.memory/logs/serialization_slice_4_fugr_implementation.md
+.memory/logs/serialization_slice_4_it8_validation_plan.md (NEW -
+  consolidated executable IT8 plan for this slice's TABL/PROG/FUGR
+  scope, distinct from serialization_slice_3_it8_validation_plan.md)
+```
+
+No live SAP syntax check or ABAP Unit execution has been performed
+(no live connectivity this session) - this is a disclosed residual, to
+be closed by the owner running
+`.memory/logs/serialization_slice_4_it8_validation_plan.md` at IT8.
+Nothing was pushed.
+
+### Next step (updated)
+
+`OWNER_ACTION_REQUIRED=RUN_CONSOLIDATED_IT8_VALIDATION` per
+`.memory/logs/serialization_slice_4_it8_validation_plan.md`. No further
+design or implementation work is queued for SER-SLICE-4 pending that
+validation's outcome (see &sect;10's per-provider decision matrix for
+what happens next depending on results).

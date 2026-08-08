@@ -54,12 +54,36 @@ repository-scoped setting to replace the global `is_serial_batch_active`/
 the mandatory 10-family assessment, and removal of Path 3. See
 `.memory/handoffs/serialization-slice-3.md` for the live handoff.
 
-### SER-SLICE-4 (parallel, design-only, does not interfere with SER-SLICE-3 IT8)
+### SER-SLICE-4 (TABL/PROG/FUGR batch providers - implementation complete, awaiting IT8)
 
 ```text
-SER_SLICE_3=LOCAL_COMPLETE_AWAITING_CONSOLIDATED_IT8
-SER_SLICE_4=DESIGN_APPROVED_AWAITING_OWNER_IMPLEMENTATION_DECISION
+SER_SLICE_3=SAP_VALIDATED_COMPLETE_WITH_LATE_CALLBACK_TEST_DEFERRED
+SER_SLICE_4=LOCAL_COMPLETE_AWAITING_CONSOLIDATED_IT8
+AUTHORITATIVE_BASELINE=8c9e5df4f9dd4fdaa4e05103cc0ac1e773758a32
 ```
+
+Owner authorized implementation of Package A (TABL partial provider),
+Package B (PROG), Package C (FUGR), and the shared aggregate-byte-
+admission prerequisite (TTYP and all full-provider follow-ups remain
+`DEFERRED_BY_APPROVED_DESIGN`, unchanged from the design phase). All
+three packages plus the prerequisite are implemented, get_errors-clean,
+locally unit-tested, and committed: `9a67c8ee` (Phase 2 + Package A),
+`bf11d559` (Package B), `f545fc45` (Package C), `070a8775` (IC-002 fix:
+aggregate byte-admission I-precision overflow), `f75f1e87` (PS-001 fix:
+O(K^2) batch-entry correlation lookups). Post-implementation correctness
+review (8 invariants) and performance IMPLEMENTATION_AUDIT both
+verdict `APPROVE` after those two fixes. No live SAP syntax check or
+ABAP Unit execution performed (no live connectivity this session).
+`OWNER_ACTION_REQUIRED=RUN_CONSOLIDATED_IT8_VALIDATION` per
+`.memory/logs/serialization_slice_4_it8_validation_plan.md`. Full detail:
+`.memory/handoffs/serialization-slice-4.md` ("IMPLEMENTATION UPDATE"
+section), `.memory/reviews/serialization_slice_4_implementation_
+correctness.md`, `.memory/reviews/serialization_slice_4_implementation_
+performance.md`, `.memory/logs/serialization_slice_4_{tabl_ttyp,prog,
+fugr}_implementation.md`.
+
+Design-phase history (unchanged, still accurate as the approved design
+this implementation followed):
 
 Convergent design-only pass for the remaining serialization providers
 (TABL/TTYP, PROG, FUGR) while the owner independently ran SER-SLICE-3's
@@ -95,10 +119,11 @@ DDIC/UI/RFC/test changes were made. Full detail, decisions, and the
 `.memory/reviews/serialization_slice_4_performance.md`,
 `.memory/reviews/serialization_slice_4_readiness.md`.
 
-`OWNER_DECISION_REQUIRED`: whether to authorize implementation of
-Package A (TABL)/B (PROG)/C (FUGR), independently or together - do not
-start implementation on any of them without an explicit new owner
-instruction naming the package(s).
+`OWNER_DECISION_REQUIRED` (superseded - Package A/B/C were subsequently
+authorized and implemented, see the "SER-SLICE-4" section above): whether
+to authorize implementation of Package A (TABL)/B (PROG)/C (FUGR),
+independently or together - do not start implementation on any of them
+without an explicit new owner instruction naming the package(s).
 
 SER-SLICE-2 is now SAP_VALIDATED_COMPLETE (owner evidence: ATC=PASS,
 ABAP_UNIT=PASS, FEATURE_OFF_TEST=PASS, FEATURE_ON_AFTER_RPERF_FIX=PASS,
