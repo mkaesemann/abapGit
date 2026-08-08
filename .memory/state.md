@@ -21,13 +21,14 @@ LATEST_SAP_VALIDATED_HEAD=f54860d18bb9c8e7c3ca6dd04f04d1c9e73b455c
 
 ```text
 SER_SLICE_4=SAP_VALIDATED_COMPLETE
-SER_SLICE_5=LOCAL_COMPLETE_AWAITING_IT8
-  (`.memory/handoffs/serialization-slice-5.md`) - discovery for FUGR
-  (REPAIR_EXISTING_PROVIDER_COVERAGE, fix applied), DDLS (MEASURE_FIRST),
-  WAPA (KEEP_SINGLETON_WITH_EVIDENCE), tail latency
-  (NO_ACTION_WAIT_REFLECTS_REAL_WORK, provisional). OWNER_ACTION_REQUIRED:
-  rerun the SER-SLICE-4 IT8 SAT comparison with the SLICE5-001 fix before
-  any further FUGR/DDLS/WAPA implementation work.
+SER_SLICE_5=SAP_VALIDATED_COMPLETE_WITH_WAPA_RUNTIME_TEST_DEFERRED
+  (`.memory/handoffs/serialization-slice-5.md`, "IT8 CLOSEOUT" section) -
+  SLICE5-001 confirmed live on IT8 (active source match, 151/151 ABAP Unit,
+  ATC clean, gate lifecycle exception-safe by exhaustive static proof).
+  Residuals (do not block closeout, see handoff): WAPA replacement not
+  runtime-exercised (no fixture), worker-side provider consumption proven
+  only statically (no live counter/trace this pass), fresh SAT retest not
+  yet run. DDLS remains WAIVED_BY_OWNER/DEFERRED.
 ```
 
 ```text
@@ -45,11 +46,11 @@ LATE_CALLBACK_TEST=DEFERRED_OWNER_ACCEPTED
 ## Active topic
 
 ```text
-TOPIC=SER_SLICE_5_CLOSEOUT_AND_DISCOVERY
-STATUS=LOCAL_COMPLETE_AWAITING_IT8
+TOPIC=SER_SLICE_5_IT8_CLOSEOUT
+STATUS=SAP_VALIDATED_COMPLETE_WITH_WAPA_RUNTIME_TEST_DEFERRED
 SER_SLICE_3=SAP_VALIDATED_COMPLETE_WITH_LATE_CALLBACK_TEST_DEFERRED
 SER_SLICE_4=SAP_VALIDATED_COMPLETE
-SER_SLICE_5=LOCAL_COMPLETE_AWAITING_IT8
+SER_SLICE_5=SAP_VALIDATED_COMPLETE_WITH_WAPA_RUNTIME_TEST_DEFERRED
 ```
 
 SER-SLICE-5 (2026-08-08): closed SER-SLICE-4 from owner IT8 evidence, verified

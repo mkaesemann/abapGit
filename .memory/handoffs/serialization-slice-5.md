@@ -106,3 +106,72 @@ OWNER_ACTION_REQUIRED=RUN_SER_SLICE_4_IT8_SAT_COMPARISON_WITH_SLICE5_001_FIX
 No further design or implementation work is queued pending that result -
 DDLS/WAPA next-slice decisions both explicitly depend on it (see the ranked
 backlog).
+
+---
+
+## IT8 CLOSEOUT (SER-SLICE-5 continuation session, 2026-08-08)
+
+```text
+PACKET=COMPACT_HANDOFF_V1
+TASK=SER_SLICE_5_IT8_CLOSEOUT
+STATUS=SAP_VALIDATED_COMPLETE_WITH_WAPA_RUNTIME_TEST_DEFERRED
+```
+
+Owner imported SLICE5-001 (`75f40b1a`) into IT8 and confirmed functionally
+("still works"). This session independently verified, live against IT8 via
+ADT:
+
+```text
+SLICE5_001_ACTIVE_SOURCE=PASS (active IT8 source byte-matches the committed
+  fix exactly)
+GATE_LIFECYCLE=PASS (exhaustive static control-flow proof - the function has
+  one loop, zero early exits, and every reachable exception path is already
+  caught before it could leak the gate ON - no productive fix needed)
+ABAP_UNIT=PASS (151/151 methods, live on IT8, across ORCH/PREF/PREF_EXT/
+  PREF_OO/SER_COST/SER_PLANNER/ORTEC_WAPA)
+ATC=PASS (0 priority-1 anywhere; 10 priority-2 findings total, ALL pre-
+  existing/unrelated SELECT-buffer-bypass patterns in code not touched this
+  session; the exact FUGR function containing SLICE5-001 has ZERO ATC
+  findings)
+INTEGRATED_OUTPUT_PARITY=PASS (owner-observed evidence tier only - not
+  independently byte-diff-measured this session, see
+  serialization_slice_5_integrated_parity.md)
+WORKER_PROVIDER_CONSUMPTION=PARTIAL / PROVIDER_EVIDENCE=STATIC_ONLY (the
+  activation chain is proven end-to-end on live IT8 source, but no live
+  batch-dispatch counter/trace/debugger observation was collected this
+  session - see serialization_slice_5_provider_activation.md)
+WAPA_REPLACEMENT=NOT_EXERCISED_NO_FIXTURE (only 4 WAPA objects existed across
+  both prior traces; no fixture available; explicitly does not block
+  closeout per the task's own rule - see serialization_slice_5_wapa_it8.md)
+FRESH_SAT_RETEST=NOT_RUN (no new trace pair supplied this session - see
+  serialization_slice_5_sat_retest.md)
+```
+
+No productive code change was needed or made this session - the SLICE5-001
+fix from the prior session is already exception-safe as designed. Full
+detail: `.memory/logs/serialization_slice_5_gate_lifecycle.md`,
+`.memory/logs/serialization_slice_5_integrated_parity.md`,
+`.memory/logs/serialization_slice_5_provider_activation.md`,
+`.memory/logs/serialization_slice_5_wapa_it8.md`,
+`.memory/logs/serialization_slice_5_sat_retest.md`.
+
+`.memory` tracking check: `git ls-files .memory` returns 246 tracked files -
+`.memory` is clearly and intentionally tracked under current repository
+policy (matches the entire prior history of this engagement). No index-only
+cleanup was needed or performed.
+
+`OWNER_ACTION_REQUIRED`:
+
+```text
+1. Capture a fresh Normal/Batch SAT trace pair with SLICE5-001 live, to
+   measure real per-provider benefit and FUGR's expected native-SQL
+   reduction (serialization_slice_5_sat_retest.md).
+2. If/when a WAPA-containing test repository becomes available, run the
+   exact minimal recipe in serialization_slice_5_wapa_it8.md.
+```
+
+### Next step
+
+No further design or implementation work is queued. DDLS remains
+`WAIVED_BY_OWNER`/`DEFERRED`. WAPA policy remains `KEEP_SINGLETON`, unchanged.
+
