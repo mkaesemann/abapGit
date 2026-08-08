@@ -1,5 +1,32 @@
 # SER-SLICE-4 — Remaining provider design convergence (handoff)
 
+---
+
+## FINAL CLOSEOUT (SER-SLICE-5 session, 2026-08-08)
+
+```text
+PACKET=COMPACT_HANDOFF_V1
+STATUS=SAP_VALIDATED_COMPLETE
+```
+
+Owner-supplied binding validation evidence (ACTIVATION/ATC/ABAP_UNIT/
+MULTI_REPOSITORY/MULTI_SLICE/OUTPUT_PARITY/FULL_REPOSITORY_BATCH_RUN all
+PASS; INDIVIDUAL_PROVIDER_OFF_ON_BENCHMARKS=WAIVED_BY_OWNER;
+ALL_ENABLED_PROVIDERS_INTEGRATED_RUN=PASS) closes this slice. Full-repository
+SAT comparison (487.557s -> 383.889s, 21.26% reduction, 95.93% RFC-start
+reduction) confirmed by reading both supplied trace files in full. A
+follow-on trace-purity audit found and fixed a real, confirmed regression
+(SLICE5-001: the batch RFC worker never activated the provider/WAPA gate in
+its own session) that explains why per-provider incremental benefit could
+never be isolated. Full detail:
+`.memory/logs/serialization_full_repo_sat_closeout.md`,
+`.memory/reviews/serialization_final_two_path_trace_audit.md`,
+`.memory/handoffs/serialization-slice-5.md`. Do not reopen this slice's own
+correctness/output-parity findings (unaffected, still PASS) - only the
+providers' PERFORMANCE contribution was newly explained and fixed.
+
+---
+
 ```text
 PACKET=COMPACT_HANDOFF_V1
 TASK=SER_SLICE_4_REMAINING_PROVIDER_DESIGN
