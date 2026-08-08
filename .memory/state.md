@@ -54,6 +54,52 @@ repository-scoped setting to replace the global `is_serial_batch_active`/
 the mandatory 10-family assessment, and removal of Path 3. See
 `.memory/handoffs/serialization-slice-3.md` for the live handoff.
 
+### SER-SLICE-4 (parallel, design-only, does not interfere with SER-SLICE-3 IT8)
+
+```text
+SER_SLICE_3=LOCAL_COMPLETE_AWAITING_CONSOLIDATED_IT8
+SER_SLICE_4=DESIGN_APPROVED_AWAITING_OWNER_IMPLEMENTATION_DECISION
+```
+
+Convergent design-only pass for the remaining serialization providers
+(TABL/TTYP, PROG, FUGR) while the owner independently ran SER-SLICE-3's
+consolidated IT8 validation. Decisions: `TABL=IMPLEMENT_PARTIAL_PROVIDER`
+(per-extra-language DD02T text + TDDAT extras only; TTYP=`DEFER`),
+`PROG=IMPLEMENT_METADATA_TEXT_PROVIDER`,
+`FUGR=IMPLEMENT_METADATA_AND_DIRECTORY_PROVIDER`. Central finding: PROG's
+and FUGR's EXISTING single-object prefetch seams currently provide ZERO
+benefit under the RFC/adaptive-batch dispatch path (`before_dispatch`
+never populates the old generic `iv_prefetch_buffer_ext`) - both designs
+fix this dead optimization path, not a new large win. TABL's DD03P
+(fields, SAP-runtime-flattened/include-resolved) is explicitly excluded
+as too high-risk for naive bulk reconstruction this slice (named,
+NOT-authorized follow-up only). All three designs passed 3 adversarial
+review cycles (0 open blockers/majors), a cross-package correctness gate
+(`APPROVE_WITH_MINOR_REVISIONS` - one reviewer finding, CG-001, was
+independently re-verified against live source by the orchestrator and
+`REJECTED_WITH_PROOF`), and a performance design gate (`APPROVE` after
+fixing one real BLOCKER, PF-001: an O(N^2)-shape ABAP cache-scan defect
+in the TABL design, fixed before this slice closed). No productive code/
+DDIC/UI/RFC/test changes were made. Full detail, decisions, and the
+17-slice implementation-readiness breakdown:
+`.memory/handoffs/serialization-slice-4.md` (primary handoff),
+`.memory/logs/serialization_slice_4_common_discovery.md`,
+`.memory/logs/serialization_slice_4_tabl_ttyp_design.md`,
+`.memory/logs/serialization_slice_4_prog_design.md`,
+`.memory/logs/serialization_slice_4_fugr_design.md`,
+`.memory/logs/serialization_slice_4_shared_infrastructure.md`,
+`.memory/reviews/serialization_slice_4_tabl_ttyp_adversarial.md`,
+`.memory/reviews/serialization_slice_4_prog_adversarial.md`,
+`.memory/reviews/serialization_slice_4_fugr_adversarial.md`,
+`.memory/reviews/serialization_slice_4_correctness.md`,
+`.memory/reviews/serialization_slice_4_performance.md`,
+`.memory/reviews/serialization_slice_4_readiness.md`.
+
+`OWNER_DECISION_REQUIRED`: whether to authorize implementation of
+Package A (TABL)/B (PROG)/C (FUGR), independently or together - do not
+start implementation on any of them without an explicit new owner
+instruction naming the package(s).
+
 SER-SLICE-2 is now SAP_VALIDATED_COMPLETE (owner evidence: ATC=PASS,
 ABAP_UNIT=PASS, FEATURE_OFF_TEST=PASS, FEATURE_ON_AFTER_RPERF_FIX=PASS,
 NO_DUMP_AFTER_RPERF_FIX=YES, OUTPUT_PARITY_AFTER_RPERF_FIX=PASS).
