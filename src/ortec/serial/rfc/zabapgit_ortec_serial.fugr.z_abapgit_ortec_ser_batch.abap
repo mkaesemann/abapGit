@@ -159,6 +159,16 @@ FUNCTION z_abapgit_ortec_ser_batch.
     ENDTRY.
   ENDIF.
 
+  " SER-SLICE-5 fix (confirmed regression): this worker session is a
+  " SEPARATE aRFC process from ZCL_ABAPGIT_ORTEC_SER_ORCH - CLASS-DATA
+  " does not cross the RFC boundary, so every object serializer's own
+  " "IF is_serial_prefetch_active( ) = abap_true" gate (DOMA/DTEL/CLAS/
+  " INTF/MSAG/TABL/PROG/FUGR/ENHS/SMIM/TOBJ/TRAN) and IS_WAPA_ACTIVE were
+  " silently FALSE here despite the caches above being correctly
+  " injected - every object fell back to its native per-object read.
+  " Mirrors the existing Z_ABAPGIT_SERIALIZE_PARALLEL precedent.
+  zcl_abapgit_ortec_git_switch=>set_serial_prefetch_active( abap_true ).
+
   ls_i18n_params-main_language         = iv_language.
   ls_i18n_params-main_language_only    = iv_main_language_only.
   ls_i18n_params-suppress_po_comments  = iv_suppress_po_comments.
@@ -290,6 +300,8 @@ FUNCTION z_abapgit_ortec_ser_batch.
 
     APPEND ls_result TO et_result.
   ENDLOOP.
+
+  zcl_abapgit_ortec_git_switch=>set_serial_prefetch_active( abap_false ).
 
   ev_output_row_count = lines( et_result ).
 
