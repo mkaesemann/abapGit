@@ -1,4 +1,4 @@
-CLASS zcl_abapgit_ortec_ser_pref_ext DEFINITION LOCAL FRIENDS ltcl_dd_batch_wire ltcl_tabl_batch_wire.
+CLASS zcl_abapgit_ortec_ser_pref_ext DEFINITION LOCAL FRIENDS ltcl_dd_batch_wire ltcl_tabl_batch_wire ltcl_prog_batch_wire.
 
 CLASS ltcl_doma_parity DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINAL.
 
@@ -745,6 +745,255 @@ CLASS ltcl_tabl_batch_wire IMPLEMENTATION.
 
     cl_abap_unit_assert=>assert_false(
       zcl_abapgit_ortec_ser_pref_ext=>get_tabl_extras( iv_tabname = c_table ) ).
+  ENDMETHOD.
+
+ENDCLASS.
+
+CLASS ltcl_prog_batch_wire DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINAL.
+
+  " SER-SLICE-4 Package B (serialization_slice_4_prog_design.md):
+  " EXTRACT_FOR_BATCH_PROG / INJECT_BATCH_FROM_BUFFER_PROG wire-envelope
+  " contract. SAPLSCFG (the SCFG function group's main program) is used
+  " as a real, universal, always-present SAP program fixture (part of
+  " SAP_BASIS on every install, never created/modified by this test).
+  " Friend access to the class's private MT_PROG_LANGS/MV_LANGUAGE is
+  " used to hand-craft corrupt envelopes and to directly verify the
+  " "empty tpool_i18n is still a HIT" contract without depending on any
+  " specific system's real D010TINF translation content.
+
+  PRIVATE SECTION.
+    CONSTANTS c_program TYPE d010tinf-prog VALUE 'SAPLSCFG'.
+
+    METHODS setup.
+    METHODS teardown.
+
+    METHODS extract_no_prog_objects_empty  FOR TESTING.
+    METHODS batch_round_trip_finds_data    FOR TESTING RAISING zcx_abapgit_exception.
+    METHODS checked_empty_is_hit_not_miss  FOR TESTING RAISING zcx_abapgit_exception.
+    METHODS reject_unknown_provider_id     FOR TESTING.
+    METHODS reject_prog_without_p_entry    FOR TESTING.
+    METHODS reject_initial_language        FOR TESTING RAISING zcx_abapgit_exception.
+    METHODS no_cross_batch_leakage         FOR TESTING RAISING zcx_abapgit_exception.
+    METHODS clear_prog_cache_clears        FOR TESTING.
+
+ENDCLASS.
+
+
+CLASS ltcl_prog_batch_wire IMPLEMENTATION.
+
+  METHOD setup.
+    zcl_abapgit_ortec_ser_pref_ext=>clear( ).
+  ENDMETHOD.
+
+  METHOD teardown.
+    zcl_abapgit_ortec_ser_pref_ext=>clear( ).
+  ENDMETHOD.
+
+  METHOD extract_no_prog_objects_empty.
+    DATA(lv_buffer) = zcl_abapgit_ortec_ser_pref_ext=>extract_for_batch_prog(
+      VALUE #( ( object = 'TABL' obj_name = 'SFLIGHT' ) ) ).
+
+    cl_abap_unit_assert=>assert_initial( lv_buffer ).
+  ENDMETHOD.
+
+  METHOD batch_round_trip_finds_data.
+    DATA(lt_tadir) = VALUE zif_abapgit_definitions=>ty_tadir_tt(
+      ( object = 'PROG' obj_name = c_program ) ).
+
+    zcl_abapgit_ortec_ser_pref_ext=>prepare( it_tadir = lt_tadir iv_language = 'E' ).
+    DATA(lv_buffer) = zcl_abapgit_ortec_ser_pref_ext=>extract_for_batch_prog( lt_tadir ).
+    cl_abap_unit_assert=>assert_not_initial( lv_buffer ).
+
+    zcl_abapgit_ortec_ser_pref_ext=>clear( ).
+    zcl_abapgit_ortec_ser_pref_ext=>inject_batch_from_buffer_prog( lv_buffer ).
+
+    DATA et_tpool_i18n TYPE zcl_abapgit_ortec_ser_pref_ext=>ty_tpool_i18n_tt.
+    cl_abap_unit_assert=>assert_true(
+      zcl_abapgit_ortec_ser_pref_ext=>get_prog_tpool_languages(
+        EXPORTING iv_program = c_program iv_language = 'E'
+        IMPORTING et_tpool_i18n = et_tpool_i18n ) ).
+  ENDMETHOD.
+
+  METHOD checked_empty_is_hit_not_miss.
+    " A program with genuinely no extra-language translations is still a
+    " real, checked HIT with an empty ET_TPOOL_I18N, never a MISS -
+    " PREPARE_PROG_LANGS unconditionally pre-inserts one MT_PROG_LANGS
+    " row per requested program. Directly overwrite the private caches
+    " (friend access) to a deterministic checked-but-empty state,
+    " independent of this system's real D010TINF content.
+    zcl_abapgit_ortec_ser_pref_ext=>mv_language = 'E'.
+    INSERT VALUE zcl_abapgit_ortec_ser_pref_ext=>ty_prog_lang_cache( program = c_program )
+      INTO TABLE zcl_abapgit_ortec_ser_pref_ext=>mt_prog_langs.
+
+    DATA et_tpool_i18n TYPE zcl_abapgit_ortec_ser_pref_ext=>ty_tpool_i18n_tt.
+    DATA(rv_found) = zcl_abapgit_ortec_ser_pref_ext=>get_prog_tpool_languages(
+      EXPORTING iv_program = c_program iv_language = 'E'
+      IMPORTING et_tpool_i18n = et_tpool_i18n ).
+
+    cl_abap_unit_assert=>assert_true( rv_found ).
+    cl_abap_unit_assert=>assert_initial( et_tpool_i18n ).
+  ENDMETHOD.
+
+  METHOD reject_unknown_provider_id.
+    DATA(ls_hdr) = VALUE zaog_ser_env_bhdr(
+      wire_format_version = 1
+      provider_id         = 'SER_XXXX'
+      object_count        = 0 ).
+    DATA lt_prog TYPE zcl_abapgit_ortec_ser_pref_ext=>ty_prog_lang_cache_tt.
+    DATA lv_buffer TYPE xstring.
+
+    EXPORT hdr      = ls_hdr
+           entries  = VALUE zaog_ser_env_bentry_tt( )
+           prog     = lt_prog
+           language = 'E'
+      TO DATA BUFFER lv_buffer COMPRESSION ON.
+
+    TRY.
+        zcl_abapgit_ortec_ser_pref_ext=>inject_batch_from_buffer_prog( lv_buffer ).
+        cl_abap_unit_assert=>fail( 'expected zcx_abapgit_exception' ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_error).
+        cl_abap_unit_assert=>assert_char_cp(
+          act = lx_error->get_text( ) exp = '*provider_id*' ).
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD reject_prog_without_p_entry.
+    " Payload/entry correlation mismatch (PR-002-fixed check): a prog
+    " payload row present with ZERO 'P' entries to correlate against
+    " must reject the whole buffer as corrupt.
+    DATA(ls_hdr) = VALUE zaog_ser_env_bhdr(
+      wire_format_version = 1
+      provider_id         = 'SER_PROG'
+      object_count        = 0 ).
+    DATA lt_prog TYPE zcl_abapgit_ortec_ser_pref_ext=>ty_prog_lang_cache_tt.
+    INSERT VALUE zcl_abapgit_ortec_ser_pref_ext=>ty_prog_lang_cache( program = c_program )
+      INTO TABLE lt_prog.
+    DATA lv_buffer TYPE xstring.
+
+    EXPORT hdr      = ls_hdr
+           entries  = VALUE zaog_ser_env_bentry_tt( )
+           prog     = lt_prog
+           language = 'E'
+      TO DATA BUFFER lv_buffer COMPRESSION ON.
+
+    TRY.
+        zcl_abapgit_ortec_ser_pref_ext=>inject_batch_from_buffer_prog( lv_buffer ).
+        cl_abap_unit_assert=>fail( 'expected zcx_abapgit_exception' ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_error).
+        cl_abap_unit_assert=>assert_char_cp(
+          act = lx_error->get_text( ) exp = '*P entries*' ).
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD reject_initial_language.
+    " PR-005 regression: inject a valid buffer first (establishing a real
+    " HIT), then attempt a malformed second buffer with LANGUAGE = space.
+    " The rejected second buffer must not let the worker's PRIOR
+    " mv_language silently serve a HIT for data the bad buffer never
+    " actually delivered.
+    DATA(lt_tadir) = VALUE zif_abapgit_definitions=>ty_tadir_tt(
+      ( object = 'PROG' obj_name = c_program ) ).
+    zcl_abapgit_ortec_ser_pref_ext=>prepare( it_tadir = lt_tadir iv_language = 'E' ).
+    DATA(lv_valid_buffer) = zcl_abapgit_ortec_ser_pref_ext=>extract_for_batch_prog( lt_tadir ).
+    cl_abap_unit_assert=>assert_not_initial( lv_valid_buffer ).
+
+    zcl_abapgit_ortec_ser_pref_ext=>clear( ).
+    zcl_abapgit_ortec_ser_pref_ext=>inject_batch_from_buffer_prog( lv_valid_buffer ).
+
+    DATA et_tpool_i18n TYPE zcl_abapgit_ortec_ser_pref_ext=>ty_tpool_i18n_tt.
+    cl_abap_unit_assert=>assert_true(
+      zcl_abapgit_ortec_ser_pref_ext=>get_prog_tpool_languages(
+        EXPORTING iv_program = c_program iv_language = 'E'
+        IMPORTING et_tpool_i18n = et_tpool_i18n ) ).
+
+    " worker lifecycle: clear the cache (mv_language is untouched by
+    " design, exactly like clear_tabl_cache/clear_dd_cache), then inject
+    " a malformed buffer with an initial language.
+    zcl_abapgit_ortec_ser_pref_ext=>clear_prog_cache( ).
+
+    DATA(ls_hdr) = VALUE zaog_ser_env_bhdr(
+      wire_format_version = 1
+      provider_id         = 'SER_PROG'
+      object_count        = 0 ).
+    DATA lt_prog TYPE zcl_abapgit_ortec_ser_pref_ext=>ty_prog_lang_cache_tt.
+    DATA lv_bad_buffer TYPE xstring.
+
+    EXPORT hdr      = ls_hdr
+           entries  = VALUE zaog_ser_env_bentry_tt( )
+           prog     = lt_prog
+           language = space
+      TO DATA BUFFER lv_bad_buffer COMPRESSION ON.
+
+    TRY.
+        zcl_abapgit_ortec_ser_pref_ext=>inject_batch_from_buffer_prog( lv_bad_buffer ).
+        cl_abap_unit_assert=>fail( 'expected zcx_abapgit_exception' ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_error).
+        cl_abap_unit_assert=>assert_char_cp(
+          act = lx_error->get_text( ) exp = '*language*' ).
+    ENDTRY.
+
+    CLEAR et_tpool_i18n.
+    cl_abap_unit_assert=>assert_false(
+      zcl_abapgit_ortec_ser_pref_ext=>get_prog_tpool_languages(
+        EXPORTING iv_program = c_program iv_language = 'E'
+        IMPORTING et_tpool_i18n = et_tpool_i18n ) ).
+  ENDMETHOD.
+
+  METHOD no_cross_batch_leakage.
+    zcl_abapgit_ortec_ser_pref_ext=>mv_language = 'E'.
+    INSERT VALUE zcl_abapgit_ortec_ser_pref_ext=>ty_prog_lang_cache( program = 'PROGRAM_ONE' )
+      INTO TABLE zcl_abapgit_ortec_ser_pref_ext=>mt_prog_langs.
+    DATA(lv_buffer_a) = zcl_abapgit_ortec_ser_pref_ext=>extract_for_batch_prog(
+      VALUE #( ( object = 'PROG' obj_name = 'PROGRAM_ONE' ) ) ).
+
+    zcl_abapgit_ortec_ser_pref_ext=>clear( ).
+    zcl_abapgit_ortec_ser_pref_ext=>mv_language = 'E'.
+    INSERT VALUE zcl_abapgit_ortec_ser_pref_ext=>ty_prog_lang_cache( program = 'PROGRAM_TWO' )
+      INTO TABLE zcl_abapgit_ortec_ser_pref_ext=>mt_prog_langs.
+    DATA(lv_buffer_b) = zcl_abapgit_ortec_ser_pref_ext=>extract_for_batch_prog(
+      VALUE #( ( object = 'PROG' obj_name = 'PROGRAM_TWO' ) ) ).
+
+    DATA et_tpool_i18n TYPE zcl_abapgit_ortec_ser_pref_ext=>ty_tpool_i18n_tt.
+
+    zcl_abapgit_ortec_ser_pref_ext=>clear( ).
+    zcl_abapgit_ortec_ser_pref_ext=>inject_batch_from_buffer_prog( lv_buffer_a ).
+    cl_abap_unit_assert=>assert_true(
+      zcl_abapgit_ortec_ser_pref_ext=>get_prog_tpool_languages(
+        EXPORTING iv_program = 'PROGRAM_ONE' iv_language = 'E'
+        IMPORTING et_tpool_i18n = et_tpool_i18n ) ).
+    cl_abap_unit_assert=>assert_false(
+      zcl_abapgit_ortec_ser_pref_ext=>get_prog_tpool_languages(
+        EXPORTING iv_program = 'PROGRAM_TWO' iv_language = 'E'
+        IMPORTING et_tpool_i18n = et_tpool_i18n ) ).
+
+    zcl_abapgit_ortec_ser_pref_ext=>inject_batch_from_buffer_prog( lv_buffer_b ).
+    cl_abap_unit_assert=>assert_true(
+      zcl_abapgit_ortec_ser_pref_ext=>get_prog_tpool_languages(
+        EXPORTING iv_program = 'PROGRAM_TWO' iv_language = 'E'
+        IMPORTING et_tpool_i18n = et_tpool_i18n ) ).
+    cl_abap_unit_assert=>assert_false(
+      zcl_abapgit_ortec_ser_pref_ext=>get_prog_tpool_languages(
+        EXPORTING iv_program = 'PROGRAM_ONE' iv_language = 'E'
+        IMPORTING et_tpool_i18n = et_tpool_i18n ) ).
+  ENDMETHOD.
+
+  METHOD clear_prog_cache_clears.
+    zcl_abapgit_ortec_ser_pref_ext=>mv_language = 'E'.
+    INSERT VALUE zcl_abapgit_ortec_ser_pref_ext=>ty_prog_lang_cache( program = c_program )
+      INTO TABLE zcl_abapgit_ortec_ser_pref_ext=>mt_prog_langs.
+
+    DATA et_tpool_i18n TYPE zcl_abapgit_ortec_ser_pref_ext=>ty_tpool_i18n_tt.
+    cl_abap_unit_assert=>assert_true(
+      zcl_abapgit_ortec_ser_pref_ext=>get_prog_tpool_languages(
+        EXPORTING iv_program = c_program iv_language = 'E'
+        IMPORTING et_tpool_i18n = et_tpool_i18n ) ).
+
+    zcl_abapgit_ortec_ser_pref_ext=>clear_prog_cache( ).
+
+    cl_abap_unit_assert=>assert_false(
+      zcl_abapgit_ortec_ser_pref_ext=>get_prog_tpool_languages(
+        EXPORTING iv_program = c_program iv_language = 'E'
+        IMPORTING et_tpool_i18n = et_tpool_i18n ) ).
   ENDMETHOD.
 
 ENDCLASS.

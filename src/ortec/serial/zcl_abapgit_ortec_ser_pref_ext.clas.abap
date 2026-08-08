@@ -279,6 +279,36 @@ CLASS zcl_abapgit_ortec_ser_pref_ext DEFINITION
     "! injecting a new buffer.
     CLASS-METHODS clear_tabl_cache.
 
+    "! SER-SLICE-4 Package B (serialization_slice_4_prog_design.md &sect;3):
+    "! extract the PROG batch prefetch envelope (per-extra-language
+    "! D010TINF text-pool language list) for an entire dispatch's TADIR
+    "! rows in ONE call, reusing the SAME generic ZAOG_SER_ENV_BHDR/BENTRY
+    "! envelope as the TABL/CLAS/INTF/MSAG providers. Filters
+    "! IT_OBJECT_KEYS to PROG rows internally; returns an INITIAL buffer
+    "! with no DB access when none are present.
+    CLASS-METHODS extract_for_batch_prog
+      IMPORTING it_object_keys   TYPE zif_abapgit_definitions=>ty_tadir_tt
+      RETURNING VALUE(rv_buffer) TYPE xstring.
+
+    "! SER-SLICE-4 Package B: inject a PROG batch prefetch envelope
+    "! (produced by EXTRACT_FOR_BATCH_PROG) into this session's caches.
+    "! Unknown wire format version, a failed IMPORT, an unexpected
+    "! provider_id/entry type/state, an initial LANGUAGE, or a payload
+    "! row that does not correlate 1:1 with a 'P' entry all reject the
+    "! WHOLE buffer by raising ZCX_ABAPGIT_EXCEPTION - callers must treat
+    "! this as a full prefetch MISS for this buffer only, never propagate
+    "! it into aborting the batch.
+    CLASS-METHODS inject_batch_from_buffer_prog
+      IMPORTING iv_buffer TYPE xstring
+      RAISING   zcx_abapgit_exception.
+
+    "! SER-SLICE-4 Package B: unconditionally clears MT_PROG_LANGS - a
+    "! pooled/reused RFC worker session must never carry PROG data from a
+    "! PRIOR dispatch into a batch whose OWN IV_PREFETCH_BUFFER_PROG is
+    "! legitimately empty. Callers must call this FIRST, on EVERY worker
+    "! invocation, before conditionally injecting a new buffer.
+    CLASS-METHODS clear_prog_cache.
+
   PRIVATE SECTION.
     TYPES ty_dtel_keys TYPE HASHED TABLE OF dd04l-rollname
       WITH UNIQUE KEY table_line.
@@ -1809,6 +1839,161 @@ CLASS zcl_abapgit_ortec_ser_pref_ext IMPLEMENTATION.
   METHOD clear_tabl_cache.
     CLEAR mt_tabl_text.
     CLEAR mt_tabl_extras.
+  ENDMETHOD.
+
+  METHOD extract_for_batch_prog.
+    DATA lt_entries TYPE zaog_ser_env_bentry_tt.
+    DATA lt_prog    TYPE ty_prog_lang_cache_tt.
+    DATA ls_hdr     TYPE zaog_ser_env_bhdr.
+    DATA lv_any_hit TYPE abap_bool.
+
+    IF mv_language IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    LOOP AT it_object_keys INTO DATA(ls_tadir) WHERE object = 'PROG'.
+      DATA(ls_entry) = VALUE zaog_ser_env_bentry(
+        obj_type = ls_tadir-object obj_name = ls_tadir-obj_name ).
+
+      READ TABLE mt_prog_langs INTO DATA(ls_prog)
+        WITH TABLE KEY program = CONV d010tinf-prog( ls_tadir-obj_name ).
+      IF sy-subrc = 0.
+        INSERT ls_prog INTO TABLE lt_prog.
+        ls_entry-state        = 'P'.
+        ls_entry-actual_bytes = xstrlen( extract_for_object( ls_tadir ) ).
+        lv_any_hit = abap_true.
+      ELSE.
+        ls_entry-state        = 'M'.
+        ls_entry-actual_bytes = 0.
+      ENDIF.
+
+      APPEND ls_entry TO lt_entries.
+    ENDLOOP.
+
+    " A batch with ZERO PROG objects, or where EVERY entry would be a
+    " MISS, has nothing genuinely useful to send - mirrors the identical
+    " EXTRACT_FOR_BATCH_TABL/EXTRACT_FOR_BATCH guard.
+    IF lt_entries IS INITIAL OR lv_any_hit = abap_false.
+      CLEAR rv_buffer.
+      RETURN.
+    ENDIF.
+
+    ls_hdr-wire_format_version = 1.
+    ls_hdr-provider_id         = 'SER_PROG'.
+    ls_hdr-object_count        = lines( lt_entries ).
+
+    EXPORT hdr      = ls_hdr
+           entries  = lt_entries
+           prog     = lt_prog
+           language = mv_language
+      TO DATA BUFFER rv_buffer COMPRESSION ON.
+  ENDMETHOD.
+
+
+  METHOD inject_batch_from_buffer_prog.
+    DATA ls_hdr            TYPE zaog_ser_env_bhdr.
+    DATA lt_entries        TYPE zaog_ser_env_bentry_tt.
+    DATA lt_prog           TYPE ty_prog_lang_cache_tt.
+    DATA lt_entries_sorted TYPE STANDARD TABLE OF zaog_ser_env_bentry WITH DEFAULT KEY.
+    DATA lv_lines_before   TYPE i.
+    DATA lv_language       TYPE spras.
+
+    CHECK iv_buffer IS NOT INITIAL.
+
+    TRY.
+        IMPORT hdr      = ls_hdr
+               entries  = lt_entries
+               prog     = lt_prog
+               language = lv_language
+          FROM DATA BUFFER iv_buffer.
+      CATCH cx_root INTO DATA(lx_import).
+        zcx_abapgit_exception=>raise(
+          |ORTEC PROG batch prefetch buffer is corrupt: { lx_import->get_text( ) }| ).
+    ENDTRY.
+    IF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise( 'ORTEC PROG batch prefetch buffer: IMPORT failed' ).
+    ENDIF.
+
+    IF ls_hdr-wire_format_version <> 1.
+      zcx_abapgit_exception=>raise(
+        |ORTEC PROG batch prefetch buffer: unknown wire_format_version { ls_hdr-wire_format_version }| ).
+    ENDIF.
+
+    IF ls_hdr-provider_id <> 'SER_PROG'.
+      zcx_abapgit_exception=>raise(
+        'ORTEC PROG batch prefetch buffer: unexpected provider_id' ).
+    ENDIF.
+
+    IF ls_hdr-object_count <> lines( lt_entries ).
+      zcx_abapgit_exception=>raise(
+        'ORTEC PROG batch prefetch buffer: object_count does not match ENTRIES' ).
+    ENDIF.
+
+    " PR-005 fix: EXTRACT_FOR_BATCH_PROG can only ever export a
+    " non-initial MV_LANGUAGE (its own entry guard), so an initial
+    " LANGUAGE here is itself proof of a corrupt/foreign buffer - reject
+    " BEFORE any cache mutation, so a pooled worker's PRIOR mv_language
+    " can never be silently reused to serve this buffer's data.
+    IF lv_language IS INITIAL.
+      zcx_abapgit_exception=>raise(
+        'ORTEC PROG batch prefetch buffer: language must not be initial' ).
+    ENDIF.
+
+    " every ENTRIES row must be PROG with a known state - reject anything
+    " else as corrupt.
+    LOOP AT lt_entries INTO DATA(ls_check_entry).
+      IF ls_check_entry-obj_type <> 'PROG' OR
+         ( ls_check_entry-state <> 'P' AND ls_check_entry-state <> 'M' ).
+        zcx_abapgit_exception=>raise(
+          'ORTEC PROG batch prefetch buffer: unexpected entry type or state' ).
+      ENDIF.
+    ENDLOOP.
+
+    " duplicate check MUST happen before any INSERT INTO mt_prog_langs -
+    " a HASHED TABLE INSERT would otherwise silently collapse a duplicate
+    " instead of rejecting the whole buffer. Note LT_PROG itself cannot
+    " contain a duplicate PROGRAM (TY_PROG_LANG_CACHE_TT is HASHED WITH
+    " UNIQUE KEY program, so a duplicate could not have been exported in
+    " the first place) - only the generic ENTRIES table needs this check.
+    lt_entries_sorted = CORRESPONDING #( lt_entries ).
+    SORT lt_entries_sorted BY obj_type obj_name.
+    lv_lines_before = lines( lt_entries_sorted ).
+    DELETE ADJACENT DUPLICATES FROM lt_entries_sorted COMPARING obj_type obj_name.
+    IF lines( lt_entries_sorted ) <> lv_lines_before.
+      zcx_abapgit_exception=>raise(
+        'ORTEC PROG batch prefetch buffer: duplicate entry in ENTRIES' ).
+    ENDIF.
+
+    " canonical object-key correlation: every 'P' entry must have exactly
+    " one prog payload row, and every payload row's program must
+    " correspond to a real 'P' entry - reject any mismatch as corrupt.
+    DATA(lt_p_entries) = lt_entries.
+    DELETE lt_p_entries WHERE state <> 'P'.
+    IF lines( lt_prog ) <> lines( lt_p_entries ).
+      zcx_abapgit_exception=>raise(
+        'ORTEC PROG batch prefetch buffer: prog payload does not match P entries 1:1' ).
+    ENDIF.
+    LOOP AT lt_prog INTO DATA(ls_prog_check).
+      READ TABLE lt_p_entries TRANSPORTING NO FIELDS
+        WITH KEY obj_name = ls_prog_check-program.
+      IF sy-subrc <> 0.
+        zcx_abapgit_exception=>raise(
+          'ORTEC PROG batch prefetch buffer: prog payload key not in P entries' ).
+      ENDIF.
+    ENDLOOP.
+
+    " CLEAR first: a parallel RFC worker session can be reused across many
+    " unrelated dispatches over its lifetime - see INJECT_FROM_BUFFER's own
+    " identical clear-before-insert rationale.
+    CLEAR mt_prog_langs.
+    LOOP AT lt_prog INTO DATA(ls_prog_ins).
+      INSERT ls_prog_ins INTO TABLE mt_prog_langs.
+    ENDLOOP.
+    mv_language = lv_language.
+  ENDMETHOD.
+
+  METHOD clear_prog_cache.
+    CLEAR mt_prog_langs.
   ENDMETHOD.
 
 ENDCLASS.

@@ -91,6 +91,11 @@
        <TYP>XSTRING</TYP>
       </RSIMP>
       <RSIMP>
+       <PARAMETER>IV_PREFETCH_BUFFER_PROG</PARAMETER>
+       <OPTIONAL>X</OPTIONAL>
+       <TYP>XSTRING</TYP>
+      </RSIMP>
+      <RSIMP>
        <PARAMETER>IV_INPUT_ROW_COUNT</PARAMETER>
        <TYP>I</TYP>
       </RSIMP>
@@ -186,6 +191,10 @@
       </RSFDO>
       <RSFDO>
        <PARAMETER>IV_PREFETCH_BUFFER_TABL</PARAMETER>
+       <KIND>P</KIND>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>IV_PREFETCH_BUFFER_PROG</PARAMETER>
        <KIND>P</KIND>
       </RSFDO>
       <RSFDO>
