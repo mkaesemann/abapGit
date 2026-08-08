@@ -1539,12 +1539,21 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
 
 
   METHOD sum_provider_buffer_bytes.
-    rv_bytes = xstrlen( iv_buffer_dd )
-             + xstrlen( iv_buffer_oo_batch )
-             + xstrlen( iv_buffer_msag )
-             + xstrlen( iv_buffer_tabl )
-             + xstrlen( iv_buffer_prog )
-             + xstrlen( iv_buffer_fugr ).
+    " Every XSTRLEN( ) result is TYPE i - ABAP's classic arithmetic type
+    " inference computes a "+" chain's intermediate results from the
+    " OPERAND types, never from the target variable's type, so a bare
+    " `xstrlen(a) + xstrlen(b) + ...` chain would accumulate in 32-bit I
+    " precision (max 2,147,483,647) and can overflow BEFORE the final
+    " conversion to RV_BYTES (TYPE int8) ever happens - defeating the
+    " entire purpose of an int8 accumulator. CONV int8( ... ) on every
+    " term forces int8 + int8 = int8 promotion at every step, so the
+    " running sum never re-enters I precision.
+    rv_bytes = CONV int8( xstrlen( iv_buffer_dd ) )
+             + CONV int8( xstrlen( iv_buffer_oo_batch ) )
+             + CONV int8( xstrlen( iv_buffer_msag ) )
+             + CONV int8( xstrlen( iv_buffer_tabl ) )
+             + CONV int8( xstrlen( iv_buffer_prog ) )
+             + CONV int8( xstrlen( iv_buffer_fugr ) ).
   ENDMETHOD.
 
 
