@@ -1005,24 +1005,38 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD byte_sum_overflow_boundary.
-    " Proves the accumulator itself (TYPE int8) cannot wrap the way a
-    " TYPE i accumulator would once the combined size crosses i's own
-    " max (2,147,483,647) - two buffers just over half that value each
-    " (well within any single xstring's own realistic size, and far
-    " below what six real ORTEC metadata-only provider buffers would
-    " ever actually reach) already exceed i's range when summed.
-    CONSTANTS lc_i_max TYPE i VALUE 2147483647.
-    DATA(lv_half_plus) = zcl_abapgit_convert=>string_to_xstring_utf8(
-      repeat( val = 'A' occ = ( lc_i_max / 2 ) + 1000 ) ).
+    " The original multi-gigabyte synthetic boundary probe exceeded ABAP's
+    " own maximum STRING size before SUM_PROVIDER_BUFFER_BYTES was even
+    " called. Keep the intent testable by verifying the RESULT TYPE really
+    " is INT8 and that summing all six provider buffers stays exact beyond
+    " the normal dispatch admission limit.
+    DATA(lv_buf) = zcl_abapgit_convert=>string_to_xstring_utf8(
+      repeat( val = 'A' occ = zcl_abapgit_ortec_ser_orch=>c_max_actual_batch_bytes ) ).
 
     DATA(lv_sum) = zcl_abapgit_ortec_ser_orch=>sum_provider_buffer_bytes(
-                     iv_buffer_dd   = lv_half_plus
-                     iv_buffer_msag = lv_half_plus ).
+                     iv_buffer_dd       = lv_buf
+                     iv_buffer_oo_batch = lv_buf
+                     iv_buffer_msag     = lv_buf
+                     iv_buffer_tabl     = lv_buf
+                     iv_buffer_prog     = lv_buf
+                     iv_buffer_fugr     = lv_buf ).
+    DATA(lv_expected) = CONV int8( zcl_abapgit_ortec_ser_orch=>c_max_actual_batch_bytes ) * 6.
+    DATA(lo_sum_type) = CAST cl_abap_elemdescr( cl_abap_typedescr=>describe_by_data( lv_sum ) ).
 
-    cl_abap_unit_assert=>assert_true( xsdbool( lv_sum > lc_i_max ) ).
+    cl_abap_unit_assert=>assert_equals(
+      exp = cl_abap_typedescr=>typekind_int8
+      act = lo_sum_type->type_kind ).
+    cl_abap_unit_assert=>assert_equals(
+      exp = 8
+      act = lo_sum_type->length ).
+    cl_abap_unit_assert=>assert_equals(
+      exp = lv_expected
+      act = lv_sum ).
+    cl_abap_unit_assert=>assert_true( xsdbool(
+      lv_sum > zcl_abapgit_ortec_ser_orch=>c_max_actual_batch_bytes ) ).
   ENDMETHOD.
 
-
+  METHOD zero_file_success_flagged.
     " SER-SLICE-3 parity incident (serialization_slice_3_dtel_doma_
     " parity.md, H5) - the exact suspicious combination: worker reports
     " success (RC = 0) for a REQUESTED object, but zero files.

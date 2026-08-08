@@ -662,8 +662,10 @@ CLASS ltcl_tabl_batch_wire IMPLEMENTATION.
     DATA lt_text TYPE zcl_abapgit_ortec_ser_pref_ext=>ty_tabl_text_cache_tt.
     DATA lv_buffer TYPE xstring.
 
+    DATA(lt_empty_bentry) = VALUE zaog_ser_env_bentry_tt( ).
+
     EXPORT hdr         = ls_hdr
-           entries     = VALUE zaog_ser_env_bentry_tt( )
+           entries     = lt_empty_bentry
            tabl_text   = lt_text
            tabl_extras = lt_extras
            language    = 'E'
@@ -687,8 +689,10 @@ CLASS ltcl_tabl_batch_wire IMPLEMENTATION.
     DATA lt_extras TYPE zcl_abapgit_ortec_ser_pref_ext=>ty_tabl_extras_cache_tt.
     DATA lv_buffer TYPE xstring.
 
+    DATA(lt_empty_bentry) = VALUE zaog_ser_env_bentry_tt( ).
+
     EXPORT hdr         = ls_hdr
-           entries     = VALUE zaog_ser_env_bentry_tt( )
+           entries     = lt_empty_bentry
            tabl_text   = lt_text
            tabl_extras = lt_extras
            language    = space
@@ -842,8 +846,9 @@ CLASS ltcl_prog_batch_wire IMPLEMENTATION.
     DATA lt_prog TYPE zcl_abapgit_ortec_ser_pref_ext=>ty_prog_lang_cache_tt.
     DATA lv_buffer TYPE xstring.
 
+    DATA(lt_empty_bentry) = VALUE zaog_ser_env_bentry_tt( ).
     EXPORT hdr      = ls_hdr
-           entries  = VALUE zaog_ser_env_bentry_tt( )
+           entries  = lt_empty_bentry
            prog     = lt_prog
            language = 'E'
       TO DATA BUFFER lv_buffer COMPRESSION ON.
@@ -870,8 +875,9 @@ CLASS ltcl_prog_batch_wire IMPLEMENTATION.
       INTO TABLE lt_prog.
     DATA lv_buffer TYPE xstring.
 
+    DATA(lt_empty_bentry) = VALUE zaog_ser_env_bentry_tt( ).
     EXPORT hdr      = ls_hdr
-           entries  = VALUE zaog_ser_env_bentry_tt( )
+           entries  = lt_empty_bentry
            prog     = lt_prog
            language = 'E'
       TO DATA BUFFER lv_buffer COMPRESSION ON.
@@ -918,8 +924,9 @@ CLASS ltcl_prog_batch_wire IMPLEMENTATION.
     DATA lt_prog TYPE zcl_abapgit_ortec_ser_pref_ext=>ty_prog_lang_cache_tt.
     DATA lv_bad_buffer TYPE xstring.
 
+    DATA(lt_empty_bentry) = VALUE zaog_ser_env_bentry_tt( ).
     EXPORT hdr      = ls_hdr
-           entries  = VALUE zaog_ser_env_bentry_tt( )
+           entries  = lt_empty_bentry
            prog     = lt_prog
            language = space
       TO DATA BUFFER lv_bad_buffer COMPRESSION ON.
@@ -1123,8 +1130,9 @@ CLASS ltcl_fugr_batch_wire IMPLEMENTATION.
     DATA lt_func    TYPE zcl_abapgit_ortec_ser_pref_ext=>ty_fugr_func_meta_tt.
     DATA lv_buffer  TYPE xstring.
 
+    DATA(lt_empty_bentry) = VALUE zaog_ser_env_bentry_tt( ).
     EXPORT hdr      = ls_hdr
-           entries  = VALUE zaog_ser_env_bentry_tt( )
+           entries  = lt_empty_bentry
            areat    = lt_areat
            enlfdir  = lt_enlfdir
            func     = lt_func

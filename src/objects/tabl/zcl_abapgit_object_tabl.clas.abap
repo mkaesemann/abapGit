@@ -1041,3 +1041,4 @@ CLASS zcl_abapgit_object_tabl IMPLEMENTATION.
 
   ENDMETHOD.
 ENDCLASS.
+

@@ -240,10 +240,13 @@ FUNCTION z_abapgit_ortec_ser_batch.
               ls_result-provider_miss = 1.
             ENDIF.
           WHEN 'PROG'.
+            DATA(lt_ignored_tpool) = value zcl_abapgit_ortec_ser_pref_ext=>ty_tpool_i18n_tt( ).
             IF zcl_abapgit_ortec_ser_pref_ext=>get_prog_tpool_languages(
-                 iv_program  = CONV #( ls_tadir-obj_name )
-                 iv_language = iv_language
-                 IMPORTING et_tpool_i18n = DATA(lt_ignored_tpool) ) = abap_true.
+                 EXPORTING
+                    iv_program  = CONV #( ls_tadir-obj_name )
+                    iv_language = iv_language
+                 IMPORTING
+                    et_tpool_i18n = lt_ignored_tpool ) = abap_true.
               ls_result-provider_hit = 1.
             ELSE.
               ls_result-provider_miss = 1.
