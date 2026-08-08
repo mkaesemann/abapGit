@@ -1897,17 +1897,26 @@ CLASS zcl_abapgit_ortec_ser_pref_ext IMPLEMENTATION.
       zcx_abapgit_exception=>raise(
         'ORTEC TABL batch prefetch buffer: extras payload does not match P entries 1:1' ).
     ENDIF.
+    " PS-001 fix: a plain READ TABLE ... WITH KEY against a STANDARD
+    " LT_P_ENTRIES is an O(K) linear scan per lookup, so a loop of K
+    " lookups is O(K^2) overall - build an O(1) HASHED secondary lookup
+    " instead. OBJ_NAME is unique within LT_P_ENTRIES because the
+    " duplicate-entry check above already rejected any duplicate
+    " (obj_type, obj_name) pair across the whole (single-object-type)
+    " ENTRIES table.
+    DATA lt_p_entries_by_name TYPE HASHED TABLE OF zaog_ser_env_bentry WITH UNIQUE KEY obj_name.
+    lt_p_entries_by_name = lt_p_entries.
     LOOP AT lt_extras INTO DATA(ls_extras_check).
-      READ TABLE lt_p_entries TRANSPORTING NO FIELDS
-        WITH KEY obj_name = ls_extras_check-tabname.
+      READ TABLE lt_p_entries_by_name TRANSPORTING NO FIELDS
+        WITH TABLE KEY obj_name = ls_extras_check-tabname.
       IF sy-subrc <> 0.
         zcx_abapgit_exception=>raise(
           'ORTEC TABL batch prefetch buffer: extras payload key not in P entries' ).
       ENDIF.
     ENDLOOP.
     LOOP AT lt_text INTO DATA(ls_text_check).
-      READ TABLE lt_p_entries TRANSPORTING NO FIELDS
-        WITH KEY obj_name = ls_text_check-tabname.
+      READ TABLE lt_p_entries_by_name TRANSPORTING NO FIELDS
+        WITH TABLE KEY obj_name = ls_text_check-tabname.
       IF sy-subrc <> 0.
         zcx_abapgit_exception=>raise(
           'ORTEC TABL batch prefetch buffer: text payload key not in P entries' ).
@@ -2065,9 +2074,13 @@ CLASS zcl_abapgit_ortec_ser_pref_ext IMPLEMENTATION.
       zcx_abapgit_exception=>raise(
         'ORTEC PROG batch prefetch buffer: prog payload does not match P entries 1:1' ).
     ENDIF.
+    " PS-001 fix: see LTCL_TABL_BATCH_WIRE's inject method for the
+    " identical O(K^2)->O(K) HASHED-lookup rationale.
+    DATA lt_p_entries_by_name TYPE HASHED TABLE OF zaog_ser_env_bentry WITH UNIQUE KEY obj_name.
+    lt_p_entries_by_name = lt_p_entries.
     LOOP AT lt_prog INTO DATA(ls_prog_check).
-      READ TABLE lt_p_entries TRANSPORTING NO FIELDS
-        WITH KEY obj_name = ls_prog_check-program.
+      READ TABLE lt_p_entries_by_name TRANSPORTING NO FIELDS
+        WITH TABLE KEY obj_name = ls_prog_check-program.
       IF sy-subrc <> 0.
         zcx_abapgit_exception=>raise(
           'ORTEC PROG batch prefetch buffer: prog payload key not in P entries' ).
@@ -2251,8 +2264,15 @@ CLASS zcl_abapgit_ortec_ser_pref_ext IMPLEMENTATION.
     DATA(lt_p_entries) = lt_entries.
     DELETE lt_p_entries WHERE state <> 'P'.
 
+    " PS-001 fix: see LTCL_TABL_BATCH_WIRE's inject method for the
+    " identical O(K^2)->O(K) HASHED-lookup rationale (the final LOOP AT
+    " LT_P_ENTRIES below already looks up INTO LT_AREAT/LT_ENLFDIR via
+    " their own HASHED WITH TABLE KEY, so it is not affected).
+    DATA lt_p_entries_by_name TYPE HASHED TABLE OF zaog_ser_env_bentry WITH UNIQUE KEY obj_name.
+    lt_p_entries_by_name = lt_p_entries.
+
     LOOP AT lt_areat INTO DATA(ls_areat_check).
-      READ TABLE lt_p_entries TRANSPORTING NO FIELDS WITH KEY obj_name = ls_areat_check-area.
+      READ TABLE lt_p_entries_by_name TRANSPORTING NO FIELDS WITH TABLE KEY obj_name = ls_areat_check-area.
       IF sy-subrc <> 0.
         zcx_abapgit_exception=>raise(
           'ORTEC FUGR batch prefetch buffer: areat payload key not in P entries' ).
@@ -2260,7 +2280,7 @@ CLASS zcl_abapgit_ortec_ser_pref_ext IMPLEMENTATION.
     ENDLOOP.
 
     LOOP AT lt_enlfdir INTO DATA(ls_enlfdir_check).
-      READ TABLE lt_p_entries TRANSPORTING NO FIELDS WITH KEY obj_name = ls_enlfdir_check-area.
+      READ TABLE lt_p_entries_by_name TRANSPORTING NO FIELDS WITH TABLE KEY obj_name = ls_enlfdir_check-area.
       IF sy-subrc <> 0.
         zcx_abapgit_exception=>raise(
           'ORTEC FUGR batch prefetch buffer: enlfdir payload key not in P entries' ).
