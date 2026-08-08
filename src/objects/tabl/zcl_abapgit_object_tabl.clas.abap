@@ -524,6 +524,7 @@ CLASS zcl_abapgit_object_tabl IMPLEMENTATION.
           lv_index           TYPE i,
           ls_dd02v           TYPE dd02v,
           lt_language_filter TYPE zif_abapgit_environment=>ty_system_language_filter.
+    DATA lv_i18n_prefetched TYPE abap_bool.
 
     FIELD-SYMBOLS: <lv_lang>      LIKE LINE OF cs_internal-i18n_langs,
                    <ls_dd02_text> LIKE LINE OF cs_internal-dd02_texts.
@@ -537,32 +538,47 @@ CLASS zcl_abapgit_object_tabl IMPLEMENTATION.
     " Collect additional languages, skip main lang - it was serialized already
     lt_language_filter = mo_i18n_params->build_language_filter( ).
 
-    SELECT DISTINCT ddlanguage AS langu INTO TABLE cs_internal-i18n_langs
-      FROM dd02v
-      WHERE tabname = lv_name
-      AND ddlanguage IN lt_language_filter
-      AND ddlanguage <> mv_language
-      ORDER BY langu.                                     "#EC CI_SUBRC
-
-    LOOP AT cs_internal-i18n_langs ASSIGNING <lv_lang>.
-      lv_index = sy-tabix.
-      CALL FUNCTION 'DDIF_TABL_GET'
-        EXPORTING
-          name          = lv_name
-          langu         = <lv_lang>
-        IMPORTING
-          dd02v_wa      = ls_dd02v
-        EXCEPTIONS
-          illegal_input = 1
-          OTHERS        = 2.
-      IF sy-subrc <> 0 OR ls_dd02v-ddlanguage IS INITIAL.
-        DELETE cs_internal-i18n_langs INDEX lv_index. " Don't save this lang
-        CONTINUE.
+    IF zcl_abapgit_ortec_git_switch=>is_serial_prefetch_active( ) = abap_true.
+      lv_i18n_prefetched = zcl_abapgit_ortec_ser_pref_ext=>get_tabl_i18n(
+        EXPORTING iv_tabname    = lv_name
+                  iv_language   = mv_language
+        IMPORTING et_i18n_langs = cs_internal-i18n_langs
+                  et_dd02_texts = cs_internal-dd02_texts ).
+      IF lv_i18n_prefetched = abap_true.
+        DELETE cs_internal-i18n_langs WHERE table_line NOT IN lt_language_filter
+                                          OR table_line = mv_language.
+        DELETE cs_internal-dd02_texts WHERE ddlanguage NOT IN lt_language_filter
+                                          OR ddlanguage = mv_language.
       ENDIF.
+    ENDIF.
+    IF lv_i18n_prefetched = abap_false.
+      SELECT DISTINCT ddlanguage AS langu INTO TABLE cs_internal-i18n_langs
+        FROM dd02v
+        WHERE tabname = lv_name
+        AND ddlanguage IN lt_language_filter
+        AND ddlanguage <> mv_language
+        ORDER BY langu.                                     "#EC CI_SUBRC
 
-      APPEND INITIAL LINE TO cs_internal-dd02_texts ASSIGNING <ls_dd02_text>.
-      MOVE-CORRESPONDING ls_dd02v TO <ls_dd02_text>.
-    ENDLOOP.
+      LOOP AT cs_internal-i18n_langs ASSIGNING <lv_lang>.
+        lv_index = sy-tabix.
+        CALL FUNCTION 'DDIF_TABL_GET'
+          EXPORTING
+            name          = lv_name
+            langu         = <lv_lang>
+          IMPORTING
+            dd02v_wa      = ls_dd02v
+          EXCEPTIONS
+            illegal_input = 1
+            OTHERS        = 2.
+        IF sy-subrc <> 0 OR ls_dd02v-ddlanguage IS INITIAL.
+          DELETE cs_internal-i18n_langs INDEX lv_index. " Don't save this lang
+          CONTINUE.
+        ENDIF.
+
+        APPEND INITIAL LINE TO cs_internal-dd02_texts ASSIGNING <ls_dd02_text>.
+        MOVE-CORRESPONDING ls_dd02v TO <ls_dd02_text>.
+      ENDLOOP.
+    ENDIF.
 
     SORT cs_internal-i18n_langs ASCENDING.
     SORT cs_internal-dd02_texts BY ddlanguage ASCENDING.
@@ -1006,7 +1022,18 @@ CLASS zcl_abapgit_object_tabl IMPLEMENTATION.
 
     serialize_idoc_segment( CHANGING cs_internal = ls_internal ).
 
-    ls_internal-extras = read_extras( lv_name ).
+    DATA lv_extras_prefetched TYPE abap_bool.
+    IF zcl_abapgit_ortec_git_switch=>is_serial_prefetch_active( ) = abap_true.
+      lv_extras_prefetched = zcl_abapgit_ortec_ser_pref_ext=>get_tabl_extras(
+        EXPORTING iv_tabname = lv_name
+        IMPORTING es_tddat   = ls_internal-extras-tddat ).
+      IF lv_extras_prefetched = abap_true.
+        ls_internal-extras-abap_language_version = get_abap_language_version( ).
+      ENDIF.
+    ENDIF.
+    IF lv_extras_prefetched = abap_false.
+      ls_internal-extras = read_extras( lv_name ).
+    ENDIF.
 
     lcl_tabl_xml=>add(
       io_xml      = io_xml

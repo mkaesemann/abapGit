@@ -622,6 +622,33 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
       IMPORTING iv_split_depth TYPE i
       RETURNING VALUE(rv_yes)  TYPE abap_bool.
 
+    "! SER-SLICE-4 shared prerequisite (serialization_slice_4_shared_
+    "! infrastructure.md &sect;3): overflow-safe aggregate actual-byte sum
+    "! across every active provider buffer for one dispatch - extracted as
+    "! its own pure method for the SAME reason SPLIT_DEPTH_AT_CAP was: the
+    "! exact threshold/overflow arithmetic can be unit tested
+    "! deterministically with synthetic xstrings, without needing to
+    "! manufacture real oversized DOMA/DTEL/CLAS/INTF/MSAG/TABL/PROG/FUGR
+    "! provider data. An INITIAL (0-byte) buffer contributes exactly 0 -
+    "! never treated as payload. Uses TYPE int8 throughout so six
+    "! provider buffers, each individually bounded well under 2 GB, can
+    "! never wrap a TYPE i accumulator even in a pathological scenario.
+    "! @parameter iv_buffer_dd | DOMA/DTEL batch buffer
+    "! @parameter iv_buffer_oo_batch | CLAS/INTF batch buffer
+    "! @parameter iv_buffer_msag | MSAG batch buffer
+    "! @parameter iv_buffer_tabl | TABL batch buffer (SER-SLICE-4 Package A)
+    "! @parameter iv_buffer_prog | PROG batch buffer (SER-SLICE-4 Package B)
+    "! @parameter iv_buffer_fugr | FUGR batch buffer (SER-SLICE-4 Package C)
+    "! @parameter rv_bytes | Combined byte length across every buffer
+    CLASS-METHODS sum_provider_buffer_bytes
+      IMPORTING iv_buffer_dd       TYPE xstring OPTIONAL
+                iv_buffer_oo_batch TYPE xstring OPTIONAL
+                iv_buffer_msag     TYPE xstring OPTIONAL
+                iv_buffer_tabl     TYPE xstring OPTIONAL
+                iv_buffer_prog     TYPE xstring OPTIONAL
+                iv_buffer_fugr     TYPE xstring OPTIONAL
+      RETURNING VALUE(rv_bytes)    TYPE int8.
+
     "! Dispatches one bounded batch via
     "! "CALL FUNCTION 'Z_ABAPGIT_ORTEC_SER_BATCH' STARTING NEW TASK", after
     "! the actual-bytes admission check
@@ -658,6 +685,11 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "!   serialization_slice_3_msag.md) - computed once by BEFORE_DISPATCH
     "!   via EXTRACT_FOR_BATCH and threaded through unchanged, mirroring
     "!   IV_PREFETCH_BUFFER_DD/IV_PREFETCH_BUFFER_OO_BATCH exactly.
+    "! @parameter iv_prefetch_buffer_tabl | ZCL_ABAPGIT_ORTEC_SER_PREF_EXT's
+    "!   TABL batch envelope (SER-SLICE-4 Package A,
+    "!   serialization_slice_4_tabl_ttyp_design.md) - computed once by
+    "!   BEFORE_DISPATCH via EXTRACT_FOR_BATCH_TABL and threaded through
+    "!   unchanged, mirroring IV_PREFETCH_BUFFER_DD/_OO_BATCH/_MSAG exactly.
     "! @raising zcx_abapgit_exception | Batch-level dispatch failure (e.g.
     "!   STARTING NEW TASK could not be issued at all)
     CLASS-METHODS dispatch_batch
@@ -671,6 +703,7 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
                 iv_prefetch_buffer_dd       TYPE xstring OPTIONAL
                 iv_prefetch_buffer_oo_batch TYPE xstring OPTIONAL
                 iv_prefetch_buffer_msag     TYPE xstring OPTIONAL
+                iv_prefetch_buffer_tabl     TYPE xstring OPTIONAL
       RAISING   zcx_abapgit_exception.
 
     "! Builds a globally unique TASK_NAME by incrementing MV_NEXT_TASK_
@@ -1375,7 +1408,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
   METHOD before_dispatch.
     DATA lt_half_1       TYPE zif_abapgit_definitions=>ty_tadir_tt.
     DATA lt_half_2       TYPE zif_abapgit_definitions=>ty_tadir_tt.
-    DATA lv_actual_bytes TYPE i.
+    DATA lv_actual_bytes TYPE int8.
     DATA lv_split_at     TYPE i.
 
     " AR-1-002 (independent adversarial audit): a tripped circuit breaker
@@ -1395,7 +1428,39 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     " extract to an INITIAL buffer (0 bytes) with no DB access, exactly
     " like before this slice.
     DATA(lv_prefetch_buffer_dd) = zcl_abapgit_ortec_ser_pref_ext=>extract_for_batch( it_object_keys ).
-    lv_actual_bytes = xstrlen( lv_prefetch_buffer_dd ).
+
+    " SER-SLICE-4 shared prerequisite (serialization_slice_4_shared_
+    " infrastructure.md &sect;3): restores CLAS/INTF and MSAG batch-buffer
+    " computation/forwarding, which a prior owner commit silently dropped
+    " from this method (DISPATCH_BATCH's signature still declared both
+    " OPTIONAL parameters, but neither was ever assigned here nor forwarded
+    " into the real RFC CALL FUNCTION - see serialization_slice_3_owner_
+    " test_rework.md's "Separate, undocumented drift" section). Restoring
+    " these two lines is a precondition for the aggregate byte-admission
+    " sum below to be meaningful for CLAS/INTF/MSAG, not new scope.
+    DATA(lv_prefetch_buffer_oo_batch) = zcl_abapgit_ortec_ser_pref_oo=>extract_for_batch( it_object_keys ).
+    DATA(lv_prefetch_buffer_msag) = zcl_abapgit_ortec_ser_pref=>extract_for_batch( it_object_keys ).
+
+    " SER-SLICE-4 Package A (serialization_slice_4_tabl_ttyp_design.md
+    " &sect;6): the TABL batch prefetch envelope (per-extra-language DD02T
+    " text + TDDAT) for this dispatch's objects - computed once and
+    " reused for the final DISPATCH_BATCH call below, mirroring
+    " LV_PREFETCH_BUFFER_DD/_OO_BATCH/_MSAG exactly.
+    DATA(lv_prefetch_buffer_tabl) = zcl_abapgit_ortec_ser_pref_ext=>extract_for_batch_tabl( it_object_keys ).
+
+    " Overflow-safe aggregate sum (TYPE int8, not the c_max_actual_batch_
+    " bytes constant's own TYPE i) - never counts an empty buffer as
+    " payload (XSTRLEN of an INITIAL xstring is exactly 0, contributing
+    " nothing to the sum), and never counts anything beyond ORTEC's own
+    " provider envelopes (no other buffer/envelope exists on this call
+    " path). SER-SLICE-4 Packages A/B/C each extend this same sum with
+    " their own xstrlen(...) term as they land (TABL/PROG/FUGR) - see
+    " each package's own implementation log for its exact addition.
+    lv_actual_bytes = sum_provider_buffer_bytes(
+      iv_buffer_dd       = lv_prefetch_buffer_dd
+      iv_buffer_oo_batch = lv_prefetch_buffer_oo_batch
+      iv_buffer_msag     = lv_prefetch_buffer_msag
+      iv_buffer_tabl     = lv_prefetch_buffer_tabl ).
 
     IF lv_actual_bytes > c_max_actual_batch_bytes AND lines( it_object_keys ) > 1.
       IF split_depth_at_cap( iv_split_depth ) = abap_true.
@@ -1424,16 +1489,29 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    dispatch_batch( iv_run_id             = iv_run_id
-                     it_object_keys        = it_object_keys
-                     iv_attempt            = iv_attempt
-                     iv_batch_id           = iv_batch_id
-                     iv_prefetch_buffer_dd = lv_prefetch_buffer_dd ).
+    dispatch_batch( iv_run_id                   = iv_run_id
+                     it_object_keys              = it_object_keys
+                     iv_attempt                  = iv_attempt
+                     iv_batch_id                 = iv_batch_id
+                     iv_prefetch_buffer_dd       = lv_prefetch_buffer_dd
+                     iv_prefetch_buffer_oo_batch = lv_prefetch_buffer_oo_batch
+                     iv_prefetch_buffer_msag     = lv_prefetch_buffer_msag
+                     iv_prefetch_buffer_tabl     = lv_prefetch_buffer_tabl ).
   ENDMETHOD.
 
 
   METHOD split_depth_at_cap.
     rv_yes = boolc( iv_split_depth >= c_max_pre_dispatch_splits ).
+  ENDMETHOD.
+
+
+  METHOD sum_provider_buffer_bytes.
+    rv_bytes = xstrlen( iv_buffer_dd )
+             + xstrlen( iv_buffer_oo_batch )
+             + xstrlen( iv_buffer_msag )
+             + xstrlen( iv_buffer_tabl )
+             + xstrlen( iv_buffer_prog )
+             + xstrlen( iv_buffer_fugr ).
   ENDMETHOD.
 
 
@@ -1502,6 +1580,9 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
           iv_prefetch_buffer_ext  = iv_prefetch_buffer_ext
           iv_prefetch_buffer_oo   = iv_prefetch_buffer_oo
           iv_prefetch_buffer_dd   = iv_prefetch_buffer_dd
+          iv_prefetch_buffer_oo_batch = iv_prefetch_buffer_oo_batch
+          iv_prefetch_buffer_msag = iv_prefetch_buffer_msag
+          iv_prefetch_buffer_tabl = iv_prefetch_buffer_tabl
           iv_input_row_count      = lines( it_object_keys )
           iv_input_version        = 1
         EXCEPTIONS

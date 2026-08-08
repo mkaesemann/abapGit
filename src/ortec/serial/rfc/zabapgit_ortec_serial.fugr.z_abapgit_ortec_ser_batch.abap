@@ -18,6 +18,7 @@ FUNCTION z_abapgit_ortec_ser_batch.
 *"     VALUE(IV_PREFETCH_BUFFER_DD) TYPE  XSTRING OPTIONAL
 *"     VALUE(IV_PREFETCH_BUFFER_OO_BATCH) TYPE  XSTRING OPTIONAL
 *"     VALUE(IV_PREFETCH_BUFFER_MSAG) TYPE  XSTRING OPTIONAL
+*"     VALUE(IV_PREFETCH_BUFFER_TABL) TYPE  XSTRING OPTIONAL
 *"     VALUE(IV_INPUT_ROW_COUNT) TYPE  I
 *"     VALUE(IV_INPUT_VERSION) TYPE  I DEFAULT 1
 *"  EXPORTING
@@ -108,6 +109,22 @@ FUNCTION z_abapgit_ortec_ser_batch.
     ENDTRY.
   ENDIF.
 
+  " SER-SLICE-4 Package A (serialization_slice_4_tabl_ttyp_design.md
+  " &sect;8): same unconditional-clear-first pattern as CLEAR_MSAG_CACHE/
+  " CLEAR_OO_CACHE/CLEAR_DD_CACHE above - a pooled/reused worker session
+  " must never keep a PRIOR dispatch's TABL cache when THIS dispatch's
+  " own buffer is legitimately empty.
+  zcl_abapgit_ortec_ser_pref_ext=>clear_tabl_cache( ).
+  IF iv_prefetch_buffer_tabl IS NOT INITIAL.
+    TRY.
+        zcl_abapgit_ortec_ser_pref_ext=>inject_batch_from_buffer_tabl( iv_prefetch_buffer_tabl ).
+      CATCH zcx_abapgit_exception ##NO_HANDLER.
+        " Corrupt/unknown-version TABL batch buffer: treat as a full
+        " prefetch MISS for this buffer only - never propagate, the batch
+        " itself must still complete.
+    ENDTRY.
+  ENDIF.
+
   ls_i18n_params-main_language         = iv_language.
   ls_i18n_params-main_language_only    = iv_main_language_only.
   ls_i18n_params-suppress_po_comments  = iv_suppress_po_comments.
@@ -174,6 +191,16 @@ FUNCTION z_abapgit_ortec_ser_batch.
             IF zcl_abapgit_ortec_ser_pref=>get_msag_data(
                  iv_msg_id   = CONV #( ls_tadir-obj_name )
                  iv_language = iv_language ) = abap_true.
+              ls_result-provider_hit = 1.
+            ELSE.
+              ls_result-provider_miss = 1.
+            ENDIF.
+          WHEN 'TABL'.
+            IF zcl_abapgit_ortec_ser_pref_ext=>get_tabl_i18n(
+                 iv_tabname  = CONV #( ls_tadir-obj_name )
+                 iv_language = iv_language ) = abap_true
+            OR zcl_abapgit_ortec_ser_pref_ext=>get_tabl_extras(
+                 iv_tabname  = CONV #( ls_tadir-obj_name ) ) = abap_true.
               ls_result-provider_hit = 1.
             ELSE.
               ls_result-provider_miss = 1.

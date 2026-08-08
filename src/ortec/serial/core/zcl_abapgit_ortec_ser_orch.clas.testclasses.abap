@@ -61,6 +61,16 @@ CLASS ltcl_ser_orch DEFINITION FINAL
     METHODS split_depth_above_cap_true      FOR TESTING.
     METHODS before_dispatch_dd_buf_empty    FOR TESTING.
     METHODS before_dispatch_oo_buf_empty    FOR TESTING.
+    METHODS before_dispatch_msag_buf_empty  FOR TESTING.
+    METHODS before_dispatch_tabl_buf_empty  FOR TESTING.
+
+    METHODS byte_sum_all_buffers_empty      FOR TESTING.
+    METHODS byte_sum_one_buffer_populated   FOR TESTING.
+    METHODS byte_sum_all_buffers_populated  FOR TESTING.
+    METHODS byte_sum_below_limit            FOR TESTING.
+    METHODS byte_sum_exactly_at_limit       FOR TESTING.
+    METHODS byte_sum_above_limit            FOR TESTING.
+    METHODS byte_sum_overflow_boundary      FOR TESTING.
 
     METHODS zero_file_success_flagged    FOR TESTING.
     METHODS nonzero_file_not_flagged      FOR TESTING.
@@ -880,7 +890,139 @@ CLASS ltcl_ser_orch IMPLEMENTATION.
     cl_abap_unit_assert=>assert_initial( zcl_abapgit_ortec_ser_orch=>mt_dispatch ).
   ENDMETHOD.
 
-  METHOD zero_file_success_flagged.
+  METHOD before_dispatch_msag_buf_empty.
+    " SER-SLICE-3 Phase 6 (serialization_slice_3_msag.md) - mirrors
+    " BEFORE_DISPATCH_DD_BUF_EMPTY/_OO_BUF_EMPTY exactly, for the MSAG
+    " batch buffer.
+    zcl_abapgit_ortec_ser_pref=>clear( ).
+
+    DATA(lv_run) = build_run_id( ).
+    DATA(lt_keys) = VALUE zif_abapgit_definitions=>ty_tadir_tt(
+                              ( build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'ZZZ' ) ) ).
+
+    cl_abap_unit_assert=>assert_initial(
+      zcl_abapgit_ortec_ser_pref=>extract_for_batch( lt_keys ) ).
+
+    TRY.
+        zcl_abapgit_ortec_ser_orch=>before_dispatch(
+            iv_run_id      = lv_run
+            it_object_keys = lt_keys
+            iv_attempt     = 1
+            iv_batch_id    = 'B1' ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_exc_msag).
+        cl_abap_unit_assert=>fail( msg = lx_exc_msag->get_text( ) ).
+    ENDTRY.
+
+    cl_abap_unit_assert=>assert_initial( zcl_abapgit_ortec_ser_orch=>mt_dispatch ).
+  ENDMETHOD.
+
+  METHOD before_dispatch_tabl_buf_empty.
+    " SER-SLICE-4 Package A - mirrors BEFORE_DISPATCH_DD_BUF_EMPTY/
+    " _OO_BUF_EMPTY/_MSAG_BUF_EMPTY exactly, for the new TABL batch buffer.
+    zcl_abapgit_ortec_ser_pref_ext=>clear( ).
+
+    DATA(lv_run) = build_run_id( ).
+    DATA(lt_keys) = VALUE zif_abapgit_definitions=>ty_tadir_tt(
+                              ( build_tadir( iv_obj_type = 'CLAS' iv_obj_name = 'ZZZ' ) ) ).
+
+    cl_abap_unit_assert=>assert_initial(
+      zcl_abapgit_ortec_ser_pref_ext=>extract_for_batch_tabl( lt_keys ) ).
+
+    TRY.
+        zcl_abapgit_ortec_ser_orch=>before_dispatch(
+            iv_run_id      = lv_run
+            it_object_keys = lt_keys
+            iv_attempt     = 1
+            iv_batch_id    = 'B1' ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_exc_tabl).
+        cl_abap_unit_assert=>fail( msg = lx_exc_tabl->get_text( ) ).
+    ENDTRY.
+
+    cl_abap_unit_assert=>assert_initial( zcl_abapgit_ortec_ser_orch=>mt_dispatch ).
+  ENDMETHOD.
+
+  METHOD byte_sum_all_buffers_empty.
+    " SER-SLICE-4 shared prerequisite - an INITIAL buffer contributes
+    " exactly 0, never treated as payload.
+    cl_abap_unit_assert=>assert_equals(
+      exp = 0
+      act = zcl_abapgit_ortec_ser_orch=>sum_provider_buffer_bytes( ) ).
+  ENDMETHOD.
+
+  METHOD byte_sum_one_buffer_populated.
+    DATA(lv_buf) = zcl_abapgit_convert=>string_to_xstring_utf8( repeat( val = 'A' occ = 1000 ) ).
+
+    cl_abap_unit_assert=>assert_equals(
+      exp = 1000
+      act = zcl_abapgit_ortec_ser_orch=>sum_provider_buffer_bytes( iv_buffer_msag = lv_buf ) ).
+  ENDMETHOD.
+
+  METHOD byte_sum_all_buffers_populated.
+    DATA(lv_100) = zcl_abapgit_convert=>string_to_xstring_utf8( repeat( val = 'A' occ = 100 ) ).
+
+    cl_abap_unit_assert=>assert_equals(
+      exp = 600
+      act = zcl_abapgit_ortec_ser_orch=>sum_provider_buffer_bytes(
+              iv_buffer_dd       = lv_100
+              iv_buffer_oo_batch = lv_100
+              iv_buffer_msag     = lv_100
+              iv_buffer_tabl     = lv_100
+              iv_buffer_prog     = lv_100
+              iv_buffer_fugr     = lv_100 ) ).
+  ENDMETHOD.
+
+  METHOD byte_sum_below_limit.
+    DATA(lv_buf) = zcl_abapgit_convert=>string_to_xstring_utf8(
+      repeat( val = 'A' occ = zcl_abapgit_ortec_ser_orch=>c_max_actual_batch_bytes - 1 ) ).
+    DATA(lv_sum) = zcl_abapgit_ortec_ser_orch=>sum_provider_buffer_bytes( iv_buffer_dd = lv_buf ).
+
+    cl_abap_unit_assert=>assert_true( xsdbool(
+      lv_sum <= zcl_abapgit_ortec_ser_orch=>c_max_actual_batch_bytes ) ).
+  ENDMETHOD.
+
+  METHOD byte_sum_exactly_at_limit.
+    DATA(lv_buf) = zcl_abapgit_convert=>string_to_xstring_utf8(
+      repeat( val = 'A' occ = zcl_abapgit_ortec_ser_orch=>c_max_actual_batch_bytes ) ).
+    DATA(lv_sum) = zcl_abapgit_ortec_ser_orch=>sum_provider_buffer_bytes( iv_buffer_dd = lv_buf ).
+
+    " BEFORE_DISPATCH's own admission test is "> c_max_actual_batch_bytes"
+    " (strictly greater) - a sum EXACTLY at the limit must NOT trip the
+    " split condition.
+    cl_abap_unit_assert=>assert_equals(
+      exp = zcl_abapgit_ortec_ser_orch=>c_max_actual_batch_bytes
+      act = lv_sum ).
+    cl_abap_unit_assert=>assert_false( xsdbool(
+      lv_sum > zcl_abapgit_ortec_ser_orch=>c_max_actual_batch_bytes ) ).
+  ENDMETHOD.
+
+  METHOD byte_sum_above_limit.
+    DATA(lv_buf) = zcl_abapgit_convert=>string_to_xstring_utf8(
+      repeat( val = 'A' occ = zcl_abapgit_ortec_ser_orch=>c_max_actual_batch_bytes + 1 ) ).
+    DATA(lv_sum) = zcl_abapgit_ortec_ser_orch=>sum_provider_buffer_bytes( iv_buffer_dd = lv_buf ).
+
+    cl_abap_unit_assert=>assert_true( xsdbool(
+      lv_sum > zcl_abapgit_ortec_ser_orch=>c_max_actual_batch_bytes ) ).
+  ENDMETHOD.
+
+  METHOD byte_sum_overflow_boundary.
+    " Proves the accumulator itself (TYPE int8) cannot wrap the way a
+    " TYPE i accumulator would once the combined size crosses i's own
+    " max (2,147,483,647) - two buffers just over half that value each
+    " (well within any single xstring's own realistic size, and far
+    " below what six real ORTEC metadata-only provider buffers would
+    " ever actually reach) already exceed i's range when summed.
+    CONSTANTS lc_i_max TYPE i VALUE 2147483647.
+    DATA(lv_half_plus) = zcl_abapgit_convert=>string_to_xstring_utf8(
+      repeat( val = 'A' occ = ( lc_i_max / 2 ) + 1000 ) ).
+
+    DATA(lv_sum) = zcl_abapgit_ortec_ser_orch=>sum_provider_buffer_bytes(
+                     iv_buffer_dd   = lv_half_plus
+                     iv_buffer_msag = lv_half_plus ).
+
+    cl_abap_unit_assert=>assert_true( xsdbool( lv_sum > lc_i_max ) ).
+  ENDMETHOD.
+
+
     " SER-SLICE-3 parity incident (serialization_slice_3_dtel_doma_
     " parity.md, H5) - the exact suspicious combination: worker reports
     " success (RC = 0) for a REQUESTED object, but zero files.

@@ -181,6 +181,34 @@ CLASS zcl_abapgit_ortec_ser_pref_ext DEFINITION
       RETURNING
         VALUE(rv_found) TYPE abap_bool.
 
+    "! SER-SLICE-4 Package A: prefetched per-extra-language TABL header
+    "! text (DD02T), mirroring GET_DTEL_I18N/GET_DOMA_I18N. RV_FOUND is
+    "! keyed on whether PREPARE_TABL processed this table at all (same
+    "! checked-marker GET_TABL_EXTRAS uses), NOT on whether any text rows
+    "! exist - a table with zero extra-language translations is a valid,
+    "! checked-and-empty HIT.
+    CLASS-METHODS get_tabl_i18n
+      IMPORTING
+        iv_tabname      TYPE dd02l-tabname
+        iv_language     TYPE spras
+      EXPORTING
+        et_i18n_langs   TYPE zcl_abapgit_ortec_ser_pref=>ty_langu_tt
+        et_dd02_texts   TYPE zif_abapgit_object_tabl=>ty_dd02_texts
+      RETURNING
+        VALUE(rv_found) TYPE abap_bool.
+
+    "! SER-SLICE-4 Package A: prefetched per-object TDDAT (table
+    "! authorization group). RV_FOUND is ABAP_TRUE iff PREPARE_TABL
+    "! processed this table - ES_TDDAT stays INITIAL (a real, checked
+    "! "no authorization group assigned" fact) when no TDDAT row exists.
+    CLASS-METHODS get_tabl_extras
+      IMPORTING
+        iv_tabname      TYPE tddat-tabname
+      EXPORTING
+        es_tddat        TYPE tddat
+      RETURNING
+        VALUE(rv_found) TYPE abap_bool.
+
     "! Extract prefetch data relevant to a single TADIR object into a transferable buffer.
     CLASS-METHODS extract_for_object
       IMPORTING is_tadir         TYPE zif_abapgit_definitions=>ty_tadir
@@ -220,6 +248,37 @@ CLASS zcl_abapgit_ortec_ser_pref_ext DEFINITION
     "! worker invocation, before conditionally injecting a new buffer.
     CLASS-METHODS clear_dd_cache.
 
+    "! SER-SLICE-4 Package A (serialization_slice_4_tabl_ttyp_design.md
+    "! &sect;6): extract the TABL batch prefetch envelope (per-extra-
+    "! language DD02T text + TDDAT) for an entire dispatch's TADIR rows in
+    "! ONE call, reusing the SAME generic ZAOG_SER_ENV_BHDR/BENTRY
+    "! envelope as the CLAS/INTF provider. Filters IT_OBJECT_KEYS to TABL
+    "! rows internally; returns an INITIAL buffer with no DB access when
+    "! none are present.
+    CLASS-METHODS extract_for_batch_tabl
+      IMPORTING it_object_keys   TYPE zif_abapgit_definitions=>ty_tadir_tt
+      RETURNING VALUE(rv_buffer) TYPE xstring.
+
+    "! SER-SLICE-4 Package A: inject a TABL batch prefetch envelope
+    "! (produced by EXTRACT_FOR_BATCH_TABL) into this session's caches.
+    "! Unknown wire format version, a failed IMPORT, an unexpected
+    "! provider_id/entry type/state, or a payload row that does not
+    "! correlate 1:1 with a 'P' entry all reject the WHOLE buffer by
+    "! raising ZCX_ABAPGIT_EXCEPTION - callers must treat this as a full
+    "! prefetch MISS for this buffer only, never propagate it into
+    "! aborting the batch.
+    CLASS-METHODS inject_batch_from_buffer_tabl
+      IMPORTING iv_buffer TYPE xstring
+      RAISING   zcx_abapgit_exception.
+
+    "! SER-SLICE-4 Package A: unconditionally clears MT_TABL_TEXT/
+    "! MT_TABL_EXTRAS - a pooled/reused RFC worker session must never
+    "! carry TABL data from a PRIOR dispatch into a batch whose OWN
+    "! IV_PREFETCH_BUFFER_TABL is legitimately empty. Callers must call
+    "! this FIRST, on EVERY worker invocation, before conditionally
+    "! injecting a new buffer.
+    CLASS-METHODS clear_tabl_cache.
+
   PRIVATE SECTION.
     TYPES ty_dtel_keys TYPE HASHED TABLE OF dd04l-rollname
       WITH UNIQUE KEY table_line.
@@ -236,6 +295,8 @@ CLASS zcl_abapgit_ortec_ser_pref_ext DEFINITION
     TYPES ty_tobj_keys TYPE HASHED TABLE OF vim_name
       WITH UNIQUE KEY table_line.
     TYPES ty_tran_keys TYPE HASHED TABLE OF tstc-tcode
+      WITH UNIQUE KEY table_line.
+    TYPES ty_tabl_keys TYPE HASHED TABLE OF dd02l-tabname
       WITH UNIQUE KEY table_line.
 
     TYPES:
@@ -330,6 +391,33 @@ CLASS zcl_abapgit_ortec_ser_pref_ext DEFINITION
     TYPES ty_tran_cache_tt TYPE HASHED TABLE OF ty_tran_cache
       WITH UNIQUE KEY tcode.
 
+    "! SER-SLICE-4 Package A (TABL): one nested row per extra-language
+    "! DD02T text, held under a SINGLE hashed-by-tabname cache row
+    "! (PF-001 fix) - mirrors MT_FUGR_ENLFDIR's own proven O(1) shape.
+    TYPES:
+      BEGIN OF ty_tabl_text_lang,
+        ddlanguage TYPE dd02t-ddlanguage,
+        ddtext     TYPE dd02t-ddtext,
+      END OF ty_tabl_text_lang.
+    TYPES ty_tabl_text_lang_tt TYPE STANDARD TABLE OF ty_tabl_text_lang
+      WITH DEFAULT KEY.
+
+    TYPES:
+      BEGIN OF ty_tabl_text_cache,
+        tabname TYPE dd02l-tabname,
+        texts   TYPE ty_tabl_text_lang_tt,
+      END OF ty_tabl_text_cache.
+    TYPES ty_tabl_text_cache_tt TYPE HASHED TABLE OF ty_tabl_text_cache
+      WITH UNIQUE KEY tabname.
+
+    TYPES:
+      BEGIN OF ty_tabl_extras_cache,
+        tabname TYPE tddat-tabname,
+        tddat   TYPE tddat,
+      END OF ty_tabl_extras_cache.
+    TYPES ty_tabl_extras_cache_tt TYPE HASHED TABLE OF ty_tabl_extras_cache
+      WITH UNIQUE KEY tabname.
+
     TYPES:
       BEGIN OF ty_d010tinf_lang,
         prog     TYPE d010tinf-prog,
@@ -349,6 +437,8 @@ CLASS zcl_abapgit_ortec_ser_pref_ext DEFINITION
     CLASS-DATA mt_smim_phf TYPE ty_smim_phf_cache_tt.
     CLASS-DATA mt_tobj TYPE ty_tobj_cache_tt.
     CLASS-DATA mt_tran TYPE ty_tran_cache_tt.
+    CLASS-DATA mt_tabl_text TYPE ty_tabl_text_cache_tt.
+    CLASS-DATA mt_tabl_extras TYPE ty_tabl_extras_cache_tt.
     CLASS-DATA mv_language TYPE spras.
 
     CLASS-METHODS collect_keys
@@ -362,7 +452,8 @@ CLASS zcl_abapgit_ortec_ser_pref_ext DEFINITION
         et_prog  TYPE ty_prog_keys
         et_smim  TYPE ty_smim_keys
         et_tobj  TYPE ty_tobj_keys
-        et_tran  TYPE ty_tran_keys.
+        et_tran  TYPE ty_tran_keys
+        et_tabl  TYPE ty_tabl_keys.
 
     CLASS-METHODS get_fugr_main_program
       IMPORTING
@@ -401,6 +492,12 @@ CLASS zcl_abapgit_ortec_ser_pref_ext DEFINITION
       IMPORTING
         it_tcodes   TYPE ty_tran_keys
         iv_language TYPE spras.
+    "! SER-SLICE-4 Package A: decision-free bulk-read mirror of
+    "! SERIALIZE_TEXTS'/READ_EXTRAS' per-object DD02T/TDDAT reads.
+    CLASS-METHODS prepare_tabl
+      IMPORTING
+        it_names         TYPE ty_tabl_keys
+        iv_main_language TYPE spras.
 ENDCLASS.
 
 CLASS zcl_abapgit_ortec_ser_pref_ext IMPLEMENTATION.
@@ -416,6 +513,8 @@ CLASS zcl_abapgit_ortec_ser_pref_ext IMPLEMENTATION.
     CLEAR mt_smim_phf.
     CLEAR mt_tobj.
     CLEAR mt_tran.
+    CLEAR mt_tabl_text.
+    CLEAR mt_tabl_extras.
     CLEAR mv_language.
   ENDMETHOD.
 
@@ -459,6 +558,8 @@ CLASS zcl_abapgit_ortec_ser_pref_ext IMPLEMENTATION.
         WHEN 'TRAN'.
           lv_tcode = ls_tadir-obj_name.
           INSERT lv_tcode INTO TABLE et_tran.
+        WHEN 'TABL'.
+          INSERT CONV dd02l-tabname( ls_tadir-obj_name ) INTO TABLE et_tabl.
       ENDCASE.
     ENDLOOP.
   ENDMETHOD.
@@ -648,6 +749,42 @@ CLASS zcl_abapgit_ortec_ser_pref_ext IMPLEMENTATION.
     ENDIF.
   ENDMETHOD.
 
+  METHOD get_tabl_i18n.
+    CLEAR: et_i18n_langs, et_dd02_texts.
+
+    READ TABLE mt_tabl_extras TRANSPORTING NO FIELDS
+      WITH TABLE KEY tabname = iv_tabname.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+    rv_found = abap_true.
+
+    READ TABLE mt_tabl_text INTO DATA(ls_text_cache)
+      WITH TABLE KEY tabname = iv_tabname.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+
+    LOOP AT ls_text_cache-texts INTO DATA(ls_lang) WHERE ddlanguage <> iv_language.
+      APPEND VALUE #( ddlanguage = ls_lang-ddlanguage
+                       ddtext     = ls_lang-ddtext ) TO et_dd02_texts.
+      APPEND ls_lang-ddlanguage TO et_i18n_langs.
+    ENDLOOP.
+
+    SORT et_i18n_langs ASCENDING.
+    DELETE ADJACENT DUPLICATES FROM et_i18n_langs.
+    SORT et_dd02_texts BY ddlanguage ASCENDING.
+  ENDMETHOD.
+
+  METHOD get_tabl_extras.
+    CLEAR es_tddat.
+    READ TABLE mt_tabl_extras INTO DATA(ls_extras) WITH TABLE KEY tabname = iv_tabname.
+    IF sy-subrc = 0.
+      es_tddat = ls_extras-tddat.
+      rv_found = abap_true.
+    ENDIF.
+  ENDMETHOD.
+
   METHOD prepare.
     DATA lt_dtel TYPE ty_dtel_keys.
     DATA lt_doma TYPE ty_doma_keys.
@@ -657,6 +794,7 @@ CLASS zcl_abapgit_ortec_ser_pref_ext IMPLEMENTATION.
     DATA lt_smim TYPE ty_smim_keys.
     DATA lt_tobj TYPE ty_tobj_keys.
     DATA lt_tran TYPE ty_tran_keys.
+    DATA lt_tabl TYPE ty_tabl_keys.
 
     clear( ).
     mv_language = iv_language.
@@ -672,7 +810,8 @@ CLASS zcl_abapgit_ortec_ser_pref_ext IMPLEMENTATION.
         et_prog  = lt_prog
         et_smim  = lt_smim
         et_tobj  = lt_tobj
-        et_tran  = lt_tran ).
+        et_tran  = lt_tran
+        et_tabl  = lt_tabl ).
 
     TRY.
         prepare_dtel( lt_dtel ).
@@ -689,6 +828,9 @@ CLASS zcl_abapgit_ortec_ser_pref_ext IMPLEMENTATION.
         prepare_tran(
           it_tcodes   = lt_tran
           iv_language = iv_language ).
+        prepare_tabl(
+          it_names         = lt_tabl
+          iv_main_language = iv_language ).
       CATCH cx_root.
         clear( ).
     ENDTRY.
@@ -1105,6 +1247,56 @@ CLASS zcl_abapgit_ortec_ser_pref_ext IMPLEMENTATION.
     ENDLOOP.
   ENDMETHOD.
 
+  METHOD prepare_tabl.
+    DATA lt_dd02t TYPE STANDARD TABLE OF dd02t WITH DEFAULT KEY.
+    DATA lt_tddat TYPE STANDARD TABLE OF tddat WITH DEFAULT KEY.
+
+    IF it_names IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    SELECT *
+      FROM dd02t
+      INTO TABLE @lt_dd02t
+      FOR ALL ENTRIES IN @it_names
+      WHERE tabname = @it_names-table_line
+        AND ddlanguage <> @iv_main_language.
+
+    LOOP AT lt_dd02t INTO DATA(ls_dd02t).
+      IF ls_dd02t-ddlanguage IS INITIAL.
+        CONTINUE.
+      ENDIF.
+      READ TABLE mt_tabl_text ASSIGNING FIELD-SYMBOL(<ls_text_cache>)
+        WITH TABLE KEY tabname = ls_dd02t-tabname.
+      IF sy-subrc <> 0.
+        INSERT VALUE ty_tabl_text_cache( tabname = ls_dd02t-tabname )
+          INTO TABLE mt_tabl_text ASSIGNING <ls_text_cache>.
+      ENDIF.
+      APPEND VALUE #( ddlanguage = ls_dd02t-ddlanguage
+                       ddtext     = ls_dd02t-ddtext )
+        TO <ls_text_cache>-texts.
+    ENDLOOP.
+
+    LOOP AT it_names INTO DATA(lv_tabname_extras).
+      INSERT VALUE ty_tabl_extras_cache( tabname = lv_tabname_extras )
+        INTO TABLE mt_tabl_extras.
+    ENDLOOP.
+
+    SELECT *
+      FROM tddat
+      INTO TABLE @lt_tddat
+      FOR ALL ENTRIES IN @it_names
+      WHERE tabname = @it_names-table_line.
+
+    LOOP AT lt_tddat INTO DATA(ls_tddat).
+      READ TABLE mt_tabl_extras ASSIGNING FIELD-SYMBOL(<ls_extras_upd>)
+        WITH TABLE KEY tabname = ls_tddat-tabname.
+      IF sy-subrc = 0.
+        <ls_extras_upd>-tddat = ls_tddat.
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
 
   METHOD extract_for_object.
     DATA lt_dtel TYPE ty_dtel_cache_tt.
@@ -1436,6 +1628,187 @@ CLASS zcl_abapgit_ortec_ser_pref_ext IMPLEMENTATION.
   METHOD clear_dd_cache.
     CLEAR mt_doma.
     CLEAR mt_dtel.
+  ENDMETHOD.
+
+  METHOD extract_for_batch_tabl.
+    DATA lt_entries TYPE zaog_ser_env_bentry_tt.
+    DATA lt_text    TYPE ty_tabl_text_cache_tt.
+    DATA lt_extras  TYPE ty_tabl_extras_cache_tt.
+    DATA ls_hdr     TYPE zaog_ser_env_bhdr.
+    DATA lv_any_hit TYPE abap_bool.
+
+    IF mv_language IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    LOOP AT it_object_keys INTO DATA(ls_tadir) WHERE object = 'TABL'.
+      DATA(lv_tabname) = CONV dd02l-tabname( ls_tadir-obj_name ).
+
+      READ TABLE mt_tabl_text INTO DATA(ls_text_cache)
+        WITH TABLE KEY tabname = lv_tabname.
+      IF sy-subrc = 0.
+        INSERT ls_text_cache INTO TABLE lt_text.
+      ENDIF.
+
+      DATA(ls_entry) = VALUE zaog_ser_env_bentry(
+        obj_type = ls_tadir-object obj_name = ls_tadir-obj_name ).
+
+      READ TABLE mt_tabl_extras INTO DATA(ls_extras)
+        WITH TABLE KEY tabname = lv_tabname.
+      IF sy-subrc = 0.
+        INSERT ls_extras INTO TABLE lt_extras.
+        ls_entry-state        = 'P'.
+        ls_entry-actual_bytes = xstrlen( extract_for_object( ls_tadir ) ).
+        lv_any_hit = abap_true.
+      ELSE.
+        ls_entry-state        = 'M'.
+        ls_entry-actual_bytes = 0.
+      ENDIF.
+
+      APPEND ls_entry TO lt_entries.
+    ENDLOOP.
+
+    " A batch with ZERO TABL objects, or where EVERY entry would be a
+    " MISS, has nothing genuinely useful to send - mirrors the identical
+    " EXTRACT_FOR_BATCH guard used by the DOMA/DTEL and CLAS/INTF
+    " providers (SER-SLICE-3 parity incident Fix B).
+    IF lt_entries IS INITIAL OR lv_any_hit = abap_false.
+      CLEAR rv_buffer.
+      RETURN.
+    ENDIF.
+
+    ls_hdr-wire_format_version = 1.
+    ls_hdr-provider_id         = 'SER_TABL'.
+    ls_hdr-object_count        = lines( lt_entries ).
+
+    EXPORT hdr         = ls_hdr
+           entries     = lt_entries
+           tabl_text   = lt_text
+           tabl_extras = lt_extras
+           language    = mv_language
+      TO DATA BUFFER rv_buffer COMPRESSION ON.
+  ENDMETHOD.
+
+
+  METHOD inject_batch_from_buffer_tabl.
+    DATA ls_hdr            TYPE zaog_ser_env_bhdr.
+    DATA lt_entries        TYPE zaog_ser_env_bentry_tt.
+    DATA lt_text           TYPE ty_tabl_text_cache_tt.
+    DATA lt_extras         TYPE ty_tabl_extras_cache_tt.
+    DATA lt_entries_sorted TYPE STANDARD TABLE OF zaog_ser_env_bentry WITH DEFAULT KEY.
+    DATA lv_lines_before   TYPE i.
+    DATA lv_language       TYPE spras.
+
+    CHECK iv_buffer IS NOT INITIAL.
+
+    TRY.
+        IMPORT hdr         = ls_hdr
+               entries     = lt_entries
+               tabl_text   = lt_text
+               tabl_extras = lt_extras
+               language    = lv_language
+          FROM DATA BUFFER iv_buffer.
+      CATCH cx_root INTO DATA(lx_import).
+        zcx_abapgit_exception=>raise(
+          |ORTEC TABL batch prefetch buffer is corrupt: { lx_import->get_text( ) }| ).
+    ENDTRY.
+    IF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise( 'ORTEC TABL batch prefetch buffer: IMPORT failed' ).
+    ENDIF.
+
+    IF ls_hdr-wire_format_version <> 1.
+      zcx_abapgit_exception=>raise(
+        |ORTEC TABL batch prefetch buffer: unknown wire_format_version { ls_hdr-wire_format_version }| ).
+    ENDIF.
+
+    IF ls_hdr-object_count <> lines( lt_entries ).
+      zcx_abapgit_exception=>raise(
+        'ORTEC TABL batch prefetch buffer: object_count does not match ENTRIES' ).
+    ENDIF.
+
+    " PR-005-style guard: EXTRACT_FOR_BATCH_TABL can only ever export a
+    " non-initial MV_LANGUAGE (its own entry guard above), so an initial
+    " LANGUAGE here is itself proof of a corrupt/foreign buffer.
+    IF lv_language IS INITIAL.
+      zcx_abapgit_exception=>raise(
+        'ORTEC TABL batch prefetch buffer: language must not be initial' ).
+    ENDIF.
+
+    IF ls_hdr-provider_id <> 'SER_TABL'.
+      zcx_abapgit_exception=>raise(
+        'ORTEC TABL batch prefetch buffer: unexpected provider_id' ).
+    ENDIF.
+
+    " every ENTRIES row must be TABL with a known state - reject anything
+    " else as corrupt (TT-004).
+    LOOP AT lt_entries INTO DATA(ls_check_entry).
+      IF ls_check_entry-obj_type <> 'TABL' OR
+         ( ls_check_entry-state <> 'P' AND ls_check_entry-state <> 'M' ).
+        zcx_abapgit_exception=>raise(
+          'ORTEC TABL batch prefetch buffer: unexpected entry type or state' ).
+      ENDIF.
+    ENDLOOP.
+
+    " duplicate check MUST happen before any INSERT INTO mt_tabl_text/
+    " mt_tabl_extras - a HASHED TABLE INSERT would otherwise silently
+    " collapse a duplicate instead of rejecting the whole buffer. Note
+    " LT_TEXT/LT_EXTRAS themselves cannot contain a duplicate TABNAME
+    " (both are HASHED WITH UNIQUE KEY tabname, so a duplicate could not
+    " have been exported in the first place) - only the generic ENTRIES
+    " table needs this check.
+    lt_entries_sorted = CORRESPONDING #( lt_entries ).
+    SORT lt_entries_sorted BY obj_type obj_name.
+    lv_lines_before = lines( lt_entries_sorted ).
+    DELETE ADJACENT DUPLICATES FROM lt_entries_sorted COMPARING obj_type obj_name.
+    IF lines( lt_entries_sorted ) <> lv_lines_before.
+      zcx_abapgit_exception=>raise(
+        'ORTEC TABL batch prefetch buffer: duplicate entry in ENTRIES' ).
+    ENDIF.
+
+    " canonical object-key correlation (TT-004): every 'P' entry must
+    " have exactly one extras payload row, and every payload row's
+    " tabname must correspond to a real 'P' entry - reject any mismatch
+    " as corrupt.
+    DATA(lt_p_entries) = lt_entries.
+    DELETE lt_p_entries WHERE state <> 'P'.
+    IF lines( lt_extras ) <> lines( lt_p_entries ).
+      zcx_abapgit_exception=>raise(
+        'ORTEC TABL batch prefetch buffer: extras payload does not match P entries 1:1' ).
+    ENDIF.
+    LOOP AT lt_extras INTO DATA(ls_extras_check).
+      READ TABLE lt_p_entries TRANSPORTING NO FIELDS
+        WITH KEY obj_name = ls_extras_check-tabname.
+      IF sy-subrc <> 0.
+        zcx_abapgit_exception=>raise(
+          'ORTEC TABL batch prefetch buffer: extras payload key not in P entries' ).
+      ENDIF.
+    ENDLOOP.
+    LOOP AT lt_text INTO DATA(ls_text_check).
+      READ TABLE lt_p_entries TRANSPORTING NO FIELDS
+        WITH KEY obj_name = ls_text_check-tabname.
+      IF sy-subrc <> 0.
+        zcx_abapgit_exception=>raise(
+          'ORTEC TABL batch prefetch buffer: text payload key not in P entries' ).
+      ENDIF.
+    ENDLOOP.
+
+    " CLEAR first: a parallel RFC worker session can be reused across many
+    " unrelated dispatches over its lifetime - see INJECT_FROM_BUFFER's own
+    " identical clear-before-insert rationale.
+    CLEAR mt_tabl_text.
+    CLEAR mt_tabl_extras.
+    LOOP AT lt_text INTO DATA(ls_text_ins).
+      INSERT ls_text_ins INTO TABLE mt_tabl_text.
+    ENDLOOP.
+    LOOP AT lt_extras INTO DATA(ls_extras_ins).
+      INSERT ls_extras_ins INTO TABLE mt_tabl_extras.
+    ENDLOOP.
+    mv_language = lv_language.
+  ENDMETHOD.
+
+  METHOD clear_tabl_cache.
+    CLEAR mt_tabl_text.
+    CLEAR mt_tabl_extras.
   ENDMETHOD.
 
 ENDCLASS.
