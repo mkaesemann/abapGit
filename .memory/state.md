@@ -27,8 +27,38 @@ SER_SLICE_5=SAP_VALIDATED_COMPLETE_WITH_WAPA_RUNTIME_TEST_DEFERRED
   ATC clean, gate lifecycle exception-safe by exhaustive static proof).
   Residuals (do not block closeout, see handoff): WAPA replacement not
   runtime-exercised (no fixture), worker-side provider consumption proven
-  only statically (no live counter/trace this pass), fresh SAT retest not
-  yet run. DDLS remains WAIVED_BY_OWNER/DEFERRED.
+  only statically (no live counter/trace this pass). The "fresh SAT
+  retest not yet run" residual is now CLOSED by SER-FINAL (2026-08-10,
+  see below): the owner-supplied `FUGR Set - Batch - Worker` true-worker
+  traces show the FUGR provider actually consulted and mostly HIT inside
+  the RFC worker's own aRFC session. DDLS remains WAIVED_BY_OWNER/
+  DEFERRED.
+```
+
+```text
+SER_FINAL_WAPA_FUGR=EVIDENCE_REVIEW_COMPLETE_NO_IMPLEMENTATION
+  (2026-08-10, `.memory/logs/ser_final_wapa_fugr_evidence.md` +
+  `ser_final_wapa_design.md` + `ser_final_fugr_design.md` +
+  `ser_final_ddls_disposition.md`, reviews under `.memory/reviews/
+  ser_final_*`). Owner supplied fresh dedicated WAPA/FUGR SAT traces plus
+  mixed FUGR+DDLS+WAPA Main/Worker traces; classified each as MAIN/
+  AGGREGATE_PARALLEL/TRUE_WORKER before drawing conclusions. Findings:
+  (1) closes the SER-SLICE-5 SAT-retest residual (see above); (2)
+  WAPA=D_KEEP_SINGLETON_NO_CHANGE - `ZCL_ABAPGIT_ORTEC_WAPA` already
+  implements the only safe optimization, remaining O2PAGCON cluster-import
+  cost is architecturally bounded, no batch-worker WAPA evidence exists to
+  justify multi-WAPA batching; (3) FUGR=F_NO_FURTHER_OPTIMIZATION_THIS_
+  PASS - found a real, evidenced ~1.3s/trace direct-DB cost inside
+  `ZIF_ABAPGIT_OBJECT~CHANGED_BY` (own uncached `RS_GET_ALL_INCLUDES` +
+  `REPOTEXT`/`REPOSRC`/`EUDB`/`D010INC`/`RSEUINC` reads, 0% covered by the
+  existing dispatch-scoped ENLFDIR/func-metadata provider because
+  `CHANGED_BY` runs on a different, repository-wide status-calc lifecycle)
+  but deliberately deferred as a named follow-up rather than implemented
+  without a dedicated design+adversarial pass - see "Resumable backlog
+  topics" below (`FUGR-CHANGED-BY-STATUS-SWEEP`); (4)
+  DDLS=DEFER_NO_MATERIAL_SAFE_CHANGE, unchanged. No productive ABAP source
+  was changed this pass. Full detail:
+  `.memory/handoffs/ser-final-wapa-fugr-it8.md`.
 ```
 
 ```text
@@ -410,6 +440,19 @@ SYSTEM_NO_ROLL-OS4-STAGE-AFTER-OVERVIEW: a SYSTEM_NO_ROLL dump when Full
   `.memory/logs/variant_b_package_e_false_modified_os4_d1.md` section 11.
 Package F (validated legacy-code cleanup): NOT_STARTED. Entry condition:
   Package E fully settled first.
+FUGR-CHANGED-BY-STATUS-SWEEP: NOT_STARTED, design sketch only (2026-08-10,
+  SER-FINAL). `ZCL_ABAPGIT_OBJECT_FUGR~ZIF_ABAPGIT_OBJECT~CHANGED_BY`
+  independently calls `RS_GET_ALL_INCLUDES` plus `REPOTEXT`/`REPOSRC`/
+  `EUDB`/`D010INC`/`RSEUINC` SELECTs with zero provider coverage
+  (~1.3s aggregate DB time for 147 FUGR objects in the supplied trace) -
+  uncovered because it runs on the repository-wide status-calc sweep, a
+  different lifecycle than the existing dispatch-scoped `prepare_fugr`
+  prefetch. See `.memory/logs/ser_final_fugr_design.md` Candidate B for
+  the exact sketch and `.memory/reviews/ser_final_readiness.md` for what
+  is still missing. Entry condition: owner authorizes a dedicated design
+  +adversarial-review pass (this touches `CHANGED_BY`, which feeds
+  `ZCL_ABAPGIT_CTS_INTEGRATION`, a correctness-sensitive area) AND the
+  repository-wide `CHANGED_BY` sweep call site is located/read first.
 ```
 
 Full narrative history, per-slice validation matrices, and incident
