@@ -38,10 +38,35 @@ CLASS zcl_abapgit_object_fugr DEFINITION
       ty_function_tt TYPE STANDARD TABLE OF ty_function WITH DEFAULT KEY .
     TYPES:
       ty_sobj_name_tt TYPE STANDARD TABLE OF sobj_name  WITH DEFAULT KEY .
+    TYPES:
+      BEGIN OF ty_changed_by_stamp,
+        user TYPE syuname,
+        date TYPE d,
+        time TYPE t,
+      END OF ty_changed_by_stamp .
+    TYPES:
+      ty_changed_by_stamp_tt TYPE STANDARD TABLE OF ty_changed_by_stamp WITH DEFAULT KEY .
 
     DATA mt_includes_cache TYPE ty_sobj_name_tt .
     DATA mt_includes_all TYPE ty_sobj_name_tt .
 
+    "! #SER-FINAL test seam: TRUE only if IV_EXTRA could possibly match a
+    "! function-module name (function names are never empty) - guards the
+    "! otherwise-wasted FUNCTIONS( ) lookup in CHANGED_BY for whole-object
+    "! requests.
+    CLASS-METHODS needs_function_lookup
+      IMPORTING
+        !iv_extra        TYPE clike
+      RETURNING
+        VALUE(rv_needed) TYPE abap_bool .
+    "! #SER-FINAL test seam: picks the most recently changed stamp's user
+    "! (date DESCENDING, time DESCENDING), mirroring CHANGED_BY's own
+    "! tie-break rule; returns C_USER_UNKNOWN for an empty input.
+    CLASS-METHODS most_recent_user
+      IMPORTING
+        !it_stamps     TYPE ty_changed_by_stamp_tt
+      RETURNING
+        VALUE(rv_user) TYPE syuname .
     METHODS check_rfc_parameters
       IMPORTING
         !is_function TYPE ty_function
@@ -620,7 +645,7 @@ CLASS ZCL_ABAPGIT_OBJECT_FUGR IMPLEMENTATION.
     LOOP AT rt_functab ASSIGNING <ls_functab>.
       TRANSLATE <ls_functab> TO UPPER CASE.
       lv_index = sy-tabix.
-      READ TABLE lt_enlfdir WITH KEY funcname = <ls_functab>-funcname TRANSPORTING NO FIELDS.
+      READ TABLE lt_enlfdir WITH KEY funcname = <ls_functab>-funcname BINARY SEARCH TRANSPORTING NO FIELDS.
       IF sy-subrc <> 0.
         DELETE rt_functab INDEX lv_index.
       ENDIF.
@@ -628,6 +653,30 @@ CLASS ZCL_ABAPGIT_OBJECT_FUGR IMPLEMENTATION.
 
     SORT rt_functab BY funcname ASCENDING.
     DELETE ADJACENT DUPLICATES FROM rt_functab COMPARING funcname.
+
+  ENDMETHOD.
+
+
+  METHOD needs_function_lookup.
+    rv_needed = boolc( iv_extra IS NOT INITIAL ).
+  ENDMETHOD.
+
+
+  METHOD most_recent_user.
+
+    DATA lt_stamps TYPE ty_changed_by_stamp_tt.
+
+    FIELD-SYMBOLS <ls_stamp> LIKE LINE OF lt_stamps.
+
+    lt_stamps = it_stamps.
+    SORT lt_stamps BY date DESCENDING time DESCENDING.
+
+    READ TABLE lt_stamps INDEX 1 ASSIGNING <ls_stamp>.
+    IF sy-subrc = 0.
+      rv_user = <ls_stamp>-user.
+    ELSE.
+      rv_user = c_user_unknown.
+    ENDIF.
 
   ENDMETHOD.
 
@@ -1217,22 +1266,15 @@ CLASS ZCL_ABAPGIT_OBJECT_FUGR IMPLEMENTATION.
 
   METHOD zif_abapgit_object~changed_by.
 
-    TYPES: BEGIN OF ty_stamps,
-             user TYPE syuname,
-             date TYPE d,
-             time TYPE t,
-           END OF ty_stamps.
-
     DATA:
-      lt_stamps    TYPE STANDARD TABLE OF ty_stamps WITH DEFAULT KEY,
+      lt_stamps    TYPE ty_changed_by_stamp_tt,
       lv_program   TYPE program,
       lv_found     TYPE abap_bool,
       lt_functions TYPE ty_rs38l_incl_tt.
 
     FIELD-SYMBOLS:
       <ls_function> LIKE LINE OF lt_functions,
-      <lv_include>  LIKE LINE OF mt_includes_all,
-      <ls_stamp>    LIKE LINE OF lt_stamps.
+      <lv_include>  LIKE LINE OF mt_includes_all.
 
     lv_program = main_name( ).
 
@@ -1259,9 +1301,7 @@ CLASS ZCL_ABAPGIT_OBJECT_FUGR IMPLEMENTATION.
     ENDLOOP.
 
     " Check if changed_by for function module was requested
-    " (funcname is never empty, so this can never match for a whole-object
-    " request - skip the expensive FUNCTIONS() lookup in that case, #SER-FINAL)
-    IF iv_extra IS NOT INITIAL.
+    IF needs_function_lookup( iv_extra ) = abap_true.
       lt_functions = functions( ).
 
       LOOP AT lt_functions ASSIGNING <ls_function> WHERE funcname = to_upper( iv_extra ).
@@ -1300,14 +1340,7 @@ CLASS ZCL_ABAPGIT_OBJECT_FUGR IMPLEMENTATION.
 
 * Screens: username not stored in D020S database table
 
-    SORT lt_stamps BY date DESCENDING time DESCENDING.
-
-    READ TABLE lt_stamps INDEX 1 ASSIGNING <ls_stamp>.
-    IF sy-subrc = 0.
-      rv_user = <ls_stamp>-user.
-    ELSE.
-      rv_user = c_user_unknown.
-    ENDIF.
+    rv_user = most_recent_user( lt_stamps ).
 
   ENDMETHOD.
 
