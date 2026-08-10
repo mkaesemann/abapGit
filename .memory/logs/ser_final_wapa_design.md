@@ -56,7 +56,7 @@ build. Candidate B requires evidence this pass does not have.
 | Feature OFF remains pure standard | Held — the only entry point is the existing `is_wapa_active()` guard in `ZCL_ABAPGIT_OBJECT_WAPA`, unchanged this pass |
 | Output byte parity | Not re-verified this pass — no code changed |
 
-## Decision
+## Decision (SER-FINAL, first pass)
 
 `WAPA_SELECTED_DESIGN=D_KEEP_SINGLETON_NO_CHANGE`. No implementation.
 Multi-WAPA batching (Candidate B) remains a named, resumable backlog item:
@@ -64,4 +64,47 @@ Multi-WAPA batching (Candidate B) remains a named, resumable backlog item:
 (or equivalent) proving `ZCL_ABAPGIT_ORTEC_WAPA` is actually exercised in
 a batch dispatch and showing a concrete, repeated, batching-addressable
 cost (e.g. RFC/dispatch overhead dominating over per-page cluster-import
-cost for small WAPAs) — not evidenced this pass.
+cost for small WAPAs) - not evidenced this pass.
+
+## SER-FINAL-CONTINUOUS re-evaluation (2026-08-10, second pass)
+
+The owner explicitly directed not to reject W-A solely because `O2PAGCON`
+is a cluster/import mechanism, and to check for: supported SAP APIs that
+avoid it, raw-payload preload with identical decode semantics, request-
+scoped result reuse, and elimination of duplicate page reads. This pass
+re-read `ZCL_ABAPGIT_ORTEC_WAPA=>serialize` in full (not just the helper
+methods read previously):
+
+- `serialize()` calls `build_context()` exactly once (bulk directory
+  reads), then `LOOP AT lt_pages ... read_page(...)` exactly once per
+  page - confirmed no page is visited twice.
+- `read_page()` calls `add_page_content_file` (1 cluster IMPORT,
+  `objtype = PAGE`) and, for full-type pages only, `add_full_page_details`
+  (up to 2 more cluster IMPORTs, `objtype = EVHNDL`/`TYPES`) - these are
+  three **different keys** in the same cluster table (objtype differs),
+  not repeated reads of the same key. No duplicate-read pattern exists to
+  eliminate via request-scoped reuse (W-A) or worker-local dedup (W-B).
+- Checked for a "raw payload preload, identical decode" alternative: the
+  only way to read multiple `O2PAGCON` cluster records in fewer round
+  trips than one `IMPORT` per key is to read the cluster's own physical
+  storage table directly (bypassing `IMPORT ... FROM DATABASE`) and
+  decompress/decode it in ABAP - this is precisely "direct cluster-table
+  interpretation" and the mission's own instruction is explicit: "Reject
+  direct cluster reconstruction when parity cannot be proven." No parity
+  proof is possible in this pass (would require reverse-engineering the
+  kernel's cluster compression/paging format), so this remains rejected,
+  not merely assumed-risky.
+- Conclusion unchanged: **W-D remains correct** on a strictly more
+  thorough re-read. This is not a conservative refusal to look - the
+  source genuinely contains no duplicate/redundant WAPA read to remove,
+  and the one theoretically "bulkable" avenue (cluster reconstruction) is
+  explicitly out of bounds without parity proof this pass cannot produce.
+
+## Decision (SER-FINAL-CONTINUOUS, final)
+
+`WAPA_INTRA_OBJECT_DESIGN=W-D_NO_CHANGE` (re-confirmed).
+`WAPA_MULTI_OBJECT_DESIGN=W-D_NO_CHANGE` (re-confirmed - still no true-
+worker batch evidence). No implementation for either. Per the mission's
+own operating rule, a no-change conclusion does not end the mission -
+continuing directly to FUGR (see `ser_final_fugr_design.md` and
+`fugr_changed_by_design.md`).

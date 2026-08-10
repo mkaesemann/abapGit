@@ -23,3 +23,16 @@ session can resume without re-deriving context:
   items above.
 
 `READINESS_GATE=N/A_NO_IMPLEMENTATION_THIS_PASS`.
+
+## SER-FINAL-CONTINUOUS update (2026-08-10)
+
+The FUGR `CHANGED_BY` fix (guard `functions()` behind `IF iv_extra IS NOT
+INITIAL`) is implementation-complete, adversarially reviewed (0 BLOCKER/0
+MAJOR), and locally committed. The larger bulk `CHANGED_BY_BULK` FUGR
+branch remains explicitly NOT implementation-ready (needs a complete-
+correctness bulk design spanning main program + all includes + REPOTEXT/
+EUDB, not attempted). WAPA and the remaining FUGR serializer/provider
+surface remain `NO_CHANGE_JUSTIFIED`, not blocked - both were re-
+evaluated with more scrutiny this pass and reconfirmed.
+
+`IMPLEMENTATION_READINESS=COMPLETE_FOR_IMPLEMENTED_SCOPE`.

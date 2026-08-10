@@ -74,8 +74,45 @@
   area — `CHANGED_BY` feeds `ZCL_ABAPGIT_CTS_INTEGRATION=>FIND_CHANGED_BY`
   /`CHANGED_BY_BULK`, confirmed live in the supplied traces).
 
-## Decision
+## Decision (SER-FINAL, first pass)
 
 `FUGR_SELECTED_DESIGN=F_NO_FURTHER_OPTIMIZATION_THIS_PASS`. No
 implementation. Candidate B recorded as a named, resumable backlog item
 in `.memory/state.md`.
+
+## SER-FINAL-CONTINUOUS re-evaluation (2026-08-10, second pass)
+
+Re-read every `is_serial_prefetch_active()`-guarded consumer seam in
+`ZCL_ABAPGIT_OBJECT_FUGR` (`functions()`, `serialize_texts` i18n block,
+`serialize_xml` AREAT block) looking specifically for an "F-B: eliminate
+direct read after successful provider HIT" defect (a HIT that still does
+direct work) or a call executed even though its result is unused. Found:
+
+- `serialize_texts`/`serialize_xml`: both correctly guard with
+  `IF <flag> = abap_false. SELECT ... ENDIF.` and both consume their
+  result unconditionally afterward (no dead-work pattern).
+- `functions()` itself (called from `includes()`, `changed_by()`, and the
+  main content-serialize path): correctly skips its own direct `SELECT *
+  FROM enlfdir` when the provider HIT (`lv_prefetched = abap_true`) - no
+  defect.
+- The one real dead-work defect found is inside `changed_by()`'s own
+  unconditional call **to** `functions()` - not a provider-seam defect at
+  all (it doesn't matter whether `functions()`'s own internal provider
+  HITs or MISSes - the outer call itself was provably unnecessary for the
+  dominant caller). This is handled as its own package - see
+  `fugr_changed_by_design.md` - because it is a `CHANGED_BY`-specific
+  fix, not a serializer/provider-coverage fix in the Phase 2 sense.
+
+No additional Phase-2-scoped (serializer/provider coverage) defect was
+found this pass.
+
+## Decision (SER-FINAL-CONTINUOUS, final)
+
+`FUGR_SERIALIZER_SELECTED_DESIGN=F-G_NO_FURTHER_CHANGE` (re-confirmed,
+more thoroughly). The FUGR `CHANGED_BY` fix is tracked and implemented
+separately - see `fugr_changed_by_design.md` /
+`fugr_changed_by_current_source.md` / `.memory/reviews/
+fugr_changed_by_adversarial.md`. Continuing directly to DDLS disposition
+(unchanged, `ser_final_ddls_disposition.md`) and then to implementation/
+regression/handoff - per the mission's operating rules, this no-change
+conclusion does not end the mission.

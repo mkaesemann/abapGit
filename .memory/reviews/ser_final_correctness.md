@@ -15,3 +15,20 @@ evaluated against the **decision to make no change**, not a diff:
 
 `CORRECTNESS_GATE=APPROVE` (nothing to regress; one prior open item
 closed by evidence).
+
+## SER-FINAL-CONTINUOUS update (2026-08-10)
+
+One productive change was implemented this pass:
+`src/objects/zcl_abapgit_object_fugr.clas.abap`,
+`ZIF_ABAPGIT_OBJECT~CHANGED_BY` - guard the `functions()` call with
+`IF iv_extra IS NOT INITIAL`. Correctness proof: the guarded branch's
+only effect (`funcname = to_upper( iv_extra )` match) can never fire when
+`iv_extra` is initial, so removing it cannot change `lv_program`/
+`lv_found`/`lt_stamps` for that case; the non-initial-`iv_extra` case is
+left byte-for-byte unchanged. See `.memory/reviews/
+fugr_changed_by_adversarial.md` for the full attack table (0 BLOCKER/0
+MAJOR). WAPA and the remaining FUGR serializer/provider surface were
+re-reviewed more thoroughly this pass and confirmed to have no further
+safe change (see the respective design logs) - `CORRECTNESS_GATE=APPROVE`
+unchanged, now covering one real productive diff plus two re-confirmed
+no-change decisions.

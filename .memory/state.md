@@ -62,6 +62,47 @@ SER_FINAL_WAPA_FUGR=EVIDENCE_REVIEW_COMPLETE_NO_IMPLEMENTATION
 ```
 
 ```text
+SER_FINAL_WAPA_FUGR_CONTINUOUS=PARTIAL_IMPLEMENTATION_COMPLETE
+  (2026-08-10, owner explicitly superseded the two "no-change" closeouts
+  above and authorized continuous re-evaluation + conditional
+  implementation without pausing between packages). Per-package
+  disposition (kept separate per owner instruction):
+  WAPA_INTRA_OBJECT=NO_CHANGE_JUSTIFIED (re-confirmed after a full re-read
+  of `ZCL_ABAPGIT_ORTEC_WAPA=>serialize`; no duplicate/redundant read
+  exists, and direct O2PAGCON cluster reconstruction remains explicitly
+  out of bounds without provable parity - see `ser_final_wapa_design.md`
+  "SER-FINAL-CONTINUOUS re-evaluation").
+  WAPA_MULTI_OBJECT=NO_CHANGE_JUSTIFIED (still no true-worker WAPA batch
+  evidence; unchanged).
+  FUGR_SERIALIZER_PROVIDER=NO_CHANGE_JUSTIFIED (re-reviewed every
+  `is_serial_prefetch_active()`-guarded FUGR seam; no HIT-still-does-
+  direct-work or other dead-work defect found beyond the one fixed in
+  CHANGED_BY - see `ser_final_fugr_design.md` "SER-FINAL-CONTINUOUS
+  re-evaluation").
+  FUGR_CHANGED_BY=COMPLETE_LOCAL - implemented and committed:
+  `src/objects/zcl_abapgit_object_fugr.clas.abap`,
+  `ZIF_ABAPGIT_OBJECT~CHANGED_BY` now skips the unconditional `functions()`
+  call (⇒ `RS_FUNCTION_POOL_CONTENTS` + `ENLFDIR` work) when `iv_extra` is
+  initial - provably a no-op removal for that case (function names are
+  never empty), byte-for-byte unchanged for the per-file/`iv_extra`-
+  populated case. `get_errors` clean. No dedicated local ABAP Unit test
+  exists for this class (consistent with most `src/objects/*` handlers in
+  this repo); IT8 manual spot-check requested in the handoff instead. The
+  larger cross-object bulk `CHANGED_BY_BULK` FUGR branch (bulk `REPOSRC`/
+  `REPOTEXT`/`EUDB` across all FUGRs in one sweep) remains **not**
+  implemented - it would require an incomplete/approximate correctness
+  model as currently scoped, so the automatic-implementation gate
+  correctly did not authorize it; tracked as the same named
+  `FUGR-CHANGED-BY-STATUS-SWEEP` backlog item below.
+  DDLS=DEFER_NO_MATERIAL_SAFE_CHANGE (unchanged, no new measurements
+  taken per owner waiver).
+  Full detail: `.memory/logs/fugr_changed_by_current_source.md`,
+  `.memory/logs/fugr_changed_by_design.md`,
+  `.memory/reviews/fugr_changed_by_adversarial.md`,
+  `.memory/handoffs/ser-final-wapa-fugr-it8.md` (updated).
+```
+
+```text
 SERIALIZATION_TARGET_ARCHITECTURE=TWO_PATH_ONLY
 PURE_STANDARD_PATH=VERIFIED_CORRECT_KEEP
 ADAPTIVE_BATCH_PATH=KEEP_AND_EXTEND
@@ -440,19 +481,25 @@ SYSTEM_NO_ROLL-OS4-STAGE-AFTER-OVERVIEW: a SYSTEM_NO_ROLL dump when Full
   `.memory/logs/variant_b_package_e_false_modified_os4_d1.md` section 11.
 Package F (validated legacy-code cleanup): NOT_STARTED. Entry condition:
   Package E fully settled first.
-FUGR-CHANGED-BY-STATUS-SWEEP: NOT_STARTED, design sketch only (2026-08-10,
-  SER-FINAL). `ZCL_ABAPGIT_OBJECT_FUGR~ZIF_ABAPGIT_OBJECT~CHANGED_BY`
-  independently calls `RS_GET_ALL_INCLUDES` plus `REPOTEXT`/`REPOSRC`/
-  `EUDB`/`D010INC`/`RSEUINC` SELECTs with zero provider coverage
-  (~1.3s aggregate DB time for 147 FUGR objects in the supplied trace) -
-  uncovered because it runs on the repository-wide status-calc sweep, a
-  different lifecycle than the existing dispatch-scoped `prepare_fugr`
-  prefetch. See `.memory/logs/ser_final_fugr_design.md` Candidate B for
-  the exact sketch and `.memory/reviews/ser_final_readiness.md` for what
-  is still missing. Entry condition: owner authorizes a dedicated design
-  +adversarial-review pass (this touches `CHANGED_BY`, which feeds
-  `ZCL_ABAPGIT_CTS_INTEGRATION`, a correctness-sensitive area) AND the
-  repository-wide `CHANGED_BY` sweep call site is located/read first.
+FUGR-CHANGED-BY-STATUS-SWEEP: PARTIALLY_IMPLEMENTED (2026-08-10, see
+  SER_FINAL_WAPA_FUGR_CONTINUOUS above) - the narrow, fully-correct
+  `functions()`-skip fix is DONE. The remaining, larger piece (a bulk
+  `CHANGED_BY_BULK` FUGR branch covering `REPOSRC`/`REPOTEXT`/`EUDB`
+  across every FUGR's main program + all includes in one repository-wide
+  sweep) is still NOT_STARTED, design sketch only. `ZCL_ABAPGIT_OBJECT_
+  FUGR~ZIF_ABAPGIT_OBJECT~CHANGED_BY`'s remaining direct REPOSRC/REPOTEXT/
+  EUDB reads (single-row lookups, ~1s aggregate DB time for 147 FUGR
+  objects in the original trace, now somewhat less after the functions()
+  fix) are uncovered because they run on the repository-wide status-calc
+  sweep, a different lifecycle than the existing dispatch-scoped
+  `prepare_fugr` prefetch. See `.memory/logs/fugr_changed_by_design.md`
+  "Rejected alternative" section for why this is a genuinely new, larger
+  design (not a bounded fix) and `.memory/logs/ser_final_fugr_design.md`
+  Candidate B for the original sketch. Entry condition: owner authorizes
+  a dedicated design+adversarial-review pass (this touches `CHANGED_BY`,
+  which feeds `ZCL_ABAPGIT_CTS_INTEGRATION`, a correctness-sensitive
+  area) AND a complete (not approximate) bulk correctness model is worked
+  out first.
 ```
 
 Full narrative history, per-slice validation matrices, and incident

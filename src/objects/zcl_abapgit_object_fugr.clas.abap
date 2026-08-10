@@ -1259,13 +1259,17 @@ CLASS ZCL_ABAPGIT_OBJECT_FUGR IMPLEMENTATION.
     ENDLOOP.
 
     " Check if changed_by for function module was requested
-    lt_functions = functions( ).
+    " (funcname is never empty, so this can never match for a whole-object
+    " request - skip the expensive FUNCTIONS() lookup in that case, #SER-FINAL)
+    IF iv_extra IS NOT INITIAL.
+      lt_functions = functions( ).
 
-    LOOP AT lt_functions ASSIGNING <ls_function> WHERE funcname = to_upper( iv_extra ).
-      lv_program = <ls_function>-include.
-      lv_found   = abap_true.
-      EXIT.
-    ENDLOOP.
+      LOOP AT lt_functions ASSIGNING <ls_function> WHERE funcname = to_upper( iv_extra ).
+        lv_program = <ls_function>-include.
+        lv_found   = abap_true.
+        EXIT.
+      ENDLOOP.
+    ENDIF.
 
     SELECT unam AS user udat AS date utime AS time FROM reposrc
       APPENDING CORRESPONDING FIELDS OF TABLE lt_stamps

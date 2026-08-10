@@ -23,3 +23,17 @@ not to implement?" — answered per area:
 
 `PERFORMANCE_GATE=APPROVE` overall, with the FUGR follow-up carried
 forward explicitly.
+
+## SER-FINAL-CONTINUOUS update (2026-08-10)
+
+`FUGR_CHANGED_BY` gate re-evaluated per the new mission's explicit
+automatic-implementation criteria (THEORETICAL_GAIN/BOUNDED_COMPLEXITY/
+CORRECTNESS_MODEL=COMPLETE/NO_CROSS_REQUEST_STATE/EXPECTED_SAVING>
+OVERHEAD) - all YES, implemented (see `fugr_changed_by_design.md`). This
+supersedes the prior pass's `APPROVE_WITH_DOCUMENTED_FOLLOWUP` for the
+specific sub-case that was implementable within a complete correctness
+model; the larger cross-object bulk `CHANGED_BY_BULK` FUGR branch
+(`FUGR-CHANGED-BY-STATUS-SWEEP`) remains a named, NOT-implemented
+follow-up because it would require an incomplete/approximate correctness
+model to bulk in its current envisioned shape - correctly not auto-
+authorized by the gate. `PERFORMANCE_GATE=APPROVE`.
