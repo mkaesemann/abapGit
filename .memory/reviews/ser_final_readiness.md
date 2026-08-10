@@ -51,3 +51,19 @@ experiment plan (`ser_final_wapa_it8_experiment.md`).
 
 `IMPLEMENTATION_READINESS=COMPLETE_FOR_IMPLEMENTED_SCOPE; WAPA_BLOCKED_
 ITEMS_HAVE_EXACT_EXPERIMENT_PLAN`.
+
+## SER-FINAL apply-IT8-results update (2026-08-10)
+
+The IT8 experiment plan from the prior pass was executed by the owner and
+returned authoritative results (`WAPA_EXP_1..4`). Candidate 2 (raw
+O2PAGCON prefetch) is now `IMPLEMENTED_LOCAL` - design, adversarial
+review (0 BLOCKER/0 MAJOR), correctness proof, performance audit, and 21
+new ABAP Unit tests are all complete, see the respective updated review
+sections above. Candidates 3 and 5 are `CLOSED_REJECT_WITH_LIVE_IT8_
+PROOF` - no further design/implementation work authorized or attempted
+for either. WAPA singleton policy is unchanged (no file under
+`zcl_abapgit_ortec_ser_orch*` touched).
+
+`IMPLEMENTATION_READINESS=COMPLETE` (WAPA Candidate 2 implemented and
+tested locally; Candidates 3/5 closed; FUGR unchanged from the prior
+pass's implemented+tested scope; DDLS still deferred).

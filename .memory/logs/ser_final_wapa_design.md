@@ -143,3 +143,28 @@ owner design round, per this mission's own gate table (`CORRECTNESS_
 MODEL=COMPLETE`, `BOUNDED_MEMORY=YES`, `EXCEPTION_CLEANUP=YES`,
 `FEATURE_OFF_PURE=YES`, `OUTPUT_PARITY_TESTABLE=YES`, `EXPECTED_GAIN=YES`
 - all restated as the exact pass condition for each step).
+
+## SER-FINAL apply-IT8-results update (2026-08-10, fourth pass) — IMPLEMENTED
+
+The owner ran the 4-step experiment and returned authoritative results:
+
+```text
+WAPA_EXP_1_MASS_READ_API=FAIL          -> Candidate 3 closed, REJECT_WITH_LIVE_IT8_PROOF
+WAPA_EXP_2_LAYOUT_BULK_READABLE=PASS   -> Candidate 2 layout approved
+WAPA_EXP_3_DECODE_PARITY=PASS          -> Candidate 2 IMPLEMENT (169/169 exact matches)
+WAPA_EXP_4_MULTI_BATCH_BENEFIT=FAIL    -> Candidate 5 closed, REJECT_WITH_LIVE_IT8_PROOF
+```
+
+Candidate 2 (bounded, whole-WAPA, all-or-nothing raw `O2PAGCON` prefetch)
+is now implemented in `ZCL_ABAPGIT_ORTEC_WAPA` - see
+`.memory/logs/ser_final_wapa_raw_prefetch_design.md` for the full
+implementation-ready design (all 15 required decisions),
+`.memory/reviews/ser_final_wapa_adversarial.md` "apply-IT8-results cycle"
+for the adversarial pass (0 BLOCKER/0 MAJOR), and
+`.memory/reviews/ser_final_correctness.md`/`ser_final_performance.md`/
+`ser_final_regression.md` for the remaining independent reviews.
+Candidates 3 and 5 remain closed, unchanged, not re-measured.
+
+**Final disposition**: `WAPA_INTRA_OBJECT=IMPLEMENTED` (Candidate 2),
+`WAPA_MULTI_OBJECT=REJECTED_WITH_LIVE_IT8_PROOF` (Candidate 5, singleton
+policy KEPT).

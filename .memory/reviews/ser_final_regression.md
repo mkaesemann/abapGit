@@ -65,3 +65,46 @@ this session's family has been handled (see IT8 handoff).
 
 `REGRESSION_REVIEW=APPROVE` - no existing behavior or test coverage is
 put at risk; new coverage is strictly additive.
+
+## SER-FINAL apply-IT8-results update (2026-08-10) — WAPA raw prefetch
+
+### Files changed
+
+- `src/ortec/serial/zcl_abapgit_ortec_wapa.clas.abap`
+- `src/ortec/serial/zcl_abapgit_ortec_wapa.clas.testclasses.abap`
+
+### Existing test suite impact
+
+The pre-existing `ltcl_wapa` test class (T-WAPA-1, `EXISTS()` only) is
+unchanged in behavior - its 3 test methods and `class_setup`/`setup`
+lifecycle are untouched, only extended (one more doubled table,
+`O2PAGCON`, added to `class_setup`; one more `reset_raw_prefetch_counters`
+call added to `setup` - neither affects `O2APPL`-based tests). 21 new test
+methods added, all additive.
+
+### Regression analysis per change
+
+1. **`add_page_content_file`/`add_full_page_details` conditional
+   restructure**: the original `IMPORT` statements are preserved
+   verbatim inside a new `IF <not obtained from raw prefetch>` guard -
+   when `raw_prefetch_active = abap_false` (the case for every existing
+   caller/scenario before this change existed), execution is
+   byte-for-byte identical to the pre-change method body. No regression
+   risk for any WAPA that does not benefit from the new fast path.
+2. **`serialize()`**: one new statement (`try_raw_prefetch`) inserted
+   between `build_context` and the page loop; nothing before or after it
+   was changed.
+3. **New private state** (`ty_context`'s three new fields, two new
+   `CLASS-DATA` counters): additive only, default-initial, never read by
+   any pre-existing code path.
+
+### ABAP Unit / ATC
+
+No live SAP connectivity this session - `get_errors` is clean for both
+changed files. The new tests do not depend on real, repository-specific
+O2 data (per the mission's explicit requirement) - `O2APPL`/`O2PAGCON`
+doubles and hand-built `ty_context`/`ty_raw_row` tables only. ABAP Unit
+execution and ATC must be run on IT8 before this is considered fully
+verified - see the updated IT8 handoff.
+
+`REGRESSION_REVIEW=APPROVE`.

@@ -150,6 +150,47 @@ SER_FINAL_WAPA_FUGR_CORRECTION=CORRECTED_IMPLEMENTATION_COMPLETE
 ```
 
 ```text
+SER_FINAL_APPLY_WAPA_IT8_RESULTS=IMPLEMENTATION_COMPLETE
+  (2026-08-10, owner executed the WAPA IT8 experiment from the prior pass
+  and returned authoritative results: WAPA_EXP_1_MASS_READ_API=FAIL,
+  WAPA_EXP_2_LAYOUT_BULK_READABLE=PASS, WAPA_EXP_3_DECODE_PARITY=PASS,
+  WAPA_EXP_4_MULTI_BATCH_BENEFIT=FAIL). Final per-package status:
+  WAPA_INTRA_OBJECT=IMPLEMENTED (Candidate 2, bounded whole-WAPA raw
+  O2PAGCON prefetch) - `ZCL_ABAPGIT_ORTEC_WAPA` gained `TRY_RAW_PREFETCH`/
+  `BUILD_REQUESTED_KEYS`/`READ_RAW_ROWS`/`ASSEMBLE_AND_DECODE` plus 2
+  observability counters; wired into `SERIALIZE`/`ADD_PAGE_CONTENT_FILE`/
+  `ADD_FULL_PAGE_DETAILS` with the original per-key `IMPORT ... FROM
+  DATABASE` preserved verbatim as an automatic, whole-WAPA, all-or-
+  nothing fallback on any anomaly (row/byte cap, malformed row, sequence
+  gap, decode failure). Row cap 20000 (derived from the IT8-observed
+  1126-row single-key maximum, not copied from the experiment's own
+  5000-row probe cap); byte cap reuses the existing, already-reviewed
+  `ZCL_ABAPGIT_ORTEC_SER_ORCH=>C_MAX_OBJECT_OUTPUT_BYTES` (20 MB) instead
+  of a new duplicated constant. 21 new local ABAP Unit tests added (no
+  dependency on real O2 data - `O2APPL`/`O2PAGCON` OSQL doubles + hand-
+  built tables only). No new feature switch was added (the class is
+  already fully gated behind `is_wapa_active()`, and the fallback is
+  unconditionally safe). Full design: `.memory/logs/
+  ser_final_wapa_raw_prefetch_design.md` (all 15 required decisions).
+  WAPA_MULTI_OBJECT=REJECTED_WITH_LIVE_IT8_PROOF (Candidate 5) -
+  `WAPA_SINGLETON_POLICY=KEPT`, no file under `zcl_abapgit_ortec_ser_orch*`
+  touched, not re-measured. Candidate 3 (mass-read API) also closed
+  `REJECTED_WITH_LIVE_IT8_PROOF`, not re-designed.
+  FUGR/DDLS: unchanged from the 3rd pass (`SER_FINAL_WAPA_FUGR_
+  CORRECTION` above).
+  Independent reviews (correctness/adversarial/performance/regression -
+  kept separate per owner instruction), all updated with a dedicated
+  "apply-IT8-results" section: `.memory/reviews/ser_final_correctness.md`,
+  `.memory/reviews/ser_final_wapa_adversarial.md`,
+  `.memory/reviews/ser_final_performance.md`,
+  `.memory/reviews/ser_final_regression.md`,
+  `.memory/reviews/ser_final_readiness.md`. All: 0 open BLOCKER/MAJOR.
+  IT8 handoff updated with a full WAPA validation section (fixture
+  matrix, fallback/error-injection check, O2PAGCON call-count/timing
+  check) - see `.memory/handoffs/ser-final-wapa-fugr-it8.md`. `PUSHED=NO`.
+```
+
+```text
 SERIALIZATION_TARGET_ARCHITECTURE=TWO_PATH_ONLY
 PURE_STANDARD_PATH=VERIFIED_CORRECT_KEEP
 ADAPTIVE_BATCH_PATH=KEEP_AND_EXTEND
@@ -553,20 +594,14 @@ FUGR-CHANGED-BY-STATUS-SWEEP: PARTIALLY_IMPLEMENTED (2026-08-10, see
   adversarial-review pass (this touches `CHANGED_BY`, which feeds
   `ZCL_ABAPGIT_CTS_INTEGRATION`, a correctness-sensitive area) AND a
   complete (not approximate) bulk correctness model is worked out first.
-WAPA-INTRA-OBJECT-IT8-EXPERIMENT: BLOCKED_PENDING_IT8_ACCESS (2026-08-10,
-  see SER_FINAL_WAPA_FUGR_CORRECTION above). Candidates "one-time raw
-  O2PAGCON preload + existing decode semantics", "supported SAP mass-read
-  API", and "bounded multi-WAPA batching" each have `EXPECTED_GAIN`/
-  `CORRECTNESS_MODEL` questions that only live SE11/ADT/debugger/SAT
-  access can answer - none of that access exists in this workspace. Exact
-  4-step experiment (objects, breakpoints, inputs, pass/fail criteria) is
-  fully specified in `.memory/logs/ser_final_wapa_it8_experiment.md`.
-  Entry condition: owner (or someone with IT8 access) executes the
-  experiment and reports the 4 pass/fail outcomes; each outcome
-  deterministically resolves to `IMPLEMENT` (design+adversarial+
-  implementation) or `REJECT_WITH_SOURCE_PROOF` (close, no further work)
-  per the experiment doc's own stated thresholds - no further owner
-  design decision is needed after the experiment runs.
+WAPA-INTRA-OBJECT-IT8-EXPERIMENT: RESOLVED_2026-08-10 (see
+  SER_FINAL_APPLY_WAPA_IT8_RESULTS above). The owner executed the 4-step
+  experiment from `.memory/logs/ser_final_wapa_it8_experiment.md` and
+  returned WAPA_EXP_1=FAIL, WAPA_EXP_2=PASS, WAPA_EXP_3=PASS,
+  WAPA_EXP_4=FAIL - deterministically resolving Candidate 2 to
+  IMPLEMENT (now done) and Candidates 3/5 to REJECT_WITH_LIVE_IT8_PROOF
+  (closed, not re-designed). No further action needed on this item;
+  kept here only as resolved history.
 ```
 
 Full narrative history, per-slice validation matrices, and incident

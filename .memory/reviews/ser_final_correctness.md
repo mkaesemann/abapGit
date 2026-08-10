@@ -79,3 +79,54 @@ are not folded together).
 
 `CORRECTNESS_GATE=APPROVE` (updated, both new changes proven behavior-
 preserving).
+
+## SER-FINAL apply-IT8-results update (2026-08-10) — WAPA raw prefetch correctness proof
+
+This section is intentionally correctness-only (equivalence proofs); see
+`.memory/reviews/ser_final_wapa_adversarial.md` for the separate
+adversarial attack pass on the same diff.
+
+1. **Decode equivalence**: `assemble_and_decode`'s `IMPORT ... FROM DATA
+   BUFFER <assembled>` calls use the **exact same field-name lists**
+   (`content`/`xml_source` for PAGE, `evhandler` for EVHNDL,
+   `typesource` for TYPES) and the **exact same additions**
+   (`ACCEPTING PADDING IGNORING CONVERSION ERRORS`) as the reference
+   `IMPORT ... FROM DATABASE o2pagcon(tr) ID ...` calls they replace -
+   this is not an independent reimplementation of the decode logic, it
+   is the identical ABAP `IMPORT` statement fed a different, but
+   IT8-proven-identical, source buffer (169/169 exact matches, Experiment
+   3). `PASS`.
+2. **PAGE missing-content error parity**: the reference path raises
+   `zcx_abapgit_exception` with the exact message `"WAPA page {name}/
+   {pagekey} has no active content"` when `IMPORT` finds nothing.
+   `assemble_and_decode` raises its own (differently worded) exception
+   for the same underlying condition (`no content rows`), but this
+   exception is only ever caught internally by `try_raw_prefetch` and
+   converted into a **fallback to the reference path**, which then
+   independently re-evaluates the same condition and raises the exact,
+   original, unchanged error message and text. The user-visible error is
+   therefore byte-for-byte identical to today's; only the *internal*
+   signal used to decide "should I fall back" has a different message,
+   which is never shown to a caller. `PASS`.
+3. **EVHNDL/TYPES optional-missing parity**: the reference path tolerates
+   a missing EVHNDL/TYPES cluster key silently (`IMPORT` sets `sy-subrc
+   <> 0`, no check, target keeps its initial value). `assemble_and_decode`
+   reproduces this exactly: a requested-but-rowless EVHNDL/TYPES key gets
+   an **empty** map entry inserted (not an exception), so
+   `add_full_page_details`'s consumption (`lt_ev_handler_sources`/
+   `cs_page-types` left empty) is identical either way. `PASS`.
+4. **Per-key substitution is the only change**: a line-by-line diff of
+   `add_page_content_file`/`add_full_page_details` shows every statement
+   *after* obtaining `lt_content`/`lv_xml_source`/`lt_ev_handler_sources`/
+   `cs_page-types` is untouched, character-for-character, from the prior
+   version - language conversion, `get_page_content`, `io_files->add_raw`,
+   `CLEAR`/`FREE` cleanup, and the `LOOP AT is_context-event_handlers`
+   block are all identical. `PASS`.
+5. **Active-version-only guarantee**: `read_raw_rows`'s `WHERE version =
+   @c_active` uses the class's own `c_active` constant (`'A'`, the exact
+   same constant already used throughout the reference path's own
+   `o2pconkey-version`/`WHERE version = c_active` clauses) - never a
+   variable that could be influenced by row data or caller input. `PASS`.
+
+`CORRECTNESS_GATE=APPROVE` (WAPA raw prefetch: proven behaviour-
+preserving by construction; FUGR sections above unchanged).

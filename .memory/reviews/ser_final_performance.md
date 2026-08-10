@@ -55,3 +55,43 @@ and a concrete, ordered, pass/fail-defined IT8 experiment (candidates
 2/3/5) in `ser_final_wapa_it8_experiment.md` - no speculative
 implementation was made without `EXPECTED_GAIN=YES` evidence, consistent
 with this mission's own gate table. `PERFORMANCE_GATE=APPROVE`.
+
+## SER-FINAL apply-IT8-results update (2026-08-10) — WAPA raw prefetch performance audit
+
+Required proofs, verified against the actual implementation:
+
+- **Bounded bulk SQL, not one import per logical key on the hit path**:
+  `try_raw_prefetch` issues exactly one `SELECT ... FOR ALL ENTRIES` per
+  WAPA (`read_raw_rows`) - PASS.
+- **No SQL per physical row**: rows are all returned by the single bulk
+  `SELECT`; no further `SELECT`/`IMPORT` is issued while iterating
+  `lt_rows` in `assemble_and_decode` - PASS.
+- **No O(N·K) correlation**: `lt_buffers` (assembly) and
+  `raw_content`/`raw_evhandler`/`raw_typesource` (final maps) are all
+  `SORTED TABLE ... UNIQUE KEY` structures, so every group lookup
+  (`READ TABLE ... WITH TABLE KEY`) is O(log n), not a linear scan -
+  PASS.
+- **Suitable HASHED/SORTED key access**: see above; `SORTED` was chosen
+  over `HASHED` because the final maps are also iterated in key order in
+  a few places (e.g. the completeness-check loop), which `SORTED` serves
+  natively without an extra sort - PASS.
+- **Bounded raw/reconstructed/decoded buffer copies**: byte cap (20 MB,
+  shared with `ZCL_ABAPGIT_ORTEC_SER_ORCH=>C_MAX_OBJECT_OUTPUT_BYTES`)
+  and row cap (20000) both enforced inside `assemble_and_decode`/
+  `read_raw_rows` before any unbounded accumulation could occur - PASS.
+- **Explicit prefetch hit/fallback counters**: `gv_raw_prefetch_hits`/
+  `gv_raw_prefetch_fallbacks`, exposed via `get_raw_prefetch_counters`/
+  `reset_raw_prefetch_counters` - PASS.
+- **No multi-WAPA change**: confirmed via `git diff --name-only` - only
+  `zcl_abapgit_ortec_wapa.*` changed - PASS.
+- **No regression in other serializer providers**: no file under
+  `zcl_abapgit_ortec_ser_pref*`/`zcl_abapgit_ortec_ser_orch*` was touched
+  - PASS.
+
+`PERFORMANCE_AUDIT=APPROVE`. Absolute wall-clock improvement was not
+independently re-measured in this pass (no live IT8 access this
+session) - IT8 Experiment 3's own real-system evidence (successful
+reconstruction of up to 1126 rows/~3 MB per key, byte/hash-identical
+output) is the load-bearing performance evidence for this design; the
+IT8 handoff requests a focused before/after O2PAGCON call-count check to
+confirm the SQL-count reduction in production.
