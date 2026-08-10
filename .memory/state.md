@@ -103,6 +103,53 @@ SER_FINAL_WAPA_FUGR_CONTINUOUS=PARTIAL_IMPLEMENTATION_COMPLETE
 ```
 
 ```text
+SER_FINAL_WAPA_FUGR_CORRECTION=CORRECTED_IMPLEMENTATION_COMPLETE
+  (2026-08-10, owner rejected the prior "NO_CHANGE_JUSTIFIED" summaries as
+  premature and required per-candidate IMPLEMENT/REJECT_WITH_SOURCE_PROOF/
+  BLOCKED_BY_REQUIRED_IT8_EXPERIMENT dispositions plus real regression
+  tests for the FUGR fix). Final per-package status:
+  WAPA_INTRA_OBJECT: candidates "request/worker-local page-content cache"
+  and "dedup of repeated READ_PAGE/GET_PAGE_CONTENT" are CLOSED
+  (`REJECT_WITH_SOURCE_PROOF`, exhaustive proof that every O2PAGCON
+  cluster key in `ZCL_ABAPGIT_ORTEC_WAPA` is read exactly once, no call
+  path duplication anywhere in the class - see
+  `ser_final_wapa_it8_experiment.md`). Candidates "one-time raw preload +
+  existing decode semantics" and "supported SAP mass-read API" are
+  `BLOCKED_BY_REQUIRED_IT8_EXPERIMENT` (need live SE11/ADT access to
+  O2PAGCON's physical layout and CL_O2_API_PAGES's full interface, neither
+  available in this workspace) - exact experiment with objects/
+  breakpoints/pass-fail criteria recorded, not a bare "not provable".
+  WAPA_MULTI_OBJECT: `BLOCKED_BY_REQUIRED_IT8_EXPERIMENT` (needs a live
+  SAT trace measuring RFC/dispatch overhead share for an actual multi-WAPA
+  dispatch - no such trace exists in any pass's evidence).
+  FUGR_CHANGED_BY: extended - `needs_function_lookup`/`most_recent_user`
+  extracted as pure, private, testable `CLASS-METHODS` (byte-for-byte
+  behavior-preserving refactor); new `ltcl_changed_by` ABAP Unit test
+  class added (7 methods, `LOCAL FRIENDS`, mirrors the existing
+  `zcl_abapgit_object_ecatt_super` precedent) covering the guard predicate
+  and the stamp tie-break logic; `functions()`'s ENLFDIR existence check
+  upgraded to `BINARY SEARCH` (O(F·E)→O(F·log E), provably safe - the
+  table is unconditionally sorted by the same key immediately before the
+  read). Two further candidates (the `mt_includes_all` scan, and a
+  cross-object `CHANGED_BY_BULK` FUGR branch) evaluated and rejected with
+  exact source proof - see `fugr_changed_by_design.md`
+  "SER-FINAL-CORRECTION additions".
+  FUGR_SERIALIZER_PROVIDER: unchanged, `NO_CHANGE_JUSTIFIED` (re-confirmed
+  scope is Phase-2-only; all CHANGED_BY work tracked separately above).
+  DDLS: unchanged, `DEFER_NO_MATERIAL_SAFE_CHANGE`.
+  Reviews (kept separate per owner instruction - correctness ≠
+  adversarial): `.memory/reviews/ser_final_correctness.md`,
+  `.memory/reviews/ser_final_wapa_adversarial.md`,
+  `.memory/reviews/fugr_changed_by_adversarial.md`,
+  `.memory/reviews/ser_final_performance.md`,
+  `.memory/reviews/ser_final_regression.md`,
+  `.memory/reviews/ser_final_readiness.md`. All: 0 open BLOCKER/MAJOR.
+  Checkpoint commits: `f3d57ccc` (prior pass's functions()-guard fix,
+  unchanged/not reverted per owner instruction), this pass's new commits
+  recorded in the handoff. `PUSHED=NO`.
+```
+
+```text
 SERIALIZATION_TARGET_ARCHITECTURE=TWO_PATH_ONLY
 PURE_STANDARD_PATH=VERIFIED_CORRECT_KEEP
 ADAPTIVE_BATCH_PATH=KEEP_AND_EXTEND
@@ -482,24 +529,44 @@ SYSTEM_NO_ROLL-OS4-STAGE-AFTER-OVERVIEW: a SYSTEM_NO_ROLL dump when Full
 Package F (validated legacy-code cleanup): NOT_STARTED. Entry condition:
   Package E fully settled first.
 FUGR-CHANGED-BY-STATUS-SWEEP: PARTIALLY_IMPLEMENTED (2026-08-10, see
-  SER_FINAL_WAPA_FUGR_CONTINUOUS above) - the narrow, fully-correct
-  `functions()`-skip fix is DONE. The remaining, larger piece (a bulk
-  `CHANGED_BY_BULK` FUGR branch covering `REPOSRC`/`REPOTEXT`/`EUDB`
-  across every FUGR's main program + all includes in one repository-wide
-  sweep) is still NOT_STARTED, design sketch only. `ZCL_ABAPGIT_OBJECT_
-  FUGR~ZIF_ABAPGIT_OBJECT~CHANGED_BY`'s remaining direct REPOSRC/REPOTEXT/
-  EUDB reads (single-row lookups, ~1s aggregate DB time for 147 FUGR
-  objects in the original trace, now somewhat less after the functions()
-  fix) are uncovered because they run on the repository-wide status-calc
-  sweep, a different lifecycle than the existing dispatch-scoped
-  `prepare_fugr` prefetch. See `.memory/logs/fugr_changed_by_design.md`
-  "Rejected alternative" section for why this is a genuinely new, larger
-  design (not a bounded fix) and `.memory/logs/ser_final_fugr_design.md`
-  Candidate B for the original sketch. Entry condition: owner authorizes
-  a dedicated design+adversarial-review pass (this touches `CHANGED_BY`,
-  which feeds `ZCL_ABAPGIT_CTS_INTEGRATION`, a correctness-sensitive
-  area) AND a complete (not approximate) bulk correctness model is worked
-  out first.
+  SER_FINAL_WAPA_FUGR_CORRECTION above) - the narrow, fully-correct
+  `functions()`-skip fix and the `BINARY SEARCH` complexity fix are DONE,
+  plus regression tests for the guard predicate and stamp tie-break logic.
+  The remaining, larger piece (a bulk `CHANGED_BY_BULK` FUGR branch
+  covering `REPOSRC`/`REPOTEXT`/`EUDB` across every FUGR's main program +
+  all includes in one repository-wide sweep) is still NOT_STARTED -
+  explicitly `REJECT_WITH_SOURCE_PROOF` as scoped (would require exposing
+  `main_name()`'s namespace logic as a shared primitive plus a wholly new
+  per-FUGR stamp-partitioning algorithm - new architecture, not a bounded
+  fix). `ZCL_ABAPGIT_OBJECT_FUGR~ZIF_ABAPGIT_OBJECT~CHANGED_BY`'s
+  remaining direct REPOSRC/REPOTEXT/EUDB reads (single-row lookups, ~1s
+  aggregate DB time for 147 FUGR objects in the original trace, now
+  somewhat less after this session's fixes) are uncovered because they
+  run on the repository-wide status-calc sweep, a different lifecycle
+  than the existing dispatch-scoped `prepare_fugr` prefetch. See
+  `.memory/logs/fugr_changed_by_design.md` "SER-FINAL-CORRECTION
+  additions" for the exact, current rejection reasoning (supersedes the
+  earlier "Rejected alternative" section, same conclusion, now with the
+  missing-primitive stated precisely) and
+  `.memory/logs/ser_final_fugr_design.md` Candidate B for the original
+  sketch. Entry condition: owner authorizes a dedicated design+
+  adversarial-review pass (this touches `CHANGED_BY`, which feeds
+  `ZCL_ABAPGIT_CTS_INTEGRATION`, a correctness-sensitive area) AND a
+  complete (not approximate) bulk correctness model is worked out first.
+WAPA-INTRA-OBJECT-IT8-EXPERIMENT: BLOCKED_PENDING_IT8_ACCESS (2026-08-10,
+  see SER_FINAL_WAPA_FUGR_CORRECTION above). Candidates "one-time raw
+  O2PAGCON preload + existing decode semantics", "supported SAP mass-read
+  API", and "bounded multi-WAPA batching" each have `EXPECTED_GAIN`/
+  `CORRECTNESS_MODEL` questions that only live SE11/ADT/debugger/SAT
+  access can answer - none of that access exists in this workspace. Exact
+  4-step experiment (objects, breakpoints, inputs, pass/fail criteria) is
+  fully specified in `.memory/logs/ser_final_wapa_it8_experiment.md`.
+  Entry condition: owner (or someone with IT8 access) executes the
+  experiment and reports the 4 pass/fail outcomes; each outcome
+  deterministically resolves to `IMPLEMENT` (design+adversarial+
+  implementation) or `REJECT_WITH_SOURCE_PROOF` (close, no further work)
+  per the experiment doc's own stated thresholds - no further owner
+  design decision is needed after the experiment runs.
 ```
 
 Full narrative history, per-slice validation matrices, and incident

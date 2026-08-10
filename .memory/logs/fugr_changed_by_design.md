@@ -78,3 +78,75 @@ complete version is a genuinely new, larger design effort, not a bounded fix.
 ## Gate result
 
 `FUGR_CHANGED_BY_THEORETICAL_GAIN=YES` → automatic implementation authorized and completed.
+
+## SER-FINAL-CORRECTION additions (2026-08-10)
+
+### Implemented: test seam extraction (no behavior change)
+
+`needs_function_lookup( iv_extra )` and `most_recent_user( it_stamps )`
+were extracted from `CHANGED_BY`'s body into small, pure, private
+`CLASS-METHODS` (the exact `ty_stamps` local type was promoted to a
+class-level `ty_changed_by_stamp`/`ty_changed_by_stamp_tt` type pair to
+support this). This is a pure refactor - the method bodies are
+byte-for-byte the same logic, just parameterized - done specifically to
+enable local ABAP Unit coverage (see
+`src/objects/zcl_abapgit_object_fugr.clas.testclasses.abap`,
+`LOCAL FRIENDS ltcl_changed_by`, mirroring the exact precedent already
+used in this codebase for `zcl_abapgit_object_ecatt_super`'s own
+`ltcl_changed_by` test class).
+
+### Implemented: ENLFDIR lookup complexity fix (BOUNDED_COMPLEXITY_IMPROVEMENT gate)
+
+`functions()`'s `LOOP AT rt_functab ... READ TABLE lt_enlfdir WITH KEY
+funcname = ... TRANSPORTING NO FIELDS` was a linear scan of a table that
+is unconditionally `SORT`ed by the exact same key on the immediately
+preceding line - added the `BINARY SEARCH` addition. This is a provably
+behavior-preserving, O(F·E)→O(F·log E) fix (ABAP guarantees identical
+found/not-found results for `BINARY SEARCH` against a table sorted by the
+specified key) - matches this mission's own named pattern "repeated
+STANDARD-table lookup changes from O(N·K) to O(K log N)" exactly. Not
+unit-tested in isolation (would require refactoring `functions()`'s
+`RS_FUNCTION_POOL_CONTENTS` dependency out, judged not worth the
+additional surface area for a change whose correctness is provable by
+the ABAP language's own `BINARY SEARCH` contract); covered by static
+proof in the correctness review instead.
+
+### Evaluated and REJECTED (source-backed): `mt_includes_all` LOOP...WHERE conversion to sorted/binary-search read
+
+`CHANGED_BY`'s `LOOP AT mt_includes_all ASSIGNING <lv_include> WHERE
+table_line = to_upper( iv_extra ). ... EXIT.` is a single find-first scan,
+executed exactly once per `CHANGED_BY` call (not repeated), against a
+table whose size is bounded by one function group's own include count
+(typically tens, not thousands). Converting this to a sort + binary-search
+read would add a `SORT` statement whose cost is not clearly recouped for
+a single non-repeated lookup against a small table - this is exactly the
+mission's own named non-authorized case ("micro-optimizing small tables
+without repeated lookup"). `NO_CHANGE_JUSTIFIED`, source-backed: no
+repeated lookup exists at this call site to amortize a sort against.
+
+### Evaluated and REJECTED (source-backed): cross-object `CHANGED_BY_BULK` FUGR branch
+
+Re-considered under this pass's more permissive framing (the mission
+explicitly asks about "existing data already available in CTS
+integration"). A complete (non-approximate) bulk FUGR branch in
+`ZCL_ABAPGIT_CTS_INTEGRATION=>CHANGED_BY_BULK` would require: (1)
+exposing `main_name()`'s private namespace-computation as a shared
+primitive (to avoid a second, independently-maintained copy of
+`FUNCTION_INCLUDE_SPLIT`-based namespace logic silently drifting from the
+original over time); (2) one `RS_GET_ALL_INCLUDES` call per FUGR up front
+(same F calls as today, not a regression, but still needed before any
+bulk SELECT can be built); (3) a **new** per-FUGR stamp-partitioning
+algorithm proven correct for every `iv_extra` shape (whole-object,
+per-include, per-function) - none of which exists anywhere in this
+codebase today (the *other* 8 object types already covered by
+`CHANGED_BY_BULK` all use an explicitly weaker, `iv_extra`-blind, single-
+table approximation, previously and again this pass judged unacceptable
+for FUGR's fundamentally multi-source rollup). This is not a bounded
+complexity fix to *existing* code - it is new architecture requiring its
+own design + adversarial review pass, matching how this mission itself
+treats FUGR serializer Candidate F-F ("authorized only if...can all be
+proven") and the DDLS gate (reject net-new semantic-reconstruction risk).
+`REJECT_WITH_SOURCE_PROOF` - not implemented; remains the same named
+`FUGR-CHANGED-BY-STATUS-SWEEP` backlog item in `.memory/state.md`, now
+with a precise statement of exactly what new primitive/algorithm would
+need to be designed and reviewed before it could be attempted.

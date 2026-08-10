@@ -37,3 +37,21 @@ model; the larger cross-object bulk `CHANGED_BY_BULK` FUGR branch
 follow-up because it would require an incomplete/approximate correctness
 model to bulk in its current envisioned shape - correctly not auto-
 authorized by the gate. `PERFORMANCE_GATE=APPROVE`.
+
+## SER-FINAL-CORRECTION update (2026-08-10, this pass)
+
+Additional real complexity-class fix implemented: `functions()`'s
+`ENLFDIR` existence check upgraded from a linear scan to `BINARY SEARCH`
+against a table already unconditionally sorted by the same key
+immediately beforehand - O(F·E)→O(F·log E), zero risk, matching this
+mission's own named win pattern. The `mt_includes_all` single find-first
+scan and the cross-object `CHANGED_BY_BULK` FUGR branch were both
+re-evaluated and correctly NOT implemented (small-N/non-repeated lookup
+and new-architecture-required, respectively - see
+`fugr_changed_by_design.md` for the exact source-backed reasoning).
+
+WAPA: re-derived per-candidate with exact source proofs (candidates 1/4)
+and a concrete, ordered, pass/fail-defined IT8 experiment (candidates
+2/3/5) in `ser_final_wapa_it8_experiment.md` - no speculative
+implementation was made without `EXPECTED_GAIN=YES` evidence, consistent
+with this mission's own gate table. `PERFORMANCE_GATE=APPROVE`.

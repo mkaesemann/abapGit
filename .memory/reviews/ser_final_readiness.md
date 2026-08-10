@@ -36,3 +36,18 @@ surface remain `NO_CHANGE_JUSTIFIED`, not blocked - both were re-
 evaluated with more scrutiny this pass and reconfirmed.
 
 `IMPLEMENTATION_READINESS=COMPLETE_FOR_IMPLEMENTED_SCOPE`.
+
+## SER-FINAL-CORRECTION update (2026-08-10)
+
+Added and implementation-complete this pass: the `functions()` `BINARY
+SEARCH` fix, and the `needs_function_lookup`/`most_recent_user` test-seam
+refactor with new `ltcl_changed_by` ABAP Unit coverage (7 test methods).
+WAPA candidates 1 and 4 are now CLOSED (source-provable rejections, will
+not change with new evidence - no follow-up needed). WAPA candidates
+2/3/5 and the FUGR cross-object `CHANGED_BY_BULK` branch remain explicitly
+NOT implementation-ready, each with a precise statement of the exact
+missing evidence/primitive and, for WAPA, a ready-to-execute IT8
+experiment plan (`ser_final_wapa_it8_experiment.md`).
+
+`IMPLEMENTATION_READINESS=COMPLETE_FOR_IMPLEMENTED_SCOPE; WAPA_BLOCKED_
+ITEMS_HAVE_EXACT_EXPERIMENT_PLAN`.

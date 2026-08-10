@@ -116,3 +116,17 @@ fugr_changed_by_adversarial.md`. Continuing directly to DDLS disposition
 (unchanged, `ser_final_ddls_disposition.md`) and then to implementation/
 regression/handoff - per the mission's operating rules, this no-change
 conclusion does not end the mission.
+
+## SER-FINAL-CORRECTION update (2026-08-10)
+
+Two additional CHANGED_BY-adjacent fixes were implemented this pass (a
+`BINARY SEARCH` complexity fix inside `functions()`, called from
+`CHANGED_BY`) and two additional candidates were evaluated and rejected
+with exact source proof (the `mt_includes_all` scan, and a cross-object
+bulk `CHANGED_BY_BULK` FUGR branch) - see `fugr_changed_by_design.md`
+"SER-FINAL-CORRECTION additions" for full detail. `F-G_NO_FURTHER_CHANGE`
+remains the correct disposition for the Phase-2-scoped serializer/
+provider surface specifically (ENLFDIR/AREAT/func-metadata/tpool-i18n
+seams) - all CHANGED_BY-related work is tracked under the separate
+`FUGR_CHANGED_BY` disposition, not this one, per the mission's own
+phase/field separation.

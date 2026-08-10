@@ -100,7 +100,7 @@ methods read previously):
   and the one theoretically "bulkable" avenue (cluster reconstruction) is
   explicitly out of bounds without parity proof this pass cannot produce.
 
-## Decision (SER-FINAL-CONTINUOUS, final)
+## Decision (SER-FINAL-CONTINUOUS, second pass — superseded, see below)
 
 `WAPA_INTRA_OBJECT_DESIGN=W-D_NO_CHANGE` (re-confirmed).
 `WAPA_MULTI_OBJECT_DESIGN=W-D_NO_CHANGE` (re-confirmed - still no true-
@@ -108,3 +108,38 @@ worker batch evidence). No implementation for either. Per the mission's
 own operating rule, a no-change conclusion does not end the mission -
 continuing directly to FUGR (see `ser_final_fugr_design.md` and
 `fugr_changed_by_design.md`).
+
+## SER-FINAL-CORRECTION re-evaluation (2026-08-10, third pass)
+
+The owner explicitly rejected "parity not provable" as a sufficient final
+answer and required, per named candidate, exactly one of `IMPLEMENT` /
+`REJECT_WITH_SOURCE_PROOF` / `BLOCKED_BY_REQUIRED_IT8_EXPERIMENT`, with
+exact source evidence. Full re-derivation, with line-level citations and
+an explicit statement of what evidence is missing (and why no safe local
+experiment can supply it) for every candidate that isn't source-provably
+empty, is in `.memory/logs/ser_final_wapa_it8_experiment.md` - this
+supersedes the second-pass "W-D, architectural floor" framing above
+(kept only as prior-pass history).
+
+**Final per-candidate disposition:**
+
+| Candidate | Disposition |
+|---|---|
+| 1. request/worker-local page-content cache | `REJECT_WITH_SOURCE_PROOF` |
+| 2. one-time raw preload + existing decode semantics | `BLOCKED_BY_REQUIRED_IT8_EXPERIMENT` |
+| 3. supported SAP mass-read API | `BLOCKED_BY_REQUIRED_IT8_EXPERIMENT` |
+| 4. dedup of repeated READ_PAGE/GET_PAGE_CONTENT | `REJECT_WITH_SOURCE_PROOF` |
+| 5. bounded multi-WAPA batching | `BLOCKED_BY_REQUIRED_IT8_EXPERIMENT` |
+
+No WAPA productive code was implemented this pass. This is not a repeated
+no-change design summary: two candidates now carry closed, exhaustive
+source proofs (not merely "we didn't find anything"), and the remaining
+three carry one concrete, ordered, four-step IT8 experiment plan with
+exact objects/breakpoints/pass-fail criteria - see
+`ser_final_wapa_it8_experiment.md` "Required IT8 experiment" for the
+full plan. `IMPLEMENT` is authorized automatically for whichever of
+candidates 2/3/5 pass their respective experiment step, without a further
+owner design round, per this mission's own gate table (`CORRECTNESS_
+MODEL=COMPLETE`, `BOUNDED_MEMORY=YES`, `EXCEPTION_CLEANUP=YES`,
+`FEATURE_OFF_PURE=YES`, `OUTPUT_PARITY_TESTABLE=YES`, `EXPECTED_GAIN=YES`
+- all restated as the exact pass condition for each step).
