@@ -234,6 +234,8 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! recorded. Used only for the final visible failure summary.
     TYPES first_fail_type TYPE trobjtype.
     TYPES first_fail_name TYPE sobj_name.
+    "! Progress indicator for this run - shown after each terminal object outcome.
+    TYPES ii_progress TYPE REF TO zif_abapgit_progress. "saved
     TYPES END OF ty_run_context.
     TYPES ty_run_context_tt TYPE HASHED TABLE OF ty_run_context WITH UNIQUE KEY run_id.
 
@@ -903,13 +905,14 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
 
 
   METHOD serialize.
-    DATA lv_run_id      TYPE sysuuid_x16.
-    DATA ls_partition   TYPE ty_partition.
-    DATA lt_work_items  TYPE zcl_abapgit_ortec_ser_planner=>tt_work_item.
-    DATA lt_batches     TYPE zcl_abapgit_ortec_ser_planner=>tt_batch.
-    DATA lv_ready       TYPE i.
-    DATA lv_wait_result TYPE i.
+    DATA lv_run_id          TYPE sysuuid_x16.
+    DATA ls_partition       TYPE ty_partition.
+    DATA lt_work_items      TYPE zcl_abapgit_ortec_ser_planner=>tt_work_item.
+    DATA lt_batches         TYPE zcl_abapgit_ortec_ser_planner=>tt_batch.
+    DATA lv_ready           TYPE i.
+    DATA lv_wait_result     TYPE i.
     DATA lv_use_ortec_prefetch TYPE abap_bool.
+    DATA lv_expected_count  TYPE i.
 
     " SER-SLICE-3 parity incident fix (serialization_slice_3_dtel_doma_
     " parity.md): this entry point never called PREPARE on any of the
@@ -947,27 +950,16 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
         zcx_abapgit_exception=>raise( 'ORTEC batch: could not generate a run id' ).
     ENDTRY.
 
+    lv_expected_count = count_expected_objects( it_tadir ).
     INSERT VALUE #( run_id                 = lv_run_id
                      ii_log                 = ii_log
                      iv_group               = iv_group
                      is_i18n_params         = is_i18n_params
                      wo_translation_patterns = it_wo_translation_patterns
                      worker_count           = iv_max_processes
-                     expected_count         = count_expected_objects( it_tadir ) ) INTO TABLE mt_run_context.
+                     ii_progress            = zcl_abapgit_progress=>get_instance( lv_expected_count )
+                     expected_count         = lv_expected_count ) INTO TABLE mt_run_context.
     ASSIGN mt_run_context[ run_id = lv_run_id ] TO FIELD-SYMBOL(<ls_ctx>).
-
-    " SER-SLICE-3 DTEL/DOMA parity fix: mirror ZCL_ABAPGIT_SERIALIZE~SERIALIZE's own
-    " non-batch PREPARE() call so batch-dispatched DOMA/DTEL objects get the same
-    " prefetch-HIT data ZCL_ABAPGIT_ORTEC_SER_PREF_EXT=>EXTRACT_FOR_BATCH expects to
-    " find - without this, every DOMA/DTEL object silently falls back to each
-    " object's own raw DB read, which is not proven byte-identical to the prefetched
-    " result and caused a real output-parity regression (see
-    " serialization_slice_3_dtel_doma_parity.md).
-    IF zcl_abapgit_ortec_git_switch=>is_serial_prefetch_active( ) = abap_true.
-      zcl_abapgit_ortec_ser_pref_ext=>prepare(
-        it_tadir    = it_tadir
-        iv_language = is_i18n_params-main_language ).
-    ENDIF.
 
     TRY.
         ls_partition = partition_objects(
@@ -1022,6 +1014,12 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
 
         IF <ls_ctx> IS ASSIGNED.
           rt_files = <ls_ctx>-files.
+          IF <ls_ctx>-ii_progress IS BOUND.
+            TRY.
+                <ls_ctx>-ii_progress->off( ).
+              CATCH zcx_abapgit_exception ##NO_HANDLER.
+            ENDTRY.
+          ENDIF.
         ENDIF.
         purge_run_state( lv_run_id ).
         IF lv_use_ortec_prefetch = abap_true.
@@ -1030,6 +1028,13 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
           zcl_abapgit_ortec_ser_pref_oo=>clear( ).
         ENDIF.
       CATCH zcx_abapgit_exception INTO DATA(lx_run_failure).
+        ASSIGN mt_run_context[ run_id = lv_run_id ] TO <ls_ctx>.
+        IF <ls_ctx> IS ASSIGNED AND <ls_ctx>-ii_progress IS BOUND.
+          TRY.
+              <ls_ctx>-ii_progress->off( ).
+            CATCH zcx_abapgit_exception ##NO_HANDLER.
+          ENDTRY.
+        ENDIF.
         discard_run_state( lv_run_id ).
         IF lv_use_ortec_prefetch = abap_true.
           zcl_abapgit_ortec_ser_pref=>clear( ).
@@ -1100,6 +1105,14 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
 
     INSERT VALUE #( run_id = iv_run_id obj_type = is_tadir-object obj_name = is_tadir-obj_name )
       INTO TABLE mt_resolved.
+    IF <ls_ctx> IS ASSIGNED AND <ls_ctx>-ii_progress IS BOUND.
+      TRY.
+          <ls_ctx>-ii_progress->show(
+            iv_current = <ls_ctx>-terminal_count
+            iv_text    = |Serialized { <ls_ctx>-terminal_count } of { <ls_ctx>-expected_count }| ).
+        CATCH zcx_abapgit_exception ##NO_HANDLER.
+      ENDTRY.
+    ENDIF.
   ENDMETHOD.
 
 
@@ -1728,22 +1741,29 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
 
   METHOD wait_for_run_completion.
     DATA lv_wait_subrc TYPE sy-subrc.
+    DATA lv_deadline   TYPE timestampl.
+    DATA lv_now        TYPE timestampl.
 
     drain_queue( iv_run_id ).
 
-    " Refill happens here only - the main path, after WAIT UNTIL has fully
-    " returned - never from inside ON_END_OF_BATCH's own callback context,
-    " where STARTING NEW TASK is illegal (RPERF_ILLEGAL_STATEMENT).
+    " Pipeline wait: WAIT FOR ASYNCHRONOUS TASKS returns after EACH callback,
+    " allowing drain_queue to immediately refill freed slots. The prior
+    " WAIT UNTIL has_no_pending_callbacks design waited for ALL in-flight
+    " tasks before draining, causing wave-based (not pipeline) processing.
+    GET TIME STAMP FIELD lv_deadline.
+    lv_deadline = cl_abap_tstmp=>add( tstmp = lv_deadline secs = c_batch_rfc_timeout_s ).
+
     WHILE is_run_complete( iv_run_id ) = abap_false.
-      WAIT UNTIL has_no_pending_callbacks( iv_run_id ) = abap_true
-           UP TO c_batch_rfc_timeout_s SECONDS.
-      lv_wait_subrc = sy-subrc.
-      IF lv_wait_subrc <> 0.
+      GET TIME STAMP FIELD lv_now.
+      IF cl_abap_tstmp=>compare( tstmp1 = lv_now tstmp2 = lv_deadline ) >= 0.
+        lv_wait_subrc = 8. " overall deadline exceeded
         EXIT.
       ENDIF.
+      WAIT UNTIL is_run_complete( iv_run_id ) = abap_true UP TO 5 SECONDS.
+      lv_wait_subrc = sy-subrc.
       drain_queue( iv_run_id ).
-      IF has_no_pending_callbacks( iv_run_id ) = abap_true.
-        EXIT. " Refill found nothing to dispatch; let completion/failure be evaluated below.
+      IF lv_wait_subrc = 8 AND has_no_pending_callbacks( iv_run_id ) = abap_true.
+        EXIT. " No callbacks remain and nothing new to dispatch.
       ENDIF.
     ENDWHILE.
 

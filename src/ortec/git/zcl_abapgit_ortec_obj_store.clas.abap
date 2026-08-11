@@ -378,7 +378,7 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
     IF sy-subrc <> 0.
       zcx_abapgit_ortec_git=>raise( |Failed to store object { iv_sha1 }| ).
     ENDIF.
-    invalidate_cache( ).
+    MODIFY TABLE mt_cache FROM ls_row. " warm-update: upsert by key (repo_key + obj_sha1)
   ENDMETHOD.
 
 
@@ -403,8 +403,10 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
     ENDLOOP.
     IF lt_rows IS NOT INITIAL.
       MODIFY zaog_obj_store FROM TABLE lt_rows.
+      LOOP AT lt_rows INTO DATA(ls_cache_upd).
+        MODIFY TABLE mt_cache FROM ls_cache_upd. " warm-update: upsert by key
+      ENDLOOP.
     ENDIF.
-    invalidate_cache( ).
   ENDMETHOD.
 
 
