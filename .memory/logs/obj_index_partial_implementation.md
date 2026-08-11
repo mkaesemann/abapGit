@@ -1,3 +1,34 @@
+## Post-implementation performance audit fixes (PS-001, PA-001/PA-002)
+
+`OBJ-PERF-SCAN-1` (static scan) found PS-001 (MINOR): `walk_filtered`'s per-tree-node membership
+test used `line_exists( it_filter[ ... ] )`, an O(K) linear scan repeated per visited tree node
+(O(F x K) total). Fixed directly by the orchestrator: build one `HASHED TABLE ... WITH UNIQUE KEY
+obj_type obj_name` (`lt_filter_set`) from `it_filter` once, before `acquire_repo_lock`/the BFS
+loop, and replace the per-node check with an O(1) `READ TABLE ... WITH TABLE KEY`.
+
+`OBJ-PERF-AUDIT-1` (post-implementation IMPLEMENTATION_AUDIT) then found PA-001 (MAJOR): despite
+the design's AR-1-04 closure and its explicit W2 work order both mandating that
+`select_rows_for_filter` be chunked at `zcl_abapgit_ortec_obj_cover=>c_filter_chunk_size` and
+predicated on `context_hash`, the Slice 1b implementation only added the `iv_context_hash`
+parameter to the signature and never used it in the method body, and never chunked the single
+`FOR ALL ENTRIES` - a real regression against the approved, adversarially-reviewed design that
+survived four separate implementation/gap-fill passes undetected (PA-002, the missing
+`context_hash` predicate, is the same method/same root cause). Fixed directly by the orchestrator:
+`select_rows_for_filter` now chunks `it_filter` at `c_filter_chunk_size` using the identical
+`LOOP ... APPEND ... IF lines(...) >= c_filter_chunk_size ... SELECT ... APPENDING TABLE ...` idiom
+already used by `select_partial_rows_for_filter`/`get_coverage`, and each chunk's WHERE clause now
+includes `AND context_hash = iv_context_hash`. Added the design-mandated `select_rows_chunk_boundary`
+test (5100-file `build_bulk_commit` fixture, builds a COMPLETE index then exercises the warm
+`select_rows_for_filter` read path directly, asserting no row is lost across the chunk boundary).
+
+Verified via `get_errors` (0 errors) and the `Compare-Object` self-check (same harmless "for"
+comment false positive as before, no real gap). This finding is a strong argument for always
+running the full mandatory performance scan + IMPLEMENTATION_AUDIT sequence even when every
+individual implementation slice's own `get_errors`/self-check passed clean - a design-mandated
+behavior can be silently dropped (parameter added, body left unchanged) in a way neither compiles
+to an error nor fails an existing test, since no existing test exercised `select_rows_for_filter`
+above the chunk boundary or under a mismatched context before this fix.
+
 ## Slice 3 (IMPL-C) gap-fill (orchestrator direct fix)
 
 The `OBJ-PERF-IMPL-C` subagent call again returned "Agent completed with no output" (4th
