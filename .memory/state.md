@@ -26,50 +26,36 @@ The completed serialization work is now fully documented in the repository memor
 ## Active topic
 ```text
 TOPIC=OBJ_PERF_FINAL
-STATUS=DESIGN_APPROVED
+STATUS=LOCAL_COMPLETE_AWAITING_IT8
 START_HEAD=4193733de3c8ad75bae61f6ceb95b1c3e0ccb3e4
-OBJ_PERF_FINAL=DESIGN_APPROVED
-OBJ_INDEX_SLICE_1=DESIGN_APPROVED
-OBJ_STORE_SLICE_1=DESIGN_APPROVED
+CURRENT_HEAD=d3f0679d
+OBJ_PERF_FINAL=LOCAL_COMPLETE_AWAITING_IT8
+OBJ_INDEX_SLICE_1=LOCAL_COMPLETE_AWAITING_IT8
+OBJ_STORE_SLICE_1=NO_CHANGE_JUSTIFIED
 LAUNCH_PROMPT=obj-store-partial-index-integrated-orchestrator.prompt.md
 ADVERSARIAL_CYCLES=3
-ADVERSARIAL_VERDICT=APPROVE (0 open blockers/majors, see .memory/reviews/obj_index_partial_adversarial.md)
-CORRECTNESS_GATE=APPROVE (.memory/reviews/obj_index_partial_correctness.md)
-READINESS_GATE=APPROVE (.memory/reviews/obj_index_partial_readiness.md)
-PROTOCOL_PERSISTENCE_GATE=APPROVE_WITH_MINOR_REVISIONS, PP-01/PP-02 closed by doc correction in obj_store_performance_design.md (.memory/reviews/obj_index_partial_protocol_persistence.md)
-PERFORMANCE_DESIGN_GATE=APPROVE_WITH_MINOR_REVISIONS, non-blocking (.memory/reviews/obj_index_partial_performance.md)
-DESIGN_ARTIFACTS=.memory/logs/obj_index_partial_design.md, .memory/logs/obj_store_performance_design.md
-SELECTED_INDEX_DESIGN=Candidate C hybrid: full commit-tree BFS walk unchanged, demand-driven per-object coverage (ZAOG_OBJ_COVER) + context-keyed partial rows (ZAOG_OBJ_PIDX, new) avoid full-F persistence for small K; COMPLETE-mode ZAOG_OBJ_INDEX unchanged (+ non-key CONTEXT_HASH column)
-OBJ_STORE_DISPOSITIONS=OS-A/B/C/D/F=IMPLEMENT, OS-E/H=DEFER_OUT_OF_SCOPE, OS-G/I/J=REJECT_WITH_SOURCE_PROOF
-DDIC_CHANGES=ZAOG_OBJ_COVER (new), ZAOG_OBJ_PIDX (new), ZAOG_OBJ_INDEX +CONTEXT_HASH (non-key column)
-NEXT=senior implementation per obj_index_partial_design.md §9 commit-slice order
-SER_SLICE_4=SAP_VALIDATED_COMPLETE
-SER_SLICE_5=SAP_VALIDATED_COMPLETE
-SER_FINAL_WAPA_FUGR=SAP_VALIDATED_COMPLETE
-GENERIC_BATCH_ORCHESTRATION=SAP_VALIDATED_COMPLETE
-INTEGRATED_PROVIDER_SET=SAP_VALIDATED_ACCEPTED
-WAPA_RAW_PREFETCH=SAP_VALIDATED_COMPLETE
-WAPA_MULTI_OBJECT_BATCHING=REJECTED_WITH_LIVE_IT8_EVIDENCE
-WAPA_SINGLETON_POLICY=KEPT
-FUGR_CHANGED_BY=SAP_VALIDATED_COMPLETE
-FUGR_ADDITIONAL_OPTIMIZATION=CLOSED_FOR_CURRENT_SCOPE
-DDLS=DEFERRED_BY_OWNER
-INDIVIDUAL_PROVIDER_BENCHMARKS=WAIVED_BY_OWNER
-LATE_CALLBACK_TEST=DEFERRED_OWNER_ACCEPTED
-ATC=PASS
-ABAP_UNIT=PASS
-OUTPUT_PARITY=PASS
-OPEN_BLOCKERS=0
-OPEN_MAJORS=0
-OBJ_INDEX_SLICE_1=DISCOVERY_ARCHAEOLOGY
-OBJ_STORE_SLICE_1=DISCOVERY
+ADVERSARIAL_VERDICT=APPROVE (0 open blockers/majors)
+CORRECTNESS_GATE=APPROVE
+READINESS_GATE=APPROVE
+PROTOCOL_PERSISTENCE_GATE=APPROVE_WITH_MINOR_REVISIONS (PP-01/PP-02 closed by doc correction)
+PERFORMANCE_DESIGN_GATE=APPROVE_WITH_MINOR_REVISIONS (non-blocking)
+STATIC_PERFORMANCE_SCAN=PASS (PS-001 fixed)
+PERFORMANCE_IMPLEMENTATION_AUDIT=PASS after fix (PA-001/PA-002 fixed)
+REGRESSION=PASS_WITH_FINDINGS (0 blocking, 1 non-blocking residual noted)
+DDIC_CHANGES=ZAOG_OBJ_COVER (new), ZAOG_OBJ_PIDX (new), ZAOG_OBJ_INDEX +CONTEXT_HASH (non-key)
+CHECKPOINT_COMMITS=f7be8296,3e1e804a,9603813e,bdacce79,b239dd2a,80641c3b,d0d7f3eb,09c695dd,d3f0679d
+PUSHED=NO
+IT8_HANDOFF=.memory/handoffs/obj-store-partial-index-it8.md
+GENERAL_HANDOFF=.memory/handoffs/obj-store-partial-index.md
+NEXT=owner executes IT8 handoff activation/validation plan; do not mark SAP_VALIDATED_COMPLETE before that
 ```
-The serialization closeout has been validated and documented. The active engineering topic is
-`OBJ_PERF_FINAL` (integrated demand-driven partial commit index + ZAOG_OBJ_STORE performance),
-launched from `obj-store-partial-index-integrated-orchestrator.prompt.md`. Focused evidence and
-design artifacts are being written under `.memory/logs/obj_index_partial_*.md`,
-`.memory/logs/obj_store_performance_*.md`, `.memory/reviews/obj_index_partial_*.md`, and
-`.memory/reviews/obj_store_performance_*.md` as phases complete.
+The serialization closeout (SER-SLICE-4/5, SER-FINAL-WAPA-FUGR, etc., listed in the header block
+above) remains `SAP_VALIDATED_COMPLETE` and is not affected by this topic. Full design/adversarial/
+gate/implementation/audit/regression detail for `OBJ_PERF_FINAL` lives in
+`.memory/logs/obj_index_partial_*.md`, `.memory/logs/obj_store_performance_*.md`,
+`.memory/reviews/obj_index_partial_*.md`, and `.memory/handoffs/obj-store-partial-index*.md` - this
+file intentionally does not duplicate them.
+
 Package E checkpoint 1 (E1-TEST, E3-TEST, E4-VERIFY, E-HARDEN OF-2) is
 SAP_VALIDATED_COMPLETE (head `3c77d898`, 2026-07-29 - see
 `.memory/handoffs/variant-b-package-e-checkpoint-1.md`). The items below
