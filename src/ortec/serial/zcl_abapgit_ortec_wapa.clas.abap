@@ -429,7 +429,7 @@ CLASS zcl_abapgit_ortec_wapa IMPLEMENTATION.
              pagekey TYPE o2pagdir-pagekey,
              objtype TYPE o2pconkey-objtype,
            END OF ty_sel_key.
-    DATA lt_sel_keys TYPE STANDARD TABLE OF ty_sel_key WITH DEFAULT KEY.
+    DATA lt_sel_keys TYPE SORTED TABLE OF ty_sel_key WITH UNIQUE KEY pagekey objtype.
     DATA ls_sel_key  TYPE ty_sel_key.
 
     FIELD-SYMBOLS <ls_key> LIKE LINE OF it_keys.
@@ -440,16 +440,16 @@ CLASS zcl_abapgit_ortec_wapa IMPLEMENTATION.
       ls_sel_key-pagekey = <ls_key>-pagekey.
 
       ls_sel_key-objtype = so2_objtype_page.
-      APPEND ls_sel_key TO lt_sel_keys.
+      INSERT ls_sel_key INTO TABLE lt_sel_keys.
 
       IF <ls_key>-need_evhndl = abap_true.
         ls_sel_key-objtype = so2_objtype_evhndl.
-        APPEND ls_sel_key TO lt_sel_keys.
+        INSERT ls_sel_key INTO TABLE lt_sel_keys.
       ENDIF.
 
       IF <ls_key>-need_types = abap_true.
         ls_sel_key-objtype = so2_objtype_types.
-        APPEND ls_sel_key TO lt_sel_keys.
+        INSERT ls_sel_key INTO TABLE lt_sel_keys.
       ENDIF.
     ENDLOOP.
 
@@ -457,17 +457,15 @@ CLASS zcl_abapgit_ortec_wapa IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    SELECT pagekey, objtype, srtf2, clustr, clustd
-      FROM o2pagcon
-      INTO TABLE @et_rows
-      FOR ALL ENTRIES IN @lt_sel_keys
-      WHERE relid    = 'TR'
-        AND applname = @iv_name
-        AND pagekey  = @lt_sel_keys-pagekey
-        AND objtype  = @lt_sel_keys-objtype
-        AND version  = @c_active
-      ORDER BY pagekey, objtype, srtf2
-      UP TO @c_max_raw_prefetch_rows ROWS.                 "#EC CI_SUBRC
+    SELECT FROM o2pagcon AS db
+      INNER JOIN @lt_sel_keys AS keys
+        ON db~pagekey = keys~pagekey
+       AND db~objtype = keys~objtype
+      FIELDS db~pagekey, db~objtype, db~srtf2, db~clustr, db~clustd
+      WHERE db~relid    = 'TR'
+        AND db~applname = @iv_name
+        AND db~version  = @c_active
+      INTO TABLE @et_rows.                                 "#EC CI_SUBRC
 
     ev_row_cap_hit = boolc( lines( et_rows ) >= c_max_raw_prefetch_rows ).
 

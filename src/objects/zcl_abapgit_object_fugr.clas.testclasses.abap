@@ -1,5 +1,3 @@
-CLASS ltcl_changed_by DEFINITION DEFERRED.
-
 CLASS zcl_abapgit_object_fugr DEFINITION LOCAL FRIENDS ltcl_changed_by.
 
 CLASS ltcl_changed_by DEFINITION FINAL FOR TESTING

@@ -1,3 +1,5 @@
+CLASS zcl_abapgit_ortec_wapa DEFINITION LOCAL FRIENDS ltcl_wapa.
+
 CLASS ltcl_wapa DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINAL.
 
   " SER-SLICE-0 scope note: only T-WAPA-1 (serialization_wapa_review.md)
@@ -22,6 +24,15 @@ CLASS ltcl_wapa DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINAL.
 
   PRIVATE SECTION.
     CLASS-DATA gi_environment TYPE REF TO if_osql_test_environment.
+
+    TYPES: BEGIN OF ty_raw_row,
+             pagekey TYPE o2pagdir-pagekey,
+             objtype TYPE o2pconkey-objtype,
+             srtf2   TYPE i,
+             clustr  TYPE i,
+             clustd  TYPE xstring,
+           END OF ty_raw_row.
+    TYPES ty_raw_row_tt TYPE STANDARD TABLE OF ty_raw_row WITH DEFAULT KEY.
 
     CLASS-METHODS class_setup.
     CLASS-METHODS class_teardown.
@@ -63,7 +74,7 @@ CLASS ltcl_wapa DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINAL.
         !iv_buffer       TYPE xstring
         !iv_chunk_size   TYPE i DEFAULT 4000
       RETURNING
-        VALUE(rt_rows)   TYPE zcl_abapgit_ortec_wapa=>ty_raw_row_tt.
+        VALUE(rt_rows)   TYPE ty_raw_row_tt.
 
     "--------------------------------------------------------------
     " ASSEMBLE_AND_DECODE - pure reconstruction/decode, no DB
@@ -73,7 +84,7 @@ CLASS ltcl_wapa DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINAL.
     METHODS clustr_truncation_ignores_pad FOR TESTING RAISING cx_static_check.
     METHODS interleaved_rows_multi_keys FOR TESTING RAISING cx_static_check.
     METHODS page_evhndl_types_separated FOR TESTING RAISING cx_static_check.
-    METHODS optional_evhndl_absent_is_empty FOR TESTING RAISING cx_static_check.
+    METHODS optionl_evhndl_absent_is_empty FOR TESTING RAISING cx_static_check.
     METHODS optional_types_absent_is_empty FOR TESTING RAISING cx_static_check.
     METHODS missing_page_content_raises FOR TESTING RAISING cx_static_check.
     METHODS duplicate_srtf2_raises FOR TESTING RAISING cx_static_check.
@@ -86,7 +97,7 @@ CLASS ltcl_wapa DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINAL.
     "--------------------------------------------------------------
     METHODS keys_skip_controller_pages FOR TESTING RAISING cx_static_check.
     METHODS keys_full_page_needs_types FOR TESTING RAISING cx_static_check.
-    METHODS keys_full_page_needs_evhndl_only_if_present FOR TESTING RAISING cx_static_check.
+    METHODS keys_fl_pge_req_evhndl_if_pres FOR TESTING RAISING cx_static_check.
 
     "--------------------------------------------------------------
     " READ_RAW_ROWS / TRY_RAW_PREFETCH - real O2PAGCON double
@@ -94,7 +105,7 @@ CLASS ltcl_wapa DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINAL.
     METHODS read_raw_rows_filters_by_key FOR TESTING RAISING cx_static_check.
     METHODS prefetch_hit_feeds_content FOR TESTING RAISING cx_static_check.
     METHODS prefetch_row_cap_falls_back FOR TESTING RAISING cx_static_check.
-    METHODS prefetch_no_pages_is_trivial_hit FOR TESTING RAISING cx_static_check.
+    METHODS prftch_no_pages_is_trivial_hit FOR TESTING RAISING cx_static_check.
 
     "--------------------------------------------------------------
     " Counters
@@ -102,9 +113,6 @@ CLASS ltcl_wapa DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINAL.
     METHODS counters_reset_to_zero FOR TESTING RAISING cx_static_check.
 
 ENDCLASS.
-
-
-CLASS zcl_abapgit_ortec_wapa DEFINITION LOCAL FRIENDS ltcl_wapa.
 
 
 CLASS ltcl_wapa IMPLEMENTATION.
@@ -166,7 +174,7 @@ CLASS ltcl_wapa IMPLEMENTATION.
   METHOD build_evhandler_buffer.
     DATA lt_evhandler TYPE so2_ev_handler_t.
 
-    APPEND VALUE #( name = iv_name source = iv_source ) TO lt_evhandler.
+    APPEND VALUE #( name = iv_name source = VALUE #( ( iv_source ) ) ) TO lt_evhandler.
 
     EXPORT evhandler = lt_evhandler TO DATA BUFFER rv_buffer.
   ENDMETHOD.
@@ -183,7 +191,7 @@ CLASS ltcl_wapa IMPLEMENTATION.
     DATA lv_offset TYPE i.
     DATA lv_len    TYPE i.
     DATA lv_srtf2  TYPE i.
-    DATA ls_row    TYPE zcl_abapgit_ortec_wapa=>ty_raw_row.
+    DATA ls_row    TYPE ty_raw_row.
     DATA(lv_total) = xstrlen( iv_buffer ).
 
     WHILE lv_offset < lv_total.
@@ -221,7 +229,7 @@ CLASS ltcl_wapa IMPLEMENTATION.
     DATA lt_typesource TYPE zcl_abapgit_ortec_wapa=>ty_raw_typesource_tt.
 
     INSERT VALUE #( pagekey = 'PAGE1' ) INTO TABLE lt_keys.
-    lt_rows = split_buffer( iv_pagekey = 'PAGE1' iv_objtype = 'PAGE' iv_buffer = build_page_buffer( 'hello' )
+    lt_rows = split_buffer( iv_pagekey = 'PAGE1' iv_objtype = so2_objtype_page iv_buffer = build_page_buffer( 'hello' )
                             iv_chunk_size = 10000 ).
 
     zcl_abapgit_ortec_wapa=>assemble_and_decode(
@@ -245,13 +253,20 @@ CLASS ltcl_wapa IMPLEMENTATION.
     DATA lt_content    TYPE zcl_abapgit_ortec_wapa=>ty_raw_content_tt.
     DATA lt_evhandler  TYPE zcl_abapgit_ortec_wapa=>ty_raw_evhandler_tt.
     DATA lt_typesource TYPE zcl_abapgit_ortec_wapa=>ty_raw_typesource_tt.
+    DATA lt_expected_content TYPE o2pageline_table.
+    DATA lv_expected_xml     TYPE xstring.
+    DATA lv_expected_buffer  TYPE xstring.
 
     INSERT VALUE #( pagekey = 'PAGE1' ) INTO TABLE lt_keys.
     " force many small physical rows for one logical key
-    DATA(lt_rows) = split_buffer( iv_pagekey = 'PAGE1' iv_objtype = 'PAGE'
+    DATA(lt_rows) = split_buffer( iv_pagekey = 'PAGE1' iv_objtype = so2_objtype_page
                                   iv_buffer = build_page_buffer( repeat( val = 'AB' occ = 5000 ) )
                                   iv_chunk_size = 37 ).
-    cl_abap_unit_assert=>assert_true( lines( lt_rows ) > 1 ).
+    lv_expected_buffer = build_page_buffer( repeat( val = 'AB' occ = 5000 ) ).
+    IMPORT content    = lt_expected_content
+           xml_source = lv_expected_xml
+           FROM DATA BUFFER lv_expected_buffer.
+    cl_abap_unit_assert=>assert_true( xsdbool( lines( lt_rows ) > 1 ) ).
 
     " scramble the physical row order - ASSEMBLE_AND_DECODE must not rely
     " on caller-side pre-sorting.
@@ -268,8 +283,9 @@ CLASS ltcl_wapa IMPLEMENTATION.
         et_typesource = lt_typesource ).
 
     READ TABLE lt_content INTO DATA(ls_content) WITH TABLE KEY pagekey = 'PAGE1'.
+    READ TABLE lt_expected_content INTO DATA(lv_expected_line) INDEX 1.
     READ TABLE ls_content-content INTO DATA(lv_line) INDEX 1.
-    cl_abap_unit_assert=>assert_equals( exp = repeat( val = 'AB' occ = 5000 ) act = lv_line ).
+    cl_abap_unit_assert=>assert_equals( exp = lv_expected_line act = lv_line ).
   ENDMETHOD.
 
   METHOD clustr_truncation_ignores_pad.
@@ -288,7 +304,7 @@ CLASS ltcl_wapa IMPLEMENTATION.
     INSERT VALUE #( pagekey = 'PAGE1' ) INTO TABLE lt_keys.
 
     ls_row-pagekey = 'PAGE1'.
-    ls_row-objtype = 'PAGE'.
+    ls_row-objtype = so2_objtype_page.
     ls_row-srtf2   = 0.
     ls_row-clustr  = xstrlen( lv_real ).  " only the real, non-garbage portion is valid
     ls_row-clustd  = lv_padded.
@@ -319,9 +335,9 @@ CLASS ltcl_wapa IMPLEMENTATION.
     INSERT VALUE #( pagekey = 'PAGE1' ) INTO TABLE lt_keys.
     INSERT VALUE #( pagekey = 'PAGE2' ) INTO TABLE lt_keys.
 
-    DATA(lt_rows_1) = split_buffer( iv_pagekey = 'PAGE1' iv_objtype = 'PAGE'
+    DATA(lt_rows_1) = split_buffer( iv_pagekey = 'PAGE1' iv_objtype = so2_objtype_page
                                     iv_buffer = build_page_buffer( 'content one' ) iv_chunk_size = 6 ).
-    DATA(lt_rows_2) = split_buffer( iv_pagekey = 'PAGE2' iv_objtype = 'PAGE'
+    DATA(lt_rows_2) = split_buffer( iv_pagekey = 'PAGE2' iv_objtype = so2_objtype_page
                                     iv_buffer = build_page_buffer( 'content two' ) iv_chunk_size = 6 ).
 
     " interleave: 1,2,1,2,... - proves rows are grouped by full logical
@@ -366,11 +382,11 @@ CLASS ltcl_wapa IMPLEMENTATION.
 
     INSERT VALUE #( pagekey = 'PAGE1' need_evhndl = abap_true need_types = abap_true ) INTO TABLE lt_keys.
 
-    APPEND LINES OF split_buffer( iv_pagekey = 'PAGE1' iv_objtype = 'PAGE'
+    APPEND LINES OF split_buffer( iv_pagekey = 'PAGE1' iv_objtype = so2_objtype_page
       iv_buffer = build_page_buffer( 'the content' ) ) TO lt_rows.
-    APPEND LINES OF split_buffer( iv_pagekey = 'PAGE1' iv_objtype = 'EVHNDL'
+    APPEND LINES OF split_buffer( iv_pagekey = 'PAGE1' iv_objtype = so2_objtype_evhndl
       iv_buffer = build_evhandler_buffer( ) ) TO lt_rows.
-    APPEND LINES OF split_buffer( iv_pagekey = 'PAGE1' iv_objtype = 'TYPES'
+    APPEND LINES OF split_buffer( iv_pagekey = 'PAGE1' iv_objtype = so2_objtype_types
       iv_buffer = build_typesource_buffer( ) ) TO lt_rows.
 
     zcl_abapgit_ortec_wapa=>assemble_and_decode(
@@ -395,7 +411,7 @@ CLASS ltcl_wapa IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( exp = 'TYPES: ty_test TYPE i.' act = lv_type_line ).
   ENDMETHOD.
 
-  METHOD optional_evhndl_absent_is_empty.
+  METHOD optionl_evhndl_absent_is_empty.
     DATA lt_keys       TYPE zcl_abapgit_ortec_wapa=>ty_raw_key_tt.
     DATA lt_content    TYPE zcl_abapgit_ortec_wapa=>ty_raw_content_tt.
     DATA lt_evhandler  TYPE zcl_abapgit_ortec_wapa=>ty_raw_evhandler_tt.
@@ -403,7 +419,7 @@ CLASS ltcl_wapa IMPLEMENTATION.
 
     " EVHNDL requested but has zero physical rows - normal, not an anomaly
     INSERT VALUE #( pagekey = 'PAGE1' need_evhndl = abap_true ) INTO TABLE lt_keys.
-    DATA(lt_rows) = split_buffer( iv_pagekey = 'PAGE1' iv_objtype = 'PAGE' iv_buffer = build_page_buffer( 'x' ) ).
+    DATA(lt_rows) = split_buffer( iv_pagekey = 'PAGE1' iv_objtype = so2_objtype_page iv_buffer = build_page_buffer( 'x' ) ).
 
     zcl_abapgit_ortec_wapa=>assemble_and_decode(
       EXPORTING
@@ -416,7 +432,7 @@ CLASS ltcl_wapa IMPLEMENTATION.
 
     cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( lt_evhandler ) ).
     READ TABLE lt_evhandler INTO DATA(ls_evhandler) WITH TABLE KEY pagekey = 'PAGE1'.
-    cl_abap_unit_assert=>assert_true( ls_evhandler-evhandler IS INITIAL ).
+    cl_abap_unit_assert=>assert_initial( ls_evhandler-evhandler ).
   ENDMETHOD.
 
   METHOD optional_types_absent_is_empty.
@@ -426,7 +442,7 @@ CLASS ltcl_wapa IMPLEMENTATION.
     DATA lt_typesource TYPE zcl_abapgit_ortec_wapa=>ty_raw_typesource_tt.
 
     INSERT VALUE #( pagekey = 'PAGE1' need_types = abap_true ) INTO TABLE lt_keys.
-    DATA(lt_rows) = split_buffer( iv_pagekey = 'PAGE1' iv_objtype = 'PAGE' iv_buffer = build_page_buffer( 'x' ) ).
+    DATA(lt_rows) = split_buffer( iv_pagekey = 'PAGE1' iv_objtype = so2_objtype_page iv_buffer = build_page_buffer( 'x' ) ).
 
     zcl_abapgit_ortec_wapa=>assemble_and_decode(
       EXPORTING
@@ -439,7 +455,7 @@ CLASS ltcl_wapa IMPLEMENTATION.
 
     cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( lt_typesource ) ).
     READ TABLE lt_typesource INTO DATA(ls_typesource) WITH TABLE KEY pagekey = 'PAGE1'.
-    cl_abap_unit_assert=>assert_true( ls_typesource-typesource IS INITIAL ).
+    cl_abap_unit_assert=>assert_initial( ls_typesource-typesource ).
   ENDMETHOD.
 
   METHOD missing_page_content_raises.
@@ -475,8 +491,8 @@ CLASS ltcl_wapa IMPLEMENTATION.
     DATA lt_typesource TYPE zcl_abapgit_ortec_wapa=>ty_raw_typesource_tt.
 
     INSERT VALUE #( pagekey = 'PAGE1' ) INTO TABLE lt_keys.
-    APPEND VALUE #( pagekey = 'PAGE1' objtype = 'PAGE' srtf2 = 0 clustr = 1 clustd = '41' ) TO lt_rows.
-    APPEND VALUE #( pagekey = 'PAGE1' objtype = 'PAGE' srtf2 = 0 clustr = 1 clustd = '42' ) TO lt_rows.
+    APPEND VALUE #( pagekey = 'PAGE1' objtype = so2_objtype_page srtf2 = 0 clustr = 1 clustd = '41' ) TO lt_rows.
+    APPEND VALUE #( pagekey = 'PAGE1' objtype = so2_objtype_page srtf2 = 0 clustr = 1 clustd = '42' ) TO lt_rows.
 
     TRY.
         zcl_abapgit_ortec_wapa=>assemble_and_decode(
@@ -500,8 +516,8 @@ CLASS ltcl_wapa IMPLEMENTATION.
     DATA lt_typesource TYPE zcl_abapgit_ortec_wapa=>ty_raw_typesource_tt.
 
     INSERT VALUE #( pagekey = 'PAGE1' ) INTO TABLE lt_keys.
-    APPEND VALUE #( pagekey = 'PAGE1' objtype = 'PAGE' srtf2 = 0 clustr = 1 clustd = '41' ) TO lt_rows.
-    APPEND VALUE #( pagekey = 'PAGE1' objtype = 'PAGE' srtf2 = 2 clustr = 1 clustd = '42' ) TO lt_rows.
+    APPEND VALUE #( pagekey = 'PAGE1' objtype = so2_objtype_page srtf2 = 0 clustr = 1 clustd = '41' ) TO lt_rows.
+    APPEND VALUE #( pagekey = 'PAGE1' objtype = so2_objtype_page srtf2 = 2 clustr = 1 clustd = '42' ) TO lt_rows.
 
     TRY.
         zcl_abapgit_ortec_wapa=>assemble_and_decode(
@@ -526,7 +542,7 @@ CLASS ltcl_wapa IMPLEMENTATION.
 
     INSERT VALUE #( pagekey = 'PAGE1' ) INTO TABLE lt_keys.
     " CLUSTR claims 5 valid bytes but CLUSTD only has 1
-    APPEND VALUE #( pagekey = 'PAGE1' objtype = 'PAGE' srtf2 = 0 clustr = 5 clustd = '41' ) TO lt_rows.
+    APPEND VALUE #( pagekey = 'PAGE1' objtype = so2_objtype_page srtf2 = 0 clustr = 5 clustd = '41' ) TO lt_rows.
 
     TRY.
         zcl_abapgit_ortec_wapa=>assemble_and_decode(
@@ -557,7 +573,7 @@ CLASS ltcl_wapa IMPLEMENTATION.
     " reached for a claim this large; both guards independently protect
     " the same invariant (never trust an unverifiable byte count), so
     " either one raising here is the correct, safe outcome.
-    APPEND VALUE #( pagekey = 'PAGE1' objtype = 'PAGE' srtf2 = 0
+    APPEND VALUE #( pagekey = 'PAGE1' objtype = so2_objtype_page srtf2 = 0
                     clustr = zcl_abapgit_ortec_ser_orch=>c_max_object_output_bytes + 1
                     clustd = '41' )
       TO lt_rows.
@@ -593,7 +609,7 @@ CLASS ltcl_wapa IMPLEMENTATION.
     DATA ls_context TYPE zcl_abapgit_ortec_wapa=>ty_context.
     DATA lt_pages   TYPE o2pagelist.
 
-    INSERT VALUE #( applname = 'ZTST' pagekey = 'PAGE1' pagetype = 'F' ) INTO TABLE ls_context-page_dirs.
+    INSERT VALUE #( applname = 'ZTST' pagekey = 'PAGE1' pagetype = so2_full_page ) INTO TABLE ls_context-page_dirs.
     ls_context-name = 'ZTST'.
     APPEND VALUE #( pagekey = 'PAGE1' ) TO lt_pages.
 
@@ -605,11 +621,11 @@ CLASS ltcl_wapa IMPLEMENTATION.
     cl_abap_unit_assert=>assert_false( ls_key-need_evhndl ).
   ENDMETHOD.
 
-  METHOD keys_full_page_needs_evhndl_only_if_present.
+  METHOD keys_fl_pge_req_evhndl_if_pres.
     DATA ls_context TYPE zcl_abapgit_ortec_wapa=>ty_context.
     DATA lt_pages   TYPE o2pagelist.
 
-    INSERT VALUE #( applname = 'ZTST' pagekey = 'PAGE1' pagetype = 'F' ) INTO TABLE ls_context-page_dirs.
+    INSERT VALUE #( applname = 'ZTST' pagekey = 'PAGE1' pagetype = so2_full_page ) INTO TABLE ls_context-page_dirs.
     INSERT VALUE #( applname = 'ZTST' pagekey = 'PAGE1' version = 'A' evhandler = 'ON_INIT' )
       INTO TABLE ls_context-event_handlers.
     ls_context-name = 'ZTST'.
@@ -627,13 +643,13 @@ CLASS ltcl_wapa IMPLEMENTATION.
     DATA lv_row_cap_hit TYPE abap_bool.
     DATA lt_o2pagcon    TYPE STANDARD TABLE OF o2pagcon WITH DEFAULT KEY.
 
-    APPEND VALUE #( relid = 'TR' applname = 'ZTST' pagekey = 'PAGE1' objtype = 'PAGE' version = 'A'
+    APPEND VALUE #( relid = 'TR' applname = 'ZTST' pagekey = 'PAGE1' objtype = so2_objtype_page version = 'A'
                     srtf2 = 0 clustr = 1 clustd = '41' ) TO lt_o2pagcon.
     " a different, non-requested page - must NOT be returned
-    APPEND VALUE #( relid = 'TR' applname = 'ZTST' pagekey = 'PAGE2' objtype = 'PAGE' version = 'A'
+    APPEND VALUE #( relid = 'TR' applname = 'ZTST' pagekey = 'PAGE2' objtype = so2_objtype_page version = 'A'
                     srtf2 = 0 clustr = 1 clustd = '42' ) TO lt_o2pagcon.
     " same key but inactive version - must NOT be returned
-    APPEND VALUE #( relid = 'TR' applname = 'ZTST' pagekey = 'PAGE1' objtype = 'PAGE' version = 'I'
+    APPEND VALUE #( relid = 'TR' applname = 'ZTST' pagekey = 'PAGE1' objtype = so2_objtype_page version = 'I'
                     srtf2 = 0 clustr = 1 clustd = '43' ) TO lt_o2pagcon.
     gi_environment->insert_test_data( lt_o2pagcon ).
 
@@ -662,7 +678,7 @@ CLASS ltcl_wapa IMPLEMENTATION.
     ls_context-name = 'ZTST'.
     APPEND VALUE #( pagekey = 'PAGE1' ) TO lt_pages.
 
-    DATA(lt_rows) = split_buffer( iv_pagekey = 'PAGE1' iv_objtype = 'PAGE'
+    DATA(lt_rows) = split_buffer( iv_pagekey = 'PAGE1' iv_objtype = so2_objtype_page
                                   iv_buffer = build_page_buffer( 'hit content' ) ).
     LOOP AT lt_rows INTO DATA(ls_row).
       APPEND VALUE #( relid = 'TR' applname = 'ZTST' pagekey = ls_row-pagekey objtype = ls_row-objtype
@@ -713,7 +729,7 @@ CLASS ltcl_wapa IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( exp = 1 act = lv_fallbacks ).
   ENDMETHOD.
 
-  METHOD prefetch_no_pages_is_trivial_hit.
+  METHOD prftch_no_pages_is_trivial_hit.
     DATA ls_context TYPE zcl_abapgit_ortec_wapa=>ty_context.
     DATA lt_pages   TYPE o2pagelist.
 
