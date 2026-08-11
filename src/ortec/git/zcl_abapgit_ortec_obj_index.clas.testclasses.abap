@@ -1,8 +1,10 @@
 CLASS zcl_abapgit_ortec_obj_index DEFINITION LOCAL FRIENDS ltcl_obj_index.
+
 CLASS ltcl_obj_index DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
   PRIVATE SECTION.
     CONSTANTS mc_repo TYPE c LENGTH 12 VALUE 'ZAOGT_OBJIDX'.
-    METHODS setup. METHODS teardown.
+    METHODS setup.
+    METHODS teardown.
     METHODS marker_required_for_ready FOR TESTING RAISING cx_static_check.
 
     " Package E E1-TEST (design doc §1, INV-E1-T-1/2): CONFIRMED_CURRENT
@@ -10,8 +12,8 @@ CLASS ltcl_obj_index DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
     " behavior of the commit-scoped index and its readiness marker.
     METHODS build_commit
       IMPORTING
-        iv_filename          TYPE string
-        iv_content            TYPE xstring
+                iv_filename          TYPE string
+                iv_content           TYPE xstring
       RETURNING VALUE(rv_commit_sha) TYPE zif_abapgit_git_definitions=>ty_sha1
       RAISING   zcx_abapgit_exception
                 zcx_abapgit_ortec_git.
@@ -53,32 +55,32 @@ CLASS ltcl_obj_index DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
 
     " AR-1-01/AR-2-01 (design doc §3.0/§3.0b/§9 Slice 1b/1d): positive-row
     " and readiness-marker context isolation regression coverage.
-    METHODS ready_rejects_different_context   FOR TESTING RAISING cx_static_check.
-    METHODS select_rows_excludes_other_context FOR TESTING RAISING cx_static_check.
-    METHODS blank_legacy_context_is_never_ready FOR TESTING RAISING cx_static_check.
+    METHODS ready_rejects_other_context   FOR TESTING RAISING cx_static_check.
+    METHODS select_rows_ignores_other_ctx FOR TESTING RAISING cx_static_check.
+    METHODS blank_legacy_ctx_never_ready FOR TESTING RAISING cx_static_check.
     METHODS partial_rows_context_disjoint     FOR TESTING RAISING cx_static_check.
-    METHODS select_partial_rows_chunk_boundary FOR TESTING RAISING cx_static_check.
+    METHODS partial_rows_chunk_boundary FOR TESTING RAISING cx_static_check.
 
     " OBJ-PERF-IMPL-B (design doc §11 step 3 sub-steps 1-2, Slice 2):
     " ensure_filtered_coverage warm-fast-path/fallback regression coverage.
     METHODS warm_coverage_skips_rewalk FOR TESTING RAISING cx_static_check.
-    METHODS incomplete_coverage_falls_through_to_rebuild FOR TESTING RAISING cx_static_check.
+    METHODS cov_rebuild_when_incomplete FOR TESTING RAISING cx_static_check.
 
     " OBJ-PERF-IMPL-C (design doc §11 step 4, §4.1, §5, §13 W4/W5/W6/W8,
     " Slice 3): walk_filtered/invalidate_commit_index/backoff/current-remote
     " regression coverage. LOCAL FRIENDS above grants access to these two
     " PRIVATE class methods for direct testing.
-    METHODS filtered_walk_writes_only_requested_objects FOR TESTING RAISING cx_static_check.
-    METHODS filtered_walk_never_sets_ready_marker FOR TESTING RAISING cx_static_check.
-    METHODS filtered_walk_idempotent_on_overlap FOR TESTING RAISING cx_static_check.
-    METHODS filtered_walk_writes_context_hash_as_key FOR TESTING RAISING cx_static_check.
-    METHODS filtered_walk_no_cross_context_overwrite FOR TESTING RAISING cx_static_check.
-    METHODS retry_purge_removes_all_three_tables FOR TESTING RAISING cx_static_check.
-    METHODS missing_tree_writes_m_row_then_reraises FOR TESTING RAISING cx_static_check.
-    METHODS repeat_request_within_backoff_skips_walk FOR TESTING RAISING cx_static_check.
-    METHODS repeat_request_after_backoff_retries_walk FOR TESTING RAISING cx_static_check.
-    METHODS not_present_remote_requires_current_remote_commit FOR TESTING RAISING cx_static_check.
-    METHODS not_present_remote_requires_current_remote_supplied FOR TESTING RAISING cx_static_check.
+    METHODS walk_writes_requested_objs FOR TESTING RAISING cx_static_check.
+    METHODS walk_never_sets_ready_mark FOR TESTING RAISING cx_static_check.
+    METHODS walk_is_idempotent_on_overlap FOR TESTING RAISING cx_static_check.
+    METHODS walk_uses_context_hash_key FOR TESTING RAISING cx_static_check.
+    METHODS walk_keeps_context_rows FOR TESTING RAISING cx_static_check.
+    METHODS purge_removes_all_index_tables FOR TESTING RAISING cx_static_check.
+    METHODS missing_tree_writes_m_row FOR TESTING RAISING cx_static_check.
+    METHODS repeat_backoff_skips_walk FOR TESTING RAISING cx_static_check.
+    METHODS repeat_backoff_retries_walk FOR TESTING RAISING cx_static_check.
+    METHODS remote_missing_current_remote FOR TESTING RAISING cx_static_check.
+    METHODS remote_missing_default_remote FOR TESTING RAISING cx_static_check.
     METHODS select_rows_chunk_boundary FOR TESTING RAISING cx_static_check.
 
     METHODS build_commit_two_objects
@@ -115,9 +117,7 @@ CLASS ltcl_obj_index IMPLEMENTATION.
     DATA lv_commit_data TYPE xstring.
     DATA lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
     DATA lo_dot TYPE REF TO zcl_abapgit_dot_abapgit.
-    DATA lo_filter TYPE REF TO zcl_abapgit_object_filter_obj.
-    DATA lt_files TYPE zif_abapgit_git_definitions=>ty_files_tt.
-    DATA ls_file LIKE LINE OF lt_files.
+    DATA lv_context TYPE zif_abapgit_git_definitions=>ty_sha1.
 
     " Build a minimal commit -> /src/ tree -> zprogram.prog.abap blob graph,
     " matching the exact filename/path convention already proven by
@@ -164,22 +164,28 @@ CLASS ltcl_obj_index IMPLEMENTATION.
       iv_type = zif_abapgit_git_definitions=>c_type-blob iv_data = lv_blob_data ).
 
     lo_dot = zcl_abapgit_dot_abapgit=>build_default( ).
-    lo_filter = NEW #( it_filter = VALUE #( ( object = 'PROG' obj_name = 'ZPROGRAM' ) ) ).
+    lv_context = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = '$PACK' io_dot = lo_dot ).
 
     " First build: proves the index is built correctly and (per the fix) the
     " completion marker is written even though rows were found - previously
     " the marker was only written when the walk found ZERO relevant rows.
-    lt_files = zcl_abapgit_ortec_obj_index=>get_files_for_filter(
-      iv_repo_key   = mc_repo
-      iv_commit     = lv_commit_sha
-      ii_obj_filter = lo_filter
-      io_dot        = lo_dot
-      iv_devclass   = '$PACK' ).
+    " Slice 3 routes get_files_for_filter through the cheaper walk_filtered
+    " path for an uncovered filter, so rebuild_index (LOCAL FRIENDS-
+    " accessible) is called directly to exercise its own, unchanged
+    " COMPLETE-mode marker invariant.
+    zcl_abapgit_ortec_obj_index=>rebuild_index(
+      iv_repo_key = mc_repo iv_commit = lv_commit_sha io_dot = lo_dot
+      iv_devclass = '$PACK' iv_context_hash = lv_context ).
 
-    cl_abap_unit_assert=>assert_equals( act = lines( lt_files ) exp = 1
+    DATA(lt_rows) = zcl_abapgit_ortec_obj_index=>select_rows_for_filter(
+      iv_repo_key     = mc_repo
+      iv_commit       = lv_commit_sha
+      it_filter       = VALUE #( ( object = 'PROG' obj_name = 'ZPROGRAM' ) )
+      iv_context_hash = lv_context ).
+
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_rows ) exp = 1
       msg = 'The filtered PROG/ZPROGRAM file must be resolved' ).
-    READ TABLE lt_files INTO ls_file INDEX 1.
-    cl_abap_unit_assert=>assert_equals( act = ls_file-path exp = '/src/'
+    cl_abap_unit_assert=>assert_equals( act = lt_rows[ 1 ]-file_path exp = '/src/'
       msg = 'File must be resolved from the freshly-built index' ).
 
     SELECT SINGLE path_hash FROM zaog_obj_index INTO @DATA(lv_marker_hash)
@@ -199,18 +205,19 @@ CLASS ltcl_obj_index IMPLEMENTATION.
       WHERE repo_key = mc_repo AND commit_sha1 = lv_commit_sha
         AND obj_type = '$IDX' AND obj_name = '__READY__'.
 
-    CLEAR lt_files.
-    lt_files = zcl_abapgit_ortec_obj_index=>get_files_for_filter(
-      iv_repo_key   = mc_repo
-      iv_commit     = lv_commit_sha
-      ii_obj_filter = lo_filter
-      io_dot        = lo_dot
-      iv_devclass   = '$PACK' ).
+    zcl_abapgit_ortec_obj_index=>ensure_index(
+      iv_repo_key = mc_repo iv_commit = lv_commit_sha io_dot = lo_dot
+      iv_devclass = '$PACK' iv_context_hash = lv_context ).
 
-    cl_abap_unit_assert=>assert_equals( act = lines( lt_files ) exp = 1
+    DATA(lt_rows_2) = zcl_abapgit_ortec_obj_index=>select_rows_for_filter(
+      iv_repo_key     = mc_repo
+      iv_commit       = lv_commit_sha
+      it_filter       = VALUE #( ( object = 'PROG' obj_name = 'ZPROGRAM' ) )
+      iv_context_hash = lv_context ).
+
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_rows_2 ) exp = 1
       msg = 'The filtered file must still be resolved after self-heal' ).
-    READ TABLE lt_files INTO ls_file INDEX 1.
-    cl_abap_unit_assert=>assert_equals( act = ls_file-path exp = '/src/'
+    cl_abap_unit_assert=>assert_equals( act = lt_rows_2[ 1 ]-file_path exp = '/src/'
       msg = 'STRICT mode must detect the missing marker and rebuild from ' &&
             'the real stored objects instead of trusting the stale row' ).
   ENDMETHOD.
@@ -321,7 +328,7 @@ CLASS ltcl_obj_index IMPLEMENTATION.
       exp = lt_files_1[ 1 ]-sha1
       msg = 'Commit 1''s content must be unaffected by commit 2''s later index build' ).
 
-    SELECT COUNT(*) FROM zaog_obj_index INTO @DATA(lv_count)
+    SELECT COUNT(*) FROM zaog_obj_pidx INTO @DATA(lv_count)
       WHERE repo_key = @mc_repo AND commit_sha1 = @lv_commit_1
         AND obj_type = 'PROG' AND obj_name = 'ZPROGRAM'.
     cl_abap_unit_assert=>assert_equals( act = lv_count exp = 1
@@ -335,16 +342,14 @@ CLASS ltcl_obj_index IMPLEMENTATION.
     " commit is fully built and ready.
     DATA(lv_commit_1) = build_commit( iv_filename = 'zprogram.prog.abap' iv_content = '48656C6C6F' ).
     DATA(lo_dot) = zcl_abapgit_dot_abapgit=>build_default( ).
-    DATA(lo_filter) = NEW zcl_abapgit_object_filter_obj( it_filter = VALUE #( ( object = 'PROG' obj_name = 'ZPROGRAM' ) ) ).
-
-    zcl_abapgit_ortec_obj_index=>get_files_for_filter(
-      iv_repo_key   = mc_repo
-      iv_commit     = lv_commit_1
-      ii_obj_filter = lo_filter
-      io_dot        = lo_dot
-      iv_devclass   = '$PACK' ).
-
     DATA(lv_ctx_ready_1) = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = '$PACK' io_dot = lo_dot ).
+
+    " Slice 3 routes an uncovered get_files_for_filter request through
+    " walk_filtered instead of a COMPLETE-mode rebuild - call rebuild_index
+    " directly so the "sanity" baseline below is genuinely COMPLETE-ready.
+    zcl_abapgit_ortec_obj_index=>rebuild_index(
+      iv_repo_key = mc_repo iv_commit = lv_commit_1 io_dot = lo_dot
+      iv_devclass = '$PACK' iv_context_hash = lv_ctx_ready_1 ).
 
     cl_abap_unit_assert=>assert_true(
       act = zcl_abapgit_ortec_obj_index=>is_index_ready(
@@ -369,22 +374,17 @@ CLASS ltcl_obj_index IMPLEMENTATION.
     DATA(lv_commit_1) = build_commit( iv_filename = 'zprogram.prog.abap' iv_content = '48656C6C6F' ).
     DATA(lv_commit_2) = build_commit( iv_filename = 'zprogram.prog.abap' iv_content = '576F726C64' ).
     DATA(lo_dot) = zcl_abapgit_dot_abapgit=>build_default( ).
-    DATA(lo_filter) = NEW zcl_abapgit_object_filter_obj( it_filter = VALUE #( ( object = 'PROG' obj_name = 'ZPROGRAM' ) ) ).
-
-    zcl_abapgit_ortec_obj_index=>get_files_for_filter(
-      iv_repo_key   = mc_repo
-      iv_commit     = lv_commit_1
-      ii_obj_filter = lo_filter
-      io_dot        = lo_dot
-      iv_devclass   = '$PACK' ).
-    zcl_abapgit_ortec_obj_index=>get_files_for_filter(
-      iv_repo_key   = mc_repo
-      iv_commit     = lv_commit_2
-      ii_obj_filter = lo_filter
-      io_dot        = lo_dot
-      iv_devclass   = '$PACK' ).
-
     DATA(lv_ctx_ready_2) = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = '$PACK' io_dot = lo_dot ).
+
+    " Slice 3 routes an uncovered get_files_for_filter request through
+    " walk_filtered instead of a COMPLETE-mode rebuild - call rebuild_index
+    " directly so both commits are genuinely COMPLETE-ready below.
+    zcl_abapgit_ortec_obj_index=>rebuild_index(
+      iv_repo_key = mc_repo iv_commit = lv_commit_1 io_dot = lo_dot
+      iv_devclass = '$PACK' iv_context_hash = lv_ctx_ready_2 ).
+    zcl_abapgit_ortec_obj_index=>rebuild_index(
+      iv_repo_key = mc_repo iv_commit = lv_commit_2 io_dot = lo_dot
+      iv_devclass = '$PACK' iv_context_hash = lv_ctx_ready_2 ).
 
     cl_abap_unit_assert=>assert_true(
       act = zcl_abapgit_ortec_obj_index=>is_index_ready(
@@ -492,24 +492,30 @@ CLASS ltcl_obj_index IMPLEMENTATION.
     zcl_abapgit_ortec_obj_store=>store_objects( iv_repo_key = mc_repo it_objects = lt_objects ).
 
     DATA(lo_dot) = zcl_abapgit_dot_abapgit=>build_default( ).
-    DATA(lo_filter) = NEW zcl_abapgit_object_filter_obj( it_filter = lt_filter ).
+    DATA(lv_context) = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = '$PACK' io_dot = lo_dot ).
 
-    DATA(lt_files) = zcl_abapgit_ortec_obj_index=>get_files_for_filter(
-      iv_repo_key   = mc_repo
-      iv_commit     = lv_commit_sha
-      ii_obj_filter = lo_filter
-      io_dot        = lo_dot
-      iv_devclass   = '$PACK' ).
+    " Slice 3 routes get_files_for_filter through walk_filtered for an
+    " uncovered filter - call rebuild_index directly to exercise its own
+    " bulk-chunked write + unconditional marker invariant.
+    zcl_abapgit_ortec_obj_index=>rebuild_index(
+      iv_repo_key = mc_repo iv_commit = lv_commit_sha io_dot = lo_dot
+      iv_devclass = '$PACK' iv_context_hash = lv_context ).
+
+    DATA(lt_rows) = zcl_abapgit_ortec_obj_index=>select_rows_for_filter(
+      iv_repo_key     = mc_repo
+      iv_commit       = lv_commit_sha
+      it_filter       = lt_filter
+      iv_context_hash = lv_context ).
 
     cl_abap_unit_assert=>assert_equals(
-      act = lines( lt_files )
+      act = lines( lt_rows )
       exp = lc_file_count
       msg = 'All files must be indexed across the chunk boundary, not just the first chunk' ).
 
     cl_abap_unit_assert=>assert_true(
       act = zcl_abapgit_ortec_obj_index=>is_index_ready(
         iv_repo_key = mc_repo iv_commit = lv_commit_sha
-        iv_context_hash = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = '$PACK' io_dot = lo_dot ) )
+        iv_context_hash = lv_context )
       msg = 'Completion marker must be written after a multi-chunk rebuild' ).
   ENDMETHOD.
 
@@ -617,21 +623,27 @@ CLASS ltcl_obj_index IMPLEMENTATION.
       IMPORTING ev_commit_sha = lv_commit_sha et_filter = lt_filter ).
 
     DATA(lo_dot) = zcl_abapgit_dot_abapgit=>build_default( ).
-    DATA(lo_filter) = NEW zcl_abapgit_object_filter_obj( it_filter = lt_filter ).
+    DATA(lv_context) = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = '$PACK' io_dot = lo_dot ).
 
-    DATA(lt_files) = zcl_abapgit_ortec_obj_index=>get_files_for_filter(
-      iv_repo_key   = mc_repo
-      iv_commit     = lv_commit_sha
-      ii_obj_filter = lo_filter
-      io_dot        = lo_dot
-      iv_devclass   = '$PACK' ).
+    " Slice 3 routes get_files_for_filter through walk_filtered for an
+    " uncovered filter - call rebuild_index directly to exercise its own
+    " bulk-chunked write + unconditional marker invariant at 5000 rows.
+    zcl_abapgit_ortec_obj_index=>rebuild_index(
+      iv_repo_key = mc_repo iv_commit = lv_commit_sha io_dot = lo_dot
+      iv_devclass = '$PACK' iv_context_hash = lv_context ).
 
-    cl_abap_unit_assert=>assert_equals( act = lines( lt_files ) exp = 5000
+    DATA(lt_rows) = zcl_abapgit_ortec_obj_index=>select_rows_for_filter(
+      iv_repo_key     = mc_repo
+      iv_commit       = lv_commit_sha
+      it_filter       = lt_filter
+      iv_context_hash = lv_context ).
+
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_rows ) exp = 5000
       msg = 'All bulk rows below the active chunk boundary must survive via the final flush' ).
     cl_abap_unit_assert=>assert_true(
       act = zcl_abapgit_ortec_obj_index=>is_index_ready(
         iv_repo_key = mc_repo iv_commit = lv_commit_sha
-        iv_context_hash = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = '$PACK' io_dot = lo_dot ) )
+        iv_context_hash = lv_context )
       msg = 'Completion marker must be written when the walk never crosses the in-loop chunk check' ).
 
     SELECT COUNT(*) FROM zaog_obj_index INTO @DATA(lv_count)
@@ -701,44 +713,45 @@ CLASS ltcl_obj_index IMPLEMENTATION.
     zcl_abapgit_ortec_obj_store=>store_objects( iv_repo_key = mc_repo it_objects = lt_objects ).
 
     DATA(lo_dot) = zcl_abapgit_dot_abapgit=>build_default( ).
-    DATA(lo_filter) = NEW zcl_abapgit_object_filter_obj(
-      it_filter = VALUE #( ( object = 'PROG' obj_name = 'ZPROGRAM' ) ) ).
 
-    DATA(lt_files) = zcl_abapgit_ortec_obj_index=>get_files_for_filter(
-      iv_repo_key   = mc_repo
-      iv_commit     = lv_commit_sha
-      ii_obj_filter = lo_filter
-      io_dot        = lo_dot
-      iv_devclass   = '$PACK' ).
+    " Slice 3 routes an uncovered get_files_for_filter request through the
+    " cheaper walk_filtered path instead of a COMPLETE-mode rebuild_index,
+    " so this scenario no longer exercises rebuild_index indirectly - call
+    " it directly (LOCAL FRIENDS-accessible) to verify its own, unchanged
+    " unconditional-marker-write invariant.
+    DATA(lv_context) = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = '$PACK' io_dot = lo_dot ).
 
-    cl_abap_unit_assert=>assert_equals( act = lines( lt_files ) exp = 0
-      msg = 'A tree with no ABAP-resolvable objects must index zero rows' ).
+    zcl_abapgit_ortec_obj_index=>rebuild_index(
+      iv_repo_key     = mc_repo
+      iv_commit       = lv_commit_sha
+      io_dot          = lo_dot
+      iv_devclass     = '$PACK'
+      iv_context_hash = lv_context ).
+
     cl_abap_unit_assert=>assert_true(
       act = zcl_abapgit_ortec_obj_index=>is_index_ready(
         iv_repo_key = mc_repo iv_commit = lv_commit_sha
-        iv_context_hash = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = '$PACK' io_dot = lo_dot ) )
+        iv_context_hash = lv_context )
       msg = 'The completion marker must be written even when zero rows were found - ' &&
             'the final flush check must not gate the unconditional marker write' ).
   ENDMETHOD.
 
-  METHOD ready_rejects_different_context.
+  METHOD ready_rejects_other_context.
     " AR-1-01/AR-2-01: a commit indexed under context A must not be
     " reported ready under a different context B - is_index_ready's own
     " marker predicate must bind iv_context_hash, never trust "any row
     " exists" independent of context.
     DATA(lv_commit_sha) = build_commit( iv_filename = 'zprogram.prog.abap' iv_content = '48656C6C6F' ).
     DATA(lo_dot) = zcl_abapgit_dot_abapgit=>build_default( ).
-    DATA(lo_filter) = NEW zcl_abapgit_object_filter_obj( it_filter = VALUE #( ( object = 'PROG' obj_name = 'ZPROGRAM' ) ) ).
-
-    zcl_abapgit_ortec_obj_index=>get_files_for_filter(
-      iv_repo_key   = mc_repo
-      iv_commit     = lv_commit_sha
-      ii_obj_filter = lo_filter
-      io_dot        = lo_dot
-      iv_devclass   = '$PACK' ).
-
     DATA(lv_context_a) = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = '$PACK' io_dot = lo_dot ).
     DATA(lv_context_b) = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = 'ZOTHERPACK' io_dot = lo_dot ).
+
+    " Slice 3 routes an uncovered get_files_for_filter request through
+    " walk_filtered instead of a COMPLETE-mode rebuild - call rebuild_index
+    " directly so the "sanity" baseline below is genuinely COMPLETE-ready.
+    zcl_abapgit_ortec_obj_index=>rebuild_index(
+      iv_repo_key = mc_repo iv_commit = lv_commit_sha io_dot = lo_dot
+      iv_devclass = '$PACK' iv_context_hash = lv_context_a ).
 
     cl_abap_unit_assert=>assert_differs( act = lv_context_b exp = lv_context_a
       msg = 'Sanity: a different devclass must produce a different context hash' ).
@@ -753,7 +766,7 @@ CLASS ltcl_obj_index IMPLEMENTATION.
             'different resolution context - the marker predicate must bind context_hash' ).
   ENDMETHOD.
 
-  METHOD select_rows_excludes_other_context.
+  METHOD select_rows_ignores_other_ctx.
     " AR-1-01/AR-2-01: ZAOG_OBJ_INDEX carries CONTEXT_HASH as a non-key
     " column safely ONLY because rebuild_index always purges the whole
     " commit before rewriting under a new context (design doc §3.0
@@ -796,7 +809,7 @@ CLASS ltcl_obj_index IMPLEMENTATION.
             'never silently reuse a row left behind by a different context' ).
   ENDMETHOD.
 
-  METHOD blank_legacy_context_is_never_ready.
+  METHOD blank_legacy_ctx_never_ready.
     " AR-1-01: a pre-migration row written before CONTEXT_HASH existed
     " (simulated here as a blank/initial context_hash) must never satisfy
     " is_index_ready for a real, non-blank context - it must be treated as
@@ -880,7 +893,7 @@ CLASS ltcl_obj_index IMPLEMENTATION.
     DELETE FROM zaog_obj_pidx WHERE repo_key = mc_repo AND commit_sha1 = lv_commit_sha.
   ENDMETHOD.
 
-  METHOD select_partial_rows_chunk_boundary.
+  METHOD partial_rows_chunk_boundary.
     " AR-1-04: select_partial_rows_for_filter must chunk it_filter at
     " zcl_abapgit_ortec_obj_cover=>c_filter_chunk_size (5000) - proves no
     " row is lost/duplicated when the caller-supplied filter set crosses
@@ -997,19 +1010,19 @@ CLASS ltcl_obj_index IMPLEMENTATION.
     DELETE FROM zaog_obj_pidx WHERE repo_key = mc_repo AND commit_sha1 = lv_commit_sha.
   ENDMETHOD.
 
-  METHOD incomplete_coverage_falls_through_to_rebuild.
-    " Slice 2: when coverage is NOT complete for every requested object
-    " (walk_filtered does not exist until Slice 3), ensure_filtered_coverage
-    " must fall through to the existing, unchanged COMPLETE-mode
-    " ensure_index/rebuild_index path - proving Slice 2 adds a fast path
-    " only and does not yet change cold-walk behavior.
+  METHOD cov_rebuild_when_incomplete.
+    " Slice 3 supersedes this scenario's original premise (written when
+    " walk_filtered did not exist yet): an uncovered filter now correctly
+    " resolves via the cheaper walk_filtered path instead of falling
+    " through to a COMPLETE-mode rebuild - is_index_ready must stay FALSE,
+    " matching the same invariant warm_coverage_skips_rewalk documents.
     DATA(lv_commit_sha) = build_commit( iv_filename = 'zprogram.prog.abap' iv_content = '48656C6C6F' ).
     DATA(lo_dot) = zcl_abapgit_dot_abapgit=>build_default( ).
     DATA(lo_filter) = NEW zcl_abapgit_object_filter_obj( it_filter = VALUE #( ( object = 'PROG' obj_name = 'ZPROGRAM' ) ) ).
 
     " No ZAOG_OBJ_COVER row exists for this (repo, commit, object, context) -
-    " coverage is incomplete, so the file must still be resolved via a real
-    " COMPLETE-mode rebuild against the real stored commit/tree/blob.
+    " coverage is incomplete, so the file must still be resolved, now via
+    " the FILTERED-mode walk_filtered path.
     DATA(lt_files) = zcl_abapgit_ortec_obj_index=>get_files_for_filter(
       iv_repo_key   = mc_repo
       iv_commit     = lv_commit_sha
@@ -1018,13 +1031,14 @@ CLASS ltcl_obj_index IMPLEMENTATION.
       iv_devclass   = '$PACK' ).
 
     cl_abap_unit_assert=>assert_equals( act = lines( lt_files ) exp = 1
-      msg = 'Incomplete coverage must fall through to the existing COMPLETE-mode rebuild path' ).
+      msg = 'Incomplete coverage must still resolve the file via walk_filtered' ).
 
     DATA(lv_context) = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = '$PACK' io_dot = lo_dot ).
-    cl_abap_unit_assert=>assert_true(
+    cl_abap_unit_assert=>assert_false(
       act = zcl_abapgit_ortec_obj_index=>is_index_ready(
         iv_repo_key = mc_repo iv_commit = lv_commit_sha iv_context_hash = lv_context )
-      msg = 'The fallback COMPLETE-mode path must still write the $IDX/__READY__ marker as today' ).
+      msg = 'The FILTERED-mode walk_filtered path must never write the COMPLETE-mode ' &&
+            '$IDX/__READY__ marker' ).
   ENDMETHOD.
 
   METHOD build_commit_two_objects.
@@ -1093,7 +1107,7 @@ CLASS ltcl_obj_index IMPLEMENTATION.
       iv_type = zif_abapgit_git_definitions=>c_type-blob iv_data = '576F726C64' ).
   ENDMETHOD.
 
-  METHOD filtered_walk_writes_only_requested_objects.
+  METHOD walk_writes_requested_objs.
     " design §11 step 4: a tree leaf's row is appended ONLY IF present in
     " it_filter - ZOTHER must never get a ZAOG_OBJ_PIDX row even though it
     " exists in the same tree, when only ZPROGRAM was requested.
@@ -1121,7 +1135,7 @@ CLASS ltcl_obj_index IMPLEMENTATION.
             'walk_filtered must bound writes to it_filter, never the full tree' ).
   ENDMETHOD.
 
-  METHOD filtered_walk_never_sets_ready_marker.
+  METHOD walk_never_sets_ready_mark.
     " design §12: FILTERED-mode walk_filtered never writes ZAOG_OBJ_INDEX
     " or its $IDX/__READY__ marker - is_index_ready must stay false.
     DATA(lv_commit_sha) = build_commit( iv_filename = 'zprogram.prog.abap' iv_content = '48656C6C6F' ).
@@ -1147,7 +1161,7 @@ CLASS ltcl_obj_index IMPLEMENTATION.
       msg = 'walk_filtered must never write any ZAOG_OBJ_INDEX row at all' ).
   ENDMETHOD.
 
-  METHOD filtered_walk_idempotent_on_overlap.
+  METHOD walk_is_idempotent_on_overlap.
     " design §5/§11 step 4: two overlapping-but-different-filter walks
     " under the same context must be idempotent - ZPROGRAM's row must not
     " be duplicated when a second, wider walk includes it again alongside
@@ -1183,7 +1197,7 @@ CLASS ltcl_obj_index IMPLEMENTATION.
       msg = 'The second walk''s new object must still be resolved' ).
   ENDMETHOD.
 
-  METHOD filtered_walk_writes_context_hash_as_key.
+  METHOD walk_uses_context_hash_key.
     " AR-2-01 direct write-side retest: two walk_filtered calls under
     " DIFFERENT contexts for the SAME object/path must produce two
     " physically distinct ZAOG_OBJ_PIDX rows, never one overwriting the
@@ -1209,7 +1223,7 @@ CLASS ltcl_obj_index IMPLEMENTATION.
       msg = 'Two different contexts must produce two physically distinct ZAOG_OBJ_PIDX rows' ).
   ENDMETHOD.
 
-  METHOD filtered_walk_no_cross_context_overwrite.
+  METHOD walk_keeps_context_rows.
     " AR-2-01: after a context-B walk, context A's own earlier row must
     " remain fully intact and readable via select_partial_rows_for_filter.
     DATA(lv_commit_sha) = build_commit( iv_filename = 'zprogram.prog.abap' iv_content = '48656C6C6F' ).
@@ -1235,7 +1249,7 @@ CLASS ltcl_obj_index IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = lt_rows_a[ 1 ]-context_hash exp = lv_context_a ).
   ENDMETHOD.
 
-  METHOD retry_purge_removes_all_three_tables.
+  METHOD purge_removes_all_index_tables.
     " AR-1-02/AR-2-01 direct retest: invalidate_commit_index must purge
     " ZAOG_OBJ_INDEX, ZAOG_OBJ_COVER, and ZAOG_OBJ_PIDX together, in one
     " call, for a commit - never leaving orphaned coverage/partial rows
@@ -1283,7 +1297,7 @@ CLASS ltcl_obj_index IMPLEMENTATION.
       msg = 'invalidate_commit_index must purge ZAOG_OBJ_PIDX' ).
   ENDMETHOD.
 
-  METHOD missing_tree_writes_m_row_then_reraises.
+  METHOD missing_tree_writes_m_row.
     " design §4.1/AR-1-07: a missing commit must cause walk_filtered to
     " raise, and best-effort write one 'M' (unresolved_missing_local_data)
     " coverage row per it_filter entry BEFORE re-raising the original
@@ -1319,7 +1333,7 @@ CLASS ltcl_obj_index IMPLEMENTATION.
       msg = 'A best-effort M row must be written for every requested object before the re-raise' ).
   ENDMETHOD.
 
-  METHOD repeat_request_within_backoff_skips_walk.
+  METHOD repeat_backoff_skips_walk.
     " design §4.1/§11 step 3a: a fresh 'M' row must short-circuit
     " ensure_filtered_coverage to an immediate raise, WITHOUT attempting
     " walk_filtered again - proven here by seeding the backoff row against
@@ -1364,7 +1378,7 @@ CLASS ltcl_obj_index IMPLEMENTATION.
             'while the backoff is live' ).
   ENDMETHOD.
 
-  METHOD repeat_request_after_backoff_retries_walk.
+  METHOD repeat_backoff_retries_walk.
     " design §4.1: once the backoff window has elapsed, the exact same
     " request must retry a real walk_filtered and succeed.
     DATA(lv_commit_sha) = build_commit( iv_filename = 'zprogram.prog.abap' iv_content = '48656C6C6F' ).
@@ -1374,7 +1388,9 @@ CLASS ltcl_obj_index IMPLEMENTATION.
     DATA lv_expired TYPE timestampl.
 
     GET TIME STAMP FIELD lv_now.
-    lv_expired = lv_now - ( zcl_abapgit_ortec_obj_cover=>c_missing_data_backoff_seconds + 60 ).
+    lv_expired = cl_abap_tstmp=>subtractsecs(
+      tstmp = lv_now
+      secs  = zcl_abapgit_ortec_obj_cover=>c_missing_data_backoff_seconds + 60 ).
 
     DATA ls_cover TYPE zaog_obj_cover.
     CLEAR ls_cover.
@@ -1397,7 +1413,7 @@ CLASS ltcl_obj_index IMPLEMENTATION.
       msg = 'An expired backoff must allow a real retry walk that resolves the file' ).
   ENDMETHOD.
 
-  METHOD not_present_remote_requires_current_remote_commit.
+  METHOD remote_missing_current_remote.
     " AR-2-02/§13 W8: a zero-match result may only claim the strong
     " RESOLVED_NOT_PRESENT_REMOTE fact when the graph is have-eligible
     " AND iv_current_remote actually equals iv_commit. A mismatched
@@ -1407,9 +1423,10 @@ CLASS ltcl_obj_index IMPLEMENTATION.
     DATA(lo_dot) = zcl_abapgit_dot_abapgit=>build_default( ).
     DATA(lv_context) = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = '$PACK' io_dot = lo_dot ).
 
-    MODIFY zaog_commit_hist FROM VALUE #(
-      repo_key = mc_repo commit_sha1 = lv_commit_sha
-      hist_level = zcl_abapgit_ortec_mat_state=>cs_hist_level-graph_complete ).
+    DATA(ls_modify) = VALUE zaog_commit_hist(
+	  repo_key = mc_repo commit_sha1 = lv_commit_sha
+	  hist_level = zcl_abapgit_ortec_mat_state=>cs_hist_level-graph_complete ).
+    MODIFY zaog_commit_hist FROM @ls_modify.
 
     " Positive control: matching current-remote DOES yield the strong state.
     zcl_abapgit_ortec_obj_index=>walk_filtered(
@@ -1441,23 +1458,24 @@ CLASS ltcl_obj_index IMPLEMENTATION.
             'even though the graph is have-eligible' ).
   ENDMETHOD.
 
-  METHOD not_present_remote_requires_current_remote_supplied.
+  METHOD remote_missing_default_remote.
     " AR-2-02: an omitted/initial iv_current_remote must also yield
     " RESOLVED_NO_FILES, even when the commit is otherwise graph-have-eligible.
     DATA(lv_commit_sha) = build_commit( iv_filename = 'zprogram.prog.abap' iv_content = '48656C6C6F' ).
     DATA(lo_dot) = zcl_abapgit_dot_abapgit=>build_default( ).
     DATA(lv_context) = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = '$PACK' io_dot = lo_dot ).
 
-    MODIFY zaog_commit_hist FROM VALUE #(
-      repo_key = mc_repo commit_sha1 = lv_commit_sha
-      hist_level = zcl_abapgit_ortec_mat_state=>cs_hist_level-graph_complete ).
+    DATA(ls_modify) = VALUE zaog_commit_hist(
+    	  repo_key = mc_repo commit_sha1 = lv_commit_sha
+    	  hist_level = zcl_abapgit_ortec_mat_state=>cs_hist_level-graph_complete ).
+    MODIFY zaog_commit_hist FROM @ls_modify.
 
     zcl_abapgit_ortec_obj_index=>walk_filtered(
       iv_repo_key     = mc_repo iv_commit = lv_commit_sha io_dot = lo_dot iv_devclass = '$PACK'
       it_filter       = VALUE #( ( object = 'PROG' obj_name = 'ZOTHER' ) )
       iv_context_hash = lv_context ).
-      " iv_current_remote intentionally omitted - always initial, as on
-      " the real pull_filtered call path (AR-2-02).
+    " iv_current_remote intentionally omitted - always initial, as on
+    " the real pull_filtered call path (AR-2-02).
 
     SELECT SINGLE resolution_status FROM zaog_obj_cover INTO @DATA(lv_status)
       WHERE repo_key = @mc_repo AND commit_sha1 = @lv_commit_sha
@@ -1483,18 +1501,16 @@ CLASS ltcl_obj_index IMPLEMENTATION.
       IMPORTING ev_commit_sha = lv_commit_sha et_filter = lt_filter ).
 
     DATA(lo_dot) = zcl_abapgit_dot_abapgit=>build_default( ).
-    DATA(lo_filter) = NEW zcl_abapgit_object_filter_obj( it_filter = lt_filter ).
-
-    " First call builds the COMPLETE index (rebuild_index) so the second
-    " call below exercises select_rows_for_filter's own WARM read path.
-    zcl_abapgit_ortec_obj_index=>get_files_for_filter(
-      iv_repo_key   = mc_repo
-      iv_commit     = lv_commit_sha
-      ii_obj_filter = lo_filter
-      io_dot        = lo_dot
-      iv_devclass   = '$PACK' ).
-
     DATA(lv_context) = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = '$PACK' io_dot = lo_dot ).
+
+    " First call builds the COMPLETE index directly via rebuild_index (Slice
+    " 3 would otherwise route an uncovered get_files_for_filter request
+    " through the cheaper walk_filtered path) so the second call below
+    " exercises select_rows_for_filter's own WARM read path.
+    zcl_abapgit_ortec_obj_index=>rebuild_index(
+      iv_repo_key = mc_repo iv_commit = lv_commit_sha io_dot = lo_dot
+      iv_devclass = '$PACK' iv_context_hash = lv_context ).
+
     cl_abap_unit_assert=>assert_true(
       act = zcl_abapgit_ortec_obj_index=>is_index_ready(
         iv_repo_key = mc_repo iv_commit = lv_commit_sha iv_context_hash = lv_context )

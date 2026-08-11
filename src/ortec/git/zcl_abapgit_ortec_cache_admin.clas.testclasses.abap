@@ -107,7 +107,7 @@ CLASS ltcl_cache_admin DEFINITION
       FOR TESTING
       RAISING cx_static_check.
 
-    METHODS clear_repo_then_filtered_read_rewalks
+    METHODS clear_repo_forces_rewalk
       FOR TESTING
       RAISING cx_static_check.
 
@@ -1099,7 +1099,7 @@ CLASS ltcl_cache_admin IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD clear_repo_then_filtered_read_rewalks.
+  METHOD clear_repo_forces_rewalk.
 
     seed_repo( iv_repo_key = c_repo ).
     seed_filter_rows( c_repo ).

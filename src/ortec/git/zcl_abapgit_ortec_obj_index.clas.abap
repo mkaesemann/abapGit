@@ -7,6 +7,9 @@ CLASS zcl_abapgit_ortec_obj_index DEFINITION
   CREATE PRIVATE.
 
   PUBLIC SECTION.
+
+    TYPES ty_index_rows_tt TYPE STANDARD TABLE OF zaog_obj_index WITH DEFAULT KEY.
+
     "! Build/read commit index and return filtered remote files.
     "! The method retries once after automatic index rebuild when stale rows are detected.
     "! @parameter iv_repo_key |
@@ -127,8 +130,6 @@ CLASS zcl_abapgit_ortec_obj_index DEFINITION
     " from an initial, more conservative 5000-row candidate after owner
     " review of measured DB round-trip/array-DML setup cost at 1000 rows.
     CONSTANTS c_index_write_chunk_size TYPE i VALUE 30000.
-
-    TYPES ty_index_rows_tt TYPE STANDARD TABLE OF zaog_obj_index WITH DEFAULT KEY.
 
     TYPES:
       BEGIN OF ty_tree_work,
@@ -516,7 +517,9 @@ CLASS zcl_abapgit_ortec_obj_index IMPLEMENTATION.
       " backed-off/fresh set does NOT take this shortcut (§4.1 explicit
       " scope limit) - falls through to walk_filtered for the full set.
       GET TIME STAMP FIELD lv_now.
-      lv_backoff_cutoff = lv_now - zcl_abapgit_ortec_obj_cover=>c_missing_data_backoff_seconds.
+      lv_backoff_cutoff = cl_abap_tstmp=>subtractsecs(
+        tstmp = lv_now
+        secs  = zcl_abapgit_ortec_obj_cover=>c_missing_data_backoff_seconds ).
 
       lv_all_backed_off = abap_true.
       LOOP AT lt_uncovered ASSIGNING <ls_filter>.
@@ -781,6 +784,7 @@ CLASS zcl_abapgit_ortec_obj_index IMPLEMENTATION.
         ls_row-obj_name    = c_marker_obj_name.
         ls_row-path_hash   = c_marker_path_hash.
         ls_row-idx_status  = c_status_ready.
+        ls_row-context_hash = iv_context_hash.
         MODIFY zaog_obj_index FROM ls_row.
 
         zcl_abapgit_ortec_pack_raw=>release_repo_lock( lv_lock_id ).
@@ -1171,8 +1175,7 @@ CLASS zcl_abapgit_ortec_obj_index IMPLEMENTATION.
       APPEND <ls_filter> TO lt_chunk.
 
       IF lines( lt_chunk ) >= zcl_abapgit_ortec_obj_cover=>c_filter_chunk_size.
-        SELECT repo_key commit_sha1 obj_type obj_name context_hash path_hash
-               file_path file_name blob_sha1 tree_sha1 idx_status
+        SELECT *
           FROM zaog_obj_pidx
           APPENDING TABLE lt_pidx_rows
           FOR ALL ENTRIES IN lt_chunk
@@ -1187,8 +1190,7 @@ CLASS zcl_abapgit_ortec_obj_index IMPLEMENTATION.
     ENDLOOP.
 
     IF lt_chunk IS NOT INITIAL.
-      SELECT repo_key commit_sha1 obj_type obj_name context_hash path_hash
-             file_path file_name blob_sha1 tree_sha1 idx_status
+      SELECT *
         FROM zaog_obj_pidx
         APPENDING TABLE lt_pidx_rows
         FOR ALL ENTRIES IN lt_chunk
@@ -1310,3 +1312,4 @@ CLASS zcl_abapgit_ortec_obj_index IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
+

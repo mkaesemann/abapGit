@@ -32,11 +32,11 @@ CLASS zcl_abapgit_ortec_obj_cover DEFINITION
     " question 1) and is not written by any method in this class.
     CONSTANTS:
       BEGIN OF cs_resolution,
-        found                          TYPE c LENGTH 1 VALUE 'F',
-        resolved_no_files              TYPE c LENGTH 1 VALUE 'N',
-        resolved_not_present_remote    TYPE c LENGTH 1 VALUE 'D',
-        unresolved_missing_local_data  TYPE c LENGTH 1 VALUE 'M',
-        unresolved_ambiguous_mapping   TYPE c LENGTH 1 VALUE 'A',
+        found                         TYPE c LENGTH 1 VALUE 'F',
+        resolved_no_files             TYPE c LENGTH 1 VALUE 'N',
+        resolved_not_present_remote   TYPE c LENGTH 1 VALUE 'D',
+        unresolved_missing_local_data TYPE c LENGTH 1 VALUE 'M',
+        unresolved_ambiguous_mapping  TYPE c LENGTH 1 VALUE 'A',
       END OF cs_resolution.
 
     " Shared by this class' own chunked reads/writes and by
@@ -95,10 +95,10 @@ CLASS zcl_abapgit_ortec_obj_cover DEFINITION
     "! "uncovered", never an error)
     CLASS-METHODS get_coverage
       IMPORTING
-        iv_repo_key      TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
-        iv_commit        TYPE zif_abapgit_git_definitions=>ty_sha1
-        iv_context_hash  TYPE zif_abapgit_git_definitions=>ty_sha1
-        it_filter        TYPE zif_abapgit_definitions=>ty_tadir_tt
+        iv_repo_key        TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
+        iv_commit          TYPE zif_abapgit_git_definitions=>ty_sha1
+        iv_context_hash    TYPE zif_abapgit_git_definitions=>ty_sha1
+        it_filter          TYPE zif_abapgit_definitions=>ty_tadir_tt
       RETURNING
         VALUE(rt_coverage) TYPE ty_coverage_tt.
 
@@ -168,7 +168,9 @@ CLASS zcl_abapgit_ortec_obj_cover IMPLEMENTATION.
     " individual getters.
     lv_dot_xstr = io_dot->serialize( ).
 
-    rv_hash = zcl_abapgit_hash=>sha1_raw( lv_prefix_xstr && lv_dot_xstr ).
+    DATA(hash) = VALUE xstring( ).
+    CONCATENATE lv_prefix_xstr lv_dot_xstr INTO hash IN BYTE MODE.
+    rv_hash = zcl_abapgit_hash=>sha1_raw( hash ).
   ENDMETHOD.
 
 

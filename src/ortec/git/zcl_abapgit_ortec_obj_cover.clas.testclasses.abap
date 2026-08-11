@@ -10,15 +10,15 @@ CLASS ltcl_obj_cover DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
 
     METHODS build_coverage
       IMPORTING
-        iv_obj_name       TYPE tadir-obj_name
-        iv_status         TYPE zaog_obj_cover-resolution_status DEFAULT zcl_abapgit_ortec_obj_cover=>cs_resolution-found
+        iv_obj_name        TYPE tadir-obj_name
+        iv_status          TYPE zaog_obj_cover-resolution_status DEFAULT zcl_abapgit_ortec_obj_cover=>cs_resolution-found
       RETURNING
         VALUE(rs_coverage) TYPE zcl_abapgit_ortec_obj_cover=>ty_coverage.
 
-    METHODS context_hash_stable_for_same_input FOR TESTING RAISING cx_static_check.
-    METHODS context_hash_changes_on_devclass FOR TESTING RAISING cx_static_check.
-    METHODS context_hash_changes_on_dot_change FOR TESTING RAISING cx_static_check.
-    METHODS context_hash_embeds_algo_version FOR TESTING RAISING cx_static_check.
+    METHODS ctx_hash_stable_for_same_input FOR TESTING RAISING cx_static_check.
+    METHODS ctx_hash_changes_on_devclass FOR TESTING RAISING cx_static_check.
+    METHODS ctx_hash_changes_on_dot_change FOR TESTING RAISING cx_static_check.
+    METHODS ctx_hash_embeds_algo_version FOR TESTING RAISING cx_static_check.
 
     METHODS coverage_round_trip FOR TESTING RAISING cx_static_check.
     METHODS coverage_context_mismatch_excl FOR TESTING RAISING cx_static_check.
@@ -46,7 +46,7 @@ CLASS ltcl_obj_cover IMPLEMENTATION.
     rs_coverage-resolution_status = iv_status.
   ENDMETHOD.
 
-  METHOD context_hash_stable_for_same_input.
+  METHOD ctx_hash_stable_for_same_input.
     DATA(lo_dot) = zcl_abapgit_dot_abapgit=>build_default( ).
 
     DATA(lv_hash_1) = zcl_abapgit_ortec_obj_cover=>compute_context_hash(
@@ -60,7 +60,7 @@ CLASS ltcl_obj_cover IMPLEMENTATION.
       msg = 'The computed hash must not be blank' ).
   ENDMETHOD.
 
-  METHOD context_hash_changes_on_devclass.
+  METHOD ctx_hash_changes_on_devclass.
     DATA(lo_dot) = zcl_abapgit_dot_abapgit=>build_default( ).
 
     DATA(lv_hash_a) = zcl_abapgit_ortec_obj_cover=>compute_context_hash(
@@ -72,7 +72,7 @@ CLASS ltcl_obj_cover IMPLEMENTATION.
       msg = 'A different devclass must change the context hash' ).
   ENDMETHOD.
 
-  METHOD context_hash_changes_on_dot_change.
+  METHOD ctx_hash_changes_on_dot_change.
     DATA(lo_dot_a) = zcl_abapgit_dot_abapgit=>build_default( ).
     DATA(ls_dot_data) = lo_dot_a->get_data( ).
     ls_dot_data-starting_folder = '/other/'.
@@ -87,7 +87,7 @@ CLASS ltcl_obj_cover IMPLEMENTATION.
       msg = 'A changed .abapgit config (starting_folder) must change the context hash' ).
   ENDMETHOD.
 
-  METHOD context_hash_embeds_algo_version.
+  METHOD ctx_hash_embeds_algo_version.
     " c_algo_version is a private compile-time constant - it cannot be
     " "bumped" at test runtime without a production source change, so this
     " test does not literally exercise a version bump (see design doc §3.1
@@ -103,7 +103,9 @@ CLASS ltcl_obj_cover IMPLEMENTATION.
       iv_devclass = '$PACK' io_dot = lo_dot ).
 
     DATA(lv_prefix_xstr) = zcl_abapgit_convert=>string_to_xstring_utf8( |0001$PACK| ).
-    DATA(lv_expected) = zcl_abapgit_hash=>sha1_raw( lv_prefix_xstr && lo_dot->serialize( ) ).
+    DATA(sha) = lo_dot->serialize( ).
+    CONCATENATE lv_prefix_xstr sha INTO sha IN BYTE MODE.
+    DATA(lv_expected) = zcl_abapgit_hash=>sha1_raw( sha ).
 
     cl_abap_unit_assert=>assert_equals( act = lv_actual exp = lv_expected
       msg = 'The documented algo-version literal (0001) must be embedded as a fixed prefix' ).
@@ -191,7 +193,7 @@ CLASS ltcl_obj_cover IMPLEMENTATION.
 
     DO 5001 TIMES.
       DATA(lv_name) = |ZBULK{ sy-index WIDTH = 6 ALIGN = RIGHT PAD = '0' }|.
-      APPEND build_coverage( iv_obj_name = lv_name ) TO lt_results.
+      APPEND build_coverage( iv_obj_name = CONV #( lv_name ) ) TO lt_results.
       APPEND VALUE #( object = 'PROG' obj_name = lv_name ) TO lt_filter.
     ENDDO.
 
@@ -215,7 +217,7 @@ CLASS ltcl_obj_cover IMPLEMENTATION.
 
     DO 5001 TIMES.
       DATA(lv_name) = |ZBULK{ sy-index WIDTH = 6 ALIGN = RIGHT PAD = '0' }|.
-      APPEND build_coverage( iv_obj_name = lv_name ) TO lt_results.
+      APPEND build_coverage( iv_obj_name = CONV #( lv_name ) ) TO lt_results.
       APPEND VALUE #( object = 'PROG' obj_name = lv_name ) TO lt_filter.
     ENDDO.
 
