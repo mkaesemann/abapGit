@@ -79,6 +79,7 @@ CLASS ltcl_obj_index DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
     METHODS repeat_request_after_backoff_retries_walk FOR TESTING RAISING cx_static_check.
     METHODS not_present_remote_requires_current_remote_commit FOR TESTING RAISING cx_static_check.
     METHODS not_present_remote_requires_current_remote_supplied FOR TESTING RAISING cx_static_check.
+    METHODS select_rows_chunk_boundary FOR TESTING RAISING cx_static_check.
 
     METHODS build_commit_two_objects
       RETURNING VALUE(rv_commit_sha) TYPE zif_abapgit_git_definitions=>ty_sha1
@@ -1465,5 +1466,48 @@ CLASS ltcl_obj_index IMPLEMENTATION.
       act = lv_status exp = zcl_abapgit_ortec_obj_cover=>cs_resolution-resolved_no_files
       msg = 'An omitted iv_current_remote must cap the result at RESOLVED_NO_FILES regardless ' &&
             'of graph completeness' ).
+  ENDMETHOD.
+
+  METHOD select_rows_chunk_boundary.
+    " PA-001: select_rows_for_filter must chunk it_filter at
+    " zcl_abapgit_ortec_obj_cover=>c_filter_chunk_size (5000), not issue one
+    " unbounded FOR ALL ENTRIES - proves no row is lost/duplicated across
+    " the chunk boundary on the WARM (is_index_ready = true) COMPLETE-mode
+    " read path.
+    CONSTANTS lc_file_count TYPE i VALUE 5100.
+    DATA lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lt_filter TYPE zif_abapgit_definitions=>ty_tadir_tt.
+
+    build_bulk_commit(
+      EXPORTING iv_file_count = lc_file_count
+      IMPORTING ev_commit_sha = lv_commit_sha et_filter = lt_filter ).
+
+    DATA(lo_dot) = zcl_abapgit_dot_abapgit=>build_default( ).
+    DATA(lo_filter) = NEW zcl_abapgit_object_filter_obj( it_filter = lt_filter ).
+
+    " First call builds the COMPLETE index (rebuild_index) so the second
+    " call below exercises select_rows_for_filter's own WARM read path.
+    zcl_abapgit_ortec_obj_index=>get_files_for_filter(
+      iv_repo_key   = mc_repo
+      iv_commit     = lv_commit_sha
+      ii_obj_filter = lo_filter
+      io_dot        = lo_dot
+      iv_devclass   = '$PACK' ).
+
+    DATA(lv_context) = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = '$PACK' io_dot = lo_dot ).
+    cl_abap_unit_assert=>assert_true(
+      act = zcl_abapgit_ortec_obj_index=>is_index_ready(
+        iv_repo_key = mc_repo iv_commit = lv_commit_sha iv_context_hash = lv_context )
+      msg = 'Sanity: the index must be COMPLETE-ready before exercising the warm chunked read' ).
+
+    DATA(lt_rows) = zcl_abapgit_ortec_obj_index=>select_rows_for_filter(
+      iv_repo_key     = mc_repo
+      iv_commit       = lv_commit_sha
+      it_filter       = lt_filter
+      iv_context_hash = lv_context ).
+
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_rows ) exp = lc_file_count
+      msg = 'All rows must be returned across the c_filter_chunk_size boundary on the warm ' &&
+            'COMPLETE-mode read path, not just the first chunk' ).
   ENDMETHOD.
 ENDCLASS.

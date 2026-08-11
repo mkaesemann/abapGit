@@ -831,6 +831,7 @@ CLASS zcl_abapgit_ortec_obj_index IMPLEMENTATION.
       END OF ty_match_key,
       ty_match_set TYPE HASHED TABLE OF ty_match_key WITH UNIQUE KEY obj_type obj_name.
     DATA lt_matched TYPE ty_match_set.
+    DATA lt_filter_set TYPE ty_match_set.
 
     DATA lv_have_eligible TYPE abap_bool.
     DATA lv_hist_level TYPE zcl_abapgit_ortec_mat_state=>ty_hist_level.
@@ -842,6 +843,11 @@ CLASS zcl_abapgit_ortec_obj_index IMPLEMENTATION.
     FIELD-SYMBOLS <ls_obj>  TYPE zif_abapgit_definitions=>ty_object.
     FIELD-SYMBOLS <ls_node> TYPE zcl_abapgit_git_pack=>ty_node.
     FIELD-SYMBOLS <ls_filter> TYPE zif_abapgit_definitions=>ty_tadir.
+
+    LOOP AT it_filter ASSIGNING <ls_filter>.
+      INSERT VALUE ty_match_key( obj_type = <ls_filter>-object obj_name = <ls_filter>-obj_name )
+        INTO TABLE lt_filter_set.
+    ENDLOOP.
 
     lv_lock_id = zcl_abapgit_ortec_pack_raw=>acquire_repo_lock( iv_repo_key = iv_repo_key ).
 
@@ -953,8 +959,11 @@ CLASS zcl_abapgit_ortec_obj_index IMPLEMENTATION.
                   ENDIF.
 
                   " Bound ZAOG_OBJ_PIDX writes to the caller's own K
-                  " objects, never the full F (design §11 step 4).
-                  IF NOT line_exists( it_filter[ object = ls_item-obj_type obj_name = ls_item-obj_name ] ).
+                  " objects, never the full F (design §11 step 4). O(1)
+                  " hashed lookup (perf fix PS-001), not a linear it_filter scan.
+                  READ TABLE lt_filter_set TRANSPORTING NO FIELDS
+                    WITH TABLE KEY obj_type = ls_item-obj_type obj_name = ls_item-obj_name.
+                  IF sy-subrc <> 0.
                     CONTINUE.
                   ENDIF.
 
@@ -1093,18 +1102,46 @@ CLASS zcl_abapgit_ortec_obj_index IMPLEMENTATION.
 
 
   METHOD select_rows_for_filter.
+    " PA-001 fix: chunked at c_filter_chunk_size (AR-1-04) and predicated
+    " on context_hash (W2 work order) - it_filter is caller-supplied and
+    " can approach F at real Stage-by-Transport scale, exactly like
+    " select_partial_rows_for_filter/get_coverage.
+    DATA lt_chunk TYPE zif_abapgit_definitions=>ty_tadir_tt.
+
+    FIELD-SYMBOLS <ls_filter> TYPE zif_abapgit_definitions=>ty_tadir.
+
     IF it_filter IS INITIAL.
       RETURN.
     ENDIF.
 
-    SELECT * FROM zaog_obj_index
-      INTO TABLE rt_rows
-      FOR ALL ENTRIES IN it_filter
-      WHERE repo_key    = iv_repo_key
-        AND commit_sha1 = iv_commit
-        AND idx_status  = c_status_ready
-        AND obj_type    = it_filter-object
-        AND obj_name    = it_filter-obj_name.
+    LOOP AT it_filter ASSIGNING <ls_filter>.
+      APPEND <ls_filter> TO lt_chunk.
+
+      IF lines( lt_chunk ) >= zcl_abapgit_ortec_obj_cover=>c_filter_chunk_size.
+        SELECT * FROM zaog_obj_index
+          APPENDING TABLE rt_rows
+          FOR ALL ENTRIES IN lt_chunk
+          WHERE repo_key     = iv_repo_key
+            AND commit_sha1  = iv_commit
+            AND idx_status   = c_status_ready
+            AND context_hash = iv_context_hash
+            AND obj_type     = lt_chunk-object
+            AND obj_name     = lt_chunk-obj_name.
+        CLEAR lt_chunk.
+      ENDIF.
+    ENDLOOP.
+
+    IF lt_chunk IS NOT INITIAL.
+      SELECT * FROM zaog_obj_index
+        APPENDING TABLE rt_rows
+        FOR ALL ENTRIES IN lt_chunk
+        WHERE repo_key     = iv_repo_key
+          AND commit_sha1  = iv_commit
+          AND idx_status   = c_status_ready
+          AND context_hash = iv_context_hash
+          AND obj_type     = lt_chunk-object
+          AND obj_name     = lt_chunk-obj_name.
+    ENDIF.
 
     DELETE rt_rows WHERE obj_type = c_marker_obj_type
                      AND obj_name = c_marker_obj_name.
