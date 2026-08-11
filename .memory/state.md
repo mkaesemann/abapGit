@@ -47,7 +47,75 @@ CHECKPOINT_COMMITS=f7be8296,3e1e804a,9603813e,bdacce79,b239dd2a,80641c3b,d0d7f3e
 PUSHED=NO
 IT8_HANDOFF=.memory/handoffs/obj-store-partial-index-it8.md
 GENERAL_HANDOFF=.memory/handoffs/obj-store-partial-index.md
-NEXT=owner executes IT8 handoff activation/validation plan; do not mark SAP_VALIDATED_COMPLETE before that
+IT8_ABAP_UNIT_VALIDATION=PASS (2026-08-11, live IT8 edits, NOT YET IN
+  CHECKPOINT_COMMITS/git - see IT8_LIVE_FIXES below). 83/83 across
+  ZCL_ABAPGIT_ORTEC_OBJ_INDEX (26), ZCL_ABAPGIT_ORTEC_CACHE_ADMIN (16),
+  ZCL_ABAPGIT_ORTEC_OBJ_COVER (10), ZCL_ABAPGIT_ORTEC_OBJ_STORE (31
+  regression guard). ATC DEFAULT variant: 0 errors on both changed
+  objects (OBJ_INDEX 17 info; CACHE_ADMIN 8 warn/10 info, all pre-existing
+  "no WHERE condition" on get_overview's intentional full-scan admin
+  aggregation + missing text-element info, unrelated to this pass).
+IT8_LIVE_FIXES=two real production bugs found+fixed live in IT8 during
+  this pass, plus one test-code defect and ten stale pre-Slice-3 test
+  expectations corrected (CONFIRMED_CURRENT, evidence = live IT8 test
+  runs+ATC, this session):
+  (1) CLAS ZCL_ABAPGIT_ORTEC_OBJ_INDEX method REBUILD_INDEX: the
+      $IDX/__READY__ completion-marker row omitted
+      `ls_row-context_hash = iv_context_hash` (every other row in the
+      write loop sets it, the marker did not) - is_index_ready could
+      never match a freshly-built COMPLETE index under any real context.
+      Design doc already mandated this ("stamps it onto every
+      ZAOG_OBJ_INDEX row it writes, including the $IDX/__READY__ marker
+      row") - pure implementation-vs-design gap, fixed to match the
+      documented design, no design change.
+  (2) CLAS ZCL_ABAPGIT_ORTEC_OBJ_INDEX method SELECT_PARTIAL_ROWS_FOR_FILTER:
+      both SELECT statements used an explicit 11-column list into
+      `lt_pidx_rows` typed as the FULL 12-component ZAOG_OBJ_PIDX
+      structure (12th component = implicit MANDT/client) - a classic
+      ABAP positional-assignment mismatch that silently shifted every
+      field by one slot (CONTEXT_HASH received PATH_HASH's value,
+      FILE_NAME received BLOB_SHA1's value, IDX_STATUS was left blank).
+      Root-caused via a live IT8 diagnostic (temporary inline FOR ALL
+      ENTRIES replica + COMMIT WORK + direct SQL inspection), not
+      guessed. Fixed to `SELECT *` (matching the already-correct sibling
+      SELECT_ROWS_FOR_FILTER pattern). This bug had TWO production
+      impacts, not just failing tests: silently-empty file lists for
+      warm/covered FILTERED-mode reads that happened to shift a blank
+      field into FILE_NAME/BLOB_SHA1's slot, and - for real walked rows -
+      an accidental CORRUPT_OR_INCOMPLETE exception that silently forced
+      an expensive COMPLETE-mode rebuild_index fallback on every miss,
+      defeating OBJ_PERF_FINAL's own core write-volume goal without ever
+      surfacing as a visible error.
+  (3) Test-only: ZCL_ABAPGIT_ORTEC_CACHE_ADMIN testclasses method name
+      `clear_repo_then_filtered_read_rewalks` (37 chars) exceeded ABAP's
+      30-char limit, silently blocking the ENTIRE testclasses include
+      from compiling ("no test classes found", 0/16 run). Renamed to
+      `clear_repo_forces_rewalk`.
+  (4) Test-only, 10 methods (INDEX_EMPTY_NO_MATCH, MARKER_REQUIRED_FOR_READY,
+      INDEX_NO_CROSS_COMMIT_LEAK, READY_REJECTS_OTHER_COMMIT,
+      READY_ACCEPTS_EXACT_COMMIT, INDEX_CHUNK_BOUNDARY_OK,
+      INDEX_BULK_ROWS_PRESERVED, COV_REBUILD_WHEN_INCOMPLETE,
+      SELECT_ROWS_CHUNK_BOUNDARY, READY_REJECTS_OTHER_CONTEXT): each
+      asserted GET_FILES_FOR_FILTER always drives a COMPLETE-mode
+      REBUILD_INDEX (pre-Slice-3 assumption). Fixing bug (2) above
+      exposed that this assumption is now genuinely false whenever the
+      filter is uncovered - ENSURE_FILTERED_COVERAGE correctly prefers
+      the cheaper WALK_FILTERED path per the already-documented Slice 3
+      design ("FILTERED-mode coverage never becomes COMPLETE-mode
+      readiness"), so these tests were only ever passing "by accident"
+      via bug (2)'s own exception-triggered fallback. Tests whose actual
+      purpose is COMPLETE-mode-specific behavior now call REBUILD_INDEX/
+      ENSURE_INDEX directly (LOCAL FRIENDS-accessible); COV_REBUILD_WHEN_
+      INCOMPLETE's assertion was corrected to expect IS_INDEX_READY=FALSE,
+      matching the documented invariant. No design change - tests brought
+      into alignment with the already-approved Slice 3 design.
+NEXT=(a) sync IT8_LIVE_FIXES back into the local git working tree/commits
+  (git currently only has CHECKPOINT_COMMITS through d3f0679d, which does
+  NOT include these 4 live IT8 fixes yet); (b) owner still needs to
+  execute the remaining IT8 handoff items this session did not cover -
+  functional/output-parity scenarios 1-9 and the K=1/K=100-250 owner
+  performance measurements in IT8_HANDOFF; do not mark
+  SAP_VALIDATED_COMPLETE before both (a) and (b)
 ```
 The serialization closeout (SER-SLICE-4/5, SER-FINAL-WAPA-FUGR, etc., listed in the header block
 above) remains `SAP_VALIDATED_COMPLETE` and is not affected by this topic. Full design/adversarial/
