@@ -1,3 +1,34 @@
+## Slice 3 (IMPL-C) gap-fill (orchestrator direct fix)
+
+The `OBJ-PERF-IMPL-C` subagent call again returned "Agent completed with no output" (4th
+occurrence). Verification found the productive code
+(`invalidate_commit_index`, `walk_filtered`, and `ensure_filtered_coverage`'s updated
+incomplete-coverage/backoff branch, all in `zcl_abapgit_ortec_obj_index.clas.abap`) was
+implemented **completely and correctly** per design §11 step 4, §4.1, §5, §13 W4/W5/W6/W8 - read
+in full by the orchestrator and cross-checked against the design's exact narrative, including the
+subtle "full it_filter (not just lt_uncovered) passed to walk_filtered" detail and the best-effort
+'M'-row write wrapped in its own TRY/CATCH so it can never suppress the original exception. Zero
+production-code defects found this round.
+
+However, the `.testclasses.abap` file was not touched at all - all 11 design-mandated Slice 3
+tests were missing. All 11 written directly by the orchestrator:
+`filtered_walk_writes_only_requested_objects`, `filtered_walk_never_sets_ready_marker`,
+`filtered_walk_idempotent_on_overlap`, `filtered_walk_writes_context_hash_as_key`,
+`filtered_walk_no_cross_context_overwrite`, `retry_purge_removes_all_three_tables`,
+`missing_tree_writes_m_row_then_reraises`, `repeat_request_within_backoff_skips_walk`,
+`repeat_request_after_backoff_retries_walk`, `not_present_remote_requires_current_remote_commit`
+(includes both a positive control - matching current-remote yields the strong state - and the
+negative control the name describes), `not_present_remote_requires_current_remote_supplied`.
+Added `CLASS zcl_abapgit_ortec_obj_index DEFINITION LOCAL FRIENDS ltcl_obj_index.` (same pattern
+already used by `ltcl_obj_cover`) since `walk_filtered`/`invalidate_commit_index` are private and
+several tests need to call them directly. Added a `build_commit_two_objects` fixture helper for
+tests needing two filter-relevant objects in one tree. Extended `setup`/`teardown` to also purge
+`zaog_commit_hist` test rows (seeded by the two `not_present_remote_*` tests).
+
+Verified via `get_errors` (0 errors) and the `Compare-Object` declared-vs-implemented self-check
+(one harmless false-positive: "for" matched inside a comment "PRIVATE class methods for direct
+testing", not a real gap).
+
 ## Slice 2 (IMPL-B) gap-fill (orchestrator direct fix)
 
 The `OBJ-PERF-IMPL-B` subagent call again returned "Agent completed with no output" (third
