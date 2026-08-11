@@ -1,3 +1,22 @@
+## Slice 2 (IMPL-B) gap-fill (orchestrator direct fix)
+
+The `OBJ-PERF-IMPL-B` subagent call again returned "Agent completed with no output" (third
+occurrence of this exact failure mode in this program). Verification found the real changes
+(`ensure_filtered_coverage` on `ZCL_ABAPGIT_ORTEC_OBJ_INDEX`, its wiring into `get_files_for_filter`,
+and `zcl_abapgit_ortec_filter_walk=>get_remote_files_for_stage`'s `iv_current_remote` computation)
+were all correctly implemented and match design §11 steps 1-3. However, 2 of the 4 requested new
+test methods were left as bare declarations with no body:
+`warm_coverage_skips_rewalk`, `incomplete_coverage_falls_through_to_rebuild`. Both written directly
+by the orchestrator. `warm_coverage_skips_rewalk` seeds a `FOUND` `ZAOG_OBJ_COVER` row + matching
+`ZAOG_OBJ_PIDX` row (no commit/tree object in `ZAOG_OBJ_STORE` at all) and proves the file is still
+returned with no exception (a real rebuild attempt against a nonexistent commit would raise) and
+that `is_index_ready` stays false (FILTERED coverage never becomes COMPLETE readiness).
+`incomplete_coverage_falls_through_to_rebuild` proves the opposite: with no coverage row at all, the
+existing COMPLETE-mode `ensure_index`/`rebuild_index` path still runs unchanged and writes its
+usual `$IDX/__READY__` marker. Verified via `get_errors` (0 errors) and a `Compare-Object` of every
+declared vs. implemented `METHOD` name across all touched test files this slice (see repo memory
+note on this recurring failure mode) - no further gaps found.
+
 ## Slice 1/1b/1d gap-fill (orchestrator direct fix, post IMPL-A/IMPL-A2)
 The `OBJ-PERF-IMPL-A`/`OBJ-PERF-IMPL-A2` senior-implementation subagent calls both returned
 "Agent completed with no output" despite having made real, mostly-correct changes to
