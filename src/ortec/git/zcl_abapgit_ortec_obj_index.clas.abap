@@ -68,16 +68,16 @@ CLASS zcl_abapgit_ortec_obj_index DEFINITION
       RETURNING
         VALUE(rv_yes) TYPE abap_bool.
 
-    "! FILTERED-mode fast-path orchestrator (design doc §11 step 3,
-    "! sub-steps 1-2 only - this slice). If the COMPLETE-mode index is
-    "! already ready under this context, reuses it. Otherwise consults
-    "! ZAOG_OBJ_COVER: when every requested object already has a terminal
-    "! coverage fact (FOUND/RESOLVED_NO_FILES/RESOLVED_NOT_PRESENT_REMOTE),
-    "! answers from ZAOG_OBJ_PIDX with zero tree walk. Any object still
-    "! uncovered (no row, or only a non-terminal UNRESOLVED_* row) falls
-    "! through to the existing ensure_index/select_rows_for_filter
-    "! COMPLETE-mode path unchanged - walk_filtered does not exist yet
-    "! (Slice 3), so this slice never narrows cold-walk write volume.
+    "! FILTERED-mode fast-path orchestrator (design doc §11 step 3). If
+    "! the COMPLETE-mode index is already ready under this context, reuses
+    "! it. Otherwise consults ZAOG_OBJ_COVER: when every requested object
+    "! already has a terminal coverage fact (FOUND/RESOLVED_NO_FILES/
+    "! RESOLVED_NOT_PRESENT_REMOTE), answers from ZAOG_OBJ_PIDX with zero
+    "! tree walk. Any object still uncovered (no row, or only a
+    "! non-terminal UNRESOLVED_* row) resolves via walk_filtered, unless
+    "! every uncovered object is within the missing-data backoff window
+    "! (design doc §4.1), in which case the same exception a real walk
+    "! attempt would have raised is raised directly, without walking.
     "! @parameter iv_repo_key |
     "! ORTEC repository key
     "! @parameter iv_commit |
@@ -91,13 +91,14 @@ CLASS zcl_abapgit_ortec_obj_index DEFINITION
     "! @parameter iv_context_hash |
     "! Resolution context identity hash (zcl_abapgit_ortec_obj_cover=>compute_context_hash)
     "! @parameter iv_current_remote |
-    "! Best-effort current remote tip SHA1. Not yet consulted by this
-    "! slice (threaded through for the Slice 3/4 walk_filtered gate).
+    "! Best-effort current remote tip SHA1, threaded through to
+    "! walk_filtered's RESOLVED_NOT_PRESENT_REMOTE gate (design doc §11.4).
     "! @parameter rt_rows |
     "! Filtered index rows (identical shape whether sourced from
     "! ZAOG_OBJ_INDEX, ZAOG_OBJ_PIDX, or a fresh COMPLETE-mode rebuild)
     "! @raising zcx_abapgit_exception |
-    "! Propagated from a COMPLETE-mode rebuild fallback
+    "! Propagated from a COMPLETE-mode rebuild fallback, a FILTERED-mode
+    "! walk failure, or the missing-data backoff short-circuit
     CLASS-METHODS ensure_filtered_coverage
       IMPORTING
         iv_repo_key       TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
@@ -206,6 +207,45 @@ CLASS zcl_abapgit_ortec_obj_index DEFINITION
         VALUE(rt_files) TYPE zif_abapgit_git_definitions=>ty_files_tt
       RAISING
         zcx_abapgit_exception.
+
+    "! Atomic cross-table invalidation for one (repo_key, commit) - purges
+    "! ZAOG_OBJ_INDEX, ZAOG_OBJ_COVER, and ZAOG_OBJ_PIDX rows for that
+    "! commit, across every context (context-blind by design, design doc
+    "! §5/§13 W4, AR-1-02/AR-2-01). No RAISING - a plain DELETE cannot
+    "! itself fail under normal DB operation. No COMMIT WORK - the
+    "! caller's own LUW still owns atomicity/rollback.
+    CLASS-METHODS invalidate_commit_index
+      IMPORTING
+        iv_repo_key TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
+        iv_commit   TYPE zif_abapgit_git_definitions=>ty_sha1.
+
+    "! FILTERED-mode demand-driven walk (design doc §11 step 4, §13
+    "! W5/W6). Acquires the same repo lock as rebuild_index, performs the
+    "! identical commit->tree BFS, but appends a row to the write buffer
+    "! only for objects present in it_filter, writing exclusively to
+    "! ZAOG_OBJ_PIDX (never ZAOG_OBJ_INDEX, never the COMPLETE-mode
+    "! readiness marker). After a successful walk, writes one coverage
+    "! fact per it_filter entry (FOUND/RESOLVED_NO_FILES/
+    "! RESOLVED_NOT_PRESENT_REMOTE). On a missing-commit/tree failure,
+    "! best-effort writes one UNRESOLVED_MISSING_LOCAL_DATA ('M') row per
+    "! it_filter entry before re-raising the original exception unchanged
+    "! (design doc §4.1/§6 trigger 2, AR-1-07).
+    "! @parameter iv_current_remote |
+    "! Best-effort current remote tip SHA1. Required (together with
+    "! is_graph_have_eligible) before a zero-match result may be recorded
+    "! as the strong RESOLVED_NOT_PRESENT_REMOTE fact (design doc §11.4,
+    "! §13 W8, AR-2-02) - otherwise the weaker RESOLVED_NO_FILES is used.
+    CLASS-METHODS walk_filtered
+      IMPORTING
+        iv_repo_key       TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
+        iv_commit         TYPE zif_abapgit_git_definitions=>ty_sha1
+        io_dot            TYPE REF TO zcl_abapgit_dot_abapgit
+        iv_devclass       TYPE devclass
+        it_filter         TYPE zif_abapgit_definitions=>ty_tadir_tt
+        iv_context_hash   TYPE zif_abapgit_git_definitions=>ty_sha1
+        iv_current_remote TYPE zif_abapgit_git_definitions=>ty_sha1 OPTIONAL
+      RAISING
+        zcx_abapgit_exception.
 ENDCLASS.
 
 
@@ -276,9 +316,9 @@ CLASS zcl_abapgit_ortec_obj_index IMPLEMENTATION.
           iv_commit   = iv_commit ).
       CATCH zcx_abapgit_exception.
         " Index rows can become stale after partial cleanups. Rebuild once and retry.
-        DELETE FROM zaog_obj_index
-          WHERE repo_key    = iv_repo_key
-            AND commit_sha1 = iv_commit.
+        invalidate_commit_index(
+          iv_repo_key = iv_repo_key
+          iv_commit   = iv_commit ).
 
         ensure_index(
           iv_repo_key     = iv_repo_key
@@ -377,20 +417,42 @@ CLASS zcl_abapgit_ortec_obj_index IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD invalidate_commit_index.
+    " Context-blind by design (§5, §13 W4) - a commit-scoped invalidation
+    " must purge every context's rows, not just one caller's own current
+    " context, so a superseded context can never resurface after this
+    " purge either. Same LUW as the caller, no COMMIT WORK here.
+    DELETE FROM zaog_obj_index
+      WHERE repo_key    = iv_repo_key
+        AND commit_sha1 = iv_commit.
+    DELETE FROM zaog_obj_cover
+      WHERE repo_key    = iv_repo_key
+        AND commit_sha1 = iv_commit.
+    DELETE FROM zaog_obj_pidx
+      WHERE repo_key    = iv_repo_key
+        AND commit_sha1 = iv_commit.
+  ENDMETHOD.
+
+
   METHOD ensure_filtered_coverage.
-    " design doc §11 step 3, sub-steps 1-2 only (Slice 2). walk_filtered
-    " does not exist yet (Slice 3), so an incomplete coverage set always
-    " falls through to the existing COMPLETE-mode path unchanged - this
-    " slice adds the warm/coverage-complete fast path only.
+    " design doc §11 step 3 (Slice 3): sub-steps 1-2 (warm-complete/
+    " warm-coverage fast paths) plus 3a (backoff short-circuit) and 4/5
+    " (walk_filtered wiring) - an incomplete, non-backed-off coverage set
+    " now resolves via the FILTERED-mode walk_filtered/ZAOG_OBJ_PIDX path
+    " instead of forcing a COMPLETE-mode rebuild.
     DATA lt_coverage TYPE zcl_abapgit_ortec_obj_cover=>ty_coverage_tt.
     DATA lt_found_filter TYPE zif_abapgit_definitions=>ty_tadir_tt.
-    DATA lv_all_covered TYPE abap_bool.
+    DATA lt_uncovered TYPE zif_abapgit_definitions=>ty_tadir_tt.
+    DATA lv_all_backed_off TYPE abap_bool.
+    DATA lv_now TYPE timestampl.
+    DATA lv_backoff_cutoff TYPE timestampl.
 
     TYPES:
       BEGIN OF ty_cov_lookup,
         obj_type          TYPE zaog_obj_cover-obj_type,
         obj_name          TYPE zaog_obj_cover-obj_name,
         resolution_status TYPE zaog_obj_cover-resolution_status,
+        resolved_at       TYPE zaog_obj_cover-resolved_at,
       END OF ty_cov_lookup.
     DATA lt_cov_lookup TYPE HASHED TABLE OF ty_cov_lookup WITH UNIQUE KEY obj_type obj_name.
     DATA ls_cov_lookup TYPE ty_cov_lookup.
@@ -426,10 +488,12 @@ CLASS zcl_abapgit_ortec_obj_index IMPLEMENTATION.
       ls_cov_lookup-obj_type          = <ls_coverage>-obj_type.
       ls_cov_lookup-obj_name          = <ls_coverage>-obj_name.
       ls_cov_lookup-resolution_status = <ls_coverage>-resolution_status.
+      ls_cov_lookup-resolved_at       = <ls_coverage>-resolved_at.
       INSERT ls_cov_lookup INTO TABLE lt_cov_lookup.
     ENDLOOP.
 
-    lv_all_covered = abap_true.
+    " Step 3: partition it_filter into lt_uncovered (no row at all, or
+    " only a non-terminal UNRESOLVED_* row) vs. the covered remainder.
     LOOP AT it_filter ASSIGNING <ls_filter>.
       READ TABLE lt_cov_lookup ASSIGNING <ls_cov_lookup>
         WITH TABLE KEY obj_type = <ls_filter>-object
@@ -438,31 +502,64 @@ CLASS zcl_abapgit_ortec_obj_index IMPLEMENTATION.
           OR ( <ls_cov_lookup>-resolution_status <> zcl_abapgit_ortec_obj_cover=>cs_resolution-found
            AND <ls_cov_lookup>-resolution_status <> zcl_abapgit_ortec_obj_cover=>cs_resolution-resolved_no_files
            AND <ls_cov_lookup>-resolution_status <> zcl_abapgit_ortec_obj_cover=>cs_resolution-resolved_not_present_remote ).
-        " No row at all, or only a non-terminal UNRESOLVED_* row (M/A) -
-        " not coverage-complete. walk_filtered would resolve this (Slice
-        " 3); until then, fall through below.
-        lv_all_covered = abap_false.
-        EXIT.
+        APPEND <ls_filter> TO lt_uncovered.
       ENDIF.
     ENDLOOP.
 
-    IF lv_all_covered = abap_false.
-      " Coverage incomplete and walk_filtered does not exist yet - fall
-      " through to the existing, unchanged COMPLETE-mode path. This slice
-      " must NOT change cold-walk write volume (design's own explicit
-      " note for Slice 2).
-      ensure_index(
-        iv_repo_key     = iv_repo_key
-        iv_commit       = iv_commit
-        io_dot          = io_dot
-        iv_devclass     = iv_devclass
-        iv_context_hash = iv_context_hash ).
+    IF lt_uncovered IS NOT INITIAL.
+      " Step 3a (design §4.1, AR-1-07): if EVERY uncovered object is
+      " live-backed-off (an unexpired 'M' row from a prior doomed
+      " attempt), skip walk_filtered entirely and raise the same
+      " exception it would have raised, so the existing outer
+      " CATCH zcx_abapgit_exception -> get_files_remote() fallback fires
+      " without re-attempting the same doomed walk. A MIXED
+      " backed-off/fresh set does NOT take this shortcut (§4.1 explicit
+      " scope limit) - falls through to walk_filtered for the full set.
+      GET TIME STAMP FIELD lv_now.
+      lv_backoff_cutoff = lv_now - zcl_abapgit_ortec_obj_cover=>c_missing_data_backoff_seconds.
 
-      rt_rows = select_rows_for_filter(
+      lv_all_backed_off = abap_true.
+      LOOP AT lt_uncovered ASSIGNING <ls_filter>.
+        READ TABLE lt_cov_lookup ASSIGNING <ls_cov_lookup>
+          WITH TABLE KEY obj_type = <ls_filter>-object
+                          obj_name = <ls_filter>-obj_name.
+        IF sy-subrc <> 0
+            OR <ls_cov_lookup>-resolution_status <> zcl_abapgit_ortec_obj_cover=>cs_resolution-unresolved_missing_local_data
+            OR <ls_cov_lookup>-resolved_at < lv_backoff_cutoff.
+          lv_all_backed_off = abap_false.
+          EXIT.
+        ENDIF.
+      ENDLOOP.
+
+      IF lv_all_backed_off = abap_true.
+        zcx_abapgit_exception=>raise(
+          |Filtered index: all { lines( lt_uncovered ) } uncovered object(s) for | &&
+          |repo { iv_repo_key }, commit { iv_commit } are within the missing-data | &&
+          |backoff window - not re-attempting the walk yet| ).
+      ENDIF.
+    ENDIF.
+
+    IF lt_uncovered IS NOT INITIAL.
+      " Step 5: genuinely uncovered (and not all backed off) - resolve via
+      " a real FILTERED-mode walk, then re-select what it just wrote.
+      " The FULL it_filter is passed (not just lt_uncovered) - walk_filtered
+      " performs one single tree walk and writes a definitive coverage fact
+      " for every object it was given, superseding any stale/expired 'M'
+      " row (design §11 step 5, no split-set special-casing per §4.1).
+      walk_filtered(
+        iv_repo_key       = iv_repo_key
+        iv_commit         = iv_commit
+        io_dot            = io_dot
+        iv_devclass       = iv_devclass
+        it_filter         = it_filter
+        iv_context_hash   = iv_context_hash
+        iv_current_remote = iv_current_remote ).
+
+      rt_rows = select_partial_rows_for_filter(
         iv_repo_key     = iv_repo_key
         iv_commit       = iv_commit
-        it_filter       = it_filter
-        iv_context_hash = iv_context_hash ).
+        iv_context_hash = iv_context_hash
+        it_filter       = it_filter ).
       RETURN.
     ENDIF.
 
@@ -525,9 +622,9 @@ CLASS zcl_abapgit_ortec_obj_index IMPLEMENTATION.
           RETURN.
         ENDIF.
 
-        DELETE FROM zaog_obj_index
-          WHERE repo_key    = iv_repo_key
-            AND commit_sha1 = iv_commit.
+        invalidate_commit_index(
+          iv_repo_key = iv_repo_key
+          iv_commit   = iv_commit ).
 
         APPEND iv_commit TO lt_commit_sha.
         TRY.
@@ -690,6 +787,304 @@ CLASS zcl_abapgit_ortec_obj_index IMPLEMENTATION.
       CATCH zcx_abapgit_exception INTO DATA(lx_index).
         zcl_abapgit_ortec_pack_raw=>release_repo_lock( lv_lock_id ).
         RAISE EXCEPTION lx_index.
+      CATCH cx_root INTO DATA(lx_root).
+        zcl_abapgit_ortec_pack_raw=>release_repo_lock( lv_lock_id ).
+        zcx_abapgit_exception=>raise_with_text( lx_root ).
+    ENDTRY.
+  ENDMETHOD.
+
+
+  METHOD walk_filtered.
+    " design doc §11 step 4, §13 W5/W6/W8. A careful, deliberate copy of
+    " rebuild_index's own commit->tree BFS (not extracted into a shared
+    " primitive - see the OBJ-PERF-IMPL-C implementation log for why) with
+    " the differences the design mandates: writes are bounded to it_filter,
+    " land exclusively in ZAOG_OBJ_PIDX (never ZAOG_OBJ_INDEX, never the
+    " COMPLETE-mode readiness marker), and completion writes a coverage
+    " fact per it_filter entry instead.
+    DATA lv_lock_id TYPE zcl_abapgit_ortec_pack_raw=>ty_session_id.
+    DATA lt_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_commit_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA ls_commit_object TYPE zif_abapgit_definitions=>ty_object.
+    DATA ls_commit TYPE zcl_abapgit_git_pack=>ty_commit.
+
+    DATA lt_pending TYPE ty_tree_work_tt.
+    DATA lt_next TYPE ty_tree_work_tt.
+    DATA lt_seen_trees TYPE ty_sha1_set.
+
+    DATA lt_tree_sha1s TYPE zif_abapgit_git_definitions=>ty_sha1_tt.
+    DATA lt_tree_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
+    DATA lt_tree_data TYPE ty_tree_data_tt.
+    DATA lt_nodes TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+
+    DATA ls_tree_data TYPE ty_tree_data.
+    DATA ls_item TYPE zif_abapgit_definitions=>ty_item.
+    DATA ls_pidx_row TYPE zaog_obj_pidx.
+    DATA lt_pidx_rows TYPE STANDARD TABLE OF zaog_obj_pidx WITH DEFAULT KEY.
+    DATA lv_path_hash TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_next_path TYPE string.
+
+    TYPES:
+      BEGIN OF ty_match_key,
+        obj_type TYPE zaog_obj_pidx-obj_type,
+        obj_name TYPE zaog_obj_pidx-obj_name,
+      END OF ty_match_key,
+      ty_match_set TYPE HASHED TABLE OF ty_match_key WITH UNIQUE KEY obj_type obj_name.
+    DATA lt_matched TYPE ty_match_set.
+
+    DATA lv_have_eligible TYPE abap_bool.
+    DATA lv_hist_level TYPE zcl_abapgit_ortec_mat_state=>ty_hist_level.
+    DATA lt_coverage_results TYPE zcl_abapgit_ortec_obj_cover=>ty_coverage_tt.
+    DATA lt_missing_results TYPE zcl_abapgit_ortec_obj_cover=>ty_coverage_tt.
+    DATA ls_coverage_result TYPE zcl_abapgit_ortec_obj_cover=>ty_coverage.
+
+    FIELD-SYMBOLS <ls_work> TYPE ty_tree_work.
+    FIELD-SYMBOLS <ls_obj>  TYPE zif_abapgit_definitions=>ty_object.
+    FIELD-SYMBOLS <ls_node> TYPE zcl_abapgit_git_pack=>ty_node.
+    FIELD-SYMBOLS <ls_filter> TYPE zif_abapgit_definitions=>ty_tadir.
+
+    lv_lock_id = zcl_abapgit_ortec_pack_raw=>acquire_repo_lock( iv_repo_key = iv_repo_key ).
+
+    TRY.
+        " Mirrors rebuild_index's own double-check: avoids a redundant
+        " walk if a concurrent COMPLETE rebuild finished first.
+        IF is_index_ready(
+            iv_repo_key     = iv_repo_key
+            iv_commit       = iv_commit
+            iv_context_hash = iv_context_hash ) = abap_true.
+          zcl_abapgit_ortec_pack_raw=>release_repo_lock( lv_lock_id ).
+          RETURN.
+        ENDIF.
+
+        APPEND iv_commit TO lt_commit_sha.
+        TRY.
+            lt_commit_objects = zcl_abapgit_ortec_obj_store=>get_objects(
+              iv_repo_key   = iv_repo_key
+              it_sha1s      = lt_commit_sha
+              iv_bulk_fetch = abap_true ).
+          CATCH zcx_abapgit_ortec_git INTO DATA(lx_store_commit).
+            zcx_abapgit_exception=>raise_with_text( lx_store_commit ).
+        ENDTRY.
+
+        READ TABLE lt_commit_objects INTO ls_commit_object INDEX 1.
+        IF sy-subrc <> 0 OR ls_commit_object-type <> zif_abapgit_git_definitions=>c_type-commit.
+          zcx_abapgit_exception=>raise( |Filtered walk: commit { iv_commit } missing| ).
+        ENDIF.
+
+        ls_commit = zcl_abapgit_git_pack=>decode_commit( ls_commit_object-data ).
+        IF ls_commit-tree IS INITIAL.
+          zcx_abapgit_exception=>raise( |Filtered walk: commit { iv_commit } has no tree| ).
+        ENDIF.
+
+        APPEND VALUE #( tree_sha1 = ls_commit-tree path = '/' ) TO lt_pending.
+        INSERT ls_commit-tree INTO TABLE lt_seen_trees.
+
+        WHILE lt_pending IS NOT INITIAL.
+          CLEAR lt_tree_sha1s.
+          CLEAR lt_tree_objects.
+          CLEAR lt_tree_data.
+          CLEAR lt_next.
+
+          LOOP AT lt_pending ASSIGNING <ls_work>.
+            APPEND <ls_work>-tree_sha1 TO lt_tree_sha1s.
+          ENDLOOP.
+
+          TRY.
+              lt_tree_objects = zcl_abapgit_ortec_obj_store=>get_objects(
+                iv_repo_key   = iv_repo_key
+                it_sha1s      = lt_tree_sha1s
+                iv_bulk_fetch = abap_true ).
+            CATCH zcx_abapgit_ortec_git INTO DATA(lx_store_tree).
+              zcx_abapgit_exception=>raise_with_text( lx_store_tree ).
+          ENDTRY.
+
+          LOOP AT lt_tree_objects ASSIGNING <ls_obj>
+              WHERE type = zif_abapgit_git_definitions=>c_type-tree.
+            CLEAR ls_tree_data.
+            ls_tree_data-tree_sha1 = <ls_obj>-sha1.
+            ls_tree_data-data      = <ls_obj>-data.
+            INSERT ls_tree_data INTO TABLE lt_tree_data.
+          ENDLOOP.
+
+          LOOP AT lt_pending ASSIGNING <ls_work>.
+            READ TABLE lt_tree_data INTO ls_tree_data
+              WITH TABLE KEY tree_sha1 = <ls_work>-tree_sha1.
+            IF sy-subrc <> 0.
+              CONTINUE.
+            ENDIF.
+
+            TRY.
+                lt_nodes = zcl_abapgit_git_pack=>decode_tree( ls_tree_data-data ).
+              CATCH zcx_abapgit_exception INTO DATA(lx_tree_dec).
+                zcx_abapgit_exception=>raise_with_text( lx_tree_dec ).
+            ENDTRY.
+
+            LOOP AT lt_nodes ASSIGNING <ls_node>.
+              CASE <ls_node>-chmod.
+                WHEN zif_abapgit_git_definitions=>c_chmod-dir.
+                  CONCATENATE <ls_work>-path <ls_node>-name '/' INTO lv_next_path.
+                  READ TABLE lt_seen_trees WITH TABLE KEY table_line = <ls_node>-sha1
+                    TRANSPORTING NO FIELDS.
+                  IF sy-subrc <> 0.
+                    INSERT <ls_node>-sha1 INTO TABLE lt_seen_trees.
+                    APPEND VALUE #( tree_sha1 = <ls_node>-sha1
+                                    path      = lv_next_path ) TO lt_next.
+                  ENDIF.
+
+                WHEN zif_abapgit_git_definitions=>c_chmod-file
+                  OR zif_abapgit_git_definitions=>c_chmod-executable
+                  OR zif_abapgit_git_definitions=>c_chmod-symbolic_link.
+
+                  TRY.
+                      zcl_abapgit_filename_logic=>file_to_object(
+                        EXPORTING
+                          iv_filename = <ls_node>-name
+                          iv_path     = <ls_work>-path
+                          iv_devclass = iv_devclass
+                          io_dot      = io_dot
+                        IMPORTING
+                          es_item     = ls_item ).
+                    CATCH zcx_abapgit_exception.
+                      CONTINUE.
+                  ENDTRY.
+
+                  IF ls_item-obj_type IS INITIAL OR ls_item-obj_name IS INITIAL.
+                    CONTINUE.
+                  ENDIF.
+
+                  " Bound ZAOG_OBJ_PIDX writes to the caller's own K
+                  " objects, never the full F (design §11 step 4).
+                  IF NOT line_exists( it_filter[ object = ls_item-obj_type obj_name = ls_item-obj_name ] ).
+                    CONTINUE.
+                  ENDIF.
+
+                  IF strlen( <ls_work>-path ) > 255 OR strlen( <ls_node>-name ) > 255.
+                    CONTINUE.
+                  ENDIF.
+
+                  TRY.
+                      lv_path_hash = zcl_abapgit_hash=>sha1_string(
+                        |{ <ls_work>-path }{ <ls_node>-name }| ).
+                    CATCH zcx_abapgit_exception.
+                      CONTINUE.
+                  ENDTRY.
+
+                  CLEAR ls_pidx_row.
+                  ls_pidx_row-repo_key     = iv_repo_key.
+                  ls_pidx_row-commit_sha1  = iv_commit.
+                  ls_pidx_row-obj_type     = ls_item-obj_type.
+                  ls_pidx_row-obj_name     = ls_item-obj_name.
+                  ls_pidx_row-context_hash = iv_context_hash.
+                  ls_pidx_row-path_hash    = lv_path_hash.
+                  ls_pidx_row-file_path    = <ls_work>-path.
+                  ls_pidx_row-file_name    = <ls_node>-name.
+                  ls_pidx_row-blob_sha1    = <ls_node>-sha1.
+                  ls_pidx_row-tree_sha1    = <ls_work>-tree_sha1.
+                  ls_pidx_row-idx_status   = c_status_ready.
+                  APPEND ls_pidx_row TO lt_pidx_rows.
+
+                  INSERT VALUE ty_match_key( obj_type = ls_item-obj_type obj_name = ls_item-obj_name )
+                    INTO TABLE lt_matched.
+
+                  IF lines( lt_pidx_rows ) >= zcl_abapgit_ortec_obj_cover=>c_filter_chunk_size.
+                    MODIFY zaog_obj_pidx FROM TABLE lt_pidx_rows.
+                    CLEAR lt_pidx_rows.
+                  ENDIF.
+
+                WHEN OTHERS.
+                  CONTINUE.
+              ENDCASE.
+            ENDLOOP.
+          ENDLOOP.
+
+          lt_pending = lt_next.
+        ENDWHILE.
+
+        IF lt_pidx_rows IS NOT INITIAL.
+          MODIFY zaog_obj_pidx FROM TABLE lt_pidx_rows.
+        ENDIF.
+
+        " W8/§11.4 (Slice 4 gate, implemented now alongside walk_filtered
+        " per this slice's own instructions): a commit's object graph must
+        " be certified complete AND actually be the caller's known current
+        " remote tip before a zero-match result may claim the strong
+        " RESOLVED_NOT_PRESENT_REMOTE fact - otherwise the weaker
+        " RESOLVED_NO_FILES is used, unconditionally.
+        lv_have_eligible = zcl_abapgit_ortec_mat_state=>is_graph_have_eligible(
+          iv_repo_key = iv_repo_key
+          iv_commit   = iv_commit ).
+        IF lv_have_eligible = abap_true.
+          lv_hist_level = zcl_abapgit_ortec_mat_state=>cs_hist_level-graph_complete.
+        ELSE.
+          lv_hist_level = zcl_abapgit_ortec_mat_state=>cs_hist_level-unknown.
+        ENDIF.
+
+        LOOP AT it_filter ASSIGNING <ls_filter>.
+          CLEAR ls_coverage_result.
+          ls_coverage_result-obj_type = <ls_filter>-object.
+          ls_coverage_result-obj_name = <ls_filter>-obj_name.
+
+          READ TABLE lt_matched TRANSPORTING NO FIELDS
+            WITH TABLE KEY obj_type = <ls_filter>-object
+                            obj_name = <ls_filter>-obj_name.
+          IF sy-subrc = 0.
+            ls_coverage_result-resolution_status = zcl_abapgit_ortec_obj_cover=>cs_resolution-found.
+          ELSEIF lv_have_eligible = abap_true
+              AND iv_current_remote IS NOT INITIAL
+              AND iv_commit = iv_current_remote.
+            ls_coverage_result-resolution_status = zcl_abapgit_ortec_obj_cover=>cs_resolution-resolved_not_present_remote.
+          ELSE.
+            ls_coverage_result-resolution_status = zcl_abapgit_ortec_obj_cover=>cs_resolution-resolved_no_files.
+          ENDIF.
+
+          APPEND ls_coverage_result TO lt_coverage_results.
+        ENDLOOP.
+
+        TRY.
+            zcl_abapgit_ortec_obj_cover=>write_coverage(
+              iv_repo_key        = iv_repo_key
+              iv_commit          = iv_commit
+              iv_context_hash    = iv_context_hash
+              iv_walk_hist_level = lv_hist_level
+              it_results         = lt_coverage_results ).
+          CATCH zcx_abapgit_ortec_git.
+            " Non-fatal (§6 trigger 4/AR-1-08) - the walk's own resolved
+            " rows are already durably written to ZAOG_OBJ_PIDX; a
+            " coverage-write failure here must never block or fail the
+            " current request.
+        ENDTRY.
+
+        zcl_abapgit_ortec_pack_raw=>release_repo_lock( lv_lock_id ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_walk).
+        " §4.1/§6 trigger 2/AR-1-07: best-effort record one 'M'
+        " (unresolved_missing_local_data) row per it_filter entry before
+        " re-raising, so an identical repeat request can back off instead
+        " of re-attempting the same doomed walk forever. A failure in this
+        " best-effort write must never suppress or replace the original
+        " exception.
+        TRY.
+            CLEAR lt_missing_results.
+            LOOP AT it_filter ASSIGNING <ls_filter>.
+              APPEND VALUE #(
+                obj_type          = <ls_filter>-object
+                obj_name          = <ls_filter>-obj_name
+                resolution_status = zcl_abapgit_ortec_obj_cover=>cs_resolution-unresolved_missing_local_data
+              ) TO lt_missing_results.
+            ENDLOOP.
+
+            zcl_abapgit_ortec_obj_cover=>write_coverage(
+              iv_repo_key        = iv_repo_key
+              iv_commit          = iv_commit
+              iv_context_hash    = iv_context_hash
+              iv_walk_hist_level = zcl_abapgit_ortec_mat_state=>cs_hist_level-unknown
+              it_results         = lt_missing_results ).
+          CATCH zcx_abapgit_ortec_git.
+            " Best-effort - see the STOP_IF above: swallow only, never
+            " suppress the original exception being re-raised below.
+        ENDTRY.
+
+        zcl_abapgit_ortec_pack_raw=>release_repo_lock( lv_lock_id ).
+        RAISE EXCEPTION lx_walk.
       CATCH cx_root INTO DATA(lx_root).
         zcl_abapgit_ortec_pack_raw=>release_repo_lock( lv_lock_id ).
         zcx_abapgit_exception=>raise_with_text( lx_root ).

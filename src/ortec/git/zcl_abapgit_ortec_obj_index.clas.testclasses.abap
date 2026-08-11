@@ -1,3 +1,4 @@
+CLASS zcl_abapgit_ortec_obj_index DEFINITION LOCAL FRIENDS ltcl_obj_index.
 CLASS ltcl_obj_index DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
   PRIVATE SECTION.
     CONSTANTS mc_repo TYPE c LENGTH 12 VALUE 'ZAOGT_OBJIDX'.
@@ -62,6 +63,27 @@ CLASS ltcl_obj_index DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
     " ensure_filtered_coverage warm-fast-path/fallback regression coverage.
     METHODS warm_coverage_skips_rewalk FOR TESTING RAISING cx_static_check.
     METHODS incomplete_coverage_falls_through_to_rebuild FOR TESTING RAISING cx_static_check.
+
+    " OBJ-PERF-IMPL-C (design doc §11 step 4, §4.1, §5, §13 W4/W5/W6/W8,
+    " Slice 3): walk_filtered/invalidate_commit_index/backoff/current-remote
+    " regression coverage. LOCAL FRIENDS above grants access to these two
+    " PRIVATE class methods for direct testing.
+    METHODS filtered_walk_writes_only_requested_objects FOR TESTING RAISING cx_static_check.
+    METHODS filtered_walk_never_sets_ready_marker FOR TESTING RAISING cx_static_check.
+    METHODS filtered_walk_idempotent_on_overlap FOR TESTING RAISING cx_static_check.
+    METHODS filtered_walk_writes_context_hash_as_key FOR TESTING RAISING cx_static_check.
+    METHODS filtered_walk_no_cross_context_overwrite FOR TESTING RAISING cx_static_check.
+    METHODS retry_purge_removes_all_three_tables FOR TESTING RAISING cx_static_check.
+    METHODS missing_tree_writes_m_row_then_reraises FOR TESTING RAISING cx_static_check.
+    METHODS repeat_request_within_backoff_skips_walk FOR TESTING RAISING cx_static_check.
+    METHODS repeat_request_after_backoff_retries_walk FOR TESTING RAISING cx_static_check.
+    METHODS not_present_remote_requires_current_remote_commit FOR TESTING RAISING cx_static_check.
+    METHODS not_present_remote_requires_current_remote_supplied FOR TESTING RAISING cx_static_check.
+
+    METHODS build_commit_two_objects
+      RETURNING VALUE(rv_commit_sha) TYPE zif_abapgit_git_definitions=>ty_sha1
+      RAISING   zcx_abapgit_exception
+                zcx_abapgit_ortec_git.
 ENDCLASS.
 CLASS ltcl_obj_index IMPLEMENTATION.
   METHOD setup.
@@ -69,12 +91,14 @@ CLASS ltcl_obj_index IMPLEMENTATION.
     DELETE FROM zaog_obj_index WHERE repo_key = mc_repo.
     DELETE FROM zaog_obj_pidx WHERE repo_key = mc_repo.
     DELETE FROM zaog_obj_cover WHERE repo_key = mc_repo.
+    DELETE FROM zaog_commit_hist WHERE repo_key = mc_repo.
   ENDMETHOD.
   METHOD teardown.
     DELETE FROM zaog_obj_store WHERE repo_key = mc_repo.
     DELETE FROM zaog_obj_index WHERE repo_key = mc_repo.
     DELETE FROM zaog_obj_pidx WHERE repo_key = mc_repo.
     DELETE FROM zaog_obj_cover WHERE repo_key = mc_repo.
+    DELETE FROM zaog_commit_hist WHERE repo_key = mc_repo.
     ROLLBACK WORK.
   ENDMETHOD.
   METHOD marker_required_for_ready.
@@ -1000,5 +1024,446 @@ CLASS ltcl_obj_index IMPLEMENTATION.
       act = zcl_abapgit_ortec_obj_index=>is_index_ready(
         iv_repo_key = mc_repo iv_commit = lv_commit_sha iv_context_hash = lv_context )
       msg = 'The fallback COMPLETE-mode path must still write the $IDX/__READY__ marker as today' ).
+  ENDMETHOD.
+
+  METHOD build_commit_two_objects.
+    " Shared fixture for Slice 3 tests needing TWO distinct filter-relevant
+    " objects in the same tree (zprogram.prog.abap -> PROG/ZPROGRAM,
+    " zother.prog.abap -> PROG/ZOTHER), both under /src/.
+    DATA lt_nodes           TYPE zcl_abapgit_git_pack=>ty_nodes_tt.
+    DATA ls_node            LIKE LINE OF lt_nodes.
+    DATA ls_commit          TYPE zcl_abapgit_git_pack=>ty_commit.
+    DATA lv_blob_sha_1      TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_blob_sha_2      TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_src_tree_data   TYPE xstring.
+    DATA lv_src_tree_sha    TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_root_tree_data  TYPE xstring.
+    DATA lv_root_tree_sha   TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA lv_commit_data     TYPE xstring.
+
+    lv_blob_sha_1 = zcl_abapgit_hash=>sha1_blob( '48656C6C6F' ).
+    lv_blob_sha_2 = zcl_abapgit_hash=>sha1_blob( '576F726C64' ).
+
+    CLEAR ls_node.
+    ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-file.
+    ls_node-name  = 'zprogram.prog.abap'.
+    ls_node-sha1  = lv_blob_sha_1.
+    APPEND ls_node TO lt_nodes.
+
+    CLEAR ls_node.
+    ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-file.
+    ls_node-name  = 'zother.prog.abap'.
+    ls_node-sha1  = lv_blob_sha_2.
+    APPEND ls_node TO lt_nodes.
+
+    lv_src_tree_data = zcl_abapgit_git_pack=>encode_tree( lt_nodes ).
+    lv_src_tree_sha = zcl_abapgit_hash=>sha1_tree( lv_src_tree_data ).
+
+    CLEAR lt_nodes.
+    CLEAR ls_node.
+    ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-dir.
+    ls_node-name  = 'src'.
+    ls_node-sha1  = lv_src_tree_sha.
+    APPEND ls_node TO lt_nodes.
+    lv_root_tree_data = zcl_abapgit_git_pack=>encode_tree( lt_nodes ).
+    lv_root_tree_sha = zcl_abapgit_hash=>sha1_tree( lv_root_tree_data ).
+
+    ls_commit-tree = lv_root_tree_sha.
+    ls_commit-author = 'Test <test@example.com> 0 +0000'.
+    ls_commit-committer = 'Test <test@example.com> 0 +0000'.
+    ls_commit-body = 'two objects'.
+    lv_commit_data = zcl_abapgit_git_pack=>encode_commit( ls_commit ).
+    rv_commit_sha = zcl_abapgit_hash=>sha1_commit( lv_commit_data ).
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = rv_commit_sha
+      iv_type = zif_abapgit_git_definitions=>c_type-commit iv_data = lv_commit_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_root_tree_sha
+      iv_type = zif_abapgit_git_definitions=>c_type-tree iv_data = lv_root_tree_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_src_tree_sha
+      iv_type = zif_abapgit_git_definitions=>c_type-tree iv_data = lv_src_tree_data ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_blob_sha_1
+      iv_type = zif_abapgit_git_definitions=>c_type-blob iv_data = '48656C6C6F' ).
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = lv_blob_sha_2
+      iv_type = zif_abapgit_git_definitions=>c_type-blob iv_data = '576F726C64' ).
+  ENDMETHOD.
+
+  METHOD filtered_walk_writes_only_requested_objects.
+    " design §11 step 4: a tree leaf's row is appended ONLY IF present in
+    " it_filter - ZOTHER must never get a ZAOG_OBJ_PIDX row even though it
+    " exists in the same tree, when only ZPROGRAM was requested.
+    DATA(lv_commit_sha) = build_commit_two_objects( ).
+    DATA(lo_dot) = zcl_abapgit_dot_abapgit=>build_default( ).
+    DATA(lv_context) = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = '$PACK' io_dot = lo_dot ).
+
+    zcl_abapgit_ortec_obj_index=>walk_filtered(
+      iv_repo_key     = mc_repo
+      iv_commit       = lv_commit_sha
+      io_dot          = lo_dot
+      iv_devclass     = '$PACK'
+      it_filter       = VALUE #( ( object = 'PROG' obj_name = 'ZPROGRAM' ) )
+      iv_context_hash = lv_context ).
+
+    SELECT COUNT(*) FROM zaog_obj_pidx INTO @DATA(lv_prog_count)
+      WHERE repo_key = @mc_repo AND commit_sha1 = @lv_commit_sha AND obj_name = 'ZPROGRAM'.
+    SELECT COUNT(*) FROM zaog_obj_pidx INTO @DATA(lv_other_count)
+      WHERE repo_key = @mc_repo AND commit_sha1 = @lv_commit_sha AND obj_name = 'ZOTHER'.
+
+    cl_abap_unit_assert=>assert_equals( act = lv_prog_count exp = 1
+      msg = 'The requested object must get exactly one ZAOG_OBJ_PIDX row' ).
+    cl_abap_unit_assert=>assert_equals( act = lv_other_count exp = 0
+      msg = 'A non-requested object present in the same tree must get zero rows - ' &&
+            'walk_filtered must bound writes to it_filter, never the full tree' ).
+  ENDMETHOD.
+
+  METHOD filtered_walk_never_sets_ready_marker.
+    " design §12: FILTERED-mode walk_filtered never writes ZAOG_OBJ_INDEX
+    " or its $IDX/__READY__ marker - is_index_ready must stay false.
+    DATA(lv_commit_sha) = build_commit( iv_filename = 'zprogram.prog.abap' iv_content = '48656C6C6F' ).
+    DATA(lo_dot) = zcl_abapgit_dot_abapgit=>build_default( ).
+    DATA(lv_context) = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = '$PACK' io_dot = lo_dot ).
+
+    zcl_abapgit_ortec_obj_index=>walk_filtered(
+      iv_repo_key     = mc_repo
+      iv_commit       = lv_commit_sha
+      io_dot          = lo_dot
+      iv_devclass     = '$PACK'
+      it_filter       = VALUE #( ( object = 'PROG' obj_name = 'ZPROGRAM' ) )
+      iv_context_hash = lv_context ).
+
+    cl_abap_unit_assert=>assert_false(
+      act = zcl_abapgit_ortec_obj_index=>is_index_ready(
+        iv_repo_key = mc_repo iv_commit = lv_commit_sha iv_context_hash = lv_context )
+      msg = 'walk_filtered must never write the COMPLETE-mode $IDX/__READY__ marker' ).
+
+    SELECT SINGLE @abap_true FROM zaog_obj_index INTO @DATA(lv_exists)
+      WHERE repo_key = @mc_repo AND commit_sha1 = @lv_commit_sha.
+    cl_abap_unit_assert=>assert_initial( act = lv_exists
+      msg = 'walk_filtered must never write any ZAOG_OBJ_INDEX row at all' ).
+  ENDMETHOD.
+
+  METHOD filtered_walk_idempotent_on_overlap.
+    " design §5/§11 step 4: two overlapping-but-different-filter walks
+    " under the same context must be idempotent - ZPROGRAM's row must not
+    " be duplicated when a second, wider walk includes it again alongside
+    " a new object.
+    DATA(lv_commit_sha) = build_commit_two_objects( ).
+    DATA(lo_dot) = zcl_abapgit_dot_abapgit=>build_default( ).
+    DATA(lv_context) = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = '$PACK' io_dot = lo_dot ).
+
+    zcl_abapgit_ortec_obj_index=>walk_filtered(
+      iv_repo_key     = mc_repo
+      iv_commit       = lv_commit_sha
+      io_dot          = lo_dot
+      iv_devclass     = '$PACK'
+      it_filter       = VALUE #( ( object = 'PROG' obj_name = 'ZPROGRAM' ) )
+      iv_context_hash = lv_context ).
+
+    zcl_abapgit_ortec_obj_index=>walk_filtered(
+      iv_repo_key     = mc_repo
+      iv_commit       = lv_commit_sha
+      io_dot          = lo_dot
+      iv_devclass     = '$PACK'
+      it_filter       = VALUE #( ( object = 'PROG' obj_name = 'ZPROGRAM' ) ( object = 'PROG' obj_name = 'ZOTHER' ) )
+      iv_context_hash = lv_context ).
+
+    SELECT COUNT(*) FROM zaog_obj_pidx INTO @DATA(lv_prog_count)
+      WHERE repo_key = @mc_repo AND commit_sha1 = @lv_commit_sha AND obj_name = 'ZPROGRAM'.
+    SELECT COUNT(*) FROM zaog_obj_pidx INTO @DATA(lv_other_count)
+      WHERE repo_key = @mc_repo AND commit_sha1 = @lv_commit_sha AND obj_name = 'ZOTHER'.
+
+    cl_abap_unit_assert=>assert_equals( act = lv_prog_count exp = 1
+      msg = 'A second overlapping walk must not duplicate the first walk''s row (MODIFY upsert)' ).
+    cl_abap_unit_assert=>assert_equals( act = lv_other_count exp = 1
+      msg = 'The second walk''s new object must still be resolved' ).
+  ENDMETHOD.
+
+  METHOD filtered_walk_writes_context_hash_as_key.
+    " AR-2-01 direct write-side retest: two walk_filtered calls under
+    " DIFFERENT contexts for the SAME object/path must produce two
+    " physically distinct ZAOG_OBJ_PIDX rows, never one overwriting the
+    " other (context_hash is a real KEY field on this table).
+    DATA(lv_commit_sha) = build_commit( iv_filename = 'zprogram.prog.abap' iv_content = '48656C6C6F' ).
+    DATA(lo_dot) = zcl_abapgit_dot_abapgit=>build_default( ).
+    DATA(lv_context_a) = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = '$PACK' io_dot = lo_dot ).
+    DATA(lv_context_b) = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = 'ZOTHERPACK' io_dot = lo_dot ).
+
+    zcl_abapgit_ortec_obj_index=>walk_filtered(
+      iv_repo_key     = mc_repo iv_commit = lv_commit_sha io_dot = lo_dot iv_devclass = '$PACK'
+      it_filter       = VALUE #( ( object = 'PROG' obj_name = 'ZPROGRAM' ) )
+      iv_context_hash = lv_context_a ).
+    zcl_abapgit_ortec_obj_index=>walk_filtered(
+      iv_repo_key     = mc_repo iv_commit = lv_commit_sha io_dot = lo_dot iv_devclass = 'ZOTHERPACK'
+      it_filter       = VALUE #( ( object = 'PROG' obj_name = 'ZPROGRAM' ) )
+      iv_context_hash = lv_context_b ).
+
+    SELECT COUNT(*) FROM zaog_obj_pidx INTO @DATA(lv_count)
+      WHERE repo_key = @mc_repo AND commit_sha1 = @lv_commit_sha AND obj_name = 'ZPROGRAM'.
+
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 2
+      msg = 'Two different contexts must produce two physically distinct ZAOG_OBJ_PIDX rows' ).
+  ENDMETHOD.
+
+  METHOD filtered_walk_no_cross_context_overwrite.
+    " AR-2-01: after a context-B walk, context A's own earlier row must
+    " remain fully intact and readable via select_partial_rows_for_filter.
+    DATA(lv_commit_sha) = build_commit( iv_filename = 'zprogram.prog.abap' iv_content = '48656C6C6F' ).
+    DATA(lo_dot) = zcl_abapgit_dot_abapgit=>build_default( ).
+    DATA(lv_context_a) = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = '$PACK' io_dot = lo_dot ).
+    DATA(lv_context_b) = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = 'ZOTHERPACK' io_dot = lo_dot ).
+
+    zcl_abapgit_ortec_obj_index=>walk_filtered(
+      iv_repo_key     = mc_repo iv_commit = lv_commit_sha io_dot = lo_dot iv_devclass = '$PACK'
+      it_filter       = VALUE #( ( object = 'PROG' obj_name = 'ZPROGRAM' ) )
+      iv_context_hash = lv_context_a ).
+    zcl_abapgit_ortec_obj_index=>walk_filtered(
+      iv_repo_key     = mc_repo iv_commit = lv_commit_sha io_dot = lo_dot iv_devclass = 'ZOTHERPACK'
+      it_filter       = VALUE #( ( object = 'PROG' obj_name = 'ZPROGRAM' ) )
+      iv_context_hash = lv_context_b ).
+
+    DATA(lt_rows_a) = zcl_abapgit_ortec_obj_index=>select_partial_rows_for_filter(
+      iv_repo_key = mc_repo iv_commit = lv_commit_sha iv_context_hash = lv_context_a
+      it_filter = VALUE #( ( object = 'PROG' obj_name = 'ZPROGRAM' ) ) ).
+
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_rows_a ) exp = 1
+      msg = 'Context A''s row must survive a later context-B walk for the same object' ).
+    cl_abap_unit_assert=>assert_equals( act = lt_rows_a[ 1 ]-context_hash exp = lv_context_a ).
+  ENDMETHOD.
+
+  METHOD retry_purge_removes_all_three_tables.
+    " AR-1-02/AR-2-01 direct retest: invalidate_commit_index must purge
+    " ZAOG_OBJ_INDEX, ZAOG_OBJ_COVER, and ZAOG_OBJ_PIDX together, in one
+    " call, for a commit - never leaving orphaned coverage/partial rows
+    " behind after an index-side purge.
+    CONSTANTS lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1
+      VALUE '4444444444444444444444444444444444444444'.
+
+    DATA ls_index TYPE zaog_obj_index.
+    DATA ls_cover TYPE zaog_obj_cover.
+    DATA ls_pidx  TYPE zaog_obj_pidx.
+
+    CLEAR ls_index.
+    ls_index-repo_key = mc_repo. ls_index-commit_sha1 = lv_commit_sha.
+    ls_index-obj_type = 'PROG'. ls_index-obj_name = 'ZPROGRAM'.
+    ls_index-path_hash = 'A'. ls_index-idx_status = 'R'.
+    MODIFY zaog_obj_index FROM ls_index.
+
+    CLEAR ls_cover.
+    ls_cover-repo_key = mc_repo. ls_cover-commit_sha1 = lv_commit_sha.
+    ls_cover-obj_type = 'PROG'. ls_cover-obj_name = 'ZPROGRAM'.
+    ls_cover-context_hash = 'A'. ls_cover-resolution_status = 'F'.
+    MODIFY zaog_obj_cover FROM ls_cover.
+
+    CLEAR ls_pidx.
+    ls_pidx-repo_key = mc_repo. ls_pidx-commit_sha1 = lv_commit_sha.
+    ls_pidx-obj_type = 'PROG'. ls_pidx-obj_name = 'ZPROGRAM'.
+    ls_pidx-context_hash = 'A'. ls_pidx-path_hash = 'A'. ls_pidx-idx_status = 'R'.
+    MODIFY zaog_obj_pidx FROM ls_pidx.
+
+    zcl_abapgit_ortec_obj_index=>invalidate_commit_index(
+      iv_repo_key = mc_repo iv_commit = lv_commit_sha ).
+
+    SELECT COUNT(*) FROM zaog_obj_index INTO @DATA(lv_idx_count)
+      WHERE repo_key = @mc_repo AND commit_sha1 = @lv_commit_sha.
+    SELECT COUNT(*) FROM zaog_obj_cover INTO @DATA(lv_cov_count)
+      WHERE repo_key = @mc_repo AND commit_sha1 = @lv_commit_sha.
+    SELECT COUNT(*) FROM zaog_obj_pidx INTO @DATA(lv_pidx_count)
+      WHERE repo_key = @mc_repo AND commit_sha1 = @lv_commit_sha.
+
+    cl_abap_unit_assert=>assert_equals( act = lv_idx_count exp = 0
+      msg = 'invalidate_commit_index must purge ZAOG_OBJ_INDEX' ).
+    cl_abap_unit_assert=>assert_equals( act = lv_cov_count exp = 0
+      msg = 'invalidate_commit_index must purge ZAOG_OBJ_COVER' ).
+    cl_abap_unit_assert=>assert_equals( act = lv_pidx_count exp = 0
+      msg = 'invalidate_commit_index must purge ZAOG_OBJ_PIDX' ).
+  ENDMETHOD.
+
+  METHOD missing_tree_writes_m_row_then_reraises.
+    " design §4.1/AR-1-07: a missing commit must cause walk_filtered to
+    " raise, and best-effort write one 'M' (unresolved_missing_local_data)
+    " coverage row per it_filter entry BEFORE re-raising the original
+    " exception unchanged.
+    CONSTANTS lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1
+      VALUE '5555555555555555555555555555555555555555'.
+
+    DATA(lo_dot) = zcl_abapgit_dot_abapgit=>build_default( ).
+    DATA(lv_context) = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = '$PACK' io_dot = lo_dot ).
+    DATA lv_raised TYPE abap_bool.
+
+    TRY.
+        zcl_abapgit_ortec_obj_index=>walk_filtered(
+          iv_repo_key     = mc_repo
+          iv_commit       = lv_commit_sha
+          io_dot          = lo_dot
+          iv_devclass     = '$PACK'
+          it_filter       = VALUE #( ( object = 'PROG' obj_name = 'ZPROGRAM' ) )
+          iv_context_hash = lv_context ).
+      CATCH zcx_abapgit_exception.
+        lv_raised = abap_true.
+    ENDTRY.
+
+    cl_abap_unit_assert=>assert_true( act = lv_raised
+      msg = 'walk_filtered must raise when the commit is missing from ZAOG_OBJ_STORE' ).
+
+    SELECT SINGLE resolution_status FROM zaog_obj_cover INTO @DATA(lv_status)
+      WHERE repo_key = @mc_repo AND commit_sha1 = @lv_commit_sha
+        AND obj_type = 'PROG' AND obj_name = 'ZPROGRAM' AND context_hash = @lv_context.
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_status exp = zcl_abapgit_ortec_obj_cover=>cs_resolution-unresolved_missing_local_data
+      msg = 'A best-effort M row must be written for every requested object before the re-raise' ).
+  ENDMETHOD.
+
+  METHOD repeat_request_within_backoff_skips_walk.
+    " design §4.1/§11 step 3a: a fresh 'M' row must short-circuit
+    " ensure_filtered_coverage to an immediate raise, WITHOUT attempting
+    " walk_filtered again - proven here by seeding the backoff row against
+    " a commit that IS otherwise fully resolvable (so any actual walk
+    " attempt would succeed and write a row, which must NOT happen).
+    DATA(lv_commit_sha) = build_commit( iv_filename = 'zprogram.prog.abap' iv_content = '48656C6C6F' ).
+    DATA(lo_dot) = zcl_abapgit_dot_abapgit=>build_default( ).
+    DATA(lv_context) = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = '$PACK' io_dot = lo_dot ).
+    DATA lv_raised TYPE abap_bool.
+    DATA lv_now TYPE timestampl.
+
+    GET TIME STAMP FIELD lv_now.
+
+    DATA ls_cover TYPE zaog_obj_cover.
+    CLEAR ls_cover.
+    ls_cover-repo_key = mc_repo. ls_cover-commit_sha1 = lv_commit_sha.
+    ls_cover-obj_type = 'PROG'. ls_cover-obj_name = 'ZPROGRAM'.
+    ls_cover-context_hash = lv_context.
+    ls_cover-resolution_status = zcl_abapgit_ortec_obj_cover=>cs_resolution-unresolved_missing_local_data.
+    ls_cover-resolved_at = lv_now.
+    MODIFY zaog_obj_cover FROM ls_cover.
+
+    TRY.
+        zcl_abapgit_ortec_obj_index=>ensure_filtered_coverage(
+          iv_repo_key     = mc_repo
+          iv_commit       = lv_commit_sha
+          io_dot          = lo_dot
+          iv_devclass     = '$PACK'
+          it_filter       = VALUE #( ( object = 'PROG' obj_name = 'ZPROGRAM' ) )
+          iv_context_hash = lv_context ).
+      CATCH zcx_abapgit_exception.
+        lv_raised = abap_true.
+    ENDTRY.
+
+    cl_abap_unit_assert=>assert_true( act = lv_raised
+      msg = 'A fresh backoff M row must short-circuit to a raise without re-walking' ).
+
+    SELECT SINGLE @abap_true FROM zaog_obj_pidx INTO @DATA(lv_exists)
+      WHERE repo_key = @mc_repo AND commit_sha1 = @lv_commit_sha AND obj_name = 'ZPROGRAM'.
+    cl_abap_unit_assert=>assert_initial( act = lv_exists
+      msg = 'No ZAOG_OBJ_PIDX row may exist - the walk that would have succeeded must never run ' &&
+            'while the backoff is live' ).
+  ENDMETHOD.
+
+  METHOD repeat_request_after_backoff_retries_walk.
+    " design §4.1: once the backoff window has elapsed, the exact same
+    " request must retry a real walk_filtered and succeed.
+    DATA(lv_commit_sha) = build_commit( iv_filename = 'zprogram.prog.abap' iv_content = '48656C6C6F' ).
+    DATA(lo_dot) = zcl_abapgit_dot_abapgit=>build_default( ).
+    DATA(lv_context) = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = '$PACK' io_dot = lo_dot ).
+    DATA lv_now TYPE timestampl.
+    DATA lv_expired TYPE timestampl.
+
+    GET TIME STAMP FIELD lv_now.
+    lv_expired = lv_now - ( zcl_abapgit_ortec_obj_cover=>c_missing_data_backoff_seconds + 60 ).
+
+    DATA ls_cover TYPE zaog_obj_cover.
+    CLEAR ls_cover.
+    ls_cover-repo_key = mc_repo. ls_cover-commit_sha1 = lv_commit_sha.
+    ls_cover-obj_type = 'PROG'. ls_cover-obj_name = 'ZPROGRAM'.
+    ls_cover-context_hash = lv_context.
+    ls_cover-resolution_status = zcl_abapgit_ortec_obj_cover=>cs_resolution-unresolved_missing_local_data.
+    ls_cover-resolved_at = lv_expired.
+    MODIFY zaog_obj_cover FROM ls_cover.
+
+    DATA(lt_rows) = zcl_abapgit_ortec_obj_index=>ensure_filtered_coverage(
+      iv_repo_key     = mc_repo
+      iv_commit       = lv_commit_sha
+      io_dot          = lo_dot
+      iv_devclass     = '$PACK'
+      it_filter       = VALUE #( ( object = 'PROG' obj_name = 'ZPROGRAM' ) )
+      iv_context_hash = lv_context ).
+
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_rows ) exp = 1
+      msg = 'An expired backoff must allow a real retry walk that resolves the file' ).
+  ENDMETHOD.
+
+  METHOD not_present_remote_requires_current_remote_commit.
+    " AR-2-02/§13 W8: a zero-match result may only claim the strong
+    " RESOLVED_NOT_PRESENT_REMOTE fact when the graph is have-eligible
+    " AND iv_current_remote actually equals iv_commit. A mismatched
+    " iv_current_remote must cap the result at RESOLVED_NO_FILES even
+    " though the graph is otherwise have-eligible.
+    DATA(lv_commit_sha) = build_commit( iv_filename = 'zprogram.prog.abap' iv_content = '48656C6C6F' ).
+    DATA(lo_dot) = zcl_abapgit_dot_abapgit=>build_default( ).
+    DATA(lv_context) = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = '$PACK' io_dot = lo_dot ).
+
+    MODIFY zaog_commit_hist FROM VALUE #(
+      repo_key = mc_repo commit_sha1 = lv_commit_sha
+      hist_level = zcl_abapgit_ortec_mat_state=>cs_hist_level-graph_complete ).
+
+    " Positive control: matching current-remote DOES yield the strong state.
+    zcl_abapgit_ortec_obj_index=>walk_filtered(
+      iv_repo_key       = mc_repo iv_commit = lv_commit_sha io_dot = lo_dot iv_devclass = '$PACK'
+      it_filter         = VALUE #( ( object = 'PROG' obj_name = 'ZOTHER' ) )
+      iv_context_hash   = lv_context
+      iv_current_remote = lv_commit_sha ).
+
+    SELECT SINGLE resolution_status FROM zaog_obj_cover INTO @DATA(lv_status_match)
+      WHERE repo_key = @mc_repo AND commit_sha1 = @lv_commit_sha
+        AND obj_type = 'PROG' AND obj_name = 'ZOTHER' AND context_hash = @lv_context.
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_status_match exp = zcl_abapgit_ortec_obj_cover=>cs_resolution-resolved_not_present_remote
+      msg = 'Graph-complete AND iv_current_remote = iv_commit must yield the strong negative state' ).
+
+    " Negative control: a mismatched current-remote must cap at the weaker state.
+    zcl_abapgit_ortec_obj_index=>walk_filtered(
+      iv_repo_key       = mc_repo iv_commit = lv_commit_sha io_dot = lo_dot iv_devclass = '$PACK'
+      it_filter         = VALUE #( ( object = 'PROG' obj_name = 'ZOTHER' ) )
+      iv_context_hash   = lv_context
+      iv_current_remote = '6666666666666666666666666666666666666666' ).
+
+    SELECT SINGLE resolution_status FROM zaog_obj_cover INTO @DATA(lv_status_mismatch)
+      WHERE repo_key = @mc_repo AND commit_sha1 = @lv_commit_sha
+        AND obj_type = 'PROG' AND obj_name = 'ZOTHER' AND context_hash = @lv_context.
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_status_mismatch exp = zcl_abapgit_ortec_obj_cover=>cs_resolution-resolved_no_files
+      msg = 'A mismatched iv_current_remote must cap the result at RESOLVED_NO_FILES, ' &&
+            'even though the graph is have-eligible' ).
+  ENDMETHOD.
+
+  METHOD not_present_remote_requires_current_remote_supplied.
+    " AR-2-02: an omitted/initial iv_current_remote must also yield
+    " RESOLVED_NO_FILES, even when the commit is otherwise graph-have-eligible.
+    DATA(lv_commit_sha) = build_commit( iv_filename = 'zprogram.prog.abap' iv_content = '48656C6C6F' ).
+    DATA(lo_dot) = zcl_abapgit_dot_abapgit=>build_default( ).
+    DATA(lv_context) = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = '$PACK' io_dot = lo_dot ).
+
+    MODIFY zaog_commit_hist FROM VALUE #(
+      repo_key = mc_repo commit_sha1 = lv_commit_sha
+      hist_level = zcl_abapgit_ortec_mat_state=>cs_hist_level-graph_complete ).
+
+    zcl_abapgit_ortec_obj_index=>walk_filtered(
+      iv_repo_key     = mc_repo iv_commit = lv_commit_sha io_dot = lo_dot iv_devclass = '$PACK'
+      it_filter       = VALUE #( ( object = 'PROG' obj_name = 'ZOTHER' ) )
+      iv_context_hash = lv_context ).
+      " iv_current_remote intentionally omitted - always initial, as on
+      " the real pull_filtered call path (AR-2-02).
+
+    SELECT SINGLE resolution_status FROM zaog_obj_cover INTO @DATA(lv_status)
+      WHERE repo_key = @mc_repo AND commit_sha1 = @lv_commit_sha
+        AND obj_type = 'PROG' AND obj_name = 'ZOTHER' AND context_hash = @lv_context.
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_status exp = zcl_abapgit_ortec_obj_cover=>cs_resolution-resolved_no_files
+      msg = 'An omitted iv_current_remote must cap the result at RESOLVED_NO_FILES regardless ' &&
+            'of graph completeness' ).
   ENDMETHOD.
 ENDCLASS.
