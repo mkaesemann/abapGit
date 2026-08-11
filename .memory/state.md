@@ -1,5 +1,4 @@
 # ORTEC abapGit opt-rework — active state
-
 ```text
 BRANCH=ortec/abapgit_1_133-opt-rework
 CURRENT_HEAD=03273b568949ab7e9485458ddbb411703804ea9c
@@ -23,14 +22,27 @@ OUTPUT_PARITY=PASS
 OPEN_BLOCKERS=0
 OPEN_MAJORS=0
 ```
-
 The completed serialization work is now fully documented in the repository memory artifacts and committed locally. The final WAPA/FUGR validation evidence is captured in `.memory/handoffs/ser-final-wapa-fugr-it8.md`; the implementation work itself remains in the validated productive commits listed in the history below.
-
 ## Active topic
-
 ```text
-TOPIC=OBJ_INDEX_SLICE_1
-STATUS=READY_TO_START
+TOPIC=OBJ_PERF_FINAL
+STATUS=DESIGN_APPROVED
+START_HEAD=4193733de3c8ad75bae61f6ceb95b1c3e0ccb3e4
+OBJ_PERF_FINAL=DESIGN_APPROVED
+OBJ_INDEX_SLICE_1=DESIGN_APPROVED
+OBJ_STORE_SLICE_1=DESIGN_APPROVED
+LAUNCH_PROMPT=obj-store-partial-index-integrated-orchestrator.prompt.md
+ADVERSARIAL_CYCLES=3
+ADVERSARIAL_VERDICT=APPROVE (0 open blockers/majors, see .memory/reviews/obj_index_partial_adversarial.md)
+CORRECTNESS_GATE=APPROVE (.memory/reviews/obj_index_partial_correctness.md)
+READINESS_GATE=APPROVE (.memory/reviews/obj_index_partial_readiness.md)
+PROTOCOL_PERSISTENCE_GATE=APPROVE_WITH_MINOR_REVISIONS, PP-01/PP-02 closed by doc correction in obj_store_performance_design.md (.memory/reviews/obj_index_partial_protocol_persistence.md)
+PERFORMANCE_DESIGN_GATE=APPROVE_WITH_MINOR_REVISIONS, non-blocking (.memory/reviews/obj_index_partial_performance.md)
+DESIGN_ARTIFACTS=.memory/logs/obj_index_partial_design.md, .memory/logs/obj_store_performance_design.md
+SELECTED_INDEX_DESIGN=Candidate C hybrid: full commit-tree BFS walk unchanged, demand-driven per-object coverage (ZAOG_OBJ_COVER) + context-keyed partial rows (ZAOG_OBJ_PIDX, new) avoid full-F persistence for small K; COMPLETE-mode ZAOG_OBJ_INDEX unchanged (+ non-key CONTEXT_HASH column)
+OBJ_STORE_DISPOSITIONS=OS-A/B/C/D/F=IMPLEMENT, OS-E/H=DEFER_OUT_OF_SCOPE, OS-G/I/J=REJECT_WITH_SOURCE_PROOF
+DDIC_CHANGES=ZAOG_OBJ_COVER (new), ZAOG_OBJ_PIDX (new), ZAOG_OBJ_INDEX +CONTEXT_HASH (non-key column)
+NEXT=senior implementation per obj_index_partial_design.md §9 commit-slice order
 SER_SLICE_4=SAP_VALIDATED_COMPLETE
 SER_SLICE_5=SAP_VALIDATED_COMPLETE
 SER_FINAL_WAPA_FUGR=SAP_VALIDATED_COMPLETE
@@ -49,17 +61,20 @@ ABAP_UNIT=PASS
 OUTPUT_PARITY=PASS
 OPEN_BLOCKERS=0
 OPEN_MAJORS=0
-OBJ_INDEX_SLICE_1=READY_TO_START
-NEXT_TOPIC=Demand-Driven Partial Commit Index for Fast Cold Filtered Access
+OBJ_INDEX_SLICE_1=DISCOVERY_ARCHAEOLOGY
+OBJ_STORE_SLICE_1=DISCOVERY
 ```
-
-The serialization closeout has been validated and documented; the next engineering topic is the demand-driven partial commit index work. Launch artifacts for this next topic are not present in the current workspace, so the next step is to start from a fresh orchestrator prompt for OBJ_INDEX_SLICE_1.
+The serialization closeout has been validated and documented. The active engineering topic is
+`OBJ_PERF_FINAL` (integrated demand-driven partial commit index + ZAOG_OBJ_STORE performance),
+launched from `obj-store-partial-index-integrated-orchestrator.prompt.md`. Focused evidence and
+design artifacts are being written under `.memory/logs/obj_index_partial_*.md`,
+`.memory/logs/obj_store_performance_*.md`, `.memory/reviews/obj_index_partial_*.md`, and
+`.memory/reviews/obj_store_performance_*.md` as phases complete.
 Package E checkpoint 1 (E1-TEST, E3-TEST, E4-VERIFY, E-HARDEN OF-2) is
 SAP_VALIDATED_COMPLETE (head `3c77d898`, 2026-07-29 - see
 `.memory/handoffs/variant-b-package-e-checkpoint-1.md`). The items below
 are paused, not abandoned; do not start real design/implementation work
 on any of them before its entry condition is met.
-
 ```text
 E1-TREE-REUSE: APPROVED_DESIGN, PARKED_MEASUREMENT_PENDING (owner
   decision 2026-07-20). Entry condition: a focused (non-aggregated) IT8
@@ -104,7 +119,6 @@ DDLS-OPTIMIZATION: DEFERRED_BY_OWNER (non-blocking, no current change).
 LATE-CALLBACK-TEST: DEFERRED_OWNER_ACCEPTED (non-blocking, no current
   change).
 ```
-
 Full narrative history, per-slice validation matrices, and incident
 detail for the above remain in
 `.memory/handoffs/variant-b-package-e-checkpoint-1.md`,
@@ -112,9 +126,7 @@ detail for the above remain in
 `.memory/logs/variant_b_package_e_discovery.md`, and the incident files
 under `.memory/incidents/` - this file intentionally does not duplicate
 them.
-
 ## Binding invariants (all topics)
-
 - Standard abapGit behavior is unchanged when any ORTEC feature flag is
   disabled (default state for every flag introduced by either the
   Variant B partial-clone work or SER-SLICE-2).
