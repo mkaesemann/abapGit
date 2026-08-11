@@ -50,12 +50,16 @@ CLASS zcl_abapgit_ortec_obj_index DEFINITION
     "! Repository key
     "! @parameter iv_commit |
     "! Commit SHA1
+    "! @parameter iv_context_hash |
+    "! Resolution context identity hash (zcl_abapgit_ortec_obj_cover=>compute_context_hash).
+    "! A marker/row written under a different (or blank/legacy) context is treated as not ready.
     "! @parameter rv_yes |
-    "! ABAP_TRUE if the index for this commit is fully built
+    "! ABAP_TRUE if the index for this commit is fully built under this exact context
     CLASS-METHODS is_index_ready
       IMPORTING
-        iv_repo_key TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
-        iv_commit   TYPE zif_abapgit_git_definitions=>ty_sha1
+        iv_repo_key     TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
+        iv_commit       TYPE zif_abapgit_git_definitions=>ty_sha1
+        iv_context_hash TYPE zif_abapgit_git_definitions=>ty_sha1
       RETURNING
         VALUE(rv_yes) TYPE abap_bool.
 
@@ -102,27 +106,43 @@ CLASS zcl_abapgit_ortec_obj_index DEFINITION
 
     CLASS-METHODS ensure_index
       IMPORTING
-        iv_repo_key TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
-        iv_commit   TYPE zif_abapgit_git_definitions=>ty_sha1
-        io_dot      TYPE REF TO zcl_abapgit_dot_abapgit
-        iv_devclass TYPE devclass
+        iv_repo_key     TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
+        iv_commit       TYPE zif_abapgit_git_definitions=>ty_sha1
+        io_dot          TYPE REF TO zcl_abapgit_dot_abapgit
+        iv_devclass     TYPE devclass
+        iv_context_hash TYPE zif_abapgit_git_definitions=>ty_sha1
       RAISING
         zcx_abapgit_exception.
 
     CLASS-METHODS rebuild_index
       IMPORTING
-        iv_repo_key TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
-        iv_commit   TYPE zif_abapgit_git_definitions=>ty_sha1
-        io_dot      TYPE REF TO zcl_abapgit_dot_abapgit
-        iv_devclass TYPE devclass
+        iv_repo_key     TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
+        iv_commit       TYPE zif_abapgit_git_definitions=>ty_sha1
+        io_dot          TYPE REF TO zcl_abapgit_dot_abapgit
+        iv_devclass     TYPE devclass
+        iv_context_hash TYPE zif_abapgit_git_definitions=>ty_sha1
       RAISING
         zcx_abapgit_exception.
 
     CLASS-METHODS select_rows_for_filter
       IMPORTING
-        iv_repo_key TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
-        iv_commit   TYPE zif_abapgit_git_definitions=>ty_sha1
-        it_filter   TYPE zif_abapgit_definitions=>ty_tadir_tt
+        iv_repo_key     TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
+        iv_commit       TYPE zif_abapgit_git_definitions=>ty_sha1
+        it_filter       TYPE zif_abapgit_definitions=>ty_tadir_tt
+        iv_context_hash TYPE zif_abapgit_git_definitions=>ty_sha1
+      RETURNING
+        VALUE(rt_rows) TYPE ty_index_rows_tt.
+
+    "! FILTERED-mode positive-row reader (design doc §3.0b, AR-2-01). Reads
+    "! ZAOG_OBJ_PIDX (never ZAOG_OBJ_INDEX) with CONTEXT_HASH as a real key
+    "! predicate, so a differently-contexted row can never be mistaken for
+    "! this caller's own answer. Not yet wired to any caller (Slice 3).
+    CLASS-METHODS select_partial_rows_for_filter
+      IMPORTING
+        iv_repo_key     TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
+        iv_commit       TYPE zif_abapgit_git_definitions=>ty_sha1
+        iv_context_hash TYPE zif_abapgit_git_definitions=>ty_sha1
+        it_filter       TYPE zif_abapgit_definitions=>ty_tadir_tt
       RETURNING
         VALUE(rt_rows) TYPE ty_index_rows_tt.
 
@@ -156,6 +176,13 @@ CLASS zcl_abapgit_ortec_obj_index IMPLEMENTATION.
       RETURN.
     ENDIF.
 
+    " Computed once per request (design doc §11 step 2) - pure, no I/O
+    " beyond io_dot->serialize( ) - and threaded to every context-aware
+    " method below instead of being recomputed at each layer.
+    DATA(lv_context_hash) = zcl_abapgit_ortec_obj_cover=>compute_context_hash(
+      iv_devclass = iv_devclass
+      io_dot      = io_dot ).
+
     LOOP AT lt_filter ASSIGNING <ls_filter> WHERE object = 'DEVC'.
       TRY.
           lv_devc_path = zcl_abapgit_folder_logic=>get_instance( )->package_to_path(
@@ -169,15 +196,17 @@ CLASS zcl_abapgit_ortec_obj_index IMPLEMENTATION.
     ENDLOOP.
 
     ensure_index(
-      iv_repo_key = iv_repo_key
-      iv_commit   = iv_commit
-      io_dot      = io_dot
-      iv_devclass = iv_devclass ).
+      iv_repo_key     = iv_repo_key
+      iv_commit       = iv_commit
+      io_dot          = io_dot
+      iv_devclass     = iv_devclass
+      iv_context_hash = lv_context_hash ).
 
     lt_rows = select_rows_for_filter(
-      iv_repo_key = iv_repo_key
-      iv_commit   = iv_commit
-      it_filter   = lt_filter ).
+      iv_repo_key     = iv_repo_key
+      iv_commit       = iv_commit
+      it_filter       = lt_filter
+      iv_context_hash = lv_context_hash ).
 
     IF lt_devc_paths IS NOT INITIAL.
       LOOP AT lt_rows ASSIGNING <ls_row> WHERE obj_type = 'DEVC'.
@@ -206,15 +235,17 @@ CLASS zcl_abapgit_ortec_obj_index IMPLEMENTATION.
             AND commit_sha1 = iv_commit.
 
         ensure_index(
-          iv_repo_key = iv_repo_key
-          iv_commit   = iv_commit
-          io_dot      = io_dot
-          iv_devclass = iv_devclass ).
+          iv_repo_key     = iv_repo_key
+          iv_commit       = iv_commit
+          io_dot          = io_dot
+          iv_devclass     = iv_devclass
+          iv_context_hash = lv_context_hash ).
 
         lt_rows = select_rows_for_filter(
-          iv_repo_key = iv_repo_key
-          iv_commit   = iv_commit
-          it_filter   = lt_filter ).
+          iv_repo_key     = iv_repo_key
+          iv_commit       = iv_commit
+          it_filter       = lt_filter
+          iv_context_hash = lv_context_hash ).
 
         IF lt_devc_paths IS NOT INITIAL.
           LOOP AT lt_rows ASSIGNING <ls_row> WHERE obj_type = 'DEVC'.
@@ -257,7 +288,8 @@ CLASS zcl_abapgit_ortec_obj_index IMPLEMENTATION.
       SELECT SINGLE path_hash FROM zaog_obj_index INTO lv_dummy
         WHERE repo_key    = iv_repo_key
           AND commit_sha1 = iv_commit
-          AND idx_status  = c_status_ready.
+          AND idx_status  = c_status_ready
+          AND context_hash = iv_context_hash.
 
       rv_yes = boolc( sy-subrc = 0 ).
       RETURN.
@@ -275,22 +307,27 @@ CLASS zcl_abapgit_ortec_obj_index IMPLEMENTATION.
         AND commit_sha1 = iv_commit
         AND obj_type    = c_marker_obj_type
         AND obj_name    = c_marker_obj_name
-        AND idx_status  = c_status_ready.
+        AND idx_status  = c_status_ready
+        AND context_hash = iv_context_hash.
 
     rv_yes = boolc( sy-subrc = 0 ).
   ENDMETHOD.
 
 
   METHOD ensure_index.
-    IF is_index_ready( iv_repo_key = iv_repo_key iv_commit = iv_commit ) = abap_true.
+    IF is_index_ready(
+        iv_repo_key     = iv_repo_key
+        iv_commit       = iv_commit
+        iv_context_hash = iv_context_hash ) = abap_true.
       RETURN.
     ENDIF.
 
     rebuild_index(
-      iv_repo_key = iv_repo_key
-      iv_commit   = iv_commit
-      io_dot      = io_dot
-      iv_devclass = iv_devclass ).
+      iv_repo_key     = iv_repo_key
+      iv_commit       = iv_commit
+      io_dot          = io_dot
+      iv_devclass     = iv_devclass
+      iv_context_hash = iv_context_hash ).
   ENDMETHOD.
 
 
@@ -324,7 +361,10 @@ CLASS zcl_abapgit_ortec_obj_index IMPLEMENTATION.
     lv_lock_id = zcl_abapgit_ortec_pack_raw=>acquire_repo_lock( iv_repo_key = iv_repo_key ).
 
     TRY.
-        IF is_index_ready( iv_repo_key = iv_repo_key iv_commit = iv_commit ) = abap_true.
+        IF is_index_ready(
+            iv_repo_key     = iv_repo_key
+            iv_commit       = iv_commit
+            iv_context_hash = iv_context_hash ) = abap_true.
           zcl_abapgit_ortec_pack_raw=>release_repo_lock( lv_lock_id ).
           RETURN.
         ENDIF.
@@ -451,6 +491,7 @@ CLASS zcl_abapgit_ortec_obj_index IMPLEMENTATION.
                   ls_row-blob_sha1   = <ls_node>-sha1.
                   ls_row-tree_sha1   = <ls_work>-tree_sha1.
                   ls_row-idx_status  = c_status_ready.
+                  ls_row-context_hash = iv_context_hash.
                   APPEND ls_row TO lt_rows.
 
                   IF lines( lt_rows ) >= c_index_write_chunk_size.
@@ -516,6 +557,80 @@ CLASS zcl_abapgit_ortec_obj_index IMPLEMENTATION.
 
     DELETE rt_rows WHERE obj_type = c_marker_obj_type
                      AND obj_name = c_marker_obj_name.
+  ENDMETHOD.
+
+
+  METHOD select_partial_rows_for_filter.
+    " FILTERED-mode reader (design doc §3.0b, AR-2-01). ZAOG_OBJ_PIDX has
+    " CONTEXT_HASH as a real KEY field, so two contexts' rows for the same
+    " object/path physically coexist as distinct rows - binding
+    " context_hash here means a differently-contexted row can never be
+    " mistaken for this caller's own answer. c_filter_chunk_size-bounded
+    " (shared with zcl_abapgit_ortec_obj_cover=>get_coverage/write_coverage,
+    " AR-1-04) since it_filter is caller-supplied and can be large.
+    DATA lt_chunk TYPE zif_abapgit_definitions=>ty_tadir_tt.
+    DATA lt_pidx_rows TYPE STANDARD TABLE OF zaog_obj_pidx WITH DEFAULT KEY.
+    DATA ls_row TYPE zaog_obj_index.
+
+    FIELD-SYMBOLS <ls_filter> TYPE zif_abapgit_definitions=>ty_tadir.
+    FIELD-SYMBOLS <ls_pidx> TYPE zaog_obj_pidx.
+
+    IF it_filter IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    LOOP AT it_filter ASSIGNING <ls_filter>.
+      APPEND <ls_filter> TO lt_chunk.
+
+      IF lines( lt_chunk ) >= zcl_abapgit_ortec_obj_cover=>c_filter_chunk_size.
+        SELECT repo_key commit_sha1 obj_type obj_name context_hash path_hash
+               file_path file_name blob_sha1 tree_sha1 idx_status
+          FROM zaog_obj_pidx
+          APPENDING TABLE lt_pidx_rows
+          FOR ALL ENTRIES IN lt_chunk
+          WHERE repo_key     = iv_repo_key
+            AND commit_sha1  = iv_commit
+            AND context_hash = iv_context_hash
+            AND idx_status   = c_status_ready
+            AND obj_type     = lt_chunk-object
+            AND obj_name     = lt_chunk-obj_name.
+        CLEAR lt_chunk.
+      ENDIF.
+    ENDLOOP.
+
+    IF lt_chunk IS NOT INITIAL.
+      SELECT repo_key commit_sha1 obj_type obj_name context_hash path_hash
+             file_path file_name blob_sha1 tree_sha1 idx_status
+        FROM zaog_obj_pidx
+        APPENDING TABLE lt_pidx_rows
+        FOR ALL ENTRIES IN lt_chunk
+        WHERE repo_key     = iv_repo_key
+          AND commit_sha1  = iv_commit
+          AND context_hash = iv_context_hash
+          AND idx_status   = c_status_ready
+          AND obj_type     = lt_chunk-object
+          AND obj_name     = lt_chunk-obj_name.
+    ENDIF.
+
+    " Project ZAOG_OBJ_PIDX (context_hash as a real key column) into the
+    " identical ty_index_rows_tt/zaog_obj_index shape build_files_from_rows
+    " already consumes, so that caller needs zero changes for either
+    " COMPLETE- or FILTERED-mode rows.
+    LOOP AT lt_pidx_rows ASSIGNING <ls_pidx>.
+      CLEAR ls_row.
+      ls_row-repo_key     = <ls_pidx>-repo_key.
+      ls_row-commit_sha1  = <ls_pidx>-commit_sha1.
+      ls_row-obj_type     = <ls_pidx>-obj_type.
+      ls_row-obj_name     = <ls_pidx>-obj_name.
+      ls_row-path_hash    = <ls_pidx>-path_hash.
+      ls_row-file_path    = <ls_pidx>-file_path.
+      ls_row-file_name    = <ls_pidx>-file_name.
+      ls_row-blob_sha1    = <ls_pidx>-blob_sha1.
+      ls_row-tree_sha1    = <ls_pidx>-tree_sha1.
+      ls_row-idx_status   = <ls_pidx>-idx_status.
+      ls_row-context_hash = <ls_pidx>-context_hash.
+      APPEND ls_row TO rt_rows.
+    ENDLOOP.
   ENDMETHOD.
 
 

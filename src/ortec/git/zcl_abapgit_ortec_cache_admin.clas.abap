@@ -46,6 +46,8 @@ CLASS zcl_abapgit_ortec_cache_admin DEFINITION
         repo_key    TYPE zcl_abapgit_ortec_repo_state=>ty_repo_key,
         obj_store   TYPE i,
         obj_index   TYPE i,
+        obj_cover   TYPE i,
+        obj_pidx    TYPE i,
         pack_idx    TYPE i,
         pack_meta   TYPE i,
         raw_pack    TYPE i,
@@ -359,9 +361,27 @@ CLASS zcl_abapgit_ortec_cache_admin IMPLEMENTATION.
     TRY.
 
         " Delete dependent/derived data before parent-like repository state.
+        " AR-2-03: the three derived-filter-table deletes run under the
+        " canonical pack-raw mutex so a concurrent walk_filtered/rebuild_index
+        " write can never race a clear. Release before the fetch_sess delete
+        " below, since that delete would otherwise remove the mutex row out
+        " from under release_repo_lock.
+        DATA(lv_pack_lock) = zcl_abapgit_ortec_pack_raw=>acquire_repo_lock(
+                               iv_repo_key ).
+
         DELETE FROM zaog_obj_index
           WHERE repo_key = iv_repo_key.
         rs_result-obj_index = sy-dbcnt.
+
+        DELETE FROM zaog_obj_cover
+          WHERE repo_key = iv_repo_key.
+        rs_result-obj_cover = sy-dbcnt.
+
+        DELETE FROM zaog_obj_pidx
+          WHERE repo_key = iv_repo_key.
+        rs_result-obj_pidx = sy-dbcnt.
+
+        zcl_abapgit_ortec_pack_raw=>release_repo_lock( lv_pack_lock ).
 
         DELETE FROM zaog_pack_idx
           WHERE repo_key = iv_repo_key.

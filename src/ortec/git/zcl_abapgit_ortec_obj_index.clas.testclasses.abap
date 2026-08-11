@@ -49,15 +49,25 @@ CLASS ltcl_obj_index DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
 
     METHODS index_bulk_rows_preserved FOR TESTING RAISING cx_static_check.
     METHODS index_empty_no_match      FOR TESTING RAISING cx_static_check.
+
+    " AR-1-01/AR-2-01 (design doc §3.0/§3.0b/§9 Slice 1b/1d): positive-row
+    " and readiness-marker context isolation regression coverage.
+    METHODS ready_rejects_different_context   FOR TESTING RAISING cx_static_check.
+    METHODS select_rows_excludes_other_context FOR TESTING RAISING cx_static_check.
+    METHODS blank_legacy_context_is_never_ready FOR TESTING RAISING cx_static_check.
+    METHODS partial_rows_context_disjoint     FOR TESTING RAISING cx_static_check.
+    METHODS select_partial_rows_chunk_boundary FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 CLASS ltcl_obj_index IMPLEMENTATION.
   METHOD setup.
     DELETE FROM zaog_obj_store WHERE repo_key = mc_repo.
     DELETE FROM zaog_obj_index WHERE repo_key = mc_repo.
+    DELETE FROM zaog_obj_pidx WHERE repo_key = mc_repo.
   ENDMETHOD.
   METHOD teardown.
     DELETE FROM zaog_obj_store WHERE repo_key = mc_repo.
     DELETE FROM zaog_obj_index WHERE repo_key = mc_repo.
+    DELETE FROM zaog_obj_pidx WHERE repo_key = mc_repo.
     ROLLBACK WORK.
   ENDMETHOD.
   METHOD marker_required_for_ready.
@@ -302,14 +312,18 @@ CLASS ltcl_obj_index IMPLEMENTATION.
       io_dot        = lo_dot
       iv_devclass   = '$PACK' ).
 
+    DATA(lv_ctx_ready_1) = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = '$PACK' io_dot = lo_dot ).
+
     cl_abap_unit_assert=>assert_true(
-      act = zcl_abapgit_ortec_obj_index=>is_index_ready( iv_repo_key = mc_repo iv_commit = lv_commit_1 )
+      act = zcl_abapgit_ortec_obj_index=>is_index_ready(
+        iv_repo_key = mc_repo iv_commit = lv_commit_1 iv_context_hash = lv_ctx_ready_1 )
       msg = 'Sanity: the built commit must be ready' ).
 
     cl_abap_unit_assert=>assert_false(
       act = zcl_abapgit_ortec_obj_index=>is_index_ready(
         iv_repo_key = mc_repo
-        iv_commit   = '9999999999999999999999999999999999999999' )
+        iv_commit   = '9999999999999999999999999999999999999999'
+        iv_context_hash = lv_ctx_ready_1 )
       msg = 'is_index_ready must not report ready for a commit that was ' &&
             'never indexed, even though its repo_key''s OTHER commit is ' &&
             'fully built' ).
@@ -338,11 +352,15 @@ CLASS ltcl_obj_index IMPLEMENTATION.
       io_dot        = lo_dot
       iv_devclass   = '$PACK' ).
 
+    DATA(lv_ctx_ready_2) = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = '$PACK' io_dot = lo_dot ).
+
     cl_abap_unit_assert=>assert_true(
-      act = zcl_abapgit_ortec_obj_index=>is_index_ready( iv_repo_key = mc_repo iv_commit = lv_commit_1 )
+      act = zcl_abapgit_ortec_obj_index=>is_index_ready(
+        iv_repo_key = mc_repo iv_commit = lv_commit_1 iv_context_hash = lv_ctx_ready_2 )
       msg = 'Commit 1''s own exact index must be reported ready' ).
     cl_abap_unit_assert=>assert_true(
-      act = zcl_abapgit_ortec_obj_index=>is_index_ready( iv_repo_key = mc_repo iv_commit = lv_commit_2 )
+      act = zcl_abapgit_ortec_obj_index=>is_index_ready(
+        iv_repo_key = mc_repo iv_commit = lv_commit_2 iv_context_hash = lv_ctx_ready_2 )
       msg = 'Commit 2''s own exact index must ALSO be reported ready, independently of commit 1' ).
   ENDMETHOD.
 
@@ -457,7 +475,9 @@ CLASS ltcl_obj_index IMPLEMENTATION.
       msg = 'All files must be indexed across the chunk boundary, not just the first chunk' ).
 
     cl_abap_unit_assert=>assert_true(
-      act = zcl_abapgit_ortec_obj_index=>is_index_ready( iv_repo_key = mc_repo iv_commit = lv_commit_sha )
+      act = zcl_abapgit_ortec_obj_index=>is_index_ready(
+        iv_repo_key = mc_repo iv_commit = lv_commit_sha
+        iv_context_hash = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = '$PACK' io_dot = lo_dot ) )
       msg = 'Completion marker must be written after a multi-chunk rebuild' ).
   ENDMETHOD.
 
@@ -577,7 +597,9 @@ CLASS ltcl_obj_index IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = lines( lt_files ) exp = 5000
       msg = 'All bulk rows below the active chunk boundary must survive via the final flush' ).
     cl_abap_unit_assert=>assert_true(
-      act = zcl_abapgit_ortec_obj_index=>is_index_ready( iv_repo_key = mc_repo iv_commit = lv_commit_sha )
+      act = zcl_abapgit_ortec_obj_index=>is_index_ready(
+        iv_repo_key = mc_repo iv_commit = lv_commit_sha
+        iv_context_hash = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = '$PACK' io_dot = lo_dot ) )
       msg = 'Completion marker must be written when the walk never crosses the in-loop chunk check' ).
 
     SELECT COUNT(*) FROM zaog_obj_index INTO @DATA(lv_count)
@@ -660,8 +682,220 @@ CLASS ltcl_obj_index IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = lines( lt_files ) exp = 0
       msg = 'A tree with no ABAP-resolvable objects must index zero rows' ).
     cl_abap_unit_assert=>assert_true(
-      act = zcl_abapgit_ortec_obj_index=>is_index_ready( iv_repo_key = mc_repo iv_commit = lv_commit_sha )
+      act = zcl_abapgit_ortec_obj_index=>is_index_ready(
+        iv_repo_key = mc_repo iv_commit = lv_commit_sha
+        iv_context_hash = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = '$PACK' io_dot = lo_dot ) )
       msg = 'The completion marker must be written even when zero rows were found - ' &&
             'the final flush check must not gate the unconditional marker write' ).
+  ENDMETHOD.
+
+  METHOD ready_rejects_different_context.
+    " AR-1-01/AR-2-01: a commit indexed under context A must not be
+    " reported ready under a different context B - is_index_ready's own
+    " marker predicate must bind iv_context_hash, never trust "any row
+    " exists" independent of context.
+    DATA(lv_commit_sha) = build_commit( iv_filename = 'zprogram.prog.abap' iv_content = '48656C6C6F' ).
+    DATA(lo_dot) = zcl_abapgit_dot_abapgit=>build_default( ).
+    DATA(lo_filter) = NEW zcl_abapgit_object_filter_obj( it_filter = VALUE #( ( object = 'PROG' obj_name = 'ZPROGRAM' ) ) ).
+
+    zcl_abapgit_ortec_obj_index=>get_files_for_filter(
+      iv_repo_key   = mc_repo
+      iv_commit     = lv_commit_sha
+      ii_obj_filter = lo_filter
+      io_dot        = lo_dot
+      iv_devclass   = '$PACK' ).
+
+    DATA(lv_context_a) = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = '$PACK' io_dot = lo_dot ).
+    DATA(lv_context_b) = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = 'ZOTHERPACK' io_dot = lo_dot ).
+
+    cl_abap_unit_assert=>assert_differs( act = lv_context_b exp = lv_context_a
+      msg = 'Sanity: a different devclass must produce a different context hash' ).
+    cl_abap_unit_assert=>assert_true(
+      act = zcl_abapgit_ortec_obj_index=>is_index_ready(
+        iv_repo_key = mc_repo iv_commit = lv_commit_sha iv_context_hash = lv_context_a )
+      msg = 'Sanity: ready under the context it was actually built with' ).
+    cl_abap_unit_assert=>assert_false(
+      act = zcl_abapgit_ortec_obj_index=>is_index_ready(
+        iv_repo_key = mc_repo iv_commit = lv_commit_sha iv_context_hash = lv_context_b )
+      msg = 'is_index_ready must not report ready for the same commit under a ' &&
+            'different resolution context - the marker predicate must bind context_hash' ).
+  ENDMETHOD.
+
+  METHOD select_rows_excludes_other_context.
+    " AR-1-01/AR-2-01: ZAOG_OBJ_INDEX carries CONTEXT_HASH as a non-key
+    " column safely ONLY because rebuild_index always purges the whole
+    " commit before rewriting under a new context (design doc §3.0
+    " closure). This proves that runtime guarantee end-to-end: once a
+    " context change forces a rebuild, the OLD context can never again be
+    " reported ready (its rows/marker no longer exist), so a caller can
+    " never read a stale cross-context row via get_files_for_filter.
+    DATA(lv_commit_sha) = build_commit( iv_filename = 'zprogram.prog.abap' iv_content = '48656C6C6F' ).
+    DATA(lo_dot) = zcl_abapgit_dot_abapgit=>build_default( ).
+    DATA(lo_filter) = NEW zcl_abapgit_object_filter_obj( it_filter = VALUE #( ( object = 'PROG' obj_name = 'ZPROGRAM' ) ) ).
+
+    DATA(lt_files_a) = zcl_abapgit_ortec_obj_index=>get_files_for_filter(
+      iv_repo_key   = mc_repo
+      iv_commit     = lv_commit_sha
+      ii_obj_filter = lo_filter
+      io_dot        = lo_dot
+      iv_devclass   = '$PACK' ).
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_files_a ) exp = 1
+      msg = 'Sanity: context A must resolve the file' ).
+
+    DATA(lv_context_a) = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = '$PACK' io_dot = lo_dot ).
+
+    " Force a rebuild under a DIFFERENT context (different devclass) for
+    " the SAME commit - is_index_ready(context B) is false, so
+    " get_files_for_filter must purge and re-walk under context B.
+    DATA(lt_files_b) = zcl_abapgit_ortec_obj_index=>get_files_for_filter(
+      iv_repo_key   = mc_repo
+      iv_commit     = lv_commit_sha
+      ii_obj_filter = lo_filter
+      io_dot        = lo_dot
+      iv_devclass   = 'ZOTHERPACK' ).
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_files_b ) exp = 1
+      msg = 'Context B must independently resolve the same file after its own rebuild' ).
+
+    cl_abap_unit_assert=>assert_false(
+      act = zcl_abapgit_ortec_obj_index=>is_index_ready(
+        iv_repo_key = mc_repo iv_commit = lv_commit_sha iv_context_hash = lv_context_a )
+      msg = 'After a context-B rebuild purged the whole commit, context A''s own ' &&
+            'marker/rows must be gone - a later context-A request must re-walk, ' &&
+            'never silently reuse a row left behind by a different context' ).
+  ENDMETHOD.
+
+  METHOD blank_legacy_context_is_never_ready.
+    " AR-1-01: a pre-migration row written before CONTEXT_HASH existed
+    " (simulated here as a blank/initial context_hash) must never satisfy
+    " is_index_ready for a real, non-blank context - it must be treated as
+    " "legacy, always rebuild", never as an accidental context match.
+    DATA(lv_commit_sha) = build_commit( iv_filename = 'zprogram.prog.abap' iv_content = '48656C6C6F' ).
+    DATA(lo_dot) = zcl_abapgit_dot_abapgit=>build_default( ).
+
+    " Directly seed a legacy-shaped completion marker row (blank context)
+    " without going through rebuild_index, simulating data written before
+    " this column existed.
+    DATA ls_marker TYPE zaog_obj_index.
+    CLEAR ls_marker.
+    ls_marker-repo_key    = mc_repo.
+    ls_marker-commit_sha1 = lv_commit_sha.
+    ls_marker-obj_type    = '$IDX'.
+    ls_marker-obj_name    = '__READY__'.
+    ls_marker-idx_status  = 'R'.
+    " ls_marker-context_hash left blank/initial on purpose.
+    MODIFY zaog_obj_index FROM ls_marker.
+
+    DATA(lv_real_context) = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = '$PACK' io_dot = lo_dot ).
+
+    cl_abap_unit_assert=>assert_false(
+      act = zcl_abapgit_ortec_obj_index=>is_index_ready(
+        iv_repo_key = mc_repo iv_commit = lv_commit_sha iv_context_hash = lv_real_context )
+      msg = 'A blank/legacy context_hash marker row must never be treated as ready ' &&
+            'for a real, non-blank context - it must force a rebuild instead' ).
+  ENDMETHOD.
+
+  METHOD partial_rows_context_disjoint.
+    " AR-2-01 direct retest: two ZAOG_OBJ_PIDX rows for the identical
+    " (repo, commit, obj_type, obj_name, path_hash) but DIFFERENT
+    " context_hash must physically coexist as distinct rows (context_hash
+    " is a real KEY field on this table) - neither can overwrite the
+    " other, and select_partial_rows_for_filter must return exactly the
+    " row matching the caller's own context, never the other one.
+    CONSTANTS lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1 VALUE '1111111111111111111111111111111111111111'.
+    CONSTANTS lv_context_a TYPE zif_abapgit_git_definitions=>ty_sha1 VALUE 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'.
+    CONSTANTS lv_context_b TYPE zif_abapgit_git_definitions=>ty_sha1 VALUE 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB'.
+    CONSTANTS lv_path_hash TYPE zif_abapgit_git_definitions=>ty_sha1 VALUE 'CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC'.
+
+    DATA lt_pidx TYPE STANDARD TABLE OF zaog_obj_pidx WITH DEFAULT KEY.
+    DATA ls_pidx TYPE zaog_obj_pidx.
+
+    CLEAR ls_pidx.
+    ls_pidx-repo_key     = mc_repo.
+    ls_pidx-commit_sha1  = lv_commit_sha.
+    ls_pidx-obj_type     = 'PROG'.
+    ls_pidx-obj_name     = 'ZPROGRAM'.
+    ls_pidx-context_hash = lv_context_a.
+    ls_pidx-path_hash    = lv_path_hash.
+    ls_pidx-file_path    = '/src/'.
+    ls_pidx-file_name    = 'zprogram_a.prog.abap'.
+    ls_pidx-idx_status   = 'R'.
+    APPEND ls_pidx TO lt_pidx.
+
+    ls_pidx-context_hash = lv_context_b.
+    ls_pidx-file_name    = 'zprogram_b.prog.abap'.
+    APPEND ls_pidx TO lt_pidx.
+
+    MODIFY zaog_obj_pidx FROM TABLE lt_pidx.
+
+    DATA(lt_filter) = VALUE zif_abapgit_definitions=>ty_tadir_tt( ( object = 'PROG' obj_name = 'ZPROGRAM' ) ).
+
+    DATA(lt_rows_a) = zcl_abapgit_ortec_obj_index=>select_partial_rows_for_filter(
+      iv_repo_key = mc_repo iv_commit = lv_commit_sha
+      iv_context_hash = lv_context_a it_filter = lt_filter ).
+    DATA(lt_rows_b) = zcl_abapgit_ortec_obj_index=>select_partial_rows_for_filter(
+      iv_repo_key = mc_repo iv_commit = lv_commit_sha
+      iv_context_hash = lv_context_b it_filter = lt_filter ).
+
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_rows_a ) exp = 1
+      msg = 'Context A must see exactly its own row' ).
+    cl_abap_unit_assert=>assert_equals( act = lt_rows_a[ 1 ]-file_name exp = 'zprogram_a.prog.abap'
+      msg = 'Context A must never see context B''s file' ).
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_rows_b ) exp = 1
+      msg = 'Context B must see exactly its own row' ).
+    cl_abap_unit_assert=>assert_equals( act = lt_rows_b[ 1 ]-file_name exp = 'zprogram_b.prog.abap'
+      msg = 'Context B must never see context A''s file' ).
+
+    DELETE FROM zaog_obj_pidx WHERE repo_key = mc_repo AND commit_sha1 = lv_commit_sha.
+  ENDMETHOD.
+
+  METHOD select_partial_rows_chunk_boundary.
+    " AR-1-04: select_partial_rows_for_filter must chunk it_filter at
+    " zcl_abapgit_ortec_obj_cover=>c_filter_chunk_size (5000) - proves no
+    " row is lost/duplicated when the caller-supplied filter set crosses
+    " that boundary.
+    CONSTANTS lc_file_count TYPE i VALUE 5100.
+    CONSTANTS lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1 VALUE '2222222222222222222222222222222222222222'.
+    CONSTANTS lv_context TYPE zif_abapgit_git_definitions=>ty_sha1 VALUE 'DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD'.
+
+    DATA lt_pidx TYPE STANDARD TABLE OF zaog_obj_pidx WITH DEFAULT KEY.
+    DATA lt_filter TYPE zif_abapgit_definitions=>ty_tadir_tt.
+    DATA ls_pidx TYPE zaog_obj_pidx.
+    DATA ls_filter LIKE LINE OF lt_filter.
+    DATA lv_index TYPE i.
+    DATA lv_obj_name TYPE string.
+
+    DO lc_file_count TIMES.
+      lv_index = sy-index.
+      lv_obj_name = |ZBULK{ lv_index WIDTH = 6 ALIGN = RIGHT PAD = '0' }|.
+
+      CLEAR ls_pidx.
+      ls_pidx-repo_key     = mc_repo.
+      ls_pidx-commit_sha1  = lv_commit_sha.
+      ls_pidx-obj_type     = 'PROG'.
+      ls_pidx-obj_name     = lv_obj_name.
+      ls_pidx-context_hash = lv_context.
+      ls_pidx-path_hash    = zcl_abapgit_hash=>sha1_string( lv_obj_name ).
+      ls_pidx-file_path    = '/src/'.
+      ls_pidx-file_name    = |{ lv_obj_name }.prog.abap|.
+      ls_pidx-idx_status   = 'R'.
+      APPEND ls_pidx TO lt_pidx.
+
+      CLEAR ls_filter.
+      ls_filter-object    = 'PROG'.
+      ls_filter-obj_name  = lv_obj_name.
+      APPEND ls_filter TO lt_filter.
+    ENDDO.
+
+    MODIFY zaog_obj_pidx FROM TABLE lt_pidx.
+
+    DATA(lt_rows) = zcl_abapgit_ortec_obj_index=>select_partial_rows_for_filter(
+      iv_repo_key = mc_repo iv_commit = lv_commit_sha
+      iv_context_hash = lv_context it_filter = lt_filter ).
+
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_rows ) exp = lc_file_count
+      msg = 'All rows must be returned across the c_filter_chunk_size boundary, ' &&
+            'not just the first chunk' ).
+
+    DELETE FROM zaog_obj_pidx WHERE repo_key = mc_repo AND commit_sha1 = lv_commit_sha.
   ENDMETHOD.
 ENDCLASS.

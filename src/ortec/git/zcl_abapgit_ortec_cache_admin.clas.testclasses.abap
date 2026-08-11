@@ -23,6 +23,9 @@ CLASS ltcl_cache_admin DEFINITION
     CONSTANTS c_other_url TYPE string
       VALUE 'https://test-cache-admin.example.com/other.git'.
 
+    CONSTANTS c_context_hash TYPE zif_abapgit_git_definitions=>ty_sha1
+      VALUE '1111111111111111111111111111111111111111'.
+
     METHODS setup.
     METHODS teardown.
     METHODS cleanup.
@@ -91,6 +94,27 @@ CLASS ltcl_cache_admin DEFINITION
       FOR TESTING
       RAISING cx_static_check.
 
+    " Slice 1c (IMPL-A3): AR-1-05/AR-2-03 cache-admin lock unification -
+    " clear_repo now also deletes ZAOG_OBJ_COVER/ZAOG_OBJ_PIDX under the
+    " canonical zcl_abapgit_ortec_pack_raw repo-scoped mutex.
+    METHODS seed_filter_rows
+      IMPORTING
+        iv_repo_key TYPE zcl_abapgit_ortec_repo_state=>ty_repo_key
+      RAISING
+        cx_static_check.
+
+    METHODS clear_repo_deletes_derived
+      FOR TESTING
+      RAISING cx_static_check.
+
+    METHODS clear_repo_then_filtered_read_rewalks
+      FOR TESTING
+      RAISING cx_static_check.
+
+    METHODS clear_repo_blocks_on_pack_lock
+      FOR TESTING
+      RAISING cx_static_check.
+
 ENDCLASS.
 
 
@@ -111,6 +135,14 @@ CLASS ltcl_cache_admin IMPLEMENTATION.
     ROLLBACK WORK.
 
     DELETE FROM zaog_obj_index
+      WHERE repo_key = c_repo
+         OR repo_key = c_other_repo.
+
+    DELETE FROM zaog_obj_cover
+      WHERE repo_key = c_repo
+         OR repo_key = c_other_repo.
+
+    DELETE FROM zaog_obj_pidx
       WHERE repo_key = c_repo
          OR repo_key = c_other_repo.
 
@@ -945,5 +977,217 @@ CLASS ltcl_cache_admin IMPLEMENTATION.
       act = ls_match-branch_name
       exp = 'main'
       msg = 'The real repo_state tier must win the dedup, not an orphan label' ).
+  ENDMETHOD.
+
+
+  METHOD seed_filter_rows.
+
+    DATA ls_marker TYPE zaog_obj_index.
+    DATA ls_cover  TYPE zaog_obj_cover.
+    DATA ls_pidx   TYPE zaog_obj_pidx.
+    DATA lv_ts     TYPE timestampl.
+
+    GET TIME STAMP FIELD lv_ts.
+
+    " $IDX/__READY__ completion marker (STRICT is_index_ready mode).
+    ls_marker-repo_key     = iv_repo_key.
+    ls_marker-commit_sha1  = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'.
+    ls_marker-obj_type     = '$IDX'.
+    ls_marker-obj_name     = '__READY__'.
+    ls_marker-path_hash    = '0000000000000000000000000000000000000000'.
+    ls_marker-idx_status   = 'R'.
+    ls_marker-context_hash = c_context_hash.
+
+    MODIFY zaog_obj_index FROM ls_marker.
+
+    cl_abap_unit_assert=>assert_subrc(
+      exp = 0
+      msg = 'Failed to seed ZAOG_OBJ_INDEX marker row' ).
+
+    ls_cover-repo_key          = iv_repo_key.
+    ls_cover-commit_sha1       = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'.
+    ls_cover-obj_type          = 'PROG'.
+    ls_cover-obj_name          = 'ZCACHE_ADMIN'.
+    ls_cover-context_hash      = c_context_hash.
+    ls_cover-resolution_status = zcl_abapgit_ortec_obj_cover=>cs_resolution-found.
+    ls_cover-file_count        = 1.
+    ls_cover-walk_hist_level   = zcl_abapgit_ortec_mat_state=>cs_hist_level-full_complete.
+    ls_cover-resolved_at       = lv_ts.
+
+    MODIFY zaog_obj_cover FROM ls_cover.
+
+    cl_abap_unit_assert=>assert_subrc(
+      exp = 0
+      msg = 'Failed to seed ZAOG_OBJ_COVER row' ).
+
+    ls_pidx-repo_key    = iv_repo_key.
+    ls_pidx-commit_sha1 = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'.
+    ls_pidx-obj_type    = 'PROG'.
+    ls_pidx-obj_name    = 'ZCACHE_ADMIN'.
+    ls_pidx-context_hash = c_context_hash.
+    ls_pidx-path_hash   = zcl_abapgit_hash=>sha1_string( '/' ).
+    ls_pidx-file_path   = '/'.
+    ls_pidx-idx_status  = 'R'.
+
+    MODIFY zaog_obj_pidx FROM ls_pidx.
+
+    cl_abap_unit_assert=>assert_subrc(
+      exp = 0
+      msg = 'Failed to seed ZAOG_OBJ_PIDX row' ).
+
+    COMMIT WORK AND WAIT.
+
+  ENDMETHOD.
+
+
+  METHOD clear_repo_deletes_derived.
+
+    seed_repo( iv_repo_key = c_repo ).
+    seed_filter_rows( c_repo ).
+
+    DATA(ls_result) =
+      zcl_abapgit_ortec_cache_admin=>clear_repo(
+        iv_repo_key = c_repo ).
+
+    " seed_repo already inserts one ZAOG_OBJ_INDEX row of its own, plus the
+    " $IDX/__READY__ marker from seed_filter_rows.
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_result-obj_index
+      exp = 2
+      msg = 'OBJ_INDEX counter must include the seeded row and the marker' ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_result-obj_cover
+      exp = 1
+      msg = 'OBJ_COVER counter must reflect the deleted coverage row' ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_result-obj_pidx
+      exp = 1
+      msg = 'OBJ_PIDX counter must reflect the deleted partial-index row' ).
+
+    SELECT COUNT(*)
+      FROM zaog_obj_index
+      WHERE repo_key = @c_repo
+      INTO @DATA(lv_idx_count).
+
+    SELECT COUNT(*)
+      FROM zaog_obj_cover
+      WHERE repo_key = @c_repo
+      INTO @DATA(lv_cover_count).
+
+    SELECT COUNT(*)
+      FROM zaog_obj_pidx
+      WHERE repo_key = @c_repo
+      INTO @DATA(lv_pidx_count).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_idx_count
+      exp = 0
+      msg = 'ZAOG_OBJ_INDEX must be empty after clear_repo' ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_cover_count
+      exp = 0
+      msg = 'ZAOG_OBJ_COVER must be empty after clear_repo' ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_pidx_count
+      exp = 0
+      msg = 'ZAOG_OBJ_PIDX must be empty after clear_repo' ).
+
+  ENDMETHOD.
+
+
+  METHOD clear_repo_then_filtered_read_rewalks.
+
+    seed_repo( iv_repo_key = c_repo ).
+    seed_filter_rows( c_repo ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = zcl_abapgit_ortec_obj_index=>is_index_ready(
+              iv_repo_key     = c_repo
+              iv_commit       = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+              iv_context_hash = c_context_hash )
+      exp = abap_true
+      msg = 'Fixture must start with a ready index under this context' ).
+
+    zcl_abapgit_ortec_cache_admin=>clear_repo(
+      iv_repo_key = c_repo ).
+
+    " A subsequent filtered read must never trust orphaned coverage: the
+    " completion marker is gone, so is_index_ready reports NOT ready and
+    " the caller re-walks instead of returning a false empty result.
+    cl_abap_unit_assert=>assert_equals(
+      act = zcl_abapgit_ortec_obj_index=>is_index_ready(
+              iv_repo_key     = c_repo
+              iv_commit       = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+              iv_context_hash = c_context_hash )
+      exp = abap_false
+      msg = 'Index must not be reported ready after clear_repo' ).
+
+    SELECT COUNT(*)
+      FROM zaog_obj_cover
+      WHERE repo_key = @c_repo
+      INTO @DATA(lv_cover_count).
+
+    SELECT COUNT(*)
+      FROM zaog_obj_pidx
+      WHERE repo_key = @c_repo
+      INTO @DATA(lv_pidx_count).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_cover_count
+      exp = 0
+      msg = 'No coverage row may survive clear_repo to be (wrongly) trusted' ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_pidx_count
+      exp = 0
+      msg = 'No partial-index row may survive clear_repo to be (wrongly) trusted' ).
+
+  ENDMETHOD.
+
+
+  METHOD clear_repo_blocks_on_pack_lock.
+
+    seed_repo( iv_repo_key = c_repo ).
+    seed_filter_rows( c_repo ).
+
+    DATA(lv_lock_id) =
+      zcl_abapgit_ortec_pack_raw=>acquire_repo_lock(
+        iv_repo_key = c_repo ).
+
+    DATA lx_caught TYPE REF TO zcx_abapgit_ortec_git.
+
+    TRY.
+        zcl_abapgit_ortec_cache_admin=>clear_repo(
+          iv_repo_key = c_repo ).
+
+        cl_abap_unit_assert=>fail(
+          'clear_repo must not proceed while the pack-raw repo lock is held' ).
+
+      CATCH zcx_abapgit_ortec_git INTO lx_caught.
+        " Expected: acquire_repo_lock inside clear_repo times out while the
+        " mutex is held by this test, and clear_repo fails cleanly instead
+        " of clearing under a concurrent writer.
+    ENDTRY.
+
+    zcl_abapgit_ortec_pack_raw=>release_repo_lock( lv_lock_id ).
+
+    cl_abap_unit_assert=>assert_bound(
+      act = lx_caught
+      msg = 'clear_repo must raise when it cannot acquire the pack-raw lock' ).
+
+    SELECT COUNT(*)
+      FROM zaog_obj_cover
+      WHERE repo_key = @c_repo
+      INTO @DATA(lv_cover_count).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = lv_cover_count
+      exp = 1
+      msg = 'A blocked clear_repo must not have deleted the coverage row' ).
+
   ENDMETHOD.
 ENDCLASS.
