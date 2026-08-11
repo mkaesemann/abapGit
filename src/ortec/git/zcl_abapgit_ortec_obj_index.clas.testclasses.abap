@@ -57,17 +57,24 @@ CLASS ltcl_obj_index DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
     METHODS blank_legacy_context_is_never_ready FOR TESTING RAISING cx_static_check.
     METHODS partial_rows_context_disjoint     FOR TESTING RAISING cx_static_check.
     METHODS select_partial_rows_chunk_boundary FOR TESTING RAISING cx_static_check.
+
+    " OBJ-PERF-IMPL-B (design doc §11 step 3 sub-steps 1-2, Slice 2):
+    " ensure_filtered_coverage warm-fast-path/fallback regression coverage.
+    METHODS warm_coverage_skips_rewalk FOR TESTING RAISING cx_static_check.
+    METHODS incomplete_coverage_falls_through_to_rebuild FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 CLASS ltcl_obj_index IMPLEMENTATION.
   METHOD setup.
     DELETE FROM zaog_obj_store WHERE repo_key = mc_repo.
     DELETE FROM zaog_obj_index WHERE repo_key = mc_repo.
     DELETE FROM zaog_obj_pidx WHERE repo_key = mc_repo.
+    DELETE FROM zaog_obj_cover WHERE repo_key = mc_repo.
   ENDMETHOD.
   METHOD teardown.
     DELETE FROM zaog_obj_store WHERE repo_key = mc_repo.
     DELETE FROM zaog_obj_index WHERE repo_key = mc_repo.
     DELETE FROM zaog_obj_pidx WHERE repo_key = mc_repo.
+    DELETE FROM zaog_obj_cover WHERE repo_key = mc_repo.
     ROLLBACK WORK.
   ENDMETHOD.
   METHOD marker_required_for_ready.
@@ -897,5 +904,101 @@ CLASS ltcl_obj_index IMPLEMENTATION.
             'not just the first chunk' ).
 
     DELETE FROM zaog_obj_pidx WHERE repo_key = mc_repo AND commit_sha1 = lv_commit_sha.
+  ENDMETHOD.
+
+  METHOD warm_coverage_skips_rewalk.
+    " Slice 2 (design §11 step 3.4): once coverage is FOUND for every
+    " requested object, get_files_for_filter must serve the file straight
+    " from ZAOG_OBJ_PIDX without ever touching ZAOG_OBJ_STORE/rebuild_index
+    " - proven here by seeding ONLY the coverage/partial-index rows (no
+    " commit/tree/blob object is stored at all) and confirming the file is
+    " still returned without any exception, which a real tree walk against
+    " a nonexistent commit would otherwise raise.
+    CONSTANTS lv_commit_sha TYPE zif_abapgit_git_definitions=>ty_sha1
+      VALUE '3333333333333333333333333333333333333333'.
+
+    DATA(lo_dot) = zcl_abapgit_dot_abapgit=>build_default( ).
+    DATA(lv_context) = zcl_abapgit_ortec_obj_cover=>compute_context_hash(
+      iv_devclass = '$PACK' io_dot = lo_dot ).
+
+    DATA ls_cover TYPE zaog_obj_cover.
+    CLEAR ls_cover.
+    ls_cover-repo_key          = mc_repo.
+    ls_cover-commit_sha1       = lv_commit_sha.
+    ls_cover-obj_type          = 'PROG'.
+    ls_cover-obj_name          = 'ZPROGRAM'.
+    ls_cover-context_hash      = lv_context.
+    ls_cover-resolution_status = zcl_abapgit_ortec_obj_cover=>cs_resolution-found.
+    MODIFY zaog_obj_cover FROM ls_cover.
+
+    DATA ls_pidx TYPE zaog_obj_pidx.
+    CLEAR ls_pidx.
+    ls_pidx-repo_key     = mc_repo.
+    ls_pidx-commit_sha1  = lv_commit_sha.
+    ls_pidx-obj_type     = 'PROG'.
+    ls_pidx-obj_name     = 'ZPROGRAM'.
+    ls_pidx-context_hash = lv_context.
+    ls_pidx-path_hash    = zcl_abapgit_hash=>sha1_string( '/src/zprogram.prog.abap' ).
+    ls_pidx-file_path    = '/src/'.
+    ls_pidx-file_name    = 'zprogram.prog.abap'.
+    ls_pidx-blob_sha1    = zcl_abapgit_hash=>sha1_blob( '48656C6C6F' ).
+    ls_pidx-idx_status   = 'R'.
+    MODIFY zaog_obj_pidx FROM ls_pidx.
+
+    zcl_abapgit_ortec_obj_store=>store_object(
+      iv_repo_key = mc_repo iv_sha1 = ls_pidx-blob_sha1
+      iv_type = zif_abapgit_git_definitions=>c_type-blob iv_data = '48656C6C6F' ).
+
+    DATA(lo_filter) = NEW zcl_abapgit_object_filter_obj( it_filter = VALUE #( ( object = 'PROG' obj_name = 'ZPROGRAM' ) ) ).
+
+    DATA(lt_files) = zcl_abapgit_ortec_obj_index=>get_files_for_filter(
+      iv_repo_key   = mc_repo
+      iv_commit     = lv_commit_sha
+      ii_obj_filter = lo_filter
+      io_dot        = lo_dot
+      iv_devclass   = '$PACK' ).
+
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_files ) exp = 1
+      msg = 'A FOUND coverage row must serve the file from ZAOG_OBJ_PIDX without a real walk - ' &&
+            'no commit/tree object exists in ZAOG_OBJ_STORE, so any attempted rebuild would raise' ).
+    cl_abap_unit_assert=>assert_equals( act = lt_files[ 1 ]-filename exp = 'zprogram.prog.abap' ).
+    cl_abap_unit_assert=>assert_false(
+      act = zcl_abapgit_ortec_obj_index=>is_index_ready(
+        iv_repo_key = mc_repo iv_commit = lv_commit_sha iv_context_hash = lv_context )
+      msg = 'The warm-via-coverage path must not write a COMPLETE-mode $IDX/__READY__ marker - ' &&
+            'FILTERED-mode coverage never becomes COMPLETE-mode readiness' ).
+
+    DELETE FROM zaog_obj_cover WHERE repo_key = mc_repo AND commit_sha1 = lv_commit_sha.
+    DELETE FROM zaog_obj_pidx WHERE repo_key = mc_repo AND commit_sha1 = lv_commit_sha.
+  ENDMETHOD.
+
+  METHOD incomplete_coverage_falls_through_to_rebuild.
+    " Slice 2: when coverage is NOT complete for every requested object
+    " (walk_filtered does not exist until Slice 3), ensure_filtered_coverage
+    " must fall through to the existing, unchanged COMPLETE-mode
+    " ensure_index/rebuild_index path - proving Slice 2 adds a fast path
+    " only and does not yet change cold-walk behavior.
+    DATA(lv_commit_sha) = build_commit( iv_filename = 'zprogram.prog.abap' iv_content = '48656C6C6F' ).
+    DATA(lo_dot) = zcl_abapgit_dot_abapgit=>build_default( ).
+    DATA(lo_filter) = NEW zcl_abapgit_object_filter_obj( it_filter = VALUE #( ( object = 'PROG' obj_name = 'ZPROGRAM' ) ) ).
+
+    " No ZAOG_OBJ_COVER row exists for this (repo, commit, object, context) -
+    " coverage is incomplete, so the file must still be resolved via a real
+    " COMPLETE-mode rebuild against the real stored commit/tree/blob.
+    DATA(lt_files) = zcl_abapgit_ortec_obj_index=>get_files_for_filter(
+      iv_repo_key   = mc_repo
+      iv_commit     = lv_commit_sha
+      ii_obj_filter = lo_filter
+      io_dot        = lo_dot
+      iv_devclass   = '$PACK' ).
+
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_files ) exp = 1
+      msg = 'Incomplete coverage must fall through to the existing COMPLETE-mode rebuild path' ).
+
+    DATA(lv_context) = zcl_abapgit_ortec_obj_cover=>compute_context_hash( iv_devclass = '$PACK' io_dot = lo_dot ).
+    cl_abap_unit_assert=>assert_true(
+      act = zcl_abapgit_ortec_obj_index=>is_index_ready(
+        iv_repo_key = mc_repo iv_commit = lv_commit_sha iv_context_hash = lv_context )
+      msg = 'The fallback COMPLETE-mode path must still write the $IDX/__READY__ marker as today' ).
   ENDMETHOD.
 ENDCLASS.

@@ -24,18 +24,23 @@ CLASS zcl_abapgit_ortec_obj_index DEFINITION
     "! active for it, a missing blob triggers one targeted negotiated fetch
     "! before falling back to the full remote read. Pass initial to keep the
     "! prior behavior (fall back immediately on any missing blob).
+    "! @parameter iv_current_remote |
+    "! Best-effort current remote tip SHA1 (zif_abapgit_repo_online=>get_current_remote),
+    "! threaded through to ensure_filtered_coverage/walk_filtered. Optional;
+    "! callers without an online repo reference in scope simply omit it.
     "! @parameter rt_files |
     "! Filtered remote files with payload
     "! @raising zcx_abapgit_exception |
     "! Raised on unrecoverable index/object-store errors
     CLASS-METHODS get_files_for_filter
       IMPORTING
-        iv_repo_key   TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
-        iv_commit     TYPE zif_abapgit_git_definitions=>ty_sha1
-        ii_obj_filter TYPE REF TO zif_abapgit_object_filter
-        io_dot        TYPE REF TO zcl_abapgit_dot_abapgit
-        iv_devclass   TYPE devclass
-        iv_url        TYPE string OPTIONAL
+        iv_repo_key       TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
+        iv_commit         TYPE zif_abapgit_git_definitions=>ty_sha1
+        ii_obj_filter     TYPE REF TO zif_abapgit_object_filter
+        io_dot            TYPE REF TO zcl_abapgit_dot_abapgit
+        iv_devclass       TYPE devclass
+        iv_url            TYPE string OPTIONAL
+        iv_current_remote TYPE zif_abapgit_git_definitions=>ty_sha1 OPTIONAL
       RETURNING
         VALUE(rt_files) TYPE zif_abapgit_git_definitions=>ty_files_tt
       RAISING
@@ -62,6 +67,50 @@ CLASS zcl_abapgit_ortec_obj_index DEFINITION
         iv_context_hash TYPE zif_abapgit_git_definitions=>ty_sha1
       RETURNING
         VALUE(rv_yes) TYPE abap_bool.
+
+    "! FILTERED-mode fast-path orchestrator (design doc §11 step 3,
+    "! sub-steps 1-2 only - this slice). If the COMPLETE-mode index is
+    "! already ready under this context, reuses it. Otherwise consults
+    "! ZAOG_OBJ_COVER: when every requested object already has a terminal
+    "! coverage fact (FOUND/RESOLVED_NO_FILES/RESOLVED_NOT_PRESENT_REMOTE),
+    "! answers from ZAOG_OBJ_PIDX with zero tree walk. Any object still
+    "! uncovered (no row, or only a non-terminal UNRESOLVED_* row) falls
+    "! through to the existing ensure_index/select_rows_for_filter
+    "! COMPLETE-mode path unchanged - walk_filtered does not exist yet
+    "! (Slice 3), so this slice never narrows cold-walk write volume.
+    "! @parameter iv_repo_key |
+    "! ORTEC repository key
+    "! @parameter iv_commit |
+    "! Commit SHA1
+    "! @parameter io_dot |
+    "! Parsed .abapgit configuration
+    "! @parameter iv_devclass |
+    "! Repository package
+    "! @parameter it_filter |
+    "! Stage object filter (TADIR-like list)
+    "! @parameter iv_context_hash |
+    "! Resolution context identity hash (zcl_abapgit_ortec_obj_cover=>compute_context_hash)
+    "! @parameter iv_current_remote |
+    "! Best-effort current remote tip SHA1. Not yet consulted by this
+    "! slice (threaded through for the Slice 3/4 walk_filtered gate).
+    "! @parameter rt_rows |
+    "! Filtered index rows (identical shape whether sourced from
+    "! ZAOG_OBJ_INDEX, ZAOG_OBJ_PIDX, or a fresh COMPLETE-mode rebuild)
+    "! @raising zcx_abapgit_exception |
+    "! Propagated from a COMPLETE-mode rebuild fallback
+    CLASS-METHODS ensure_filtered_coverage
+      IMPORTING
+        iv_repo_key       TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
+        iv_commit         TYPE zif_abapgit_git_definitions=>ty_sha1
+        io_dot            TYPE REF TO zcl_abapgit_dot_abapgit
+        iv_devclass       TYPE devclass
+        it_filter         TYPE zif_abapgit_definitions=>ty_tadir_tt
+        iv_context_hash   TYPE zif_abapgit_git_definitions=>ty_sha1
+        iv_current_remote TYPE zif_abapgit_git_definitions=>ty_sha1 OPTIONAL
+      RETURNING
+        VALUE(rt_rows) TYPE ty_index_rows_tt
+      RAISING
+        zcx_abapgit_exception.
 
   PRIVATE SECTION.
     CONSTANTS c_status_ready TYPE c LENGTH 1 VALUE 'R'.
@@ -136,7 +185,8 @@ CLASS zcl_abapgit_ortec_obj_index DEFINITION
     "! FILTERED-mode positive-row reader (design doc §3.0b, AR-2-01). Reads
     "! ZAOG_OBJ_PIDX (never ZAOG_OBJ_INDEX) with CONTEXT_HASH as a real key
     "! predicate, so a differently-contexted row can never be mistaken for
-    "! this caller's own answer. Not yet wired to any caller (Slice 3).
+    "! this caller's own answer. Wired to ensure_filtered_coverage's warm
+    "! "fully covered" fast path (Slice 2).
     CLASS-METHODS select_partial_rows_for_filter
       IMPORTING
         iv_repo_key     TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key
@@ -195,18 +245,14 @@ CLASS zcl_abapgit_ortec_obj_index IMPLEMENTATION.
       ENDTRY.
     ENDLOOP.
 
-    ensure_index(
-      iv_repo_key     = iv_repo_key
-      iv_commit       = iv_commit
-      io_dot          = io_dot
-      iv_devclass     = iv_devclass
-      iv_context_hash = lv_context_hash ).
-
-    lt_rows = select_rows_for_filter(
-      iv_repo_key     = iv_repo_key
-      iv_commit       = iv_commit
-      it_filter       = lt_filter
-      iv_context_hash = lv_context_hash ).
+    lt_rows = ensure_filtered_coverage(
+      iv_repo_key       = iv_repo_key
+      iv_commit         = iv_commit
+      io_dot            = io_dot
+      iv_devclass       = iv_devclass
+      it_filter         = lt_filter
+      iv_context_hash   = lv_context_hash
+      iv_current_remote = iv_current_remote ).
 
     IF lt_devc_paths IS NOT INITIAL.
       LOOP AT lt_rows ASSIGNING <ls_row> WHERE obj_type = 'DEVC'.
@@ -328,6 +374,116 @@ CLASS zcl_abapgit_ortec_obj_index IMPLEMENTATION.
       io_dot          = io_dot
       iv_devclass     = iv_devclass
       iv_context_hash = iv_context_hash ).
+  ENDMETHOD.
+
+
+  METHOD ensure_filtered_coverage.
+    " design doc §11 step 3, sub-steps 1-2 only (Slice 2). walk_filtered
+    " does not exist yet (Slice 3), so an incomplete coverage set always
+    " falls through to the existing COMPLETE-mode path unchanged - this
+    " slice adds the warm/coverage-complete fast path only.
+    DATA lt_coverage TYPE zcl_abapgit_ortec_obj_cover=>ty_coverage_tt.
+    DATA lt_found_filter TYPE zif_abapgit_definitions=>ty_tadir_tt.
+    DATA lv_all_covered TYPE abap_bool.
+
+    TYPES:
+      BEGIN OF ty_cov_lookup,
+        obj_type          TYPE zaog_obj_cover-obj_type,
+        obj_name          TYPE zaog_obj_cover-obj_name,
+        resolution_status TYPE zaog_obj_cover-resolution_status,
+      END OF ty_cov_lookup.
+    DATA lt_cov_lookup TYPE HASHED TABLE OF ty_cov_lookup WITH UNIQUE KEY obj_type obj_name.
+    DATA ls_cov_lookup TYPE ty_cov_lookup.
+
+    FIELD-SYMBOLS <ls_filter> TYPE zif_abapgit_definitions=>ty_tadir.
+    FIELD-SYMBOLS <ls_coverage> TYPE zcl_abapgit_ortec_obj_cover=>ty_coverage.
+    FIELD-SYMBOLS <ls_cov_lookup> TYPE ty_cov_lookup.
+
+    " Step 1: today's already-optimal warm-complete path, context-checked.
+    IF is_index_ready(
+        iv_repo_key     = iv_repo_key
+        iv_commit       = iv_commit
+        iv_context_hash = iv_context_hash ) = abap_true.
+      rt_rows = select_rows_for_filter(
+        iv_repo_key     = iv_repo_key
+        iv_commit       = iv_commit
+        it_filter       = it_filter
+        iv_context_hash = iv_context_hash ).
+      RETURN.
+    ENDIF.
+
+    " Step 2: consult per-object resolution facts. A O(1) hashed lookup
+    " keyed by obj_type/obj_name avoids an O(n^2) scan of it_filter x
+    " lt_coverage for large filter sets.
+    lt_coverage = zcl_abapgit_ortec_obj_cover=>get_coverage(
+      iv_repo_key     = iv_repo_key
+      iv_commit       = iv_commit
+      iv_context_hash = iv_context_hash
+      it_filter       = it_filter ).
+
+    LOOP AT lt_coverage ASSIGNING <ls_coverage>.
+      CLEAR ls_cov_lookup.
+      ls_cov_lookup-obj_type          = <ls_coverage>-obj_type.
+      ls_cov_lookup-obj_name          = <ls_coverage>-obj_name.
+      ls_cov_lookup-resolution_status = <ls_coverage>-resolution_status.
+      INSERT ls_cov_lookup INTO TABLE lt_cov_lookup.
+    ENDLOOP.
+
+    lv_all_covered = abap_true.
+    LOOP AT it_filter ASSIGNING <ls_filter>.
+      READ TABLE lt_cov_lookup ASSIGNING <ls_cov_lookup>
+        WITH TABLE KEY obj_type = <ls_filter>-object
+                        obj_name = <ls_filter>-obj_name.
+      IF sy-subrc <> 0
+          OR ( <ls_cov_lookup>-resolution_status <> zcl_abapgit_ortec_obj_cover=>cs_resolution-found
+           AND <ls_cov_lookup>-resolution_status <> zcl_abapgit_ortec_obj_cover=>cs_resolution-resolved_no_files
+           AND <ls_cov_lookup>-resolution_status <> zcl_abapgit_ortec_obj_cover=>cs_resolution-resolved_not_present_remote ).
+        " No row at all, or only a non-terminal UNRESOLVED_* row (M/A) -
+        " not coverage-complete. walk_filtered would resolve this (Slice
+        " 3); until then, fall through below.
+        lv_all_covered = abap_false.
+        EXIT.
+      ENDIF.
+    ENDLOOP.
+
+    IF lv_all_covered = abap_false.
+      " Coverage incomplete and walk_filtered does not exist yet - fall
+      " through to the existing, unchanged COMPLETE-mode path. This slice
+      " must NOT change cold-walk write volume (design's own explicit
+      " note for Slice 2).
+      ensure_index(
+        iv_repo_key     = iv_repo_key
+        iv_commit       = iv_commit
+        io_dot          = io_dot
+        iv_devclass     = iv_devclass
+        iv_context_hash = iv_context_hash ).
+
+      rt_rows = select_rows_for_filter(
+        iv_repo_key     = iv_repo_key
+        iv_commit       = iv_commit
+        it_filter       = it_filter
+        iv_context_hash = iv_context_hash ).
+      RETURN.
+    ENDIF.
+
+    " Fully covered under this context - warm via coverage, zero tree
+    " walk. FOUND objects have real rows in ZAOG_OBJ_PIDX; RESOLVED_NO_
+    " FILES/RESOLVED_NOT_PRESENT_REMOTE objects contribute zero rows by
+    " design (no files to return) and are simply not added to the lookup.
+    LOOP AT it_filter ASSIGNING <ls_filter>.
+      READ TABLE lt_cov_lookup ASSIGNING <ls_cov_lookup>
+        WITH TABLE KEY obj_type = <ls_filter>-object
+                        obj_name = <ls_filter>-obj_name.
+      IF sy-subrc = 0 AND <ls_cov_lookup>-resolution_status = zcl_abapgit_ortec_obj_cover=>cs_resolution-found.
+        APPEND <ls_filter> TO lt_found_filter.
+      ENDIF.
+    ENDLOOP.
+
+    rt_rows = select_partial_rows_for_filter(
+      iv_repo_key     = iv_repo_key
+      iv_commit       = iv_commit
+      iv_context_hash = iv_context_hash
+      it_filter       = lt_found_filter ).
   ENDMETHOD.
 
 

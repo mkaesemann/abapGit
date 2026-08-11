@@ -93,6 +93,7 @@ CLASS zcl_abapgit_ortec_filter_walk IMPLEMENTATION.
     DATA lv_branch      TYPE string.
     DATA lv_commit      TYPE zif_abapgit_git_definitions=>ty_sha1.
     DATA lv_repo_key    TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key.
+    DATA lv_current_remote TYPE zif_abapgit_git_definitions=>ty_sha1.
     DATA ls_state       TYPE zcl_abapgit_ortec_repo_state=>ty_state.
     DATA li_branches    TYPE REF TO zif_abapgit_git_branch_list.
     DATA ls_branch      TYPE zif_abapgit_git_definitions=>ty_git_branch.
@@ -161,13 +162,20 @@ CLASS zcl_abapgit_ortec_filter_walk IMPLEMENTATION.
           ENDIF.
         ENDIF.
 
+        TRY.
+            lv_current_remote = li_repo_online->get_current_remote( ).
+          CATCH zcx_abapgit_exception.
+            CLEAR lv_current_remote.
+        ENDTRY.
+
         rt_files = zcl_abapgit_ortec_obj_index=>get_files_for_filter(
-          iv_repo_key   = lv_repo_key
-          iv_commit     = lv_commit
-          ii_obj_filter = ii_obj_filter
-          io_dot        = ii_repo_online->get_dot_abapgit( )
-          iv_devclass   = ii_repo_online->get_package( )
-          iv_url        = lv_url ).
+          iv_repo_key       = lv_repo_key
+          iv_commit         = lv_commit
+          ii_obj_filter     = ii_obj_filter
+          io_dot            = ii_repo_online->get_dot_abapgit( )
+          iv_devclass       = ii_repo_online->get_package( )
+          iv_url            = lv_url
+          iv_current_remote = lv_current_remote ).
       CATCH zcx_abapgit_exception.
         rt_files = ii_repo_online->get_files_remote( ii_obj_filter ).
     ENDTRY.
