@@ -94,6 +94,13 @@ CLASS zcl_abapgit_ortec_ser_pref DEFINITION
     "! injecting a new buffer.
     CLASS-METHODS clear_msag_cache.
 
+    "! Prepare ONLY the DOKIL longtext index for a set of objects, leaving
+    "! the MSAG cache untouched. Called by the batch worker so GET_DOKIL
+    "! hits with one chunked SELECT per batch instead of a per-object SELECT
+    "! inside the longtext serializer.
+    CLASS-METHODS prepare_dokil_only
+      IMPORTING it_tadir TYPE zif_abapgit_definitions=>ty_tadir_tt.
+
   PRIVATE SECTION.
     TYPES:
       BEGIN OF ty_msag_cache,
@@ -109,6 +116,10 @@ CLASS zcl_abapgit_ortec_ser_pref DEFINITION
       WITH NON-UNIQUE SORTED KEY object_prefix COMPONENTS object.
     CLASS-DATA mv_dokil_prepared TYPE abap_bool.
     CLASS-DATA mv_language TYPE spras.
+
+    "! CP-range chunk size for PREPARE_DOKIL so a large object set never
+    "! builds an oversized WHERE object IN (...) statement.
+    CONSTANTS c_dokil_range_chunk TYPE i VALUE 500.
 
     CLASS-METHODS prepare_dokil
       IMPORTING it_tadir TYPE zif_abapgit_definitions=>ty_tadir_tt.
@@ -489,7 +500,10 @@ CLASS zcl_abapgit_ortec_ser_pref IMPLEMENTATION.
 
   METHOD prepare_dokil.
     DATA lr_object TYPE RANGE OF dokil-object.
-    DATA ls_range LIKE LINE OF lr_object.
+    DATA lr_chunk  TYPE RANGE OF dokil-object.
+    DATA ls_range  LIKE LINE OF lr_object.
+    DATA lt_tmp    TYPE STANDARD TABLE OF dokil.
+    DATA lt_all    TYPE STANDARD TABLE OF dokil.
 
     ls_range-sign = 'I'.
     ls_range-option = 'CP'.
@@ -509,15 +523,36 @@ CLASS zcl_abapgit_ortec_ser_pref IMPLEMENTATION.
     DELETE ADJACENT DUPLICATES FROM lr_object COMPARING low.
 
     TRY.
-        SELECT *
-          FROM dokil
-          INTO TABLE @mt_dokil
-          WHERE object IN @lr_object
-          ORDER BY PRIMARY KEY.
+        " Chunk the CP range so a large object set never builds an oversized
+        " WHERE object IN (...) statement (DBSQL_STMNT_TOO_LARGE).
+        LOOP AT lr_object INTO ls_range.
+          APPEND ls_range TO lr_chunk.
+          IF lines( lr_chunk ) >= c_dokil_range_chunk.
+            SELECT * FROM dokil INTO TABLE @lt_tmp
+              WHERE object IN @lr_chunk
+              ORDER BY PRIMARY KEY.
+            APPEND LINES OF lt_tmp TO lt_all.
+            CLEAR lr_chunk.
+          ENDIF.
+        ENDLOOP.
+        IF lr_chunk IS NOT INITIAL.
+          SELECT * FROM dokil INTO TABLE @lt_tmp
+            WHERE object IN @lr_chunk
+            ORDER BY PRIMARY KEY.
+          APPEND LINES OF lt_tmp TO lt_all.
+        ENDIF.
 
+        mt_dokil = lt_all.
         mv_dokil_prepared = abap_true.
       CATCH cx_root.
         CLEAR mt_dokil.
     ENDTRY.
+  ENDMETHOD.
+
+
+  METHOD prepare_dokil_only.
+    CLEAR mt_dokil.
+    CLEAR mv_dokil_prepared.
+    prepare_dokil( it_tadir ).
   ENDMETHOD.
 ENDCLASS.

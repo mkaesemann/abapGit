@@ -312,6 +312,10 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! ZCX_ABAPGIT_EXCEPTION is raised - there is no retry-then-fallback
     "! on timeout. Unit: seconds.
     CONSTANTS c_batch_rfc_timeout_s         TYPE i VALUE 300.
+    "! Poll cap for the pipeline wait loop. The WAIT wakes on every RFC
+    "! callback anyway; this only bounds how often the stall budget is
+    "! re-checked while no callback arrives. Unit: seconds.
+    CONSTANTS c_poll_interval_s             TYPE i VALUE 5.
 
     "! Serializes a set of objects using the adaptive batch path when
     "! eligible, falling back to the existing standard sequential/parallel
@@ -880,6 +884,19 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
       IMPORTING !iv_run_id       TYPE sysuuid_x16
       RETURNING VALUE(rv_result) TYPE abap_bool.
 
+    "! ABAP_TRUE iff this run has queued work AND a free worker slot, i.e. a
+    "! dispatch can happen right now. Pipeline wake condition for
+    "! WAIT_FOR_RUN_COMPLETION so a freed slot is refilled immediately.
+    CLASS-METHODS has_dispatchable_capacity
+      IMPORTING !iv_run_id       TYPE sysuuid_x16
+      RETURNING VALUE(rv_result) TYPE abap_bool.
+
+    "! Main-thread-only progress update. Must NEVER be called from the
+    "! ON_END_OF_BATCH aRFC callback context (SAPGUI_PROGRESS_INDICATOR is
+    "! a synchronous front-end RFC and is unsafe there).
+    CLASS-METHODS report_progress
+      IMPORTING !iv_run_id TYPE sysuuid_x16.
+
     "! SER-SLICE-3 parity incident fix (serialization_slice_3_dtel_doma_
     "! parity.md, H5): pure, deterministic guard extracted so the exact
     "! boundary can be unit tested without a live aRFC round trip. An
@@ -921,7 +938,14 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     " DTEL/CLAS/INTF/MSAG/etc. object on the adaptive batch path was an
     " unconditional MISS, exactly mirroring what the standard sequential/
     " parallel path already does before its own per-object loop.
-    lv_use_ortec_prefetch = zcl_abapgit_ortec_git_switch=>is_serial_prefetch_active( ).
+    " ORCH is the production owner of the prefetch window (see
+    " ZCL_ABAPGIT_ORTEC_GIT_SWITCH=>IS_SERIAL_PREFETCH_ACTIVE doc): turn it
+    " ON for the duration of this run so PREPARE()/EXTRACT_FOR_BATCH actually
+    " populate the worker buffers. It was never set anywhere in the main
+    " process, so it stayed FALSE, PREPARE() was skipped, the batch buffers
+    " were empty, and every worker object fell back to per-object DDIC reads.
+    zcl_abapgit_ortec_git_switch=>set_serial_prefetch_active( abap_true ).
+    lv_use_ortec_prefetch = abap_true.
     IF lv_use_ortec_prefetch = abap_true.
       zcl_abapgit_ortec_ser_pref=>prepare(
         it_tadir    = it_tadir
@@ -947,6 +971,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
           zcl_abapgit_ortec_ser_pref_ext=>clear( ).
           zcl_abapgit_ortec_ser_pref_oo=>clear( ).
         ENDIF.
+        zcl_abapgit_ortec_git_switch=>set_serial_prefetch_active( abap_false ).
         zcx_abapgit_exception=>raise( 'ORTEC batch: could not generate a run id' ).
     ENDTRY.
 
@@ -969,6 +994,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
           it_wo_translation_patterns = it_wo_translation_patterns ).
 
         route_to_sequential_fallback( iv_run_id = lv_run_id it_object_keys = ls_partition-forced_seq ).
+        report_progress( lv_run_id ).
 
         IF <ls_ctx> IS ASSIGNED.
           LOOP AT ls_partition-eligible INTO DATA(ls_key).
@@ -1027,6 +1053,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
           zcl_abapgit_ortec_ser_pref_ext=>clear( ).
           zcl_abapgit_ortec_ser_pref_oo=>clear( ).
         ENDIF.
+        zcl_abapgit_ortec_git_switch=>set_serial_prefetch_active( abap_false ).
       CATCH zcx_abapgit_exception INTO DATA(lx_run_failure).
         ASSIGN mt_run_context[ run_id = lv_run_id ] TO <ls_ctx>.
         IF <ls_ctx> IS ASSIGNED AND <ls_ctx>-ii_progress IS BOUND.
@@ -1041,6 +1068,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
           zcl_abapgit_ortec_ser_pref_ext=>clear( ).
           zcl_abapgit_ortec_ser_pref_oo=>clear( ).
         ENDIF.
+        zcl_abapgit_ortec_git_switch=>set_serial_prefetch_active( abap_false ).
         CLEAR rt_files.
         RAISE EXCEPTION lx_run_failure.
     ENDTRY.
@@ -1105,14 +1133,6 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
 
     INSERT VALUE #( run_id = iv_run_id obj_type = is_tadir-object obj_name = is_tadir-obj_name )
       INTO TABLE mt_resolved.
-    IF <ls_ctx> IS ASSIGNED AND <ls_ctx>-ii_progress IS BOUND.
-      TRY.
-          <ls_ctx>-ii_progress->show(
-            iv_current = <ls_ctx>-terminal_count
-            iv_text    = |Serialized { <ls_ctx>-terminal_count } of { <ls_ctx>-expected_count }| ).
-        CATCH zcx_abapgit_exception ##NO_HANDLER.
-      ENDTRY.
-    ENDIF.
   ENDMETHOD.
 
 
@@ -1740,30 +1760,44 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
 
 
   METHOD wait_for_run_completion.
-    DATA lv_wait_subrc TYPE sy-subrc.
-    DATA lv_deadline   TYPE timestampl.
-    DATA lv_now        TYPE timestampl.
+    DATA lv_wait_subrc     TYPE sy-subrc.
+    DATA lv_last_progress  TYPE i.
+    DATA lv_now_progress   TYPE i.
+    DATA lv_stall_deadline TYPE timestampl.
+    DATA lv_now            TYPE timestampl.
 
     drain_queue( iv_run_id ).
 
-    " Pipeline wait: WAIT FOR ASYNCHRONOUS TASKS returns after EACH callback,
-    " allowing drain_queue to immediately refill freed slots. The prior
-    " WAIT UNTIL has_no_pending_callbacks design waited for ALL in-flight
-    " tasks before draining, causing wave-based (not pipeline) processing.
-    GET TIME STAMP FIELD lv_deadline.
-    lv_deadline = cl_abap_tstmp=>add( tstmp = lv_deadline secs = c_batch_rfc_timeout_s ).
+    " True pipeline: wake as soon as a callback frees a worker slot with
+    " queued work AND refill it immediately, instead of waiting for the whole
+    " in-flight wave to finish first (which left fast workers idle behind one
+    " slow batch). Dispatch stays on the main path - STARTING NEW TASK is
+    " illegal inside the ON_END_OF_BATCH callback.
+    lv_last_progress = count_terminal_objects( iv_run_id ).
+    GET TIME STAMP FIELD lv_stall_deadline.
+    lv_stall_deadline = cl_abap_tstmp=>add( tstmp = lv_stall_deadline secs = c_batch_rfc_timeout_s ).
 
     WHILE is_run_complete( iv_run_id ) = abap_false.
-      GET TIME STAMP FIELD lv_now.
-      IF cl_abap_tstmp=>compare( tstmp1 = lv_now tstmp2 = lv_deadline ) >= 0.
-        lv_wait_subrc = 8. " overall deadline exceeded
-        EXIT.
-      ENDIF.
-      WAIT UNTIL is_run_complete( iv_run_id ) = abap_true UP TO 5 SECONDS.
-      lv_wait_subrc = sy-subrc.
+      WAIT UNTIL is_run_complete( iv_run_id ) = abap_true
+              OR has_dispatchable_capacity( iv_run_id ) = abap_true
+              UP TO c_poll_interval_s SECONDS.
       drain_queue( iv_run_id ).
-      IF lv_wait_subrc = 8 AND has_no_pending_callbacks( iv_run_id ) = abap_true.
-        EXIT. " No callbacks remain and nothing new to dispatch.
+      report_progress( iv_run_id ).
+
+      " Stall (not total-time) budget: reset on any newly completed object, so
+      " a legitimately long-but-progressing run is never aborted, while a truly
+      " hung batch (no progress for the whole budget) still fails fast.
+      lv_now_progress = count_terminal_objects( iv_run_id ).
+      IF lv_now_progress > lv_last_progress.
+        lv_last_progress = lv_now_progress.
+        GET TIME STAMP FIELD lv_stall_deadline.
+        lv_stall_deadline = cl_abap_tstmp=>add( tstmp = lv_stall_deadline secs = c_batch_rfc_timeout_s ).
+      ELSE.
+        GET TIME STAMP FIELD lv_now.
+        IF cl_abap_tstmp=>compare( tstmp1 = lv_now tstmp2 = lv_stall_deadline ) >= 0.
+          lv_wait_subrc = 8.
+          EXIT.
+        ENDIF.
       ENDIF.
     ENDWHILE.
 
@@ -1952,6 +1986,29 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
       RETURN.
     ENDIF.
     rv_result = boolc( <ls_ctx>-in_flight = 0 ).
+  ENDMETHOD.
+
+
+  METHOD has_dispatchable_capacity.
+    ASSIGN mt_run_context[ run_id = iv_run_id ] TO FIELD-SYMBOL(<ls_ctx>).
+    IF NOT <ls_ctx> IS ASSIGNED.
+      RETURN.
+    ENDIF.
+    rv_result = boolc( lines( <ls_ctx>-queue ) > 0 AND <ls_ctx>-in_flight < <ls_ctx>-worker_count ).
+  ENDMETHOD.
+
+
+  METHOD report_progress.
+    ASSIGN mt_run_context[ run_id = iv_run_id ] TO FIELD-SYMBOL(<ls_ctx>).
+    IF NOT <ls_ctx> IS ASSIGNED OR NOT <ls_ctx>-ii_progress IS BOUND.
+      RETURN.
+    ENDIF.
+    TRY.
+        <ls_ctx>-ii_progress->show(
+          iv_current = <ls_ctx>-terminal_count
+          iv_text    = |Serialize: { <ls_ctx>-terminal_count } of { <ls_ctx>-expected_count } objects| ).
+      CATCH zcx_abapgit_exception ##NO_HANDLER.
+    ENDTRY.
   ENDMETHOD.
 ENDCLASS.
 

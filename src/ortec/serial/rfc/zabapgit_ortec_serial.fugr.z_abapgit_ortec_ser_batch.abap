@@ -169,6 +169,11 @@ FUNCTION z_abapgit_ortec_ser_batch.
   " Mirrors the existing Z_ABAPGIT_SERIALIZE_PARALLEL precedent.
   zcl_abapgit_ortec_git_switch=>set_serial_prefetch_active( abap_true ).
 
+  " Load the DOKIL longtext index for this batch's objects in one chunked
+  " SELECT so SERIALIZE_LONGTEXTS' GET_DOKIL hits instead of a per-object
+  " DOKIL SELECT. The longtext TEXT still comes from the standard DOCU_READ.
+  zcl_abapgit_ortec_ser_pref=>prepare_dokil_only( CORRESPONDING #( it_tadir ) ).
+
   ls_i18n_params-main_language         = iv_language.
   ls_i18n_params-main_language_only    = iv_main_language_only.
   ls_i18n_params-suppress_po_comments  = iv_suppress_po_comments.
