@@ -415,6 +415,21 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! queued-failure accounting can be tested deterministically.
     CLASS-DATA mv_test_raise_drain TYPE abap_bool.
 
+    " ORTEC serialization run statistics (development instrumentation only,
+    " gated by ZCL_ABAPGIT_ORTEC_GIT_SWITCH=>C_SERIAL_STATS_ENABLED). One
+    " row per successfully serialized object holding the worker-measured
+    " cost; reset at the start of each SERIALIZE run and reported via
+    " CL_DEMO_OUTPUT at its successful tail. Never read by production logic.
+    TYPES: BEGIN OF ty_serial_stat,
+             obj_type     TYPE zaog_ser_batch_result-obj_type,
+             obj_name     TYPE zaog_ser_batch_result-obj_name,
+             elapsed_ms   TYPE zaog_ser_batch_result-elapsed_ms,
+             output_bytes TYPE zaog_ser_batch_result-output_bytes,
+           END OF ty_serial_stat.
+    TYPES ty_serial_stat_tt TYPE HASHED TABLE OF ty_serial_stat
+            WITH UNIQUE KEY obj_type obj_name.
+    CLASS-DATA gt_serial_stats TYPE ty_serial_stat_tt.
+
     "! Session-scoped table types and static state above; helper methods
     "! below.
 
@@ -914,6 +929,20 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
                 iv_key_found  TYPE abap_bool
       RETURNING VALUE(rv_yes) TYPE abap_bool.
 
+    "! Dev instrumentation (gated by C_SERIAL_STATS_ENABLED): clear the
+    "! run-statistics accumulator at the start of a SERIALIZE run.
+    CLASS-METHODS reset_serial_stats.
+
+    "! Dev instrumentation (gated by C_SERIAL_STATS_ENABLED): record one
+    "! worker result row's measured cost into the run-statistics accumulator.
+    CLASS-METHODS collect_serial_stat
+      IMPORTING is_row TYPE zaog_ser_batch_result.
+
+    "! Dev instrumentation (gated by C_SERIAL_STATS_ENABLED): render the
+    "! end-of-run cost report (top-20 slowest, per-type totals, summary)
+    "! via CL_DEMO_OUTPUT. No-op when disabled or when nothing was recorded.
+    CLASS-METHODS report_serial_stats.
+
 ENDCLASS.
 
 
@@ -930,6 +959,8 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     DATA lv_wait_result     TYPE i.
     DATA lv_use_ortec_prefetch TYPE abap_bool.
     DATA lv_expected_count  TYPE i.
+
+    reset_serial_stats( ).
 
     " SER-SLICE-3 parity incident fix (serialization_slice_3_dtel_doma_
     " parity.md): this entry point never called PREPARE on any of the
@@ -1047,6 +1078,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
             ENDTRY.
           ENDIF.
         ENDIF.
+        report_serial_stats( ).
         purge_run_state( lv_run_id ).
         IF lv_use_ortec_prefetch = abap_true.
           zcl_abapgit_ortec_ser_pref=>clear( ).
@@ -1363,6 +1395,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
           ENDIF.
 
           IF ls_row-rc = 0.
+            collect_serial_stat( ls_row ).
             ASSIGN mt_run_context[ run_id = <ls_d>-run_id ] TO FIELD-SYMBOL(<ls_ewma_ctx>).
             IF <ls_ewma_ctx> IS ASSIGNED.
               zcl_abapgit_ortec_ser_cost=>update_estimate(
@@ -2009,6 +2042,93 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
           iv_text    = |Serialize: { <ls_ctx>-terminal_count } of { <ls_ctx>-expected_count } objects| ).
       CATCH zcx_abapgit_exception ##NO_HANDLER.
     ENDTRY.
+  ENDMETHOD.
+
+
+  METHOD reset_serial_stats.
+    IF zcl_abapgit_ortec_git_switch=>c_serial_stats_enabled = abap_false.
+      RETURN.
+    ENDIF.
+    CLEAR gt_serial_stats.
+  ENDMETHOD.
+
+
+  METHOD collect_serial_stat.
+    IF zcl_abapgit_ortec_git_switch=>c_serial_stats_enabled = abap_false.
+      RETURN.
+    ENDIF.
+    DATA ls_stat TYPE ty_serial_stat.
+    ls_stat-obj_type     = is_row-obj_type.
+    ls_stat-obj_name     = is_row-obj_name.
+    ls_stat-elapsed_ms   = is_row-elapsed_ms.
+    ls_stat-output_bytes = is_row-output_bytes.
+    INSERT ls_stat INTO TABLE gt_serial_stats.
+    IF sy-subrc <> 0.
+      MODIFY TABLE gt_serial_stats FROM ls_stat.
+    ENDIF.
+  ENDMETHOD.
+
+
+  METHOD report_serial_stats.
+    IF zcl_abapgit_ortec_git_switch=>c_serial_stats_enabled = abap_false.
+      RETURN.
+    ENDIF.
+    IF gt_serial_stats IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    TYPES: BEGIN OF ty_type_total,
+             obj_type     TYPE zaog_ser_batch_result-obj_type,
+             object_count TYPE i,
+             total_ms     TYPE i,
+             total_bytes  TYPE i,
+           END OF ty_type_total.
+
+    DATA lt_flat        TYPE STANDARD TABLE OF ty_serial_stat WITH DEFAULT KEY.
+    DATA lt_top         TYPE STANDARD TABLE OF ty_serial_stat WITH DEFAULT KEY.
+    DATA lt_type_totals TYPE STANDARD TABLE OF ty_type_total WITH DEFAULT KEY.
+    DATA ls_type_total  TYPE ty_type_total.
+    DATA lv_total_ms    TYPE i.
+    DATA lv_max_ms      TYPE i.
+    DATA lv_avg_ms      TYPE i.
+    DATA lv_count       TYPE i.
+
+    lt_flat = gt_serial_stats.
+    SORT lt_flat BY elapsed_ms DESCENDING.
+
+    lv_count = lines( lt_flat ).
+    LOOP AT lt_flat INTO DATA(ls_flat).
+      lv_total_ms = lv_total_ms + ls_flat-elapsed_ms.
+      CLEAR ls_type_total.
+      ls_type_total-obj_type     = ls_flat-obj_type.
+      ls_type_total-object_count = 1.
+      ls_type_total-total_ms     = ls_flat-elapsed_ms.
+      ls_type_total-total_bytes  = ls_flat-output_bytes.
+      COLLECT ls_type_total INTO lt_type_totals.
+    ENDLOOP.
+
+    IF lv_count > 0.
+      READ TABLE lt_flat INTO DATA(ls_max) INDEX 1.
+      lv_max_ms = ls_max-elapsed_ms.
+      lv_avg_ms = lv_total_ms / lv_count.
+    ENDIF.
+
+    lt_top = lt_flat.
+    IF lines( lt_top ) > 20.
+      DELETE lt_top FROM 21.
+    ENDIF.
+
+    SORT lt_type_totals BY total_ms DESCENDING.
+
+    DATA(lo_out) = cl_demo_output=>new( ).
+    lo_out->begin_section( 'ORTEC Serialization Run Statistics' ).
+    lo_out->write_text( |Objects: { lv_count }  Total ms: { lv_total_ms }  | &&
+                        |Avg ms: { lv_avg_ms }  Max ms: { lv_max_ms }| ).
+    lo_out->begin_section( 'Top 20 slowest objects (elapsed_ms)' ).
+    lo_out->write( lt_top ).
+    lo_out->begin_section( 'Per-type totals (by total_ms desc)' ).
+    lo_out->write( lt_type_totals ).
+    lo_out->display( ).
   ENDMETHOD.
 ENDCLASS.
 

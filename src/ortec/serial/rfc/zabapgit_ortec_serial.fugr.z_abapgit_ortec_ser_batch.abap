@@ -29,6 +29,8 @@ FUNCTION z_abapgit_ortec_ser_batch.
 *"  EXCEPTIONS
 *"      ERROR
 *"----------------------------------------------------------------------
+* ORTEC Serializer Management
+
 * SER-SLICE-2 Phase 2: worker body per
 * serialization_adaptive_batch_design.md &sect;2 (decision-free
 * pseudocode), mirroring the exact prefetch-injection/serialize() pattern

@@ -36,6 +36,15 @@ CLASS zcl_abapgit_ortec_git_switch DEFINITION
         intf_active TYPE abap_bool VALUE abap_true,
       END OF cs_bulk_exists.
 
+    "! Development-only master switch for ORTEC adaptive-serialization run
+    "! statistics: per-object elapsed_ms / output-bytes collection plus the
+    "! end-of-run CL_DEMO_OUTPUT report produced by
+    "! ZCL_ABAPGIT_ORTEC_SER_ORCH. This is a compile-time constant, not a
+    "! session-runtime toggle: set it to ABAP_FALSE (and reactivate) before
+    "! moving the code to production. When OFF, nothing is collected and no
+    "! report is shown, so there is zero measurement overhead on the run.
+    CONSTANTS c_serial_stats_enabled TYPE abap_bool VALUE abap_true.
+
     "! D4 completeness-strictness mode for object/path resolution (see
     "! .memory/logs/target_design.md §2.3). This is a compile-time constant,
     "! not a session-runtime toggle: switching modes is an explicit code

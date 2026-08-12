@@ -330,7 +330,23 @@ CLASS zcl_abapgit_ortec_obj_store DEFINITION
     "! incident's bulk_fetch_uses_pkg_size/bulk_fetch_no_per_key_sql tests.
     CLASS-DATA gv_read_object_rows_calls TYPE i.
 
+    "! Running byte size of OBJ_DATA currently held in MT_CACHE, kept in sync
+    "! by CACHE_PUT/INVALIDATE_CACHE so the cache can be bounded without
+    "! re-summing the table.
+    CLASS-DATA gv_cache_bytes TYPE int8.
+
     CONSTANTS c_select_package_size TYPE i VALUE 1000.
+    "! Hard upper bound on MT_CACHE payload bytes. When a CACHE_PUT would
+    "! exceed it the cache is evicted first - bounds peak memory on a large
+    "! cold-materialize / full-stage read set (HTTP_NO_MEMORY guard) while
+    "! still letting stores keep the warm cache (no per-store invalidate
+    "! thrash). 128 MB.
+    CONSTANTS c_max_cache_bytes TYPE int8 VALUE 134217728.
+
+    "! Insert one row into the bounded session cache, evicting the whole
+    "! cache first if adding it would exceed C_MAX_CACHE_BYTES.
+    CLASS-METHODS cache_put
+      IMPORTING is_row TYPE ty_cache_entry.
 
     CLASS-METHODS get_timestamp
       RETURNING VALUE(rv_ts) TYPE timestampl.
@@ -378,7 +394,10 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
     IF sy-subrc <> 0.
       zcx_abapgit_ortec_git=>raise( |Failed to store object { iv_sha1 }| ).
     ENDIF.
-    invalidate_cache( ).
+    " Stores only ADD content-addressed objects, so warm read-cache entries
+    " stay valid - keep them (no per-store re-read thrash); the cache is
+    " byte-bounded by CACHE_PUT, so retaining it is memory-safe.
+    CLEAR mv_full_cache_repo_key.
   ENDMETHOD.
 
 
@@ -404,7 +423,9 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
     IF lt_rows IS NOT INITIAL.
       MODIFY zaog_obj_store FROM TABLE lt_rows.
     ENDIF.
-    invalidate_cache( ).
+    " Keep warm read cache across stores (byte-bounded by CACHE_PUT); only
+    " the full-load flag must be reset.
+    CLEAR mv_full_cache_repo_key.
   ENDMETHOD.
 
 
@@ -487,7 +508,7 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
         LOOP AT lt_db_rows ASSIGNING <ls_row>.
           CLEAR ls_cache_entry.
           MOVE-CORRESPONDING <ls_row> TO ls_cache_entry.
-          INSERT ls_cache_entry INTO TABLE mt_cache.
+          cache_put( ls_cache_entry ).
 
           CLEAR ls_object.
           ls_object-sha1 = <ls_row>-obj_sha1.
@@ -509,7 +530,7 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
       LOOP AT lt_db_rows ASSIGNING <ls_row>.
         CLEAR ls_cache_entry.
         MOVE-CORRESPONDING <ls_row> TO ls_cache_entry.
-        INSERT ls_cache_entry INTO TABLE mt_cache.
+        cache_put( ls_cache_entry ).
 
         CLEAR ls_object.
         ls_object-sha1 = <ls_row>-obj_sha1.
@@ -598,7 +619,7 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
     LOOP AT lt_rows ASSIGNING <ls_row>.
       INSERT <ls_row>-obj_sha1 INTO TABLE lt_found_sha1s.
       MOVE-CORRESPONDING <ls_row> TO ls_cache_entry.
-      INSERT ls_cache_entry INTO TABLE mt_cache.
+      cache_put( ls_cache_entry ).
       CLEAR ls_object.
       ls_object-sha1 = <ls_row>-obj_sha1.
       ls_object-type = <ls_row>-obj_type.
@@ -698,7 +719,7 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
     LOOP AT lt_rows ASSIGNING <ls_row>.
       INSERT <ls_row>-obj_sha1 INTO TABLE lt_found_sha1s.
       MOVE-CORRESPONDING <ls_row> TO ls_cache_entry.
-      INSERT ls_cache_entry INTO TABLE mt_cache.
+      cache_put( ls_cache_entry ).
       CLEAR ls_object.
       ls_object-sha1 = <ls_row>-obj_sha1.
       ls_object-type = <ls_row>-obj_type.
@@ -1213,7 +1234,24 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
   METHOD invalidate_cache.
     CLEAR: mt_cache,
            mv_cache_repo_key,
-           mv_full_cache_repo_key.
+           mv_full_cache_repo_key,
+           gv_cache_bytes.
+  ENDMETHOD.
+
+
+  METHOD cache_put.
+    DATA lv_size TYPE int8.
+
+    lv_size = xstrlen( is_row-obj_data ).
+    IF gv_cache_bytes + lv_size > c_max_cache_bytes.
+      CLEAR mt_cache.
+      CLEAR gv_cache_bytes.
+      CLEAR mv_full_cache_repo_key. " a partially-evicted cache is no longer "the full repo"
+    ENDIF.
+    INSERT is_row INTO TABLE mt_cache.
+    IF sy-subrc = 0.
+      gv_cache_bytes = gv_cache_bytes + lv_size.
+    ENDIF.
   ENDMETHOD.
 
 
@@ -1246,12 +1284,14 @@ CLASS zcl_abapgit_ortec_obj_store IMPLEMENTATION.
       ORDER BY obj_sha1.
 
     CLEAR mt_cache.
+    CLEAR gv_cache_bytes.
     mv_cache_repo_key = iv_repo_key.
     mv_full_cache_repo_key = iv_repo_key.
 
     LOOP AT lt_rows ASSIGNING <ls_row>.
       MOVE-CORRESPONDING <ls_row> TO ls_entry.
       INSERT ls_entry INTO TABLE mt_cache.
+      gv_cache_bytes = gv_cache_bytes + xstrlen( ls_entry-obj_data ).
     ENDLOOP.
   ENDMETHOD.
 

@@ -81,19 +81,25 @@ CLASS zcl_abapgit_longtexts IMPLEMENTATION.
       ENDIF.
 
     ELSEIF iv_longtext_id IS NOT INITIAL.
-      IF iv_main_lang_only = abap_true.
-        SELECT * FROM dokil
-                 INTO TABLE lt_dokil
-                 WHERE id     = iv_longtext_id
-                 AND object LIKE lv_object ESCAPE '#'
-                 AND masterlang = abap_true
-                 ORDER BY PRIMARY KEY.
-      ELSE.
-        SELECT * FROM dokil
-                 INTO TABLE lt_dokil
-                 WHERE id     = iv_longtext_id
-                 AND object LIKE lv_object ESCAPE '#'
-                 ORDER BY PRIMARY KEY.
+      " ORTEC serialization: when the serializer prefetch buffer is the
+      " authoritative DOKIL source for this run, an EMPTY it_dokil means the
+      " object genuinely has no documentation - trust it and skip the
+      " per-object fallback SELECT. Guarded, so the standard path is unchanged.
+      IF zcl_abapgit_ortec_git_switch=>is_serial_prefetch_active( ) = abap_false.
+        IF iv_main_lang_only = abap_true.
+          SELECT * FROM dokil
+                   INTO TABLE lt_dokil
+                   WHERE id     = iv_longtext_id
+                   AND object LIKE lv_object ESCAPE '#'
+                   AND masterlang = abap_true
+                   ORDER BY PRIMARY KEY.
+        ELSE.
+          SELECT * FROM dokil
+                   INTO TABLE lt_dokil
+                   WHERE id     = iv_longtext_id
+                   AND object LIKE lv_object ESCAPE '#'
+                   ORDER BY PRIMARY KEY.
+        ENDIF.
       ENDIF.
     ELSE.
 
