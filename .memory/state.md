@@ -25,6 +25,26 @@ OPEN_MAJORS=0
 The completed serialization work is now fully documented in the repository memory artifacts and committed locally. The final WAPA/FUGR validation evidence is captured in `.memory/handoffs/ser-final-wapa-fugr-it8.md`; the implementation work itself remains in the validated productive commits listed in the history below.
 ## Active topic
 ```text
+TOPIC=FDT0_LOCAL_CACHE
+STATUS=IMPLEMENTED_DISABLED_PENDING_IT8_PROOF
+SYSTEM=IT8 (productive source of truth); shared memory is this repository .memory tree
+DESIGN=C:\Projects\abap\abapGit\.memory\logs\fdt0_local_cache_design.md
+ADVERSARIAL_REVIEW=C:\Projects\abap\abapGit\.memory\reviews\fdt0_local_cache_adversarial_review.md
+PROTOCOL_GATE=APPROVE_WITH_MINOR_REVISIONS
+PERFORMANCE_DESIGN_GATE=APPROVE_WITH_MINOR_REVISIONS
+PERFORMANCE_SCAN=PASS
+PERFORMANCE_IMPLEMENTATION_AUDIT=PASS_WITH_MINOR_FINDINGS
+REGRESSION=PASS_WITH_FINDINGS
+PRODUCTIVE_OBJECTS=ZAOG_FDT_CACHE;ZCL_ABAPGIT_ORTEC_FDT0_CACHE;ZCL_ABAPGIT_ORTEC_GIT_SWITCH;ZCL_ABAPGIT_ORTEC_SER_ORCH;Z_ABAPGIT_ORTEC_SER_BATCH
+IMPLEMENTATION_FIXES=bounded signature SELECT (cap+1); pre-EXPORT 48MB file-content cap plus post-EXPORT 50MB cap; superseded per-app signature purge; linear signature assembly
+VALIDATION=cache server syntax PASS + active/inactive aligned; ORCH ABAP Unit 49/49; GIT_SWITCH ABAP Unit 7/7; worker FM activated
+RELEASE_BLOCKERS=IT-01 must prove decision-table cell/row AND rule/formula changes alter signature and force re-export; fresh warm-run SAT/ST05/scale evidence must prove cache hit/parity/performance; cache must remain forced OFF until both pass
+TEST_GAP=No focused cache ABAP Unit tests (test-class friendship could not be safely established through current class-pool/test-include tooling); do not claim cache-hit behavior unit-tested
+NEXT=Execute IT-01 and warm-run trace/scale validation on IT8; only then consider a controlled enablement change and re-run regression
+```
+
+## Prior active topic
+```text
 TOPIC=OBJ_PERF_FINAL
 STATUS=LOCAL_COMPLETE_AWAITING_IT8
 START_HEAD=4193733de3c8ad75bae61f6ceb95b1c3e0ccb3e4
