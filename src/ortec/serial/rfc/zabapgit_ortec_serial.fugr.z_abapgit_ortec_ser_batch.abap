@@ -30,7 +30,7 @@ FUNCTION z_abapgit_ortec_ser_batch.
 *"  EXCEPTIONS
 *"      ERROR
 *"----------------------------------------------------------------------
-* ORTEC Serializer Management
+* ORTEC Serializer
 
 * SER-SLICE-2 Phase 2: worker body per
 * serialization_adaptive_batch_design.md &sect;2 (decision-free
