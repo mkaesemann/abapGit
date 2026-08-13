@@ -12,4 +12,4 @@
 * INCLUDE LZABAPGIT_ORTEC_SERIALI...         " PAI-Modules
 * INCLUDE LZABAPGIT_ORTEC_SERIALE...         " Events
 * INCLUDE LZABAPGIT_ORTEC_SERIALP...         " Local class implement.
-* INCLUDE LZABAPGIT_ORTEC_SERIALT99.         " ABAP Unit tests
+* INCLUDE LZABAPGIT_ORTEC_SERIALT99.         " ABAP Unit tests classes

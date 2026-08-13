@@ -21,6 +21,7 @@ FUNCTION z_abapgit_ortec_ser_batch.
 *"     VALUE(IV_PREFETCH_BUFFER_TABL) TYPE  XSTRING OPTIONAL
 *"     VALUE(IV_PREFETCH_BUFFER_PROG) TYPE  XSTRING OPTIONAL
 *"     VALUE(IV_PREFETCH_BUFFER_FUGR) TYPE  XSTRING OPTIONAL
+*"     VALUE(IV_FDT0_CACHE_ACTIVE) TYPE  CHAR1 OPTIONAL
 *"     VALUE(IV_INPUT_ROW_COUNT) TYPE  I
 *"     VALUE(IV_INPUT_VERSION) TYPE  I DEFAULT 1
 *"  EXPORTING
@@ -29,6 +30,8 @@ FUNCTION z_abapgit_ortec_ser_batch.
 *"  EXCEPTIONS
 *"      ERROR
 *"----------------------------------------------------------------------
+* ORTEC Serializer Management
+
 * SER-SLICE-2 Phase 2: worker body per
 * serialization_adaptive_batch_design.md &sect;2 (decision-free
 * pseudocode), mirroring the exact prefetch-injection/serialize() pattern
@@ -50,6 +53,7 @@ FUNCTION z_abapgit_ortec_ser_batch.
         ls_i18n_params  TYPE zif_abapgit_definitions=>ty_i18n_params,
         ls_serialization TYPE zif_abapgit_objects=>ty_serialization,
         lx_error        TYPE REF TO zcx_abapgit_exception,
+        lv_error_text   TYPE string,
         lv_t0           TYPE i,
         lv_t1           TYPE i.
 
@@ -169,6 +173,18 @@ FUNCTION z_abapgit_ortec_ser_batch.
   " Mirrors the existing Z_ABAPGIT_SERIALIZE_PARALLEL precedent.
   zcl_abapgit_ortec_git_switch=>set_serial_prefetch_active( abap_true ).
 
+  " FDT0 local runtime cache (fdt0_local_cache_design.md &sect;5): this
+  " worker session is a SEPARATE aRFC process from
+  " ZCL_ABAPGIT_ORTEC_SER_ORCH - CLASS-DATA does not cross the RFC
+  " boundary (identical root cause to the SER-SLICE-5 prefetch fix
+  " above), so the flag ORCH decided must be re-applied locally here.
+  zcl_abapgit_ortec_git_switch=>set_fdt0_cache_active( iv_fdt0_cache_active ).
+
+  " Load the DOKIL longtext index for this batch's objects in one chunked
+  " SELECT so SERIALIZE_LONGTEXTS' GET_DOKIL hits instead of a per-object
+  " DOKIL SELECT. The longtext TEXT still comes from the standard DOCU_READ.
+  zcl_abapgit_ortec_ser_pref=>prepare_dokil_only( CORRESPONDING #( it_tadir ) ).
+
   ls_i18n_params-main_language         = iv_language.
   ls_i18n_params-main_language_only    = iv_main_language_only.
   ls_i18n_params-suppress_po_comments  = iv_suppress_po_comments.
@@ -275,7 +291,7 @@ FUNCTION z_abapgit_ortec_ser_batch.
             ls_result-provider_fallback = 1.
         ENDCASE.
 
-        ls_serialization = zcl_abapgit_objects=>serialize(
+        ls_serialization = zcl_abapgit_ortec_fdt0_cache=>serialize(
           is_item        = ls_item
           io_i18n_params = zcl_abapgit_i18n_params=>new( is_params = ls_i18n_params ) ).
 
@@ -289,7 +305,8 @@ FUNCTION z_abapgit_ortec_ser_batch.
         ls_result-rc    = 4.
         ls_result-msgid = lx_error->if_t100_message~t100key-msgid.
         ls_result-msgno = lx_error->if_t100_message~t100key-msgno.
-        ls_result-msgv1 = lx_error->msgv1.
+        lv_error_text   = lx_error->get_text( ).
+        ls_result-msgv1 = lv_error_text.
         ls_result-msgv2 = lx_error->msgv2.
         ls_result-msgv3 = lx_error->msgv3.
         ls_result-msgv4 = lx_error->msgv4.
@@ -302,6 +319,7 @@ FUNCTION z_abapgit_ortec_ser_batch.
   ENDLOOP.
 
   zcl_abapgit_ortec_git_switch=>set_serial_prefetch_active( abap_false ).
+  zcl_abapgit_ortec_git_switch=>set_fdt0_cache_active( abap_false ).
 
   ev_output_row_count = lines( et_result ).
 

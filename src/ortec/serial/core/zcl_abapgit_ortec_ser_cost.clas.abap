@@ -68,6 +68,48 @@ CLASS zcl_abapgit_ortec_ser_cost DEFINITION
     CONSTANTS c_default_ms_generic TYPE i VALUE 30.
     "! Static default output size for any other object type, in bytes.
     CONSTANTS c_default_bytes_generic TYPE i VALUE 8000.
+    "! Static default cost for CDS/RAP source artifacts (DDLS/DCLS/DDLX/
+    "! SRVD/SRVB/BDEF), in milliseconds. These drive the DDL handler and
+    "! dependency metadata reads and are among the heaviest per-object
+    "! types in trace evidence; seeded high so the LPT planner front-loads
+    "! them across workers in the first dispatch wave. Owner-adjustable.
+    CONSTANTS c_default_ms_cds TYPE i VALUE 120.
+    "! Static default output size for CDS/RAP source artifacts, in bytes.
+    CONSTANTS c_default_bytes_cds TYPE i VALUE 20000.
+    "! Static default cost for enhancement artifacts (ENHS/ENHO/ENHC), in
+    "! milliseconds - the enhancement framework (CL_ENH_FACTORY and the
+    "! ENHSPOT* persistence) is a consistent straggler in trace evidence.
+    CONSTANTS c_default_ms_enh TYPE i VALUE 120.
+    "! Static default output size for enhancement artifacts, in bytes.
+    CONSTANTS c_default_bytes_enh TYPE i VALUE 15000.
+    "! Static default cost for aggregate DDIC objects that read the DDIC
+    "! framework (TABL/VIEW/TTYP/SHLP/ENQU/NROB), in milliseconds.
+    CONSTANTS c_default_ms_ddic_agg TYPE i VALUE 90.
+    "! Static default output size for aggregate DDIC objects, in bytes.
+    CONSTANTS c_default_bytes_ddic_agg TYPE i VALUE 10000.
+    "! Static default cost for known-heavy framework serializers
+    "! (BRF+/FDT0, Web Dynpro WDYN/WDYA), in milliseconds.
+    CONSTANTS c_default_ms_heavy TYPE i VALUE 150.
+    "! Static default output size for known-heavy framework serializers.
+    CONSTANTS c_default_bytes_heavy TYPE i VALUE 20000.
+    "! Static default cost for BRF+ (FDT0) serialization, in milliseconds.
+    "! Measured on IT8 at ~150000 ms/object (two BRF+ objects alone were
+    "! 18.6% of a 17321-object run; max single object 202 s). EWMA is
+    "! run-local, so this seed governs the FIRST BRF+ object's placement on
+    "! every run - it must dominate so the LPT planner dispatches BRF+ first
+    "! and in its own batch, since the run can never finish faster than its
+    "! slowest single object.
+    CONSTANTS c_default_ms_brf TYPE i VALUE 150000.
+    "! Static default output size for BRF+ (FDT0) objects, in bytes.
+    CONSTANTS c_default_bytes_brf TYPE i VALUE 4000000.
+    "! Static default cost for function groups (FUGR), in milliseconds -
+    "! measured ~480 ms/object with individual outliers up to ~9 s. High
+    "! object count means run-local EWMA self-corrects quickly after the
+    "! first samples; the seed only needs to front-load FUGR ahead of the
+    "! light types on a cold run.
+    CONSTANTS c_default_ms_fugr TYPE i VALUE 500.
+    "! Static default output size for function groups, in bytes.
+    CONSTANTS c_default_bytes_fugr TYPE i VALUE 30000.
 
     "! One run-local cost estimate for one object type.
     TYPES BEGIN OF ty_estimate.
@@ -152,6 +194,24 @@ CLASS zcl_abapgit_ortec_ser_cost IMPLEMENTATION.
       WHEN 'DTEL' OR 'DOMA'.
         rs_estimate-est_ms    = c_default_ms_ddic.
         rs_estimate-est_bytes = c_default_bytes_ddic.
+      WHEN 'DDLS' OR 'DCLS' OR 'DDLX' OR 'SRVD' OR 'SRVB' OR 'BDEF'.
+        rs_estimate-est_ms    = c_default_ms_cds.
+        rs_estimate-est_bytes = c_default_bytes_cds.
+      WHEN 'ENHS' OR 'ENHO' OR 'ENHC'.
+        rs_estimate-est_ms    = c_default_ms_enh.
+        rs_estimate-est_bytes = c_default_bytes_enh.
+      WHEN 'TABL' OR 'VIEW' OR 'TTYP' OR 'SHLP' OR 'ENQU' OR 'NROB'.
+        rs_estimate-est_ms    = c_default_ms_ddic_agg.
+        rs_estimate-est_bytes = c_default_bytes_ddic_agg.
+      WHEN 'FDT0'.
+        rs_estimate-est_ms    = c_default_ms_brf.
+        rs_estimate-est_bytes = c_default_bytes_brf.
+      WHEN 'WDYN' OR 'WDYA'.
+        rs_estimate-est_ms    = c_default_ms_heavy.
+        rs_estimate-est_bytes = c_default_bytes_heavy.
+      WHEN 'FUGR'.
+        rs_estimate-est_ms    = c_default_ms_fugr.
+        rs_estimate-est_bytes = c_default_bytes_fugr.
       WHEN OTHERS.
         rs_estimate-est_ms    = c_default_ms_generic.
         rs_estimate-est_bytes = c_default_bytes_generic.

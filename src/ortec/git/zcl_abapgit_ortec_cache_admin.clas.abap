@@ -95,6 +95,12 @@ CLASS zcl_abapgit_ortec_cache_admin DEFINITION
       RETURNING
         VALUE(rv_message) TYPE string.
 
+    "! Delete every local BRF+ serialization-cache entry. Entries are
+    "! application-scoped rather than repository-scoped.
+    CLASS-METHODS clear_serialization_cache
+      RETURNING VALUE(rv_deleted) TYPE i
+      RAISING   zcx_abapgit_ortec_git.
+
   PRIVATE SECTION.
     CLASS-METHODS acquire_lock
       IMPORTING iv_repo_key      TYPE zcl_abapgit_ortec_repo_state=>ty_repo_key
@@ -431,6 +437,20 @@ CLASS zcl_abapgit_ortec_cache_admin IMPLEMENTATION.
 
     release_lock( iv_repo_key ).
 
+  ENDMETHOD.
+
+  METHOD clear_serialization_cache.
+    TRY.
+        DELETE FROM zaog_fdt_cache.
+        rv_deleted = sy-dbcnt.
+        COMMIT WORK AND WAIT.
+      CATCH cx_root INTO DATA(lx_error).
+        ROLLBACK WORK.
+        RAISE EXCEPTION TYPE zcx_abapgit_ortec_git
+          EXPORTING
+            iv_text  = |Cache admin: failed to clear BRF+ serialization cache: { lx_error->get_text( ) }|
+            previous = lx_error.
+    ENDTRY.
   ENDMETHOD.
 
   METHOD acquire_lock.
