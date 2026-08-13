@@ -2,7 +2,7 @@
 name: ortec-abapgit-design
 description: Target architecture and schema/protocol design
 target: vscode
-model: Claude Opus 4.8 (copilot)
+model: GPT-5.6 Sol (copilot)
 ---
 
 # Design agent

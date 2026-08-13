@@ -1,7 +1,7 @@
 ---
 name: ortec-abapgit-orchestrator
 description: Coordinates the complete opt-rework
-model: Claude Sonnet 5
+model: GPT-5.6 Terra (copilot)
 agents:
 - ortec-abapgit-discovery
 - ortec-abapgit-archaeology

@@ -3,7 +3,7 @@ name: ortec-abapgit-implementation-senior
 description: Implements correctness-critical ABAP, Git protocol, persistence, delta-resolution,
   and transaction changes from an approved design
 target: vscode
-model: Claude Sonnet 5
+model: GPT-5.6 Terra (copilot)
 user-invocable: true
 disable-model-invocation: false
 agents:

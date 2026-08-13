@@ -1,7 +1,7 @@
 ---
 name: ortec-abapgit-regression
 description: Regression validation after each implementation phase
-model: MAI-Code-1-Flash
+model: GPT-5.6 Luna (copilot)
 target: vscode
 ---
 

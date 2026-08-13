@@ -3,7 +3,7 @@ name: ortec-abapgit-implementation-junior
 description: Performs small mechanical ABAP edits and test scaffolding from an exact
   approved specification without making architecture decisions
 target: vscode
-model: MAI-Code-1-Flash
+model: GPT-5.6 Luna (copilot)
 user-invocable: false
 disable-model-invocation: false
 ---

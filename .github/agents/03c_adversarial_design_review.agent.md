@@ -1,9 +1,9 @@
 ---
 name: ortec-abapgit-adversarial-design-review
 description: Hostile reviewer for high-risk identity, persistence, transaction, reuse, and repository-scale designs
-model: GPT-5.5 (copilot)
+model: Claude Opus 4.8 (copilot)
 target: vscode
-user-invocable: false
+user-invocable: true
 disable-model-invocation: false
 ---
 

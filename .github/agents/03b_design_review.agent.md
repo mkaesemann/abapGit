@@ -2,7 +2,7 @@
 name: ortec-abapgit-design-review
 description: Balanced independent reviewer for Ortec abapGit design and major implementation
   phases
-model: Claude Sonnet 5
+model: GPT-5.6 Terra (copilot)
 target: vscode
 ---
 

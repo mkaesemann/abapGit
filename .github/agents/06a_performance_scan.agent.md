@@ -3,7 +3,7 @@ name: ortec-abapgit-performance-scan
 description: Performs low-cost static performance scans for SQL, HTTP, loop, batching,
   cache, transaction, and XSTRING problems in ORTEC abapGit code
 target: vscode
-model: MAI-Code-1-Flash
+model: GPT-5.6 Luna (copilot)
 user-invocable: false
 disable-model-invocation: false
 ---

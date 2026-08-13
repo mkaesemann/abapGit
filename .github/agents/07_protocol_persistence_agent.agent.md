@@ -1,7 +1,7 @@
 ---
 name: ortec-abapgit-protocol-persistence
 description: Git protocol and persistence deep review
-model: Claude Sonnet 5
+model: GPT-5.6 Terra (copilot)
 target: vscode
 ---
 

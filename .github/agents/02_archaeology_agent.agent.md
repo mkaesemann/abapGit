@@ -1,7 +1,7 @@
 ---
 name: ortec-abapgit-archaeology
 description: Historical fastpath recovery and regression diff
-model: Claude Sonnet 5
+model: GPT-5.6 Terra (copilot)
 target: vscode
 ---
 

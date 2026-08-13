@@ -1,7 +1,7 @@
 ---
 name: ortec-abapgit-discovery
 description: Read-only architecture and call-chain discovery
-model: MAI-Code-1-Flash
+model: GPT-5.6 Luna (copilot)
 target: vscode
 ---
 

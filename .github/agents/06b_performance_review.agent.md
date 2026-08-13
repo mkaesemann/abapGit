@@ -3,7 +3,7 @@ name: ortec-abapgit-performance-review
 description: Performs senior pre-implementation performance design gates and post-implementation
   production-scale audits for ORTEC abapGit
 target: vscode
-model: Claude Sonnet 5
+model: GPT-5.6 Terra (copilot)
 user-invocable: true
 disable-model-invocation: false
 ---
