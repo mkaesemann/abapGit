@@ -165,6 +165,23 @@ CLASS zcl_abapgit_ortec_git_switch DEFINITION
     CLASS-METHODS set_serial_prefetch_active
       IMPORTING iv_active TYPE abap_bool.
 
+    "! Check if the FDT0 (BRF+) serialization result cache is enabled in
+    "! this internal session. Defaults to ABAP_FALSE so standard behavior
+    "! is unchanged unless a caller explicitly opts in for its own run.
+    "! @parameter rv_active |
+    "! ABAP_TRUE if the FDT0 cache is enabled.
+    CLASS-METHODS is_fdt0_cache_active
+      RETURNING VALUE(rv_active) TYPE abap_bool.
+
+    "! Enable or disable the FDT0 (BRF+) serialization result cache in
+    "! this internal session. Production caller is exclusively
+    "! ZCL_ABAPGIT_ORTEC_SER_ORCH=>SERIALIZE, mirroring the existing
+    "! SET_SERIAL_PREFETCH_ACTIVE on-entry/off-on-every-exit lifecycle.
+    "! @parameter iv_active |
+    "! ABAP_TRUE enables the guarded FDT0 cache hook.
+    CLASS-METHODS set_fdt0_cache_active
+      IMPORTING iv_active TYPE abap_bool.
+
     "! Read persistent cache flag from ORTEC user persistence.
     "! @parameter iv_url |
     "! Repository URL
@@ -209,6 +226,11 @@ CLASS zcl_abapgit_ortec_git_switch DEFINITION
     CLASS-DATA mv_serial_prefetch_active TYPE abap_bool VALUE abap_false.
     CLASS-DATA mv_avoid_timeout_active TYPE abap_bool VALUE abap_true.
     CLASS-DATA mv_serial_batch_active TYPE abap_bool VALUE abap_false.
+    "! Session-scoped only (no persistence-class change for this feature -
+    "! see .memory/logs/fdt0_local_cache_design.md &sect;1). Defaults OFF
+    "! so standard behavior is unchanged unless a caller explicitly opts
+    "! in for the duration of its own run.
+    CLASS-DATA mv_fdt0_cache_active TYPE abap_bool VALUE abap_false.
 
 ENDCLASS.
 
@@ -258,6 +280,14 @@ CLASS zcl_abapgit_ortec_git_switch IMPLEMENTATION.
 
   METHOD set_serial_prefetch_active.
     mv_serial_prefetch_active = iv_active.
+  ENDMETHOD.
+
+  METHOD is_fdt0_cache_active.
+    rv_active = mv_fdt0_cache_active.
+  ENDMETHOD.
+
+  METHOD set_fdt0_cache_active.
+    mv_fdt0_cache_active = iv_active.
   ENDMETHOD.
 
   METHOD set_use_repo_cache.

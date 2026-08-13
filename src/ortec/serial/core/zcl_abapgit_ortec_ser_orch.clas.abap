@@ -234,6 +234,7 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! recorded. Used only for the final visible failure summary.
     TYPES first_fail_type TYPE trobjtype.
     TYPES first_fail_name TYPE sobj_name.
+    TYPES first_fail_detail TYPE string.
     "! Progress indicator for this run - shown after each terminal object outcome.
     TYPES ii_progress TYPE REF TO zif_abapgit_progress. "saved
     TYPES END OF ty_run_context.
@@ -977,6 +978,8 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     " were empty, and every worker object fell back to per-object DDIC reads.
     zcl_abapgit_ortec_git_switch=>set_serial_prefetch_active( abap_true ).
     lv_use_ortec_prefetch = abap_true.
+    " Cache activation waits for the required live BRF+ invalidation proof.
+    zcl_abapgit_ortec_git_switch=>set_fdt0_cache_active( abap_true ).
     IF lv_use_ortec_prefetch = abap_true.
       zcl_abapgit_ortec_ser_pref=>prepare(
         it_tadir    = it_tadir
@@ -1003,6 +1006,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
           zcl_abapgit_ortec_ser_pref_oo=>clear( ).
         ENDIF.
         zcl_abapgit_ortec_git_switch=>set_serial_prefetch_active( abap_false ).
+        zcl_abapgit_ortec_git_switch=>set_fdt0_cache_active( abap_false ).
         zcx_abapgit_exception=>raise( 'ORTEC batch: could not generate a run id' ).
     ENDTRY.
 
@@ -1086,6 +1090,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
           zcl_abapgit_ortec_ser_pref_oo=>clear( ).
         ENDIF.
         zcl_abapgit_ortec_git_switch=>set_serial_prefetch_active( abap_false ).
+        zcl_abapgit_ortec_git_switch=>set_fdt0_cache_active( abap_false ).
       CATCH zcx_abapgit_exception INTO DATA(lx_run_failure).
         ASSIGN mt_run_context[ run_id = lv_run_id ] TO <ls_ctx>.
         IF <ls_ctx> IS ASSIGNED AND <ls_ctx>-ii_progress IS BOUND.
@@ -1101,6 +1106,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
           zcl_abapgit_ortec_ser_pref_oo=>clear( ).
         ENDIF.
         zcl_abapgit_ortec_git_switch=>set_serial_prefetch_active( abap_false ).
+        zcl_abapgit_ortec_git_switch=>set_fdt0_cache_active( abap_false ).
         CLEAR rt_files.
         RAISE EXCEPTION lx_run_failure.
     ENDTRY.
@@ -1242,6 +1248,11 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
       zcx_abapgit_exception=>raise(
         'ORTEC adaptive batch serialization did not complete: the result was incomplete and was discarded (missing batch result condition). Retry the operation, or reduce the scope; no partial result was accepted.' ).
     ELSEIF lv_failed_count > 0.
+      IF <ls_ctx>-first_fail_detail IS NOT INITIAL.
+        zcx_abapgit_exception=>raise(
+          |ORTEC serialization failed: { <ls_ctx>-first_fail_type } { <ls_ctx>-first_fail_name }: | &&
+          |{ <ls_ctx>-first_fail_detail }. The result was discarded.| ).
+      ENDIF.
       zcx_abapgit_exception=>raise(
         |ORTEC adaptive batch serialization failed: { lv_failed_count } object(s) failed| &&
         |{ COND string( WHEN <ls_ctx>-first_fail_type IS NOT INITIAL
@@ -1385,9 +1396,15 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
             mark_object_success( iv_run_id = <ls_d>-run_id is_tadir = ls_tadir_row ).
           ELSE.
             ASSIGN mt_run_context[ run_id = <ls_d>-run_id ] TO FIELD-SYMBOL(<ls_fail_ctx>).
+            IF <ls_fail_ctx> IS ASSIGNED AND <ls_fail_ctx>-first_fail_detail IS INITIAL.
+              <ls_fail_ctx>-first_fail_detail =
+                |{ ls_row-msgv1 } { ls_row-msgv2 } { ls_row-msgv3 } { ls_row-msgv4 }|.
+              CONDENSE <ls_fail_ctx>-first_fail_detail.
+            ENDIF.
             IF <ls_fail_ctx> IS ASSIGNED AND <ls_fail_ctx>-ii_log IS BOUND.
               <ls_fail_ctx>-ii_log->add_error(
-                |ORTEC batch: { ls_row-obj_type } { ls_row-obj_name } failed ({ ls_row-msgid } { ls_row-msgno })| ).
+                |ORTEC batch: { ls_row-obj_type } { ls_row-obj_name } failed ({ ls_row-msgid } { ls_row-msgno }): | &&
+                |{ ls_row-msgv1 } { ls_row-msgv2 } { ls_row-msgv3 } { ls_row-msgv4 }| ).
             ENDIF.
             IF lv_key_found = abap_true.
               mark_object_failures( iv_run_id = <ls_d>-run_id it_object_keys = VALUE #( ( ls_tadir_row ) ) ).
@@ -1674,32 +1691,33 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
         DESTINATION IN GROUP <ls_ctx>-iv_group
         CALLING zcl_abapgit_ortec_ser_orch=>on_end_of_batch ON END OF TASK
         EXPORTING
-          iv_batch_id             = iv_batch_id
-          iv_attempt              = iv_attempt
-          iv_abap_language_vers   = space
-          iv_language             = <ls_ctx>-is_i18n_params-main_language
-          iv_path                 = ''
-          iv_main_language_only   = <ls_ctx>-is_i18n_params-main_language_only
-          iv_suppress_po_comments = <ls_ctx>-is_i18n_params-suppress_po_comments
-          iv_use_lxe              = <ls_ctx>-is_i18n_params-use_lxe
-          it_translation_langs    = <ls_ctx>-is_i18n_params-translation_languages
-          it_tadir                = lt_rfc_tadir
-          iv_prefetch_buffer      = iv_prefetch_buffer
-          iv_prefetch_buffer_ext  = iv_prefetch_buffer_ext
-          iv_prefetch_buffer_oo   = iv_prefetch_buffer_oo
-          iv_prefetch_buffer_dd   = iv_prefetch_buffer_dd
+          iv_batch_id                 = iv_batch_id
+          iv_attempt                  = iv_attempt
+          iv_abap_language_vers       = space
+          iv_language                 = <ls_ctx>-is_i18n_params-main_language
+          iv_path                     = ''
+          iv_main_language_only       = <ls_ctx>-is_i18n_params-main_language_only
+          iv_suppress_po_comments     = <ls_ctx>-is_i18n_params-suppress_po_comments
+          iv_use_lxe                  = <ls_ctx>-is_i18n_params-use_lxe
+          it_translation_langs        = <ls_ctx>-is_i18n_params-translation_languages
+          it_tadir                    = lt_rfc_tadir
+          iv_prefetch_buffer          = iv_prefetch_buffer
+          iv_prefetch_buffer_ext      = iv_prefetch_buffer_ext
+          iv_prefetch_buffer_oo       = iv_prefetch_buffer_oo
+          iv_prefetch_buffer_dd       = iv_prefetch_buffer_dd
           iv_prefetch_buffer_oo_batch = iv_prefetch_buffer_oo_batch
-          iv_prefetch_buffer_msag = iv_prefetch_buffer_msag
-          iv_prefetch_buffer_tabl = iv_prefetch_buffer_tabl
-          iv_prefetch_buffer_prog = iv_prefetch_buffer_prog
-          iv_prefetch_buffer_fugr = iv_prefetch_buffer_fugr
-          iv_input_row_count      = lines( it_object_keys )
-          iv_input_version        = 1
+          iv_prefetch_buffer_msag     = iv_prefetch_buffer_msag
+          iv_prefetch_buffer_tabl     = iv_prefetch_buffer_tabl
+          iv_prefetch_buffer_prog     = iv_prefetch_buffer_prog
+          iv_prefetch_buffer_fugr     = iv_prefetch_buffer_fugr
+          iv_fdt0_cache_active        = zcl_abapgit_ortec_git_switch=>is_fdt0_cache_active( )
+          iv_input_row_count          = lines( it_object_keys )
+          iv_input_version            = 1
         EXCEPTIONS
-          system_failure          = 1 MESSAGE lv_msg
-          communication_failure   = 2 MESSAGE lv_msg
-          resource_failure        = 3
-          OTHERS                  = 4.
+          system_failure              = 1 MESSAGE lv_msg
+          communication_failure       = 2 MESSAGE lv_msg
+          resource_failure            = 3
+          OTHERS                      = 4.
       lv_subrc = sy-subrc.
       IF lv_subrc = 3.
         lv_retries = lv_retries + 1.
@@ -1902,7 +1920,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
       ENDIF.
 
       TRY.
-          DATA(ls_serialization) = zcl_abapgit_objects=>serialize(
+          DATA(ls_serialization) = zcl_abapgit_ortec_fdt0_cache=>serialize(
             is_item        = ls_item
             io_i18n_params = zcl_abapgit_i18n_params=>new( is_params = ls_i18n_params ) ).
 
@@ -1983,8 +2001,8 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
       WHERE run_id = iv_run_id
         AND ( state = c_state_received OR state = c_state_received_failure ).
 
-    DELETE mt_resolved WHERE run_id = iv_run_id. "#EC CI_HASHSEQ
-    DELETE mt_failed WHERE run_id = iv_run_id.   "#EC CI_HASHSEQ
+    DELETE mt_resolved WHERE run_id = iv_run_id.        "#EC CI_HASHSEQ
+    DELETE mt_failed WHERE run_id = iv_run_id.          "#EC CI_HASHSEQ
     DELETE mt_task_outcomes WHERE run_id = iv_run_id.
     DELETE mt_broken_runs WHERE table_line = iv_run_id.
     DELETE mt_run_context WHERE run_id = iv_run_id.
@@ -1994,8 +2012,8 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
   METHOD discard_run_state.
     DELETE mt_dispatch USING KEY run
       WHERE run_id = iv_run_id.
-    DELETE mt_resolved WHERE run_id = iv_run_id.  "#EC CI_HASHSEQ
-    DELETE mt_failed WHERE run_id = iv_run_id.    "#EC CI_HASHSEQ
+    DELETE mt_resolved WHERE run_id = iv_run_id.        "#EC CI_HASHSEQ
+    DELETE mt_failed WHERE run_id = iv_run_id.          "#EC CI_HASHSEQ
     DELETE mt_task_outcomes WHERE run_id = iv_run_id.
     DELETE mt_broken_runs WHERE table_line = iv_run_id.
     DELETE mt_run_context WHERE run_id = iv_run_id.

@@ -101,6 +101,11 @@
        <TYP>XSTRING</TYP>
       </RSIMP>
       <RSIMP>
+       <PARAMETER>IV_FDT0_CACHE_ACTIVE</PARAMETER>
+       <OPTIONAL>X</OPTIONAL>
+       <TYP>CHAR1</TYP>
+      </RSIMP>
+      <RSIMP>
        <PARAMETER>IV_INPUT_ROW_COUNT</PARAMETER>
        <TYP>I</TYP>
       </RSIMP>
@@ -204,6 +209,10 @@
       </RSFDO>
       <RSFDO>
        <PARAMETER>IV_PREFETCH_BUFFER_FUGR</PARAMETER>
+       <KIND>P</KIND>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>IV_FDT0_CACHE_ACTIVE</PARAMETER>
        <KIND>P</KIND>
       </RSFDO>
       <RSFDO>
