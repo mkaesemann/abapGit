@@ -2057,7 +2057,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     TRY.
         <ls_ctx>-ii_progress->show(
           iv_current = <ls_ctx>-terminal_count
-          iv_text    = |Serialize: { <ls_ctx>-terminal_count } of { <ls_ctx>-expected_count } objects| ).
+          iv_text    = |Serialize: { <ls_ctx>-terminal_count } of { <ls_ctx>-expected_count } objects ({ <ls_ctx>-in_flight } Tasks)| ).
       CATCH zcx_abapgit_exception ##NO_HANDLER.
     ENDTRY.
   ENDMETHOD.
