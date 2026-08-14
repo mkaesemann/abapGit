@@ -25,9 +25,17 @@ OPEN_MAJORS=0
 The completed serialization work is now fully documented in the repository memory artifacts and committed locally. The final WAPA/FUGR validation evidence is captured in `.memory/handoffs/ser-final-wapa-fugr-it8.md`; the implementation work itself remains in the validated productive commits listed in the history below.
 ## Active topic
 ```text
-TOPIC=FDT0_LOCAL_CACHE
-STATUS=IMPLEMENTED_DISABLED_PENDING_IT8_PROOF
+TOPIC=WAPA_PAYLOAD_PERF
+STATUS=SAP_VALIDATED_COMPLETE
 SYSTEM=IT8 (productive source of truth); shared memory is this repository .memory tree
+WAPA_PAYLOAD_DISCOVERY=C:\Projects\abap\abapGit\.memory\logs\wapa_payload_discovery.md
+WAPA_OPTION1=SAP_VALIDATED_COMPLETE: bounded raw O2PAGCON manifest/payload/verification path; page-local decode with raw-row release before IMPORT; contiguous bounded bisection with terminal reference-range fallback. WAPA remains singleton-batched.
+TUNED_CONSTANTS=C_RAW_PREFETCH_INITIAL_PAGES=6000;C_MAX_RAW_PREFETCH_ROWS=30000;C_MAX_RAW_MANIFEST_ROWS=40000;C_MAX_RAW_PAYLOAD_BYTES=104857600;C_MAX_RAW_SPLIT_DEPTH=5;C_MAX_DECODED_PAGE_BYTES=15728640.
+WAPA_EVIDENCE=Functional output test successful. SAT worker evidence: C:\Users\MichaelK\Downloads\SAT WAPA Tuned 1000-20000 Worker 1.txt and C:\Users\MichaelK\Downloads\SAT WAPA Tuned 6000-30000 Worker 1.txt. The 6000/30000 tune reduced Companion-worker O2PAGCON DB time from 7.768888s to 6.442467s and worker gross from 53.249011s to 29.110946s; no memory issue was observed. Main traces are paired in the same Downloads folder.
+VALIDATION=Active class syntax PASS; WAPA ABAP Unit 23/23 PASS; production static scan closed PS-001/PS-002; implementation audit confirmed page rows are released before IMPORT and malformed manifests reject before payload.
+FOLLOW_UP=Closed for current scope. Diagnostics-counter saturation and synthetic 5k/40k active-path coverage remain non-blocking hardening work; do not reopen without explicit owner priority. Future tuning should preserve the 100MiB raw-payload bound unless a separate memory decision is approved.
+NEXT=Closed.
+FDT0_LOCAL_CACHE=SAP_VALIDATED_COMPLETE: IT-01 confirmed after activation for formula and decision-table-cell changes; cache hit parity and warm-run performance confirmed by owner; all related IT8/local commits synchronized.
 DESIGN=C:\Projects\abap\abapGit\.memory\logs\fdt0_local_cache_design.md
 ADVERSARIAL_REVIEW=C:\Projects\abap\abapGit\.memory\reviews\fdt0_local_cache_adversarial_review.md
 PROTOCOL_GATE=APPROVE_WITH_MINOR_REVISIONS
@@ -38,9 +46,9 @@ REGRESSION=PASS_WITH_FINDINGS
 PRODUCTIVE_OBJECTS=ZAOG_FDT_CACHE;ZCL_ABAPGIT_ORTEC_FDT0_CACHE;ZCL_ABAPGIT_ORTEC_GIT_SWITCH;ZCL_ABAPGIT_ORTEC_SER_ORCH;Z_ABAPGIT_ORTEC_SER_BATCH
 IMPLEMENTATION_FIXES=bounded signature SELECT (cap+1); pre-EXPORT 48MB file-content cap plus post-EXPORT 50MB cap; superseded per-app signature purge; linear signature assembly
 VALIDATION=cache server syntax PASS + active/inactive aligned; ORCH ABAP Unit 49/49; GIT_SWITCH ABAP Unit 7/7; worker FM activated
-RELEASE_BLOCKERS=IT-01 must prove decision-table cell/row AND rule/formula changes alter signature and force re-export; fresh warm-run SAT/ST05/scale evidence must prove cache hit/parity/performance; cache must remain forced OFF until both pass
+RELEASE_BLOCKERS=CLOSED: IT-01 confirmed by owner after activated formula and decision-table cell changes; cache hit parity and warm-run scale evidence confirmed.
 TEST_GAP=No focused cache ABAP Unit tests (test-class friendship could not be safely established through current class-pool/test-include tooling); do not claim cache-hit behavior unit-tested
-NEXT=Execute IT-01 and warm-run trace/scale validation on IT8; only then consider a controlled enablement change and re-run regression
+NEXT=Closed; proceed only with the separate WAPA_PAYLOAD_PERF trace-first slice.
 ```
 
 ## Prior active topic
