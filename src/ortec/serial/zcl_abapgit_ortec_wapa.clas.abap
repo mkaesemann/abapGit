@@ -40,8 +40,20 @@ CLASS zcl_abapgit_ortec_wapa DEFINITION
     "! lifetime, in-memory only - never persisted, never cross-request.
     CLASS-METHODS get_raw_prefetch_counters
       EXPORTING
-        !ev_hits      TYPE i
-        !ev_fallbacks TYPE i.
+        !ev_hits                  TYPE i
+        !ev_fallbacks             TYPE i
+        !ev_manifest_selects      TYPE i
+        !ev_payload_selects       TYPE i
+        !ev_verify_selects        TYPE i
+        !ev_split_events          TYPE i
+        !ev_depth_ceiling_hits    TYPE i
+        !ev_range_fallbacks       TYPE i
+        !ev_range_fallback_pages  TYPE i
+        !ev_decode_fallback_pages TYPE i
+        !ev_reference_pages       TYPE i
+        !ev_max_manifest_rows     TYPE i
+        !ev_max_charged_raw_bytes TYPE int8
+        !ev_max_raw_split_depth   TYPE i.
 
     CLASS-METHODS reset_raw_prefetch_counters.
 
@@ -62,7 +74,13 @@ CLASS zcl_abapgit_ortec_wapa DEFINITION
     "! would not catch. Hitting this cap is always treated as an
     "! ambiguous/possibly-truncated result -> safe fallback, never a
     "! partial read.
-    CONSTANTS c_max_raw_prefetch_rows TYPE i VALUE 20000.
+    CONSTANTS c_raw_prefetch_initial_pages  TYPE i VALUE 12000. "6000.
+    CONSTANTS c_max_raw_manifest_rows       TYPE i VALUE 90000. "40000.
+    CONSTANTS c_max_raw_prefetch_rows       TYPE i VALUE 30000.
+    CONSTANTS c_max_raw_payload_bytes       TYPE int8 VALUE 268435456. "104857600.
+    CONSTANTS c_raw_payload_row_bytes       TYPE i VALUE 2886.
+    CONSTANTS c_max_raw_split_depth         TYPE i VALUE 5.
+    CONSTANTS c_max_decoded_page_bytes      TYPE int8 VALUE 15728640.
 
     TYPES: BEGIN OF ty_page,
              attributes     TYPE o2pagattr,
@@ -78,7 +96,7 @@ CLASS zcl_abapgit_ortec_wapa DEFINITION
     TYPES ty_parameters      TYPE SORTED TABLE OF o2pagpar  WITH NON-UNIQUE KEY applname pagekey version compname.
     TYPES ty_parameter_texts TYPE SORTED TABLE OF o2pagpart WITH NON-UNIQUE KEY applname pagekey compname langu.
 
-    "! One decoded PAGE-content logical key (content + XML source).
+    " One decoded PAGE-content logical key (content + XML source).
     TYPES: BEGIN OF ty_raw_content,
              pagekey    TYPE o2pagdir-pagekey,
              content    TYPE o2pageline_table,
@@ -86,23 +104,23 @@ CLASS zcl_abapgit_ortec_wapa DEFINITION
            END OF ty_raw_content.
     TYPES ty_raw_content_tt TYPE SORTED TABLE OF ty_raw_content WITH UNIQUE KEY pagekey.
 
-    "! One decoded EVHNDL logical key.
+    " One decoded EVHNDL logical key.
     TYPES: BEGIN OF ty_raw_evhandler,
              pagekey   TYPE o2pagdir-pagekey,
              evhandler TYPE so2_ev_handler_t,
            END OF ty_raw_evhandler.
     TYPES ty_raw_evhandler_tt TYPE SORTED TABLE OF ty_raw_evhandler WITH UNIQUE KEY pagekey.
 
-    "! One decoded TYPES logical key.
+    " One decoded TYPES logical key.
     TYPES: BEGIN OF ty_raw_typesource,
              pagekey    TYPE o2pagdir-pagekey,
              typesource TYPE rswsourcet,
            END OF ty_raw_typesource.
     TYPES ty_raw_typesource_tt TYPE SORTED TABLE OF ty_raw_typesource WITH UNIQUE KEY pagekey.
 
-    "! One requested page's optional PAGE/EVHNDL/TYPES sub-keys. PAGE
-    "! content itself is implicit/mandatory for every non-controller page
-    "! and therefore not modelled as a flag here.
+    " One requested page's optional PAGE/EVHNDL/TYPES sub-keys. PAGE
+    " content itself is implicit/mandatory for every non-controller page
+    " and therefore not modelled as a flag here.
     TYPES: BEGIN OF ty_raw_key,
              pagekey     TYPE o2pagdir-pagekey,
              need_evhndl TYPE abap_bool,
@@ -110,8 +128,19 @@ CLASS zcl_abapgit_ortec_wapa DEFINITION
            END OF ty_raw_key.
     TYPES ty_raw_key_tt TYPE SORTED TABLE OF ty_raw_key WITH UNIQUE KEY pagekey.
 
-    "! One physical O2PAGCON row (RELID is always the literal 'TR' area
-    "! and is filtered on, never carried in this local structure).
+    TYPES: BEGIN OF ty_raw_manifest,
+             pagekey TYPE o2pagdir-pagekey,
+             objtype TYPE o2pconkey-objtype,
+             srtf2   TYPE i,
+             clustr  TYPE i,
+           END OF ty_raw_manifest.
+    TYPES ty_raw_manifest_tt TYPE STANDARD TABLE OF ty_raw_manifest
+      WITH EMPTY KEY
+      WITH NON-UNIQUE SORTED KEY by_row COMPONENTS pagekey objtype srtf2.
+    TYPES ty_raw_reject_reason TYPE c LENGTH 1.
+
+    " One physical O2PAGCON row (RELID is always the literal 'TR' area
+    " and is filtered on, never carried in this local structure).
     TYPES: BEGIN OF ty_raw_row,
              pagekey TYPE o2pagdir-pagekey,
              objtype TYPE o2pconkey-objtype,
@@ -119,7 +148,9 @@ CLASS zcl_abapgit_ortec_wapa DEFINITION
              clustr  TYPE i,
              clustd  TYPE xstring,
            END OF ty_raw_row.
-    TYPES ty_raw_row_tt TYPE STANDARD TABLE OF ty_raw_row WITH DEFAULT KEY.
+    TYPES ty_raw_row_tt TYPE STANDARD TABLE OF ty_raw_row
+      WITH DEFAULT KEY
+      WITH NON-UNIQUE SORTED KEY by_page COMPONENTS pagekey objtype srtf2.
 
     TYPES: BEGIN OF ty_context,
              name                TYPE o2applname,
@@ -142,6 +173,18 @@ CLASS zcl_abapgit_ortec_wapa DEFINITION
 
     CLASS-DATA gv_raw_prefetch_hits      TYPE i.
     CLASS-DATA gv_raw_prefetch_fallbacks TYPE i.
+    CLASS-DATA gv_manifest_selects       TYPE i.
+    CLASS-DATA gv_payload_selects        TYPE i.
+    CLASS-DATA gv_verify_selects         TYPE i.
+    CLASS-DATA gv_split_events           TYPE i.
+    CLASS-DATA gv_depth_ceiling_hits     TYPE i.
+    CLASS-DATA gv_range_fallbacks        TYPE i.
+    CLASS-DATA gv_range_fallback_pages   TYPE i.
+    CLASS-DATA gv_decode_fallback_pages  TYPE i.
+    CLASS-DATA gv_reference_pages        TYPE i.
+    CLASS-DATA gv_max_manifest_rows      TYPE i.
+    CLASS-DATA gv_max_charged_raw_bytes  TYPE int8.
+    CLASS-DATA gv_max_raw_split_depth    TYPE i.
 
     CLASS-METHODS build_context
       IMPORTING
@@ -160,7 +203,23 @@ CLASS zcl_abapgit_ortec_wapa DEFINITION
       IMPORTING
         !it_pages   TYPE o2pagelist
       CHANGING
+        !cs_context TYPE ty_context
+      RAISING
+        zcx_abapgit_exception.
+
+    CLASS-METHODS clear_raw_context
+      CHANGING
         !cs_context TYPE ty_context.
+
+    CLASS-METHODS serialize_reference_range
+      IMPORTING
+        !it_pages      TYPE o2pagelist
+        !io_files      TYPE REF TO zcl_abapgit_objects_files
+      CHANGING
+        !cs_context    TYPE ty_context
+        !ct_pages_info TYPE ty_pages_tt
+      RAISING
+        zcx_abapgit_exception.
 
     "! Pure, deterministic: which PAGE/EVHNDL/TYPES sub-keys are needed
     "! for IS_CONTEXT's own page set - mirrors the exact existence checks
@@ -174,17 +233,58 @@ CLASS zcl_abapgit_ortec_wapa DEFINITION
       RETURNING
         VALUE(rt_keys) TYPE ty_raw_key_tt.
 
+    CLASS-METHODS read_raw_manifest
+      IMPORTING
+        !iv_name              TYPE o2applname
+        !it_keys              TYPE ty_raw_key_tt
+        !iv_max_rows          TYPE i DEFAULT c_max_raw_manifest_rows
+        !iv_max_payload_bytes TYPE int8 DEFAULT c_max_raw_payload_bytes
+      EXPORTING
+        !et_manifest          TYPE ty_raw_manifest_tt
+        !ev_admitted          TYPE abap_bool
+        !ev_reject_reason     TYPE ty_raw_reject_reason
+      RAISING
+        zcx_abapgit_exception.
+
     "! Bounded bulk read of the real physical O2PAGCON rows for exactly
     "! the requested keys of ONE WAPA. EV_ROW_CAP_HIT = ABAP_TRUE means
     "! the result may be truncated (ambiguous) - the caller must treat
     "! this as a hard failure, never as partial data.
     CLASS-METHODS read_raw_rows
       IMPORTING
-        !iv_name        TYPE o2applname
-        !it_keys        TYPE ty_raw_key_tt
+        !iv_name     TYPE o2applname
+        !it_keys     TYPE ty_raw_key_tt
+        !it_manifest TYPE ty_raw_manifest_tt
       EXPORTING
-        !et_rows        TYPE ty_raw_row_tt
-        !ev_row_cap_hit TYPE abap_bool.
+        !et_rows     TYPE ty_raw_row_tt
+        !ev_complete TYPE abap_bool
+      RAISING
+        zcx_abapgit_exception.
+
+    CLASS-METHODS decode_raw_page
+      IMPORTING
+        !it_keys          TYPE ty_raw_key_tt
+        !iv_pagekey       TYPE o2pagdir-pagekey
+      EXPORTING
+        !es_content       TYPE ty_raw_content
+        !es_evhandler     TYPE ty_raw_evhandler
+        !es_typesource    TYPE ty_raw_typesource
+        !ev_decoded_bytes TYPE int8
+      CHANGING
+        !ct_rows          TYPE ty_raw_row_tt
+      RAISING
+        zcx_abapgit_exception.
+
+    CLASS-METHODS raw_prefetch_and_read
+      IMPORTING
+        !it_pages       TYPE o2pagelist
+        !io_files       TYPE REF TO zcl_abapgit_objects_files
+        !iv_split_depth TYPE i DEFAULT 0
+      CHANGING
+        !cs_context     TYPE ty_context
+        !ct_pages_info  TYPE ty_pages_tt
+      RAISING
+        zcx_abapgit_exception.
 
     "! Groups IT_ROWS by (pagekey, objtype), validates SRTF2 sequence
     "! completeness and CLUSTR truncation, reconstructs one XSTRING per
@@ -195,8 +295,8 @@ CLASS zcl_abapgit_ortec_wapa DEFINITION
     "! is the only place that decides to fall back).
     CLASS-METHODS assemble_and_decode
       IMPORTING
-        !it_keys      TYPE ty_raw_key_tt
-        !it_rows      TYPE ty_raw_row_tt
+        !it_keys       TYPE ty_raw_key_tt
+        !it_rows       TYPE ty_raw_row_tt
       EXPORTING
         !et_content    TYPE ty_raw_content_tt
         !et_evhandler  TYPE ty_raw_evhandler_tt
@@ -298,11 +398,36 @@ CLASS zcl_abapgit_ortec_wapa IMPLEMENTATION.
   METHOD get_raw_prefetch_counters.
     ev_hits      = gv_raw_prefetch_hits.
     ev_fallbacks = gv_raw_prefetch_fallbacks.
+    ev_manifest_selects      = gv_manifest_selects.
+    ev_payload_selects       = gv_payload_selects.
+    ev_verify_selects        = gv_verify_selects.
+    ev_split_events          = gv_split_events.
+    ev_depth_ceiling_hits    = gv_depth_ceiling_hits.
+    ev_range_fallbacks       = gv_range_fallbacks.
+    ev_range_fallback_pages  = gv_range_fallback_pages.
+    ev_decode_fallback_pages = gv_decode_fallback_pages.
+    ev_reference_pages       = gv_reference_pages.
+    ev_max_manifest_rows     = gv_max_manifest_rows.
+    ev_max_charged_raw_bytes = gv_max_charged_raw_bytes.
+    ev_max_raw_split_depth   = gv_max_raw_split_depth.
   ENDMETHOD.
 
 
   METHOD reset_raw_prefetch_counters.
-    CLEAR: gv_raw_prefetch_hits, gv_raw_prefetch_fallbacks.
+    CLEAR: gv_raw_prefetch_hits,
+           gv_raw_prefetch_fallbacks,
+           gv_manifest_selects,
+           gv_payload_selects,
+           gv_verify_selects,
+           gv_split_events,
+           gv_depth_ceiling_hits,
+           gv_range_fallbacks,
+           gv_range_fallback_pages,
+           gv_decode_fallback_pages,
+           gv_reference_pages,
+           gv_max_manifest_rows,
+           gv_max_charged_raw_bytes,
+           gv_max_raw_split_depth.
   ENDMETHOD.
 
 
@@ -423,7 +548,7 @@ CLASS zcl_abapgit_ortec_wapa IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD read_raw_rows.
+  METHOD read_raw_manifest.
 
     TYPES: BEGIN OF ty_sel_key,
              pagekey TYPE o2pagdir-pagekey,
@@ -431,22 +556,31 @@ CLASS zcl_abapgit_ortec_wapa IMPLEMENTATION.
            END OF ty_sel_key.
     DATA lt_sel_keys TYPE SORTED TABLE OF ty_sel_key WITH UNIQUE KEY pagekey objtype.
     DATA ls_sel_key  TYPE ty_sel_key.
+    DATA lv_probe_rows TYPE i.
+    DATA lv_charged_bytes TYPE int8.
+    DATA lv_has_anomaly TYPE abap_bool.
+    DATA lv_previous_pagekey TYPE o2pagdir-pagekey.
+    DATA lv_previous_objtype TYPE o2pconkey-objtype.
+    DATA lv_expected_srtf2 TYPE i.
+    DATA lt_page_content TYPE SORTED TABLE OF o2pagdir-pagekey WITH UNIQUE KEY table_line.
 
     FIELD-SYMBOLS <ls_key> LIKE LINE OF it_keys.
+    FIELD-SYMBOLS <ls_manifest> LIKE LINE OF et_manifest.
 
-    CLEAR: et_rows, ev_row_cap_hit.
+    CLEAR: et_manifest, ev_admitted, ev_reject_reason.
+    IF iv_max_rows <= 0 OR iv_max_rows > c_max_raw_manifest_rows
+      OR iv_max_payload_bytes <= 0 OR iv_max_payload_bytes > c_max_raw_payload_bytes.
+      zcx_abapgit_exception=>raise( 'WAPA raw manifest: invalid admission limits' ).
+    ENDIF.
 
     LOOP AT it_keys ASSIGNING <ls_key>.
       ls_sel_key-pagekey = <ls_key>-pagekey.
-
       ls_sel_key-objtype = so2_objtype_page.
       INSERT ls_sel_key INTO TABLE lt_sel_keys.
-
       IF <ls_key>-need_evhndl = abap_true.
         ls_sel_key-objtype = so2_objtype_evhndl.
         INSERT ls_sel_key INTO TABLE lt_sel_keys.
       ENDIF.
-
       IF <ls_key>-need_types = abap_true.
         ls_sel_key-objtype = so2_objtype_types.
         INSERT ls_sel_key INTO TABLE lt_sel_keys.
@@ -454,20 +588,138 @@ CLASS zcl_abapgit_ortec_wapa IMPLEMENTATION.
     ENDLOOP.
 
     IF lt_sel_keys IS INITIAL.
+      ev_admitted = abap_true.
       RETURN.
     ENDIF.
 
+    lv_probe_rows = iv_max_rows + 1.
     SELECT FROM o2pagcon AS db
       INNER JOIN @lt_sel_keys AS keys
         ON db~pagekey = keys~pagekey
        AND db~objtype = keys~objtype
+      FIELDS db~pagekey, db~objtype, db~srtf2, db~clustr
+      WHERE db~relid    = 'TR'
+        AND db~applname = @iv_name
+        AND db~version  = @c_active
+      ORDER BY db~pagekey, db~objtype, db~srtf2
+      INTO TABLE @et_manifest
+      UP TO @lv_probe_rows ROWS.                          "#EC CI_SUBRC
+
+    gv_manifest_selects = gv_manifest_selects + 1.
+    gv_max_manifest_rows = nmax( val1 = gv_max_manifest_rows val2 = lines( et_manifest ) ).
+    lv_charged_bytes = lines( et_manifest ) * c_raw_payload_row_bytes.
+    gv_max_charged_raw_bytes = nmax( val1 = gv_max_charged_raw_bytes val2 = lv_charged_bytes ).
+
+    IF lines( et_manifest ) > iv_max_rows.
+      ev_reject_reason = 'R'.
+      CLEAR et_manifest.
+      RETURN.
+    ENDIF.
+    IF lv_charged_bytes > iv_max_payload_bytes.
+      ev_reject_reason = 'B'.
+      CLEAR et_manifest.
+      RETURN.
+    ENDIF.
+
+    LOOP AT et_manifest ASSIGNING <ls_manifest> USING KEY by_row.
+      IF <ls_manifest>-pagekey <> lv_previous_pagekey
+        OR <ls_manifest>-objtype <> lv_previous_objtype.
+        CLEAR lv_expected_srtf2.
+        lv_previous_pagekey = <ls_manifest>-pagekey.
+        lv_previous_objtype = <ls_manifest>-objtype.
+      ENDIF.
+      IF <ls_manifest>-srtf2 <> lv_expected_srtf2
+        OR <ls_manifest>-clustr < 0
+        OR <ls_manifest>-clustr > c_raw_payload_row_bytes.
+        lv_has_anomaly = abap_true.
+        EXIT.
+      ENDIF.
+      lv_expected_srtf2 = lv_expected_srtf2 + 1.
+      IF <ls_manifest>-objtype = so2_objtype_page.
+        INSERT <ls_manifest>-pagekey INTO TABLE lt_page_content.
+      ENDIF.
+    ENDLOOP.
+
+    LOOP AT it_keys ASSIGNING <ls_key>.
+      READ TABLE lt_page_content TRANSPORTING NO FIELDS
+        WITH TABLE KEY table_line = <ls_key>-pagekey.
+      IF sy-subrc <> 0.
+        lv_has_anomaly = abap_true.
+        EXIT.
+      ENDIF.
+    ENDLOOP.
+
+    IF lv_has_anomaly = abap_true.
+      ev_reject_reason = 'A'.
+      CLEAR et_manifest.
+      RETURN.
+    ENDIF.
+
+    ev_admitted = abap_true.
+
+  ENDMETHOD.
+
+
+  METHOD read_raw_rows.
+
+    DATA lt_verify_manifest TYPE ty_raw_manifest_tt.
+    DATA lv_admitted TYPE abap_bool.
+    DATA lv_reject_reason TYPE ty_raw_reject_reason.
+    DATA lv_charged_bytes TYPE int8.
+    DATA lv_payload_limit TYPE i.
+
+    lv_payload_limit = c_max_raw_manifest_rows + 1.
+
+    CLEAR: et_rows, ev_complete.
+    IF it_manifest IS INITIAL.
+      ev_complete = abap_true.
+      RETURN.
+    ENDIF.
+
+    SELECT FROM o2pagcon AS db
+      INNER JOIN @it_manifest AS manifest
+        ON db~pagekey = manifest~pagekey
+       AND db~objtype = manifest~objtype
+       AND db~srtf2   = manifest~srtf2
+       AND db~clustr  = manifest~clustr
       FIELDS db~pagekey, db~objtype, db~srtf2, db~clustr, db~clustd
       WHERE db~relid    = 'TR'
         AND db~applname = @iv_name
         AND db~version  = @c_active
-      INTO TABLE @et_rows.                                 "#EC CI_SUBRC
+      ORDER BY db~pagekey, db~objtype, db~srtf2
+      INTO TABLE @et_rows
+      UP TO @lv_payload_limit ROWS.                       "#EC CI_SUBRC
 
-    ev_row_cap_hit = boolc( lines( et_rows ) >= c_max_raw_prefetch_rows ).
+    gv_payload_selects = gv_payload_selects + 1.
+    IF lines( et_rows ) <> lines( it_manifest ).
+      CLEAR et_rows.
+      RETURN.
+    ENDIF.
+
+    lv_charged_bytes = lines( et_rows ) * c_raw_payload_row_bytes.
+    IF lv_charged_bytes > c_max_raw_payload_bytes.
+      CLEAR et_rows.
+      RETURN.
+    ENDIF.
+
+    read_raw_manifest(
+      EXPORTING
+        iv_name              = iv_name
+        it_keys              = it_keys
+        iv_max_rows          = c_max_raw_manifest_rows
+        iv_max_payload_bytes = c_max_raw_payload_bytes
+      IMPORTING
+        et_manifest          = lt_verify_manifest
+        ev_admitted          = lv_admitted
+        ev_reject_reason     = lv_reject_reason ).
+    gv_verify_selects = gv_verify_selects + 1.
+
+    IF lv_admitted = abap_false OR lt_verify_manifest <> it_manifest.
+      CLEAR et_rows.
+      RETURN.
+    ENDIF.
+
+    ev_complete = abap_true.
 
   ENDMETHOD.
 
@@ -606,13 +858,16 @@ CLASS zcl_abapgit_ortec_wapa IMPLEMENTATION.
   METHOD try_raw_prefetch.
 
     DATA lt_keys        TYPE ty_raw_key_tt.
+    DATA lt_manifest    TYPE ty_raw_manifest_tt.
     DATA lt_rows        TYPE ty_raw_row_tt.
-    DATA lv_row_cap_hit TYPE abap_bool.
+    DATA lv_admitted    TYPE abap_bool.
+    DATA lv_complete    TYPE abap_bool.
+    DATA lv_reject_reason TYPE ty_raw_reject_reason.
     DATA lt_content     TYPE ty_raw_content_tt.
     DATA lt_evhandler   TYPE ty_raw_evhandler_tt.
     DATA lt_typesource  TYPE ty_raw_typesource_tt.
 
-    cs_context-raw_prefetch_active = abap_false.
+    clear_raw_context( CHANGING cs_context = cs_context ).
 
     lt_keys = build_requested_keys( it_pages = it_pages is_context = cs_context ).
     IF lt_keys IS INITIAL.
@@ -624,17 +879,31 @@ CLASS zcl_abapgit_ortec_wapa IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    read_raw_rows(
+    read_raw_manifest(
       EXPORTING
         iv_name        = cs_context-name
         it_keys        = lt_keys
       IMPORTING
-        et_rows        = lt_rows
-        ev_row_cap_hit = lv_row_cap_hit ).
+        et_manifest    = lt_manifest
+        ev_admitted    = lv_admitted
+        ev_reject_reason = lv_reject_reason ).
 
-    IF lv_row_cap_hit = abap_true.
+    IF lv_admitted = abap_false.
       gv_raw_prefetch_fallbacks = gv_raw_prefetch_fallbacks + 1.
-      RETURN. " ambiguous truncation - stay on the reference path
+      RETURN.
+    ENDIF.
+
+    read_raw_rows(
+      EXPORTING
+        iv_name     = cs_context-name
+        it_keys     = lt_keys
+        it_manifest = lt_manifest
+      IMPORTING
+        et_rows     = lt_rows
+        ev_complete = lv_complete ).
+    IF lv_complete = abap_false.
+      gv_raw_prefetch_fallbacks = gv_raw_prefetch_fallbacks + 1.
+      RETURN.
     ENDIF.
 
     TRY.
@@ -656,6 +925,293 @@ CLASS zcl_abapgit_ortec_wapa IMPLEMENTATION.
     cs_context-raw_typesource      = lt_typesource.
     cs_context-raw_prefetch_active = abap_true.
     gv_raw_prefetch_hits = gv_raw_prefetch_hits + 1.
+
+  ENDMETHOD.
+
+
+  METHOD decode_raw_page.
+
+    DATA ls_key TYPE ty_raw_key.
+    DATA lv_objtype TYPE o2pconkey-objtype.
+    DATA lv_expected_srtf2 TYPE i.
+    DATA lv_fragment TYPE xstring.
+    DATA lv_buffer TYPE xstring.
+    DATA lt_fragments TYPE STANDARD TABLE OF xstring WITH EMPTY KEY.
+
+    FIELD-SYMBOLS <ls_row> LIKE LINE OF ct_rows.
+    FIELD-SYMBOLS <lv_content_line> TYPE any.
+    FIELD-SYMBOLS <lv_type_line> TYPE any.
+    FIELD-SYMBOLS <ls_evhandler_line> TYPE so2_ev_handler.
+    FIELD-SYMBOLS <lv_evhandler_source_line> TYPE any.
+
+    READ TABLE it_keys INTO ls_key WITH TABLE KEY pagekey = iv_pagekey.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+
+    LOOP AT ct_rows ASSIGNING <ls_row> USING KEY by_page
+      WHERE pagekey = iv_pagekey.
+      IF lv_objtype IS INITIAL.
+        lv_objtype = <ls_row>-objtype.
+      ENDIF.
+      IF <ls_row>-objtype <> lv_objtype.
+        CONCATENATE LINES OF lt_fragments INTO lv_buffer IN BYTE MODE.
+        CASE lv_objtype.
+          WHEN so2_objtype_page.
+            es_content-pagekey = iv_pagekey.
+            IMPORT content TO es_content-content
+                   xml_source TO es_content-xml_source
+                   FROM DATA BUFFER lv_buffer
+                   ACCEPTING PADDING
+                   IGNORING CONVERSION ERRORS.
+            IF sy-subrc <> 0.
+              zcx_abapgit_exception=>raise( |WAPA raw prefetch: decode failed for { iv_pagekey }/PAGE| ).
+            ENDIF.
+          WHEN so2_objtype_evhndl.
+            es_evhandler-pagekey = iv_pagekey.
+            IMPORT evhandler TO es_evhandler-evhandler
+                   FROM DATA BUFFER lv_buffer
+                   ACCEPTING PADDING
+                   IGNORING CONVERSION ERRORS.
+          WHEN so2_objtype_types.
+            es_typesource-pagekey = iv_pagekey.
+            IMPORT typesource TO es_typesource-typesource
+                   FROM DATA BUFFER lv_buffer
+                   ACCEPTING PADDING
+                   IGNORING CONVERSION ERRORS.
+        ENDCASE.
+        FREE: lt_fragments, lv_buffer.
+        CLEAR lv_expected_srtf2.
+        lv_objtype = <ls_row>-objtype.
+      ENDIF.
+
+      IF <ls_row>-srtf2 <> lv_expected_srtf2
+        OR <ls_row>-clustr < 0 OR <ls_row>-clustr > xstrlen( <ls_row>-clustd ).
+        zcx_abapgit_exception=>raise( |WAPA raw prefetch: malformed row for { iv_pagekey }/{ <ls_row>-objtype }| ).
+      ENDIF.
+      lv_expected_srtf2 = lv_expected_srtf2 + 1.
+      IF <ls_row>-clustr > 0.
+        lv_fragment = <ls_row>-clustd(<ls_row>-clustr).
+        APPEND lv_fragment TO lt_fragments.
+      ENDIF.
+      DELETE TABLE ct_rows FROM <ls_row>.
+    ENDLOOP.
+
+    IF lv_objtype IS INITIAL.
+      zcx_abapgit_exception=>raise( |WAPA raw prefetch: no rows for { iv_pagekey }| ).
+    ENDIF.
+    CONCATENATE LINES OF lt_fragments INTO lv_buffer IN BYTE MODE.
+    CASE lv_objtype.
+      WHEN so2_objtype_page.
+        es_content-pagekey = iv_pagekey.
+        IMPORT content TO es_content-content
+               xml_source TO es_content-xml_source
+               FROM DATA BUFFER lv_buffer
+               ACCEPTING PADDING
+               IGNORING CONVERSION ERRORS.
+        IF sy-subrc <> 0.
+          zcx_abapgit_exception=>raise( |WAPA raw prefetch: decode failed for { iv_pagekey }/PAGE| ).
+        ENDIF.
+      WHEN so2_objtype_evhndl.
+        es_evhandler-pagekey = iv_pagekey.
+        IMPORT evhandler TO es_evhandler-evhandler
+               FROM DATA BUFFER lv_buffer
+               ACCEPTING PADDING
+               IGNORING CONVERSION ERRORS.
+      WHEN so2_objtype_types.
+        es_typesource-pagekey = iv_pagekey.
+        IMPORT typesource TO es_typesource-typesource
+               FROM DATA BUFFER lv_buffer
+               ACCEPTING PADDING
+               IGNORING CONVERSION ERRORS.
+    ENDCASE.
+
+    IF es_content-pagekey IS INITIAL.
+      zcx_abapgit_exception=>raise( |WAPA raw prefetch: no decoded content for { iv_pagekey }| ).
+    ENDIF.
+    IF ls_key-need_evhndl = abap_true AND es_evhandler-pagekey IS INITIAL.
+      es_evhandler-pagekey = iv_pagekey.
+    ENDIF.
+    IF ls_key-need_types = abap_true AND es_typesource-pagekey IS INITIAL.
+      es_typesource-pagekey = iv_pagekey.
+    ENDIF.
+
+    ev_decoded_bytes = xstrlen( es_content-xml_source ).
+    LOOP AT es_content-content ASSIGNING <lv_content_line>.
+      ev_decoded_bytes = ev_decoded_bytes + strlen( <lv_content_line> ).
+    ENDLOOP.
+    LOOP AT es_evhandler-evhandler ASSIGNING <ls_evhandler_line>.
+      ev_decoded_bytes = ev_decoded_bytes + strlen( <ls_evhandler_line>-name ).
+      LOOP AT <ls_evhandler_line>-source ASSIGNING <lv_evhandler_source_line>.
+        ev_decoded_bytes = ev_decoded_bytes + strlen( <lv_evhandler_source_line> ).
+      ENDLOOP.
+    ENDLOOP.
+    LOOP AT es_typesource-typesource ASSIGNING <lv_type_line>.
+      ev_decoded_bytes = ev_decoded_bytes + strlen( <lv_type_line> ).
+    ENDLOOP.
+
+  ENDMETHOD.
+
+
+  METHOD raw_prefetch_and_read.
+
+    DATA lt_keys TYPE ty_raw_key_tt.
+    DATA lt_manifest TYPE ty_raw_manifest_tt.
+    DATA lt_rows TYPE ty_raw_row_tt.
+    DATA lt_left TYPE o2pagelist.
+    DATA lt_right TYPE o2pagelist.
+    DATA lt_suffix TYPE o2pagelist.
+    DATA ls_content TYPE ty_raw_content.
+    DATA ls_evhandler TYPE ty_raw_evhandler.
+    DATA ls_typesource TYPE ty_raw_typesource.
+    DATA lv_admitted TYPE abap_bool.
+    DATA lv_complete TYPE abap_bool.
+    DATA lv_reject_reason TYPE ty_raw_reject_reason.
+    DATA lv_decoded_bytes TYPE int8.
+    DATA lv_mid TYPE i.
+    DATA lv_page_index TYPE i.
+
+    FIELD-SYMBOLS <ls_page> LIKE LINE OF it_pages.
+    FIELD-SYMBOLS <ls_remaining> LIKE LINE OF it_pages.
+
+    clear_raw_context( CHANGING cs_context = cs_context ).
+    IF iv_split_depth > c_max_raw_split_depth.
+      zcx_abapgit_exception=>raise( 'WAPA raw prefetch: split depth exceeded' ).
+    ENDIF.
+    gv_max_raw_split_depth = nmax( val1 = gv_max_raw_split_depth val2 = iv_split_depth ).
+
+    lt_keys = build_requested_keys( it_pages = it_pages is_context = cs_context ).
+    IF lt_keys IS INITIAL.
+      LOOP AT it_pages ASSIGNING <ls_page>.
+        APPEND read_page( is_context = cs_context is_page = <ls_page> io_files = io_files )
+          TO ct_pages_info.
+      ENDLOOP.
+      RETURN.
+    ENDIF.
+
+    read_raw_manifest(
+      EXPORTING
+        iv_name     = cs_context-name
+        it_keys     = lt_keys
+      IMPORTING
+        et_manifest = lt_manifest
+        ev_admitted = lv_admitted
+        ev_reject_reason = lv_reject_reason ).
+    IF lv_admitted = abap_true.
+      read_raw_rows(
+        EXPORTING
+          iv_name     = cs_context-name
+          it_keys     = lt_keys
+          it_manifest = lt_manifest
+        IMPORTING
+          et_rows     = lt_rows
+          ev_complete = lv_complete ).
+      lv_admitted = lv_complete.
+    ENDIF.
+
+    IF lv_admitted = abap_true.
+      LOOP AT it_pages ASSIGNING <ls_page>.
+        lv_page_index = sy-tabix.
+        CLEAR: ls_content, ls_evhandler, ls_typesource, lv_decoded_bytes.
+        TRY.
+            decode_raw_page(
+              EXPORTING it_keys = lt_keys iv_pagekey = <ls_page>-pagekey
+              IMPORTING es_content = ls_content es_evhandler = ls_evhandler
+                        es_typesource = ls_typesource ev_decoded_bytes = lv_decoded_bytes
+              CHANGING ct_rows = lt_rows ).
+          CATCH zcx_abapgit_exception.
+            CLEAR lv_decoded_bytes.
+        ENDTRY.
+
+        IF ls_content-pagekey IS INITIAL OR lv_decoded_bytes > c_max_decoded_page_bytes.
+          FREE: lt_rows, lt_manifest.
+          clear_raw_context( CHANGING cs_context = cs_context ).
+          LOOP AT it_pages ASSIGNING <ls_remaining> FROM lv_page_index.
+            APPEND <ls_remaining> TO lt_suffix.
+          ENDLOOP.
+          gv_decode_fallback_pages = gv_decode_fallback_pages + lines( lt_suffix ).
+          serialize_reference_range(
+            EXPORTING it_pages = lt_suffix io_files = io_files
+            CHANGING cs_context = cs_context ct_pages_info = ct_pages_info ).
+          RETURN.
+        ENDIF.
+
+        clear_raw_context( CHANGING cs_context = cs_context ).
+        INSERT ls_content INTO TABLE cs_context-raw_content.
+        IF ls_evhandler-pagekey IS NOT INITIAL.
+          INSERT ls_evhandler INTO TABLE cs_context-raw_evhandler.
+        ENDIF.
+        IF ls_typesource-pagekey IS NOT INITIAL.
+          INSERT ls_typesource INTO TABLE cs_context-raw_typesource.
+        ENDIF.
+        cs_context-raw_prefetch_active = abap_true.
+        APPEND read_page( is_context = cs_context is_page = <ls_page> io_files = io_files )
+          TO ct_pages_info.
+        clear_raw_context( CHANGING cs_context = cs_context ).
+      ENDLOOP.
+      FREE: lt_rows, lt_manifest.
+      RETURN.
+    ENDIF.
+
+    FREE: lt_rows, lt_manifest.
+    clear_raw_context( CHANGING cs_context = cs_context ).
+    IF lines( it_pages ) > 1 AND iv_split_depth < c_max_raw_split_depth.
+      lv_mid = lines( it_pages ) / 2.
+      LOOP AT it_pages ASSIGNING <ls_page>.
+        IF sy-tabix <= lv_mid.
+          APPEND <ls_page> TO lt_left.
+        ELSE.
+          APPEND <ls_page> TO lt_right.
+        ENDIF.
+      ENDLOOP.
+      gv_split_events = gv_split_events + 1.
+      raw_prefetch_and_read(
+        EXPORTING it_pages = lt_left io_files = io_files iv_split_depth = iv_split_depth + 1
+        CHANGING cs_context = cs_context ct_pages_info = ct_pages_info ).
+      clear_raw_context( CHANGING cs_context = cs_context ).
+      raw_prefetch_and_read(
+        EXPORTING it_pages = lt_right io_files = io_files iv_split_depth = iv_split_depth + 1
+        CHANGING cs_context = cs_context ct_pages_info = ct_pages_info ).
+      RETURN.
+    ENDIF.
+
+    IF lines( it_pages ) > 1 AND iv_split_depth = c_max_raw_split_depth.
+      gv_depth_ceiling_hits = gv_depth_ceiling_hits + 1.
+    ENDIF.
+    serialize_reference_range(
+      EXPORTING it_pages = it_pages io_files = io_files
+      CHANGING cs_context = cs_context ct_pages_info = ct_pages_info ).
+
+  ENDMETHOD.
+
+
+  METHOD clear_raw_context.
+
+    CLEAR cs_context-raw_prefetch_active.
+    FREE: cs_context-raw_content,
+          cs_context-raw_evhandler,
+          cs_context-raw_typesource.
+
+  ENDMETHOD.
+
+
+  METHOD serialize_reference_range.
+
+    FIELD-SYMBOLS <ls_page> LIKE LINE OF it_pages.
+
+    gv_range_fallbacks = gv_range_fallbacks + 1.
+    gv_range_fallback_pages = gv_range_fallback_pages + lines( it_pages ).
+
+    LOOP AT it_pages ASSIGNING <ls_page>.
+      clear_raw_context( CHANGING cs_context = cs_context ).
+      APPEND read_page(
+               is_context = cs_context
+               is_page    = <ls_page>
+               io_files   = io_files )
+             TO ct_pages_info.
+      gv_reference_pages = gv_reference_pages + 1.
+      clear_raw_context( CHANGING cs_context = cs_context ).
+    ENDLOOP.
 
   ENDMETHOD.
 
@@ -714,15 +1270,16 @@ CLASS zcl_abapgit_ortec_wapa IMPLEMENTATION.
     DATA lv_layout_language   TYPE langu.
     DATA lv_errorcode         TYPE boolean.
     DATA lt_used_guids        TYPE bsp_guids.
-    DATA ls_raw_content       TYPE ty_raw_content.
     DATA lv_have_content      TYPE abap_bool.
 
+    FIELD-SYMBOLS <ls_raw_content> TYPE ty_raw_content.
+
     IF is_context-raw_prefetch_active = abap_true.
-      READ TABLE is_context-raw_content INTO ls_raw_content
+      READ TABLE is_context-raw_content ASSIGNING <ls_raw_content>
         WITH TABLE KEY pagekey = cs_page-attributes-pagekey.
       IF sy-subrc = 0.
-        lt_content      = ls_raw_content-content.
-        lv_xml_source   = ls_raw_content-xml_source.
+        lt_content      = <ls_raw_content>-content.
+        lv_xml_source   = <ls_raw_content>-xml_source.
         lv_have_content = abap_true.
       ENDIF.
     ENDIF.
@@ -797,12 +1354,12 @@ CLASS zcl_abapgit_ortec_wapa IMPLEMENTATION.
     DATA ls_ev_handler_db      TYPE o2pagevh.
     DATA ls_ev_handler         TYPE o2pagevhs.
     DATA lt_ev_handler_sources TYPE so2_ev_handler_t.
-    DATA ls_raw_evhandler      TYPE ty_raw_evhandler.
-    DATA ls_raw_typesource     TYPE ty_raw_typesource.
     DATA lv_have_evhandler     TYPE abap_bool.
     DATA lv_have_typesource    TYPE abap_bool.
 
     FIELD-SYMBOLS <ls_ev_handler_source> TYPE so2_ev_handler.
+    FIELD-SYMBOLS <ls_raw_evhandler> TYPE ty_raw_evhandler.
+    FIELD-SYMBOLS <ls_raw_typesource> TYPE ty_raw_typesource.
 
     IF cs_page-attributes-pagetype <> so2_full_page.
       RETURN.
@@ -818,10 +1375,10 @@ CLASS zcl_abapgit_ortec_wapa IMPLEMENTATION.
                version  = c_active.
     IF sy-subrc = 0.
       IF is_context-raw_prefetch_active = abap_true.
-        READ TABLE is_context-raw_evhandler INTO ls_raw_evhandler
+        READ TABLE is_context-raw_evhandler ASSIGNING <ls_raw_evhandler>
           WITH TABLE KEY pagekey = cs_page-attributes-pagekey.
         IF sy-subrc = 0.
-          lt_ev_handler_sources = ls_raw_evhandler-evhandler.
+          lt_ev_handler_sources = <ls_raw_evhandler>-evhandler.
           lv_have_evhandler = abap_true.
         ENDIF.
       ENDIF.
@@ -857,10 +1414,10 @@ CLASS zcl_abapgit_ortec_wapa IMPLEMENTATION.
     ENDIF.
 
     IF is_context-raw_prefetch_active = abap_true.
-      READ TABLE is_context-raw_typesource INTO ls_raw_typesource
+      READ TABLE is_context-raw_typesource ASSIGNING <ls_raw_typesource>
         WITH TABLE KEY pagekey = cs_page-attributes-pagekey.
       IF sy-subrc = 0.
-        cs_page-types = ls_raw_typesource-typesource.
+        cs_page-types = <ls_raw_typesource>-typesource.
         lv_have_typesource = abap_true.
       ENDIF.
     ENDIF.
@@ -996,6 +1553,8 @@ CLASS zcl_abapgit_ortec_wapa IMPLEMENTATION.
     DATA lt_pages_info TYPE ty_pages_tt.
     DATA ls_context    TYPE ty_context.
     DATA lo_bsp        TYPE REF TO cl_o2_api_application.
+    DATA lt_page_group TYPE o2pagelist.
+    DATA lv_reference_pages_before TYPE i.
 
     FIELD-SYMBOLS <ls_page>                  LIKE LINE OF lt_pages.
     FIELD-SYMBOLS <lv_abap_language_version> TYPE uccheck.
@@ -1056,24 +1615,37 @@ CLASS zcl_abapgit_ortec_wapa IMPLEMENTATION.
       iv_name  = lv_name
       it_pages = lt_pages ).
 
-    try_raw_prefetch(
-      EXPORTING
-        it_pages   = lt_pages
-      CHANGING
-        cs_context = ls_context ).
+    lv_reference_pages_before = gv_reference_pages.
 
     LOOP AT lt_pages ASSIGNING <ls_page>.
-      APPEND read_page(
-               is_context = ls_context
-               is_page    = <ls_page>
-               io_files   = io_files )
-             TO lt_pages_info.
+      APPEND <ls_page> TO lt_page_group.
+      IF lines( lt_page_group ) = c_raw_prefetch_initial_pages.
+        raw_prefetch_and_read(
+          EXPORTING it_pages = lt_page_group io_files = io_files
+          CHANGING cs_context = ls_context ct_pages_info = lt_pages_info ).
+        CLEAR lt_page_group.
+      ENDIF.
     ENDLOOP.
+
+    IF lt_page_group IS NOT INITIAL.
+      raw_prefetch_and_read(
+        EXPORTING it_pages = lt_page_group io_files = io_files
+        CHANGING cs_context = ls_context ct_pages_info = lt_pages_info ).
+    ENDIF.
+
+    IF lt_pages IS NOT INITIAL.
+      IF gv_reference_pages > lv_reference_pages_before.
+        gv_raw_prefetch_fallbacks = gv_raw_prefetch_fallbacks + 1.
+      ELSE.
+        gv_raw_prefetch_hits = gv_raw_prefetch_hits + 1.
+      ENDIF.
+    ENDIF.
 
     io_xml->add( iv_name = 'PAGES'
                  ig_data = lt_pages_info ).
 
-    CLEAR: ls_context, lt_pages_info, lt_pages, lt_navgraph.
+    clear_raw_context( CHANGING cs_context = ls_context ).
+    CLEAR: ls_context, lt_pages_info, lt_pages, lt_navgraph, lt_page_group.
 
     zcl_abapgit_sotr_handler=>read_sotr(
       iv_pgmid       = 'LIMU'

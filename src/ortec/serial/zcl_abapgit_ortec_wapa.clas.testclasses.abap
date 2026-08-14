@@ -32,7 +32,7 @@ CLASS ltcl_wapa DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT FINAL.
              clustr  TYPE i,
              clustd  TYPE xstring,
            END OF ty_raw_row.
-    TYPES ty_raw_row_tt TYPE STANDARD TABLE OF ty_raw_row WITH DEFAULT KEY.
+    TYPES ty_raw_row_tt TYPE zcl_abapgit_ortec_wapa=>ty_raw_row_tt.
 
     CLASS-METHODS class_setup.
     CLASS-METHODS class_teardown.
@@ -639,8 +639,11 @@ CLASS ltcl_wapa IMPLEMENTATION.
 
   METHOD read_raw_rows_filters_by_key.
     DATA lt_keys        TYPE zcl_abapgit_ortec_wapa=>ty_raw_key_tt.
+    DATA lt_manifest    TYPE zcl_abapgit_ortec_wapa=>ty_raw_manifest_tt.
     DATA lt_rows        TYPE zcl_abapgit_ortec_wapa=>ty_raw_row_tt.
-    DATA lv_row_cap_hit TYPE abap_bool.
+    DATA lv_admitted    TYPE abap_bool.
+    DATA lv_complete    TYPE abap_bool.
+    DATA lv_reject_reason TYPE zcl_abapgit_ortec_wapa=>ty_raw_reject_reason.
     DATA lt_o2pagcon    TYPE STANDARD TABLE OF o2pagcon WITH DEFAULT KEY.
 
     APPEND VALUE #( relid = 'TR' applname = 'ZTST' pagekey = 'PAGE1' objtype = so2_objtype_page version = 'A'
@@ -655,15 +658,26 @@ CLASS ltcl_wapa IMPLEMENTATION.
 
     INSERT VALUE #( pagekey = 'PAGE1' ) INTO TABLE lt_keys.
 
+    zcl_abapgit_ortec_wapa=>read_raw_manifest(
+      EXPORTING
+        iv_name = 'ZTST'
+        it_keys = lt_keys
+      IMPORTING
+        et_manifest = lt_manifest
+        ev_admitted = lv_admitted
+        ev_reject_reason = lv_reject_reason ).
+    cl_abap_unit_assert=>assert_true( lv_admitted ).
+
     zcl_abapgit_ortec_wapa=>read_raw_rows(
       EXPORTING
-        iv_name        = 'ZTST'
-        it_keys        = lt_keys
+        iv_name     = 'ZTST'
+        it_keys     = lt_keys
+        it_manifest = lt_manifest
       IMPORTING
-        et_rows        = lt_rows
-        ev_row_cap_hit = lv_row_cap_hit ).
+        et_rows     = lt_rows
+        ev_complete = lv_complete ).
 
-    cl_abap_unit_assert=>assert_false( lv_row_cap_hit ).
+    cl_abap_unit_assert=>assert_true( lv_complete ).
     cl_abap_unit_assert=>assert_equals( exp = 1 act = lines( lt_rows ) ).
     READ TABLE lt_rows INTO DATA(ls_row) INDEX 1.
     cl_abap_unit_assert=>assert_equals( exp = 'PAGE1' act = ls_row-pagekey ).
