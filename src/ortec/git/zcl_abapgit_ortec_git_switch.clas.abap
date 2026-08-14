@@ -12,14 +12,19 @@ CLASS zcl_abapgit_ortec_git_switch DEFINITION
       BEGIN OF cs_info,
         BEGIN OF settings,
           name  TYPE string VALUE 'use_repo_obj_cache',
-          label TYPE string VALUE 'Use Persistent Object Cache',
-          hint  TYPE string VALUE 'Use ZAOG_* persisted object cache for this repository (per user setting)',
+          label TYPE string VALUE 'Use Persistent Git Object Cache',
+          hint  TYPE string VALUE 'Use ZAOG_* persisted git object cache for this repository (per-repository setting, default off)',
         END OF settings,
         BEGIN OF serial_batch_settings,
           name  TYPE string VALUE 'use_serial_batch',
-          label TYPE string VALUE 'Use ORTEC Adaptive Batch Serialization',
-          hint  TYPE string VALUE 'Use the ORTEC adaptive batch serializer for this repository (per-repository setting, default off)',
+          label TYPE string VALUE 'Use Adaptive Batch Serialization',
+          hint  TYPE string VALUE 'Use the adaptive batch serializer for this repository (per-repository setting, default off)',
         END OF serial_batch_settings,
+        BEGIN OF serial_stats_settings,
+          name  TYPE string VALUE 'collect_serial_stats',
+          label TYPE string VALUE 'Collect Serialization Statistics',
+          hint  TYPE string VALUE 'Collect and display ORTEC serialization statistics for this repository (per-repository setting, default off)',
+        END OF serial_stats_settings,
       END OF cs_info.
 
     "! Local-object bulk-exists optimization switches.
@@ -35,15 +40,6 @@ CLASS zcl_abapgit_ortec_git_switch DEFINITION
         "! Use the INTF bulk handler instead of standard per-object INTF existence checks.
         intf_active TYPE abap_bool VALUE abap_true,
       END OF cs_bulk_exists.
-
-    "! Development-only master switch for ORTEC adaptive-serialization run
-    "! statistics: per-object elapsed_ms / output-bytes collection plus the
-    "! end-of-run CL_DEMO_OUTPUT report produced by
-    "! ZCL_ABAPGIT_ORTEC_SER_ORCH. This is a compile-time constant, not a
-    "! session-runtime toggle: set it to ABAP_FALSE (and reactivate) before
-    "! moving the code to production. When OFF, nothing is collected and no
-    "! report is shown, so there is zero measurement overhead on the run.
-    CONSTANTS c_serial_stats_enabled TYPE abap_bool VALUE abap_true.
 
     "! D4 completeness-strictness mode for object/path resolution (see
     "! .memory/logs/target_design.md §2.3). This is a compile-time constant,
@@ -166,19 +162,16 @@ CLASS zcl_abapgit_ortec_git_switch DEFINITION
       IMPORTING iv_active TYPE abap_bool.
 
     "! Check if the FDT0 (BRF+) serialization result cache is enabled in
-    "! this internal session. Defaults to ABAP_FALSE so standard behavior
-    "! is unchanged unless a caller explicitly opts in for its own run.
+    "! this internal session.
     "! @parameter rv_active |
     "! ABAP_TRUE if the FDT0 cache is enabled.
     CLASS-METHODS is_fdt0_cache_active
       RETURNING VALUE(rv_active) TYPE abap_bool.
 
     "! Enable or disable the FDT0 (BRF+) serialization result cache in
-    "! this internal session. Production caller is exclusively
-    "! ZCL_ABAPGIT_ORTEC_SER_ORCH=>SERIALIZE, mirroring the existing
-    "! SET_SERIAL_PREFETCH_ACTIVE on-entry/off-on-every-exit lifecycle.
+    "! this internal session.
     "! @parameter iv_active |
-    "! ABAP_TRUE enables the guarded FDT0 cache hook.
+    "! ABAP_TRUE enables the FDT0 cache hook.
     CLASS-METHODS set_fdt0_cache_active
       IMPORTING iv_active TYPE abap_bool.
 
@@ -188,7 +181,7 @@ CLASS zcl_abapgit_ortec_git_switch DEFINITION
     CLASS-METHODS set_ssfo_cache_active
       IMPORTING iv_active TYPE abap_bool.
 
-    "! Read persistent cache flag from ORTEC user persistence.
+    "! Read the persistent cache flag for a repository from ORTEC persistence.
     "! @parameter iv_url |
     "! Repository URL
     "! @parameter rv_enabled |
@@ -197,7 +190,7 @@ CLASS zcl_abapgit_ortec_git_switch DEFINITION
       IMPORTING iv_url            TYPE string
       RETURNING VALUE(rv_enabled) TYPE abap_bool.
 
-    "! Persist repository cache flag in ORTEC user persistence.
+    "! Persist the repository cache flag in ORTEC persistence.
     "! @parameter iv_url |
     "! Repository URL.
     "! @parameter iv_enabled |
@@ -224,6 +217,33 @@ CLASS zcl_abapgit_ortec_git_switch DEFINITION
       IMPORTING iv_url     TYPE string
                 iv_enabled TYPE abap_bool.
 
+    "! Check if serialization statistics are enabled for a repository.
+    "! @parameter iv_url |
+    "! Repository URL. Optional test-seam-only fallback when omitted.
+    "! @parameter rv_active |
+    "! ABAP_TRUE if statistics collection and reporting are enabled.
+    CLASS-METHODS is_serial_stats_active
+      IMPORTING iv_url           TYPE string OPTIONAL
+      RETURNING VALUE(rv_active) TYPE abap_bool.
+
+    "! Read the persisted serialization-statistics flag for a repository.
+    "! @parameter iv_url |
+    "! Repository URL.
+    "! @parameter rv_enabled |
+    "! ABAP_TRUE if statistics are enabled for the repository.
+    CLASS-METHODS get_repo_use_serial_stats
+      IMPORTING iv_url            TYPE string
+      RETURNING VALUE(rv_enabled) TYPE abap_bool.
+
+    "! Persist the serialization-statistics flag for a repository.
+    "! @parameter iv_url |
+    "! Repository URL.
+    "! @parameter iv_enabled |
+    "! ABAP_TRUE to enable statistics collection and reporting.
+    CLASS-METHODS set_repo_use_serial_stats
+      IMPORTING iv_url     TYPE string
+                iv_enabled TYPE abap_bool.
+
   PRIVATE SECTION.
     CLASS-DATA mv_bulk_exists_active TYPE abap_bool VALUE abap_true.
     "! SER-SLICE-3 Phase 7 (Finding F-1 fix): defaults OFF so the classic
@@ -232,10 +252,6 @@ CLASS zcl_abapgit_ortec_git_switch DEFINITION
     CLASS-DATA mv_serial_prefetch_active TYPE abap_bool VALUE abap_false.
     CLASS-DATA mv_avoid_timeout_active TYPE abap_bool VALUE abap_true.
     CLASS-DATA mv_serial_batch_active TYPE abap_bool VALUE abap_false.
-    "! Session-scoped only (no persistence-class change for this feature -
-    "! see .memory/logs/fdt0_local_cache_design.md &sect;1). Defaults OFF
-    "! so standard behavior is unchanged unless a caller explicitly opts
-    "! in for the duration of its own run.
     CLASS-DATA mv_fdt0_cache_active TYPE abap_bool VALUE abap_false.
     CLASS-DATA mv_ssfo_cache_active TYPE abap_bool VALUE abap_false.
 
@@ -333,6 +349,24 @@ CLASS zcl_abapgit_ortec_git_switch IMPLEMENTATION.
     ENDTRY.
   ENDMETHOD.
 
+  METHOD get_repo_use_serial_stats.
+    TRY.
+        rv_enabled = zcl_abapgit_persistence_ortec=>get_instance( )->get_repo_use_serial_stats( iv_url ).
+      CATCH cx_root.
+        rv_enabled = abap_false.
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD set_repo_use_serial_stats.
+    TRY.
+        zcl_abapgit_persistence_ortec=>get_instance( )->set_repo_use_serial_stats(
+            iv_url               = iv_url
+            iv_use_serial_stats  = iv_enabled ).
+      CATCH cx_root.
+        RETURN.
+    ENDTRY.
+  ENDMETHOD.
+
   METHOD is_active_for_repo.
     rv_active = get_use_repo_cache( iv_url ).
   ENDMETHOD.
@@ -351,6 +385,13 @@ CLASS zcl_abapgit_ortec_git_switch IMPLEMENTATION.
 
   METHOD set_serial_batch_active.
     mv_serial_batch_active = iv_active.
+  ENDMETHOD.
+
+  METHOD is_serial_stats_active.
+    IF iv_url IS INITIAL.
+      RETURN.
+    ENDIF.
+    rv_active = get_repo_use_serial_stats( iv_url ).
   ENDMETHOD.
 
 ENDCLASS.

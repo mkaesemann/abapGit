@@ -44,6 +44,7 @@ CLASS zcl_abapgit_gui_page_sett_repo DEFINITION
         version_value    TYPE string VALUE 'version_value',
         abap_langu_vers  TYPE string VALUE 'abap_langu_vers',
         original_system  TYPE string VALUE 'original_system',
+        ortec            TYPE string VALUE 'ortec',
       END OF c_id.
     CONSTANTS:
       BEGIN OF c_event,
@@ -244,14 +245,21 @@ CLASS zcl_abapgit_gui_page_sett_repo IMPLEMENTATION.
       iv_label       = 'ABAP for Cloud Development'
       iv_value       = zif_abapgit_dot_abapgit=>c_abap_language_version-cloud_development ).
 
-    ro_form->checkbox(
+    ro_form->start_group(
+      iv_name  = c_id-ortec
+      iv_label = 'ORTEC'
+    )->checkbox(
       iv_name  = zcl_abapgit_ortec_git_switch=>cs_info-settings-name
       iv_label = zcl_abapgit_ortec_git_switch=>cs_info-settings-label
       iv_hint  = zcl_abapgit_ortec_git_switch=>cs_info-settings-hint
     )->checkbox(
       iv_name  = zcl_abapgit_ortec_git_switch=>cs_info-serial_batch_settings-name
       iv_label = zcl_abapgit_ortec_git_switch=>cs_info-serial_batch_settings-label
-      iv_hint  = zcl_abapgit_ortec_git_switch=>cs_info-serial_batch_settings-hint ).
+      iv_hint  = zcl_abapgit_ortec_git_switch=>cs_info-serial_batch_settings-hint
+    )->checkbox(
+      iv_name  = zcl_abapgit_ortec_git_switch=>cs_info-serial_stats_settings-name
+      iv_label = zcl_abapgit_ortec_git_switch=>cs_info-serial_stats_settings-label
+      iv_hint  = zcl_abapgit_ortec_git_switch=>cs_info-serial_stats_settings-hint ).
 
     ro_form->command(
       iv_label       = 'Save Settings'
@@ -382,6 +390,10 @@ CLASS zcl_abapgit_gui_page_sett_repo IMPLEMENTATION.
       iv_key = zcl_abapgit_ortec_git_switch=>cs_info-serial_batch_settings-name
       iv_val = |{ zcl_abapgit_ortec_git_switch=>get_repo_use_serial_batch( mi_repo->ms_data-url ) }| ).
 
+    ro_form_data->set(
+      iv_key = zcl_abapgit_ortec_git_switch=>cs_info-serial_stats_settings-name
+      iv_val = |{ zcl_abapgit_ortec_git_switch=>get_repo_use_serial_stats( mi_repo->ms_data-url ) }| ).
+
   ENDMETHOD.
 
 
@@ -414,6 +426,10 @@ CLASS zcl_abapgit_gui_page_sett_repo IMPLEMENTATION.
     zcl_abapgit_ortec_git_switch=>set_repo_use_serial_batch(
       iv_url     = mi_repo->ms_data-url
       iv_enabled = CONV abap_bool( mo_form_data->get( zcl_abapgit_ortec_git_switch=>cs_info-serial_batch_settings-name ) ) ).
+
+    zcl_abapgit_ortec_git_switch=>set_repo_use_serial_stats(
+      iv_url     = mi_repo->ms_data-url
+      iv_enabled = CONV abap_bool( mo_form_data->get( zcl_abapgit_ortec_git_switch=>cs_info-serial_stats_settings-name ) ) ).
 
     lt_i18n_langs = zcl_abapgit_lxe_texts=>convert_lang_string_to_table(
       iv_langs              = mo_form_data->get( c_id-i18n_langs )

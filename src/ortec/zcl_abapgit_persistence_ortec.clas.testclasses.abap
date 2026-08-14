@@ -57,13 +57,19 @@ CLASS ltcl_serial_batch_setting DEFINITION
   PRIVATE SECTION.
     CONSTANTS:
       c_abap_user TYPE sy-uname VALUE 'ABAPGIT_TEST',
-      c_url_a     TYPE string VALUE 'https://test-serial-batch-a.example.com/repo.git',
-      c_url_b     TYPE string VALUE 'https://test-serial-batch-b.example.com/repo.git'.
+      c_url_a       TYPE string VALUE 'https://test-serial-batch-a.example.com/repo.git',
+      c_url_b       TYPE string VALUE 'https://test-serial-batch-b.example.com/repo.git',
+      c_cache_url_a TYPE string VALUE 'https://test-cache-a.example.com/repo.git',
+      c_cache_url_b TYPE string VALUE 'https://test-cache-b.example.com/repo.git'.
 
     METHODS:
       roundtrip_set_then_get FOR TESTING RAISING zcx_abapgit_exception,
       default_off_unknown_url FOR TESTING RAISING zcx_abapgit_exception,
       repo_a_on_repo_b_off_isolated FOR TESTING RAISING zcx_abapgit_exception,
+      cache_roundtrip_set_get FOR TESTING RAISING zcx_abapgit_exception,
+      cache_default_off FOR TESTING RAISING zcx_abapgit_exception,
+      cache_repo_isolated FOR TESTING RAISING zcx_abapgit_exception,
+      serial_stats_roundtrip FOR TESTING RAISING zcx_abapgit_exception,
       teardown RAISING zcx_abapgit_exception.
 
 ENDCLASS.
@@ -120,6 +126,90 @@ CLASS ltcl_serial_batch_setting IMPLEMENTATION.
       exp = abap_true ).
     cl_abap_unit_assert=>assert_equals(
       act = mi_user->get_repo_use_serial_batch( c_url_b )
+      exp = abap_false ).
+
+  ENDMETHOD.
+
+  METHOD cache_roundtrip_set_get.
+
+    DATA mi_user TYPE REF TO zcl_abapgit_persistence_ortec.
+
+    mi_user = zcl_abapgit_persistence_ortec=>get_instance( c_abap_user ).
+    mi_user->set_repo_use_cache(
+      iv_url       = c_cache_url_a
+      iv_use_cache = abap_true ).
+
+    FREE mi_user.
+    mi_user = zcl_abapgit_persistence_ortec=>get_instance( c_abap_user ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = mi_user->get_repo_use_cache( c_cache_url_a )
+      exp = abap_true ).
+
+  ENDMETHOD.
+
+
+  METHOD cache_default_off.
+
+    DATA mi_user TYPE REF TO zcl_abapgit_persistence_ortec.
+
+    mi_user = zcl_abapgit_persistence_ortec=>get_instance( c_abap_user ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = mi_user->get_repo_use_cache( 'https://never-configured-cache.example.com/repo.git' )
+      exp = abap_false ).
+
+  ENDMETHOD.
+
+
+  METHOD cache_repo_isolated.
+
+    DATA mi_user TYPE REF TO zcl_abapgit_persistence_ortec.
+
+    mi_user = zcl_abapgit_persistence_ortec=>get_instance( c_abap_user ).
+    mi_user->set_repo_use_cache(
+      iv_url       = c_cache_url_a
+      iv_use_cache = abap_true ).
+    mi_user->set_repo_use_cache(
+      iv_url       = c_cache_url_b
+      iv_use_cache = abap_false ).
+
+    FREE mi_user.
+    mi_user = zcl_abapgit_persistence_ortec=>get_instance( c_abap_user ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = mi_user->get_repo_use_cache( c_cache_url_a )
+      exp = abap_true ).
+    cl_abap_unit_assert=>assert_equals(
+      act = mi_user->get_repo_use_cache( c_cache_url_b )
+      exp = abap_false ).
+
+  ENDMETHOD.
+
+
+  METHOD serial_stats_roundtrip.
+
+    DATA mi_user TYPE REF TO zcl_abapgit_persistence_ortec.
+
+    mi_user = zcl_abapgit_persistence_ortec=>get_instance( c_abap_user ).
+    mi_user->set_repo_use_serial_stats(
+      iv_url               = c_url_a
+      iv_use_serial_stats  = abap_true ).
+    mi_user->set_repo_use_serial_stats(
+      iv_url               = c_url_b
+      iv_use_serial_stats  = abap_false ).
+
+    FREE mi_user.
+    mi_user = zcl_abapgit_persistence_ortec=>get_instance( c_abap_user ).
+
+    cl_abap_unit_assert=>assert_equals(
+      act = mi_user->get_repo_use_serial_stats( c_url_a )
+      exp = abap_true ).
+    cl_abap_unit_assert=>assert_equals(
+      act = mi_user->get_repo_use_serial_stats( c_url_b )
+      exp = abap_false ).
+    cl_abap_unit_assert=>assert_equals(
+      act = mi_user->get_repo_use_serial_stats( 'https://never-configured-stats.example.com/repo.git' )
       exp = abap_false ).
 
   ENDMETHOD.

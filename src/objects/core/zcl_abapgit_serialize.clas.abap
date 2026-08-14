@@ -798,6 +798,7 @@ CLASS ZCL_ABAPGIT_SERIALIZE IMPLEMENTATION.
         it_tadir                   = lt_tadir
         iv_max_processes           = lv_max
         iv_group                   = mv_group
+        iv_repo_url                = mv_repo_url
         is_i18n_params             = ms_i18n_params
         it_wo_translation_patterns = mt_wo_translation_patterns
         ii_log                     = ii_log ).

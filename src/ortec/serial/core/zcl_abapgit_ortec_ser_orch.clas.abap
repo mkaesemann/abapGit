@@ -173,6 +173,7 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     "! for a late callback.
     TYPES BEGIN OF ty_run_context.
     TYPES run_id         TYPE sysuuid_x16.
+    TYPES serial_stats_active TYPE abap_bool.
     TYPES files          TYPE zif_abapgit_definitions=>ty_files_item_tt.
     TYPES ii_log         TYPE REF TO zif_abapgit_log.
     TYPES iv_group       TYPE rzlli_apcl.
@@ -357,6 +358,7 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
       IMPORTING it_tadir                   TYPE zif_abapgit_definitions=>ty_tadir_tt
                 iv_max_processes           TYPE i
                 iv_group                   TYPE rzlli_apcl             OPTIONAL
+                iv_repo_url                TYPE string                  OPTIONAL
                 is_i18n_params             TYPE zif_abapgit_definitions=>ty_i18n_params
                 it_wo_translation_patterns TYPE string_table            OPTIONAL
                 ii_log                     TYPE REF TO zif_abapgit_log OPTIONAL
@@ -417,7 +419,7 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
     CLASS-DATA mv_test_raise_drain TYPE abap_bool.
 
     " ORTEC serialization run statistics (development instrumentation only,
-    " gated by ZCL_ABAPGIT_ORTEC_GIT_SWITCH=>C_SERIAL_STATS_ENABLED). One
+    " gated by the repository-scoped ORTEC statistics setting). One
     " row per successfully serialized object holding the worker-measured
     " cost; reset at the start of each SERIALIZE run and reported via
     " CL_DEMO_OUTPUT at its successful tail. Never read by production logic.
@@ -930,19 +932,22 @@ CLASS zcl_abapgit_ortec_ser_orch DEFINITION
                 iv_key_found  TYPE abap_bool
       RETURNING VALUE(rv_yes) TYPE abap_bool.
 
-    "! Dev instrumentation (gated by C_SERIAL_STATS_ENABLED): clear the
-    "! run-statistics accumulator at the start of a SERIALIZE run.
-    CLASS-METHODS reset_serial_stats.
+    "! Clear the run-statistics accumulator at the start of a SERIALIZE run
+    "! when repository settings enable statistics collection.
+    CLASS-METHODS reset_serial_stats
+      IMPORTING iv_active TYPE abap_bool.
 
-    "! Dev instrumentation (gated by C_SERIAL_STATS_ENABLED): record one
-    "! worker result row's measured cost into the run-statistics accumulator.
+    "! Record one worker result row's measured cost when its run has enabled
+    "! repository-scoped statistics collection.
     CLASS-METHODS collect_serial_stat
-      IMPORTING is_row TYPE zaog_ser_batch_result.
+      IMPORTING iv_run_id TYPE sysuuid_x16
+                is_row    TYPE zaog_ser_batch_result.
 
-    "! Dev instrumentation (gated by C_SERIAL_STATS_ENABLED): render the
-    "! end-of-run cost report (top-20 slowest, per-type totals, summary)
-    "! via CL_DEMO_OUTPUT. No-op when disabled or when nothing was recorded.
-    CLASS-METHODS report_serial_stats.
+    "! Render the end-of-run cost report (top-20 slowest, per-type totals,
+    "! summary) via CL_DEMO_OUTPUT when repository settings enable it.
+    "! No-op when disabled or when nothing was recorded.
+    CLASS-METHODS report_serial_stats
+      IMPORTING iv_active TYPE abap_bool.
 
 ENDCLASS.
 
@@ -960,8 +965,10 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     DATA lv_wait_result     TYPE i.
     DATA lv_use_ortec_prefetch TYPE abap_bool.
     DATA lv_expected_count  TYPE i.
+    DATA lv_serial_stats_active TYPE abap_bool.
 
-    reset_serial_stats( ).
+    lv_serial_stats_active = zcl_abapgit_ortec_git_switch=>is_serial_stats_active( iv_url = iv_repo_url ).
+    reset_serial_stats( lv_serial_stats_active ).
 
     " SER-SLICE-3 parity incident fix (serialization_slice_3_dtel_doma_
     " parity.md): this entry point never called PREPARE on any of the
@@ -1014,6 +1021,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
 
     lv_expected_count = count_expected_objects( it_tadir ).
     INSERT VALUE #( run_id                 = lv_run_id
+                     serial_stats_active   = lv_serial_stats_active
                      ii_log                 = ii_log
                      iv_group               = iv_group
                      is_i18n_params         = is_i18n_params
@@ -1084,7 +1092,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
             ENDTRY.
           ENDIF.
         ENDIF.
-        report_serial_stats( ).
+        report_serial_stats( lv_serial_stats_active ).
         purge_run_state( lv_run_id ).
         IF lv_use_ortec_prefetch = abap_true.
           zcl_abapgit_ortec_ser_pref=>clear( ).
@@ -1416,7 +1424,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
           ENDIF.
 
           IF ls_row-rc = 0.
-            collect_serial_stat( ls_row ).
+            collect_serial_stat( iv_run_id = <ls_d>-run_id is_row = ls_row ).
             ASSIGN mt_run_context[ run_id = <ls_d>-run_id ] TO FIELD-SYMBOL(<ls_ewma_ctx>).
             IF <ls_ewma_ctx> IS ASSIGNED.
               zcl_abapgit_ortec_ser_cost=>update_estimate(
@@ -2069,7 +2077,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
 
 
   METHOD reset_serial_stats.
-    IF zcl_abapgit_ortec_git_switch=>c_serial_stats_enabled = abap_false.
+    IF iv_active = abap_false.
       RETURN.
     ENDIF.
     CLEAR gt_serial_stats.
@@ -2077,7 +2085,8 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
 
 
   METHOD collect_serial_stat.
-    IF zcl_abapgit_ortec_git_switch=>c_serial_stats_enabled = abap_false.
+    ASSIGN mt_run_context[ run_id = iv_run_id ] TO FIELD-SYMBOL(<ls_ctx>).
+    IF <ls_ctx> IS NOT ASSIGNED OR <ls_ctx>-serial_stats_active = abap_false.
       RETURN.
     ENDIF.
     DATA ls_stat TYPE ty_serial_stat.
@@ -2093,7 +2102,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
 
 
   METHOD report_serial_stats.
-    IF zcl_abapgit_ortec_git_switch=>c_serial_stats_enabled = abap_false.
+    IF iv_active = abap_false.
       RETURN.
     ENDIF.
     IF gt_serial_stats IS INITIAL.

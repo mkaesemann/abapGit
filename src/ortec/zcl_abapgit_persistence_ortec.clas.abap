@@ -29,8 +29,8 @@ CLASS zcl_abapgit_persistence_ortec DEFINITION
                 iv_branch TYPE string
       RAISING   zcx_abapgit_exception.
 
-    "! Reads the per-repository cache usage flag for the current user.
-    "! Missing entries are normalized to ABAP_FALSE.
+    "! Reads the cache usage flag for one repository in the current user's
+    "! persistence partition. Missing entries are normalized to ABAP_FALSE.
     "! @parameter iv_url |
     "! Repository URL.
     "! @parameter rv_use_cache |
@@ -40,8 +40,9 @@ CLASS zcl_abapgit_persistence_ortec DEFINITION
       RETURNING VALUE(rv_use_cache)   TYPE abap_bool
       RAISING   zcx_abapgit_exception.
 
-    "! Persists the per-repository cache usage flag for the current user.
-    "! The value is normalized to ABAP_TRUE or ABAP_FALSE before save.
+    "! Persists the cache usage flag for one repository in the current user's
+    "! persistence partition. The value is normalized to ABAP_TRUE or
+    "! ABAP_FALSE before save.
     "! @parameter iv_url |
     "! Repository URL.
     "! @parameter iv_use_cache |
@@ -74,6 +75,28 @@ CLASS zcl_abapgit_persistence_ortec DEFINITION
                 iv_use_serial_batch TYPE csequence
       RAISING   zcx_abapgit_exception.
 
+    "! Reads the per-repository serialization-statistics flag for the current user.
+    "! Missing entries are normalized to ABAP_FALSE.
+    "! @parameter iv_url |
+    "! Repository URL.
+    "! @parameter rv_use_serial_stats |
+    "! ABAP_TRUE when serialization statistics are enabled for the repository.
+    METHODS get_repo_use_serial_stats
+      IMPORTING iv_url                    TYPE zif_abapgit_persistence=>ty_repo-url
+      RETURNING VALUE(rv_use_serial_stats) TYPE abap_bool
+      RAISING   zcx_abapgit_exception.
+
+    "! Persists the per-repository serialization-statistics flag for the current user.
+    "! The value is normalized to ABAP_TRUE or ABAP_FALSE before save.
+    "! @parameter iv_url |
+    "! Repository URL.
+    "! @parameter iv_use_serial_stats |
+    "! Requested serialization-statistics flag.
+    METHODS set_repo_use_serial_stats
+      IMPORTING iv_url               TYPE zif_abapgit_persistence=>ty_repo-url
+                iv_use_serial_stats TYPE csequence
+      RAISING   zcx_abapgit_exception.
+
     METHODS get_settings
       RETURNING VALUE(rs_user_settings) TYPE ty_user_settings
       RAISING   zcx_abapgit_exception.
@@ -96,6 +119,7 @@ CLASS zcl_abapgit_persistence_ortec DEFINITION
         user_branch      TYPE string,
         use_cache        TYPE abap_bool,
         use_serial_batch TYPE abap_bool,
+        use_serial_stats TYPE abap_bool,
       END OF ty_repo_config.
     TYPES ty_repo_configs TYPE STANDARD TABLE OF ty_repo_config WITH DEFAULT KEY.
     TYPES:
@@ -315,6 +339,32 @@ CLASS ZCL_ABAPGIT_PERSISTENCE_ORTEC IMPLEMENTATION.
 
     ls_repo_config = read_repo_config( iv_url ).
     ls_repo_config-use_serial_batch = SWITCH #( iv_use_serial_batch
+                                                WHEN abap_true
+                                                THEN abap_true
+                                                ELSE abap_false ).
+    update_repo_config(
+        iv_url         = iv_url
+        is_repo_config = ls_repo_config ).
+
+  ENDMETHOD.
+
+
+  METHOD get_repo_use_serial_stats.
+
+    rv_use_serial_stats = SWITCH #( read_repo_config( iv_url )-use_serial_stats
+                                    WHEN abap_true
+                                    THEN abap_true
+                                    ELSE abap_false ).
+
+  ENDMETHOD.
+
+
+  METHOD set_repo_use_serial_stats.
+
+    DATA ls_repo_config TYPE ty_repo_config.
+
+    ls_repo_config = read_repo_config( iv_url ).
+    ls_repo_config-use_serial_stats = SWITCH #( iv_use_serial_stats
                                                 WHEN abap_true
                                                 THEN abap_true
                                                 ELSE abap_false ).

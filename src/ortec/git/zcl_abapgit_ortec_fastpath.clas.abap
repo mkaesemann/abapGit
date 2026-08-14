@@ -304,8 +304,9 @@ CLASS zcl_abapgit_ortec_fastpath DEFINITION
     "! Package C C2: certification lifecycle extracted from PERSIST_PULL_RESULT
     "! so it is directly unit-testable without the URL-keyed
     "! IS_ACTIVE_FOR_REPO switch (backed by a shared, singleton, XML-serialized
-    "! user settings persistence object with its own uncontrolled COMMIT WORK
-    "! AND WAIT - unsafe/impractical to flip from a unit test; see
+    "! persistence object partitioned by user and keyed by repository URL, with
+    "! its own uncontrolled COMMIT WORK AND WAIT - unsafe/impractical to flip
+    "! from a unit test; see
     "! zcl_abapgit_persistence_ortec=>set_repo_use_cache/update_repo_config).
     "! Never called with an unresolved/blank iv_repo_key - PERSIST_PULL_RESULT
     "! already guarantees that before calling this method.
