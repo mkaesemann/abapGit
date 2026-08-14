@@ -6,6 +6,21 @@ CLASS zcl_abapgit_ortec_pack_stream DEFINITION
     TYPES ty_repo_key TYPE c LENGTH 12.
     TYPES ty_pack_id  TYPE c LENGTH 32.
 
+    " Shared Git progress lifecycle used by the fastpath and pack-stream
+    " layers. The decoder temporarily replaces this total with the actual
+    " pack object count, then restores it before the remaining phases.
+    CONSTANTS c_progress_phase_cache   TYPE i VALUE 1.
+    CONSTANTS c_progress_phase_prepare TYPE i VALUE 2.
+    CONSTANTS c_progress_phase_attempt TYPE i VALUE 3.
+    CONSTANTS c_progress_phase_build   TYPE i VALUE 4.
+    CONSTANTS c_progress_phase_request TYPE i VALUE 5.
+    CONSTANTS c_progress_phase_parse   TYPE i VALUE 6.
+    CONSTANTS c_progress_phase_decode  TYPE i VALUE 7.
+    CONSTANTS c_progress_phase_resolve TYPE i VALUE 8.
+    CONSTANTS c_progress_phase_extract TYPE i VALUE 9.
+    CONSTANTS c_progress_phase_complete TYPE i VALUE 10.
+    CONSTANTS c_progress_phase_total   TYPE i VALUE 10.
+
     "! In-progress row status for zaog_obj_store, used ONLY by this streaming
     "! decoder. Distinct from the existing non-streaming decoder's own 'P'
     "! (pending) status - every existing object-store read path already
@@ -816,6 +831,10 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
     FIELD-SYMBOLS <ls_pending>   TYPE ty_meta.
     FIELD-SYMBOLS <ls_loaded>    TYPE zif_abapgit_definitions=>ty_object.
 
+    IF ii_progress IS BOUND.
+      ii_progress->set_total( iv_total = c_progress_phase_total ).
+    ENDIF.
+
     LOOP AT ct_meta ASSIGNING <ls_row>.
       lv_tabix = sy-tabix.
 
@@ -866,8 +885,8 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
           lv_progress = abap_true.
         ENDIF.
       ENDLOOP.
-      report_progress( ii_progress = ii_progress iv_current = lv_pass
-        iv_text = |Git: resolving in-pack deltas (pass { lv_pass }, { count_unresolved( ct_meta ) } remaining)| ).
+      report_progress( ii_progress = ii_progress iv_current = c_progress_phase_resolve
+        iv_text = |Git: Resolving in-pack deltas (pass { lv_pass }, { count_unresolved( ct_meta ) } remaining)| ).
       IF lv_progress = abap_false.
         EXIT.
       ENDIF.
@@ -900,8 +919,8 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
     ENDLOOP.
 
     IF lt_external_bases IS NOT INITIAL.
-      report_progress( ii_progress = ii_progress iv_current = lines( lt_external_bases )
-        iv_text = |Git: loading { lines( lt_external_bases ) } external delta bases| ).
+      report_progress( ii_progress = ii_progress iv_current = c_progress_phase_resolve
+        iv_text = |Git: Loading { lines( lt_external_bases ) } external delta bases| ).
       TRY.
           lt_loaded_bases = zcl_abapgit_ortec_delta=>bulk_resolve_external_bases(
             iv_repo_key = iv_repo_key
@@ -948,8 +967,8 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
     " and the precise "Delta base not found" raise.
     DATA(lv_remaining_ext) = count_unresolved( ct_meta ).
     IF lv_remaining_ext > 0.
-      report_progress( ii_progress = ii_progress iv_current = lv_remaining_ext
-        iv_text = |Git: resolving external deltas ({ lv_remaining_ext } remaining)| ).
+      report_progress( ii_progress = ii_progress iv_current = c_progress_phase_resolve
+        iv_text = |Git: Resolving external deltas ({ lv_remaining_ext } remaining)| ).
     ENDIF.
     LOOP AT ct_meta ASSIGNING <ls_row>.
       lv_tabix = sy-tabix.
@@ -1032,8 +1051,8 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
         RAISE EXCEPTION lx_resolve.
     ENDTRY.
 
-    report_progress( ii_progress = ii_progress iv_current = lines( lt_meta )
-      iv_text = 'Git: extracting commits' ).
+    report_progress( ii_progress = ii_progress iv_current = c_progress_phase_extract
+      iv_text = 'Git: Extracting commits' ).
 
     LOOP AT lt_meta INTO ls_meta WHERE obj_type = zif_abapgit_git_definitions=>c_type-commit.
       IF sy-tabix > lv_original_count.
@@ -1097,8 +1116,12 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
         lv_objects = zcl_abapgit_convert=>xstring_to_int( lv_xstring ).
         lv_data = lv_data+4.
 
+        IF ii_progress IS BOUND.
+          ii_progress->set_total( iv_total = lv_objects ).
+        ENDIF.
+
         report_progress( ii_progress = ii_progress iv_current = 0
-          iv_text = |Git: decoding pack object 0 of { lv_objects }| ).
+          iv_text = |Git: Decoding pack object 0 of { lv_objects }| ).
 
         DO lv_objects TIMES.
           lv_uindex = sy-index.
@@ -1188,7 +1211,7 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
 
           IF lv_uindex = 1 OR lv_uindex = lv_objects OR lines( lt_batch ) >= c_batch_size.
             report_progress( ii_progress = ii_progress iv_current = lv_uindex
-              iv_text = |Git: decoding pack object { lv_uindex } of { lv_objects }| ).
+              iv_text = |Git: Decoding pack object { lv_uindex } of { lv_objects }| ).
           ENDIF.
 
           IF lines( lt_batch ) >= c_batch_size.
@@ -1197,7 +1220,7 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
                         iv_pack_id  = lv_pack_id
               CHANGING  ct_batch    = lt_batch ).
             report_progress( ii_progress = ii_progress iv_current = lv_uindex
-              iv_text = |Git: persisting decoded objects { lv_uindex } of { lv_objects }| ).
+              iv_text = |Git: Persisting decoded objects { lv_uindex } of { lv_objects }| ).
           ENDIF.
         ENDDO.
 
@@ -1205,11 +1228,14 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
           EXPORTING iv_repo_key = iv_repo_key
                     iv_pack_id  = lv_pack_id
           CHANGING  ct_batch    = lt_batch ).
-        report_progress( ii_progress = ii_progress iv_current = lv_objects
-          iv_text = |Git: persisting decoded objects { lv_objects } of { lv_objects }| ).
+        IF ii_progress IS BOUND.
+          ii_progress->set_total( iv_total = c_progress_phase_total ).
+        ENDIF.
+        report_progress( ii_progress = ii_progress iv_current = c_progress_phase_decode
+          iv_text = |Git: Persisting decoded objects { lv_objects } of { lv_objects }| ).
 
-        report_progress( ii_progress = ii_progress iv_current = lv_objects
-          iv_text = 'Git: validating pack' ).
+        report_progress( ii_progress = ii_progress iv_current = c_progress_phase_decode
+          iv_text = 'Git: Validating pack' ).
 
         lv_len = xstrlen( iv_data ) - 20.
         " Offset/length notation on an XSTRING cannot be used inline as a
@@ -1229,8 +1255,8 @@ CLASS zcl_abapgit_ortec_pack_stream IMPLEMENTATION.
         " delta-type UPDATE runs FIRST and is narrowed by obj_type, so the
         " second, broader UPDATE (still scoped to status = c_status_incomplete)
         " only ever matches the remaining non-delta rows.
-        report_progress( ii_progress = ii_progress iv_current = lv_objects
-          iv_text = 'Git: finalizing object store' ).
+        report_progress( ii_progress = ii_progress iv_current = c_progress_phase_decode
+          iv_text = 'Git: Finalizing object store' ).
 
         UPDATE zaog_obj_store SET status = c_status_decoded
           WHERE repo_key = iv_repo_key

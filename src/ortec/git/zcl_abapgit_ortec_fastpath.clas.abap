@@ -18,8 +18,8 @@ CLASS zcl_abapgit_ortec_fastpath DEFINITION
     "! Optional progress lifecycle owned by an orchestrator (e.g.
     "! upload_pack_by_branch). When supplied, reused as-is - this method
     "! never calls zcl_abapgit_progress=>get_instance itself in that case.
-    "! When not supplied (a direct caller), falls back to its own
-    "! get_instance(1) call exactly as before this parameter existed.
+    "! When not supplied (a direct caller), falls back to its own progress
+    "! instance initialized with the shared ten-phase lifecycle total.
     "! @parameter rs_result |
     "! Pull result (INITIAL if fast-path not applicable)
     "! @raising zcx_abapgit_ortec_git |
@@ -272,6 +272,21 @@ CLASS zcl_abapgit_ortec_fastpath DEFINITION
     CONSTANTS c_progressive_widen_factor TYPE i VALUE 4.
     CONSTANTS c_progressive_max_deepen   TYPE i VALUE 2000.
     CONSTANTS c_progressive_max_steps    TYPE i VALUE 5.
+
+    " Shared Git progress lifecycle. The values mirror the pack-stream
+    " constants, but remain local so this class can be syntax-checked while
+    " the two independently editable ADT objects are inactive.
+    CONSTANTS c_progress_phase_cache    TYPE i VALUE 1.
+    CONSTANTS c_progress_phase_prepare  TYPE i VALUE 2.
+    CONSTANTS c_progress_phase_attempt  TYPE i VALUE 3.
+    CONSTANTS c_progress_phase_build    TYPE i VALUE 4.
+    CONSTANTS c_progress_phase_request  TYPE i VALUE 5.
+    CONSTANTS c_progress_phase_parse    TYPE i VALUE 6.
+    CONSTANTS c_progress_phase_decode   TYPE i VALUE 7.
+    CONSTANTS c_progress_phase_resolve  TYPE i VALUE 8.
+    CONSTANTS c_progress_phase_extract  TYPE i VALUE 9.
+    CONSTANTS c_progress_phase_complete TYPE i VALUE 10.
+    CONSTANTS c_progress_phase_total    TYPE i VALUE 10.
 
     "! First deepen level to try in the progressive recovery loop, given the
     "! depth that was in use before recovery was needed.
@@ -689,9 +704,12 @@ METHOD pull_by_branch.
     IF ii_progress IS BOUND.
       li_progress = ii_progress.
     ELSE.
-      li_progress = zcl_abapgit_progress=>get_instance( 1 ).
+      li_progress = zcl_abapgit_progress=>get_instance(
+        zcl_abapgit_ortec_fastpath=>c_progress_phase_total ).
     ENDIF.
-    report_progress( ii_progress = li_progress iv_current = 1 iv_text = 'Git: checking local cache' ).
+    report_progress( ii_progress = li_progress
+      iv_current = zcl_abapgit_ortec_fastpath=>c_progress_phase_cache
+      iv_text = 'Git: Checking local cache' ).
 
     " Resolve repo key — read-only lookup here (don't create yet)
     lv_repo_key = zcl_abapgit_ortec_repo_state=>get_repo_key_for_url( iv_url ).
@@ -738,8 +756,9 @@ METHOD pull_by_branch.
 
         IF lv_lock_held = abap_true AND lv_attempt_id IS NOT INITIAL.
           TRY.
-              report_progress( ii_progress = li_progress iv_current = 1
-                iv_text = 'Git: reading resume session from buffer (ZAOG_RAW_PACK/ZAOG_PACK_IDX)' ).
+              report_progress( ii_progress = li_progress
+                iv_current = zcl_abapgit_ortec_fastpath=>c_progress_phase_prepare
+                iv_text = 'Git: Reading resume session from buffer (ZAOG_RAW_PACK/ZAOG_PACK_IDX)' ).
               lt_resumed = zcl_abapgit_ortec_pack_dec=>resume_decode(
                                iv_repo_key   = lv_repo_key
                                iv_lock_held  = abap_true
@@ -812,8 +831,9 @@ METHOD pull_by_branch.
             ENDIF.
 
             lv_fp_duration = lo_fp_timer->end( ).
-            report_progress( ii_progress = li_progress iv_current = 1
-              iv_text = |Git: completed ({ lines( rs_result-objects ) } objects, { lv_fp_duration }, cache reuse - resumed)| ).
+            report_progress( ii_progress = li_progress
+              iv_current = zcl_abapgit_ortec_fastpath=>c_progress_phase_complete
+              iv_text = |Git: Completed ({ lines( rs_result-objects ) } objects, { lv_fp_duration }, cache reuse - resumed)| ).
             RETURN. " Success! Avoid redundant GET from remote.
           CATCH zcx_abapgit_exception.
             IF lv_lock_held = abap_true.
@@ -852,8 +872,9 @@ METHOD pull_by_branch.
 
       " Phase 4: Walk tree to produce files
       TRY.
-          report_progress( ii_progress = li_progress iv_current = 1
-            iv_text = 'Git: reading cached objects from buffer (ZAOG_OBJ_STORE)' ).
+          report_progress( ii_progress = li_progress
+            iv_current = zcl_abapgit_ortec_fastpath=>c_progress_phase_resolve
+            iv_text = 'Git: Reading cached objects from buffer (ZAOG_OBJ_STORE)' ).
           rs_result-objects = zcl_abapgit_ortec_obj_store=>get_reachable_objects(
             iv_repo_key = lv_repo_key
             iv_commit   = rs_result-commit ).
@@ -896,8 +917,9 @@ METHOD pull_by_branch.
       ENDTRY.
 
       lv_fp_duration = lo_fp_timer->end( ).
-      report_progress( ii_progress = li_progress iv_current = 1
-        iv_text = |Git: completed ({ lines( rs_result-objects ) } objects, { lv_fp_duration }, cache reuse)| ).
+      report_progress( ii_progress = li_progress
+        iv_current = zcl_abapgit_ortec_fastpath=>c_progress_phase_complete
+        iv_text = |Git: Completed ({ lines( rs_result-objects ) } objects, { lv_fp_duration }, cache reuse)| ).
       RETURN.
     ENDIF.
 
@@ -936,9 +958,12 @@ METHOD pull_by_branch.
     " see zcl_abapgit_ortec_pack_stream=>reset_completion_budget's doc.
     zcl_abapgit_ortec_pack_stream=>reset_completion_budget( ).
 
-    data(li_progress) = zcl_abapgit_progress=>get_instance( 1 ).
+    data(li_progress) = zcl_abapgit_progress=>get_instance(
+      zcl_abapgit_ortec_fastpath=>c_progress_phase_total ).
 
-    report_progress( ii_progress = li_progress iv_current = 1 iv_text = 'Git: checking local cache' ).
+    report_progress( ii_progress = li_progress
+      iv_current = zcl_abapgit_ortec_fastpath=>c_progress_phase_cache
+      iv_text = 'Git: Checking local cache' ).
 
     ls_pull = pull_by_branch(
       iv_url          = iv_url
@@ -1000,8 +1025,9 @@ METHOD pull_by_branch.
     lv_server_caps = zcl_abapgit_ortec_fetch_req=>parse_capabilities( lv_ref_data ).
 
     TRY.
-        report_progress( ii_progress = li_progress iv_current = 1
-          iv_text = 'Git: requesting objects from remote (thin attempt)' ).
+        report_progress( ii_progress = li_progress
+          iv_current = zcl_abapgit_ortec_fastpath=>c_progress_phase_attempt
+          iv_text = 'Git: Requesting objects from remote (thin attempt)' ).
         et_objects = upload_pack(
           io_client       = lo_client
           iv_url          = iv_url
@@ -1038,8 +1064,9 @@ METHOD pull_by_branch.
         lv_ref_data = lo_client->get_cdata( ).
         lv_server_caps = zcl_abapgit_ortec_fetch_req=>parse_capabilities( lv_ref_data ).
         TRY.
-            report_progress( ii_progress = li_progress iv_current = 1
-              iv_text = 'Git: requesting objects from remote (self-contained attempt)' ).
+            report_progress( ii_progress = li_progress
+              iv_current = zcl_abapgit_ortec_fastpath=>c_progress_phase_attempt
+              iv_text = 'Git: Requesting objects from remote (self-contained attempt)' ).
             et_objects = upload_pack(
               io_client       = lo_client
               iv_url          = iv_url
@@ -1085,8 +1112,9 @@ METHOD pull_by_branch.
               lv_ref_data = lo_client->get_cdata( ).
               lv_server_caps = zcl_abapgit_ortec_fetch_req=>parse_capabilities( lv_ref_data ).
               TRY.
-                  report_progress( ii_progress = li_progress iv_current = 1
-                    iv_text = 'Git: requesting objects from remote (recovery attempt)' ).
+                  report_progress( ii_progress = li_progress
+                    iv_current = zcl_abapgit_ortec_fastpath=>c_progress_phase_attempt
+                    iv_text = 'Git: Requesting objects from remote (recovery attempt)' ).
                   et_objects = upload_pack(
                     io_client       = lo_client
                     iv_url          = iv_url
@@ -1129,9 +1157,11 @@ METHOD pull_by_branch.
     " See the matching comment in upload_pack_by_branch.
     zcl_abapgit_ortec_pack_stream=>reset_completion_budget( ).
 
-    data(li_progress) = zcl_abapgit_progress=>get_instance( 1 ).
-    report_progress( ii_progress = li_progress iv_current = 1
-      iv_text = 'Git: preparing fetch request' ).
+    data(li_progress) = zcl_abapgit_progress=>get_instance(
+      zcl_abapgit_ortec_fastpath=>c_progress_phase_total ).
+    report_progress( ii_progress = li_progress
+      iv_current = zcl_abapgit_ortec_fastpath=>c_progress_phase_prepare
+      iv_text = 'Git: Preparing fetch request' ).
 
     APPEND iv_hash TO lt_hashes.
     ev_commit = iv_hash.
@@ -1149,8 +1179,9 @@ METHOD pull_by_branch.
     lv_server_caps = zcl_abapgit_ortec_fetch_req=>parse_capabilities( lv_ref_data ).
 
     TRY.
-        report_progress( ii_progress = li_progress iv_current = 1
-          iv_text = 'Git: requesting objects from remote (thin attempt)' ).
+        report_progress( ii_progress = li_progress
+          iv_current = zcl_abapgit_ortec_fastpath=>c_progress_phase_attempt
+          iv_text = 'Git: Requesting objects from remote (thin attempt)' ).
         et_objects = upload_pack(
           io_client       = lo_client
           iv_url          = iv_url
@@ -1173,8 +1204,9 @@ METHOD pull_by_branch.
         lv_ref_data = lo_client->get_cdata( ).
         lv_server_caps = zcl_abapgit_ortec_fetch_req=>parse_capabilities( lv_ref_data ).
         TRY.
-            report_progress( ii_progress = li_progress iv_current = 1
-              iv_text = 'Git: requesting objects from remote (self-contained attempt)' ).
+            report_progress( ii_progress = li_progress
+              iv_current = zcl_abapgit_ortec_fastpath=>c_progress_phase_attempt
+                iv_text = 'Git: Requesting objects from remote (self-contained attempt)' ).
             et_objects = upload_pack(
               io_client       = lo_client
               iv_url          = iv_url
@@ -1204,8 +1236,9 @@ METHOD pull_by_branch.
               lv_ref_data = lo_client->get_cdata( ).
               lv_server_caps = zcl_abapgit_ortec_fetch_req=>parse_capabilities( lv_ref_data ).
               TRY.
-                  report_progress( ii_progress = li_progress iv_current = 1
-                    iv_text = 'Git: requesting objects from remote (recovery attempt)' ).
+                  report_progress( ii_progress = li_progress
+                    iv_current = zcl_abapgit_ortec_fastpath=>c_progress_phase_attempt
+                      iv_text = 'Git: Requesting objects from remote (recovery attempt)' ).
                   et_objects = upload_pack(
                     io_client       = lo_client
                     iv_url          = iv_url
@@ -1241,6 +1274,9 @@ METHOD upload_pack.
     DATA lo_fetch_timer   TYPE REF TO zcl_abapgit_timer.
     DATA lv_fetch_duration TYPE string.
 
+    IF ii_progress IS BOUND.
+      ii_progress->set_total( iv_total = c_progress_phase_total ).
+    ENDIF.
 
     io_client->set_headers(
       iv_url     = iv_url
@@ -1277,8 +1313,9 @@ METHOD upload_pack.
         OR iv_mode = zcl_abapgit_ortec_fetch_req=>cs_fetch_mode-incremental_self_contained.
       lv_have_repo_key = zcl_abapgit_ortec_repo_state=>get_repo_key_for_url( iv_url ).
       IF lv_have_repo_key IS NOT INITIAL.
-        report_progress( ii_progress = ii_progress iv_current = 1
-          iv_text = 'Git: reading certified haves from buffer (ZAOG_COMMIT_HIST)' ).
+        report_progress( ii_progress = ii_progress
+          iv_current = zcl_abapgit_ortec_fastpath=>c_progress_phase_attempt
+          iv_text = 'Git: Reading certified haves from buffer (ZAOG_COMMIT_HIST)' ).
         lt_ortec_haves = zcl_abapgit_ortec_have_policy=>get_certified_haves(
           iv_repo_key    = lv_have_repo_key
           it_want_hashes = it_hashes ).
@@ -1292,16 +1329,19 @@ METHOD upload_pack.
       iv_server_caps     = iv_server_caps ).
 
 
-    report_progress( ii_progress = ii_progress iv_current = 1
-      iv_text = 'Git: preparing fetch request' ).
+    report_progress( ii_progress = ii_progress
+      iv_current = zcl_abapgit_ortec_fastpath=>c_progress_phase_build
+      iv_text = 'Git: Preparing fetch request' ).
 
     lo_fetch_timer = zcl_abapgit_timer=>create( )->start( ).
-    report_progress( ii_progress = ii_progress iv_current = 1
-      iv_text = 'Git: requesting objects from remote' ).
+    report_progress( ii_progress = ii_progress
+      iv_current = zcl_abapgit_ortec_fastpath=>c_progress_phase_request
+      iv_text = 'Git: Requesting objects from remote' ).
     lv_xstring = io_client->send_receive_close( zcl_abapgit_convert=>string_to_xstring_utf8( ls_request-buffer ) ).
 
-    report_progress( ii_progress = ii_progress iv_current = 1
-      iv_text = 'Git: parsing server response' ).
+    report_progress( ii_progress = ii_progress
+      iv_current = zcl_abapgit_ortec_fastpath=>c_progress_phase_parse
+      iv_text = 'Git: Parsing server response' ).
     parse( IMPORTING ev_pack = lv_pack
            CHANGING  cv_data = lv_xstring ).
 
@@ -1317,13 +1357,17 @@ METHOD upload_pack.
     " against (previously have-negotiation rarely had anything to offer, so
     " the server rarely had reason to reply this way).
     IF lv_pack IS INITIAL OR zcl_abapgit_ortec_pack_dec=>peek_object_count( lv_pack ) = 0.
+      report_progress( ii_progress = ii_progress
+        iv_current = zcl_abapgit_ortec_fastpath=>c_progress_phase_decode
+        iv_text = 'Git: No new pack objects' ).
       rt_objects = serve_cached_when_nothing_new(
         iv_url      = iv_url
         it_hashes   = it_hashes
         ii_progress = ii_progress ).
       lv_fetch_duration = lo_fetch_timer->end( ).
-      report_progress( ii_progress = ii_progress iv_current = 1
-        iv_text = |Git: completed ({ lines( rt_objects ) } objects, { lv_fetch_duration }, cached - nothing new)| ).
+      report_progress( ii_progress = ii_progress
+        iv_current = zcl_abapgit_ortec_fastpath=>c_progress_phase_complete
+        iv_text = |Git: Completed ({ lines( rt_objects ) } objects, { lv_fetch_duration }, cached - nothing new)| ).
       RETURN.
     ENDIF.
 
@@ -1344,6 +1388,9 @@ METHOD upload_pack.
             " re-decode is safe (unlike the standard abapGit decoder, which
             " the comment below this TRY still correctly refuses to use).
             TRY.
+                report_progress( ii_progress = ii_progress
+                  iv_current = zcl_abapgit_ortec_fastpath=>c_progress_phase_decode
+                  iv_text = 'Git: Decoding pack' ).
                 rt_objects = zcl_abapgit_ortec_pack_stream=>decode_streaming(
                   iv_data     = lv_pack
                   iv_repo_key = lv_ortec_rk
@@ -1375,11 +1422,13 @@ METHOD upload_pack.
               " so a streaming->fallback event is never silently normalized.
               lv_fetch_duration = lo_fetch_timer->end( ).
               IF lv_via_streaming = abap_true.
-                report_progress( ii_progress = ii_progress iv_current = 1
-                  iv_text = |Git: completed ({ lines( rt_objects ) } objects, { lv_fetch_duration }, streaming decoder)| ).
+                report_progress( ii_progress = ii_progress
+                  iv_current = zcl_abapgit_ortec_fastpath=>c_progress_phase_complete
+                  iv_text = |Git: Completed ({ lines( rt_objects ) } objects, { lv_fetch_duration }, streaming decoder)| ).
               ELSE.
-                report_progress( ii_progress = ii_progress iv_current = 1
-                  iv_text = |Git: completed ({ lines( rt_objects ) } objects, { lv_fetch_duration }, fallback decoder)| ).
+                report_progress( ii_progress = ii_progress
+                  iv_current = zcl_abapgit_ortec_fastpath=>c_progress_phase_complete
+                  iv_text = |Git: Completed ({ lines( rt_objects ) } objects, { lv_fetch_duration }, fallback decoder)| ).
               ENDIF.
               RETURN.
             ENDIF.
@@ -1437,8 +1486,9 @@ METHOD upload_pack.
 
           LOOP AT it_hashes ASSIGNING <lv_hash>.
             TRY.
-                report_progress( ii_progress = ii_progress iv_current = 1
-                  iv_text = 'Git: reading cached objects from buffer (ZAOG_OBJ_STORE)' ).
+                report_progress( ii_progress = ii_progress
+                  iv_current = zcl_abapgit_ortec_fastpath=>c_progress_phase_resolve
+                  iv_text = 'Git: Reading cached objects from buffer (ZAOG_OBJ_STORE)' ).
                 lt_reachable = zcl_abapgit_ortec_obj_store=>get_reachable_objects(
                   iv_repo_key = lv_repo_key
                   iv_commit   = <lv_hash> ).
