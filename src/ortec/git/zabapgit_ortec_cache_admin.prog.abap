@@ -10,6 +10,7 @@ SELECTION-SCREEN END OF BLOCK b1.
 SELECTION-SCREEN BEGIN OF BLOCK b2 WITH FRAME TITLE TEXT-002.
   PARAMETERS p_clear TYPE abap_bool AS CHECKBOX DEFAULT abap_false.
   PARAMETERS p_clrser TYPE abap_bool AS CHECKBOX DEFAULT abap_false.
+  PARAMETERS p_purgss TYPE abap_bool AS CHECKBOX DEFAULT abap_false.
 SELECTION-SCREEN END OF BLOCK b2.
 
 AT SELECTION-SCREEN ON VALUE-REQUEST FOR s_repo-low.
@@ -101,7 +102,7 @@ START-OF-SELECTION.
     CALL FUNCTION 'POPUP_TO_CONFIRM'
       EXPORTING
         titlebar       = 'Confirm serialization cache clear'
-        text_question  = 'Clear all local BRF+ serialization cache entries? This cannot be undone.'
+        text_question  = 'Clear all local BRF+ and Smart Form serialization cache entries? This cannot be undone.'
         text_button_1  = 'Clear'
         text_button_2  = 'Cancel'
         default_button = '2'
@@ -115,13 +116,22 @@ START-OF-SELECTION.
       TRY.
           DATA(lv_serial_deleted) =
             zcl_abapgit_ortec_cache_admin=>clear_serialization_cache( ).
-          MESSAGE |Cleared { lv_serial_deleted } BRF+ serialization cache entries| TYPE 'S'.
+          MESSAGE |Cleared { lv_serial_deleted } BRF+ and Smart Form serialization cache entries| TYPE 'S'.
         CATCH zcx_abapgit_ortec_git INTO DATA(lx_serial_error).
           MESSAGE lx_serial_error->get_text( ) TYPE 'E'.
       ENDTRY.
     ELSE.
       MESSAGE 'Serialization cache clear cancelled' TYPE 'S'.
     ENDIF.
+  ENDIF.
+
+  IF p_purgss = abap_true.
+    TRY.
+        DATA(lv_ssfo_deleted) = zcl_abapgit_ortec_cache_admin=>purge_ssfo_cache( ).
+        MESSAGE |Purged { lv_ssfo_deleted } Smart Form serialization cache entries| TYPE 'S'.
+      CATCH zcx_abapgit_ortec_git INTO DATA(lx_ssfo_error).
+        MESSAGE lx_ssfo_error->get_text( ) TYPE 'E'.
+    ENDTRY.
   ENDIF.
 
   DATA(lt_overview) = zcl_abapgit_ortec_cache_admin=>get_overview( ).

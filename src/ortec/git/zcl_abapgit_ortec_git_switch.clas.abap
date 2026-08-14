@@ -182,6 +182,12 @@ CLASS zcl_abapgit_ortec_git_switch DEFINITION
     CLASS-METHODS set_fdt0_cache_active
       IMPORTING iv_active TYPE abap_bool.
 
+    CLASS-METHODS is_ssfo_cache_active
+      RETURNING VALUE(rv_active) TYPE abap_bool.
+
+    CLASS-METHODS set_ssfo_cache_active
+      IMPORTING iv_active TYPE abap_bool.
+
     "! Read persistent cache flag from ORTEC user persistence.
     "! @parameter iv_url |
     "! Repository URL
@@ -231,6 +237,7 @@ CLASS zcl_abapgit_ortec_git_switch DEFINITION
     "! so standard behavior is unchanged unless a caller explicitly opts
     "! in for the duration of its own run.
     CLASS-DATA mv_fdt0_cache_active TYPE abap_bool VALUE abap_false.
+    CLASS-DATA mv_ssfo_cache_active TYPE abap_bool VALUE abap_false.
 
 ENDCLASS.
 
@@ -288,6 +295,14 @@ CLASS zcl_abapgit_ortec_git_switch IMPLEMENTATION.
 
   METHOD set_fdt0_cache_active.
     mv_fdt0_cache_active = iv_active.
+  ENDMETHOD.
+
+  METHOD is_ssfo_cache_active.
+    rv_active = mv_ssfo_cache_active.
+  ENDMETHOD.
+
+  METHOD set_ssfo_cache_active.
+    mv_ssfo_cache_active = iv_active.
   ENDMETHOD.
 
   METHOD set_use_repo_cache.

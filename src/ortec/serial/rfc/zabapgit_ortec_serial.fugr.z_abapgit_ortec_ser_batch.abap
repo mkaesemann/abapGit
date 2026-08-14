@@ -22,6 +22,7 @@ FUNCTION z_abapgit_ortec_ser_batch.
 *"     VALUE(IV_PREFETCH_BUFFER_PROG) TYPE  XSTRING OPTIONAL
 *"     VALUE(IV_PREFETCH_BUFFER_FUGR) TYPE  XSTRING OPTIONAL
 *"     VALUE(IV_FDT0_CACHE_ACTIVE) TYPE  CHAR1 OPTIONAL
+*"     VALUE(IV_SSFO_CACHE_ACTIVE) TYPE  CHAR1 OPTIONAL
 *"     VALUE(IV_INPUT_ROW_COUNT) TYPE  I
 *"     VALUE(IV_INPUT_VERSION) TYPE  I DEFAULT 1
 *"  EXPORTING
@@ -179,6 +180,7 @@ FUNCTION z_abapgit_ortec_ser_batch.
   " boundary (identical root cause to the SER-SLICE-5 prefetch fix
   " above), so the flag ORCH decided must be re-applied locally here.
   zcl_abapgit_ortec_git_switch=>set_fdt0_cache_active( iv_fdt0_cache_active ).
+  zcl_abapgit_ortec_git_switch=>set_ssfo_cache_active( iv_ssfo_cache_active ).
 
   " Load the DOKIL longtext index for this batch's objects in one chunked
   " SELECT so SERIALIZE_LONGTEXTS' GET_DOKIL hits instead of a per-object
@@ -291,9 +293,9 @@ FUNCTION z_abapgit_ortec_ser_batch.
             ls_result-provider_fallback = 1.
         ENDCASE.
 
-        ls_serialization = zcl_abapgit_ortec_fdt0_cache=>serialize(
+        ls_serialization = zcl_abapgit_ortec_ser_cache=>serialize(
           is_item        = ls_item
-          io_i18n_params = zcl_abapgit_i18n_params=>new( is_params = ls_i18n_params ) ).
+          is_i18n_params = ls_i18n_params ).
 
         EXPORT data = ls_serialization TO DATA BUFFER ls_result-files_xstring.
 
@@ -320,6 +322,7 @@ FUNCTION z_abapgit_ortec_ser_batch.
 
   zcl_abapgit_ortec_git_switch=>set_serial_prefetch_active( abap_false ).
   zcl_abapgit_ortec_git_switch=>set_fdt0_cache_active( abap_false ).
+  zcl_abapgit_ortec_git_switch=>set_ssfo_cache_active( abap_false ).
 
   ev_output_row_count = lines( et_result ).
 

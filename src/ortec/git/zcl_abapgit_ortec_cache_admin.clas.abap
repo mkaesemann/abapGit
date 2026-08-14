@@ -101,6 +101,10 @@ CLASS zcl_abapgit_ortec_cache_admin DEFINITION
       RETURNING VALUE(rv_deleted) TYPE i
       RAISING   zcx_abapgit_ortec_git.
 
+    CLASS-METHODS purge_ssfo_cache
+      RETURNING VALUE(rv_deleted) TYPE i
+      RAISING   zcx_abapgit_ortec_git.
+
   PRIVATE SECTION.
     CLASS-METHODS acquire_lock
       IMPORTING iv_repo_key      TYPE zcl_abapgit_ortec_repo_state=>ty_repo_key
@@ -443,12 +447,60 @@ CLASS zcl_abapgit_ortec_cache_admin IMPLEMENTATION.
     TRY.
         DELETE FROM zaog_fdt_cache.
         rv_deleted = sy-dbcnt.
+        DELETE FROM zaog_ssfo_cache.
+        rv_deleted = rv_deleted + sy-dbcnt.
         COMMIT WORK AND WAIT.
       CATCH cx_root INTO DATA(lx_error).
         ROLLBACK WORK.
         RAISE EXCEPTION TYPE zcx_abapgit_ortec_git
           EXPORTING
-            iv_text  = |Cache admin: failed to clear BRF+ serialization cache: { lx_error->get_text( ) }|
+            iv_text  = |Cache admin: failed to clear serialization caches: { lx_error->get_text( ) }|
+            previous = lx_error.
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD purge_ssfo_cache.
+    TYPES: BEGIN OF ty_oldest,
+             formname     TYPE tdsfname,
+             payload_size TYPE i,
+           END OF ty_oldest.
+    CONSTANTS c_max_rows TYPE i VALUE 5000.
+    CONSTANTS c_max_bytes TYPE int8 VALUE 5368709120.
+    CONSTANTS c_batch_rows TYPE i VALUE 500.
+    CONSTANTS c_max_batches TYPE i VALUE 10.
+    DATA lt_oldest TYPE STANDARD TABLE OF ty_oldest WITH EMPTY KEY.
+    DATA lr_formnames TYPE RANGE OF tdsfname.
+    DATA lv_count TYPE i.
+    DATA lv_total_bytes TYPE int8.
+    DATA lv_batch TYPE i.
+
+    TRY.
+        SELECT SINGLE COUNT( * ) FROM zaog_ssfo_cache INTO @lv_count.
+        SELECT SINGLE SUM( payload_size ) FROM zaog_ssfo_cache INTO @lv_total_bytes.
+          WHILE ( lv_count > c_max_rows OR lv_total_bytes > c_max_bytes )
+            AND lv_batch < c_max_batches.
+          CLEAR: lt_oldest, lr_formnames.
+          SELECT formname, payload_size FROM zaog_ssfo_cache
+            ORDER BY last_used_at, formname
+            INTO TABLE @lt_oldest UP TO @c_batch_rows ROWS.
+          IF lt_oldest IS INITIAL.
+            EXIT.
+          ENDIF.
+          LOOP AT lt_oldest INTO DATA(ls_oldest).
+            APPEND VALUE #( sign = 'I' option = 'EQ' low = ls_oldest-formname ) TO lr_formnames.
+            lv_count = lv_count - 1.
+            lv_total_bytes = lv_total_bytes - ls_oldest-payload_size.
+          ENDLOOP.
+          DELETE FROM zaog_ssfo_cache WHERE formname IN @lr_formnames.
+          rv_deleted = rv_deleted + sy-dbcnt.
+          lv_batch = lv_batch + 1.
+        ENDWHILE.
+        COMMIT WORK AND WAIT.
+      CATCH cx_root INTO DATA(lx_error).
+        ROLLBACK WORK.
+        RAISE EXCEPTION TYPE zcx_abapgit_ortec_git
+          EXPORTING
+            iv_text  = |Cache admin: failed to purge Smart Form serialization cache: { lx_error->get_text( ) }|
             previous = lx_error.
     ENDTRY.
   ENDMETHOD.

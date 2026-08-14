@@ -980,6 +980,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
     lv_use_ortec_prefetch = abap_true.
     " Cache activation waits for the required live BRF+ invalidation proof.
     zcl_abapgit_ortec_git_switch=>set_fdt0_cache_active( abap_true ).
+    zcl_abapgit_ortec_git_switch=>set_ssfo_cache_active( abap_true ).
     IF lv_use_ortec_prefetch = abap_true.
       zcl_abapgit_ortec_ser_pref=>prepare(
         it_tadir    = it_tadir
@@ -1007,6 +1008,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
         ENDIF.
         zcl_abapgit_ortec_git_switch=>set_serial_prefetch_active( abap_false ).
         zcl_abapgit_ortec_git_switch=>set_fdt0_cache_active( abap_false ).
+        zcl_abapgit_ortec_git_switch=>set_ssfo_cache_active( abap_false ).
         zcx_abapgit_exception=>raise( 'ORTEC batch: could not generate a run id' ).
     ENDTRY.
 
@@ -1091,6 +1093,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
         ENDIF.
         zcl_abapgit_ortec_git_switch=>set_serial_prefetch_active( abap_false ).
         zcl_abapgit_ortec_git_switch=>set_fdt0_cache_active( abap_false ).
+        zcl_abapgit_ortec_git_switch=>set_ssfo_cache_active( abap_false ).
       CATCH zcx_abapgit_exception INTO DATA(lx_run_failure).
         ASSIGN mt_run_context[ run_id = lv_run_id ] TO <ls_ctx>.
         IF <ls_ctx> IS ASSIGNED AND <ls_ctx>-ii_progress IS BOUND.
@@ -1107,6 +1110,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
         ENDIF.
         zcl_abapgit_ortec_git_switch=>set_serial_prefetch_active( abap_false ).
         zcl_abapgit_ortec_git_switch=>set_fdt0_cache_active( abap_false ).
+        zcl_abapgit_ortec_git_switch=>set_ssfo_cache_active( abap_false ).
         CLEAR rt_files.
         RAISE EXCEPTION lx_run_failure.
     ENDTRY.
@@ -1711,6 +1715,7 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
           iv_prefetch_buffer_prog     = iv_prefetch_buffer_prog
           iv_prefetch_buffer_fugr     = iv_prefetch_buffer_fugr
           iv_fdt0_cache_active        = zcl_abapgit_ortec_git_switch=>is_fdt0_cache_active( )
+          iv_ssfo_cache_active        = zcl_abapgit_ortec_git_switch=>is_ssfo_cache_active( )
           iv_input_row_count          = lines( it_object_keys )
           iv_input_version            = 1
         EXCEPTIONS
@@ -1920,9 +1925,9 @@ CLASS zcl_abapgit_ortec_ser_orch IMPLEMENTATION.
       ENDIF.
 
       TRY.
-          DATA(ls_serialization) = zcl_abapgit_ortec_fdt0_cache=>serialize(
+          DATA(ls_serialization) = zcl_abapgit_ortec_ser_cache=>serialize(
             is_item        = ls_item
-            io_i18n_params = zcl_abapgit_i18n_params=>new( is_params = ls_i18n_params ) ).
+            is_i18n_params = ls_i18n_params ).
 
           IF ls_serialization-files IS INITIAL.
             " SER-SLICE-3 parity incident fix (serialization_slice_3_
