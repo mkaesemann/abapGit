@@ -896,7 +896,7 @@ CLASS ltcl_pack_stream_progress IMPLEMENTATION.
       iv_repo_key = mc_repo
       ii_progress = lo_recorder ).
 
-    LOOP AT lo_recorder->mt_calls INTO DATA(ls_call) WHERE text CS 'decoding pack object'.
+    LOOP AT lo_recorder->mt_calls INTO DATA(ls_call) WHERE text CS 'Decoding pack object'.
       lv_decoding_calls = lv_decoding_calls + 1.
       cl_abap_unit_assert=>assert_true( act = xsdbool( ls_call-current >= lv_prev_current )
         msg = 'Decoding progress current must be monotonically non-decreasing' ).
@@ -929,7 +929,7 @@ CLASS ltcl_pack_stream_progress IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = lines( lt_meta ) exp = 0
       msg = 'A zero-object pack must decode to an empty metadata table without error' ).
     cl_abap_unit_assert=>assert_true(
-      act = xsdbool( line_exists( lo_recorder->mt_calls[ text = 'Git: decoding pack object 0 of 0' ] ) )
+      act = xsdbool( line_exists( lo_recorder->mt_calls[ text = 'Git: Decoding pack object 0 of 0' ] ) )
       msg = 'A zero-object pack must still produce coherent phase feedback with no division by zero' ).
   ENDMETHOD.
 
@@ -996,7 +996,7 @@ CLASS ltcl_pack_stream_progress IMPLEMENTATION.
     LOOP AT lo_recorder->mt_calls INTO DATA(ls_call).
       cl_abap_unit_assert=>assert_false( act = xsdbool( ls_call-text CS '%' )
         msg = 'Fixpoint/resolution phase text must never claim a percentage' ).
-      IF ls_call-text CS 'resolving in-pack deltas'.
+      IF ls_call-text CS 'Resolving in-pack deltas'.
         lv_found_pass = abap_true.
       ENDIF.
     ENDLOOP.
@@ -1067,10 +1067,10 @@ CLASS ltcl_pack_stream_progress IMPLEMENTATION.
       ii_progress = lo_recorder ).
 
     cl_abap_unit_assert=>assert_true(
-      act = xsdbool( line_exists( lo_recorder->mt_calls[ text = |Git: decoding pack object 0 of 3| ] ) )
+      act = xsdbool( line_exists( lo_recorder->mt_calls[ text = |Git: Decoding pack object 0 of 3| ] ) )
       msg = 'The single injected progress reference must have received the decode phase call' ).
     cl_abap_unit_assert=>assert_true(
-      act = xsdbool( line_exists( lo_recorder->mt_calls[ text = 'Git: extracting commits' ] ) )
+      act = xsdbool( line_exists( lo_recorder->mt_calls[ text = 'Git: Extracting commits' ] ) )
       msg = 'The SAME injected reference must also have received the final extraction phase call - ' &&
             'one continuous lifecycle, not a reset/second progress object' ).
   ENDMETHOD.

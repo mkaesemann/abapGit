@@ -38,6 +38,7 @@ CLASS zcl_abapgit_ortec_porcelain DEFINITION
                 iv_parent          TYPE zif_abapgit_git_definitions=>ty_sha1
                 iv_url             TYPE string                                    OPTIONAL
                 iv_repo_key        TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key OPTIONAL
+                ii_progress        TYPE REF TO zif_abapgit_progress               OPTIONAL
       RETURNING VALUE(rt_expanded) TYPE zif_abapgit_git_definitions=>ty_expanded_tt
       RAISING   zcx_abapgit_exception.
 
@@ -56,6 +57,7 @@ CLASS zcl_abapgit_ortec_porcelain DEFINITION
                 iv_parent        TYPE zif_abapgit_git_definitions=>ty_sha1
                 iv_url           TYPE string
                 iv_branch_name   TYPE string
+                ii_progress      TYPE REF TO zif_abapgit_progress OPTIONAL
       RETURNING VALUE(rs_result) TYPE zcl_abapgit_git_porcelain=>ty_push_result
       RAISING   zcx_abapgit_exception.
 
@@ -127,6 +129,7 @@ CLASS zcl_abapgit_ortec_porcelain DEFINITION
                 iv_commit        TYPE zif_abapgit_git_definitions=>ty_sha1        OPTIONAL
                 it_blob_objects  TYPE zif_abapgit_definitions=>ty_objects_tt      OPTIONAL
                 it_blob_manifest TYPE zif_abapgit_git_definitions=>ty_expanded_tt OPTIONAL
+                ii_progress      TYPE REF TO zif_abapgit_progress                 OPTIONAL
       CHANGING  ct_files         TYPE zif_abapgit_git_definitions=>ty_files_tt
       RAISING   zcx_abapgit_exception.
 
@@ -135,12 +138,14 @@ CLASS zcl_abapgit_ortec_porcelain DEFINITION
                 iv_tree            TYPE zif_abapgit_git_definitions=>ty_sha1
                 iv_base            TYPE string
                 iv_repo_key        TYPE zcl_abapgit_ortec_obj_store=>ty_repo_key OPTIONAL
+                ii_progress        TYPE REF TO zif_abapgit_progress               OPTIONAL
       RETURNING VALUE(rt_expanded) TYPE zif_abapgit_git_definitions=>ty_expanded_tt
       RAISING   zcx_abapgit_exception.
 
     CLASS-METHODS materialize_from_manifest
       IMPORTING it_objects       TYPE zif_abapgit_definitions=>ty_objects_tt
                 it_blob_manifest TYPE zif_abapgit_git_definitions=>ty_expanded_tt
+                ii_progress      TYPE REF TO zif_abapgit_progress OPTIONAL
       CHANGING  ct_files         TYPE zif_abapgit_git_definitions=>ty_files_tt
       RAISING   zcx_abapgit_exception.
 ENDCLASS.
@@ -274,7 +279,8 @@ CLASS ZCL_ABAPGIT_ORTEC_PORCELAIN IMPLEMENTATION.
     rt_expanded = walk_tree( it_objects  = it_objects
                              iv_tree     = ls_commit-tree
                              iv_base     = '/'
-                             iv_repo_key = lv_repo_key ).
+                             iv_repo_key = lv_repo_key
+                             ii_progress = ii_progress ).
   ENDMETHOD.
 
 
@@ -282,6 +288,7 @@ CLASS ZCL_ABAPGIT_ORTEC_PORCELAIN IMPLEMENTATION.
     DATA ls_ortec_object        TYPE zif_abapgit_definitions=>ty_object.
     DATA ls_file                LIKE LINE OF ct_files.
     DATA ls_blob_manifest       LIKE LINE OF it_blob_manifest.
+    DATA lv_materialized        TYPE i.
     DATA lt_blob_object_lookup  TYPE HASHED TABLE OF zif_abapgit_definitions=>ty_object WITH UNIQUE KEY sha1.
     DATA lt_blob_sha1_lookup    TYPE HASHED TABLE OF zif_abapgit_git_definitions=>ty_sha1 WITH UNIQUE KEY table_line.
 
@@ -319,7 +326,19 @@ CLASS ZCL_ABAPGIT_ORTEC_PORCELAIN IMPLEMENTATION.
       ls_file-data = ls_ortec_object-data.
       ls_file-sha1 = ls_ortec_object-sha1.
       APPEND ls_file TO ct_files.
+      lv_materialized = lv_materialized + 1.
+      IF lv_materialized = 1 OR lv_materialized MOD 100 = 0.
+        report_progress( ii_progress = ii_progress
+          iv_current = zcl_abapgit_ortec_pack_stream=>c_progress_phase_extract
+          iv_text = |Git: materializing files ({ lines( ct_files ) } files)| ).
+      ENDIF.
     ENDLOOP.
+
+    IF lv_materialized > 0.
+      report_progress( ii_progress = ii_progress
+        iv_current = zcl_abapgit_ortec_pack_stream=>c_progress_phase_extract
+        iv_text = |Git: materialized { lines( ct_files ) } files| ).
+    ENDIF.
   ENDMETHOD.
 
 
@@ -344,7 +363,8 @@ CLASS ZCL_ABAPGIT_ORTEC_PORCELAIN IMPLEMENTATION.
     ls_commit = zcl_abapgit_git_pack=>decode_commit( ls_object-data ).
     lv_root_tree = ls_commit-tree.
 
-    report_progress( ii_progress = ii_progress iv_current = 1
+    report_progress( ii_progress = ii_progress
+      iv_current = zcl_abapgit_ortec_pack_stream=>c_progress_phase_resolve
       iv_text = 'Git: reading objects from buffer (ZAOG_OBJ_STORE)' ).
 
     TRY.
@@ -364,14 +384,16 @@ CLASS ZCL_ABAPGIT_ORTEC_PORCELAIN IMPLEMENTATION.
     DATA(lt_objects_complete) = VALUE zif_abapgit_definitions=>ty_objects_tt( ( LINES OF it_objects )
                                                                               ( LINES OF lt_objects ) ).
 
-    report_progress( ii_progress = ii_progress iv_current = 1
+    report_progress( ii_progress = ii_progress
+      iv_current = zcl_abapgit_ortec_pack_stream=>c_progress_phase_extract
       iv_text = 'Git: walking file tree' ).
 
     lt_blob_manifest = walk_tree(
                            it_objects  = lt_objects_complete
                            iv_tree     = lv_root_tree
                            iv_base     = '/'
-                           iv_repo_key = iv_repo_key ).
+                           iv_repo_key = iv_repo_key
+                           ii_progress = ii_progress ).
 
     CLEAR lt_blob_sha1s.
     LOOP AT lt_blob_manifest INTO ls_blob_manifest.
@@ -398,6 +420,7 @@ CLASS ZCL_ABAPGIT_ORTEC_PORCELAIN IMPLEMENTATION.
       EXPORTING
         it_objects       = lt_objects_complete
         it_blob_manifest = lt_blob_manifest
+        ii_progress      = ii_progress
       CHANGING
         ct_files         = rt_files ).
 
@@ -405,7 +428,8 @@ CLASS ZCL_ABAPGIT_ORTEC_PORCELAIN IMPLEMENTATION.
     DELETE ADJACENT DUPLICATES FROM lt_blob_sha1s.
 
     IF lt_blob_sha1s IS NOT INITIAL.
-      report_progress( ii_progress = ii_progress iv_current = 1
+      report_progress( ii_progress = ii_progress
+        iv_current = zcl_abapgit_ortec_pack_stream=>c_progress_phase_resolve
         iv_text = |Git: reading { lines( lt_blob_sha1s ) } blobs from buffer (ZAOG_OBJ_STORE)| ).
     ENDIF.
 
@@ -427,6 +451,7 @@ CLASS ZCL_ABAPGIT_ORTEC_PORCELAIN IMPLEMENTATION.
         EXPORTING
           it_objects       = lt_batch_objects
           it_blob_manifest = lt_blob_manifest
+          ii_progress      = ii_progress
         CHANGING
           ct_files         = rt_files ).
     ENDWHILE.
@@ -456,10 +481,13 @@ CLASS ZCL_ABAPGIT_ORTEC_PORCELAIN IMPLEMENTATION.
     " PORCELAIN), which is deliberately left unmodified. get_instance(1)
     " returns the same session-global singleton the standard caller already
     " obtained for its own "Fetch remote files" message - reusing it here
-    " only resets iv_total (already 1) and throttle timestamps, both inert
-    " in the current no-throttle diagnostic build.
-    DATA(li_progress) = zcl_abapgit_progress=>get_instance( 1 ).
-    report_progress( ii_progress = li_progress iv_current = 1 iv_text = 'Git: checking local cache' ).
+    " resets the shared ten-phase total and throttle timestamps, preserving
+    " the same lifecycle used by the fastpath and pack-stream layers.
+    DATA(li_progress) = zcl_abapgit_progress=>get_instance(
+      zcl_abapgit_ortec_pack_stream=>c_progress_phase_total ).
+    report_progress( ii_progress = li_progress
+      iv_current = zcl_abapgit_ortec_pack_stream=>c_progress_phase_cache
+      iv_text = 'Git: checking local cache' ).
 
     lv_ortec_active = zcl_abapgit_ortec_git_switch=>is_active_for_repo( iv_url ).
 
@@ -515,7 +543,8 @@ CLASS ZCL_ABAPGIT_ORTEC_PORCELAIN IMPLEMENTATION.
         " one bounded commit-object read; WALK_TREE/WALK's own bulk
         " PREWARM/FETCH_BLOBS_BULK calls (inside PULL) avoid any
         " repository-wide or per-object read for the reachable set.
-        report_progress( ii_progress = li_progress iv_current = 1
+        report_progress( ii_progress = li_progress
+          iv_current = zcl_abapgit_ortec_pack_stream=>c_progress_phase_cache
           iv_text = 'Git: reusing cached objects (no fetch needed)' ).
 
         TRY.
@@ -537,7 +566,8 @@ CLASS ZCL_ABAPGIT_ORTEC_PORCELAIN IMPLEMENTATION.
                                 iv_url      = iv_pull_url
                                 ii_progress = li_progress ).
 
-        report_progress( ii_progress = li_progress iv_current = 1
+        report_progress( ii_progress = li_progress
+          iv_current = zcl_abapgit_ortec_pack_stream=>c_progress_phase_complete
           iv_text = |Git: completed ({ lines( rs_result-files ) } files, cache reuse)| ).
         RETURN.
 
@@ -548,7 +578,8 @@ CLASS ZCL_ABAPGIT_ORTEC_PORCELAIN IMPLEMENTATION.
         " duplicate certification is performed here), then reconstruct
         " locally exactly like WARM_UNCHANGED - no separate cold
         " reconstruction implementation.
-        report_progress( ii_progress = li_progress iv_current = 1
+        report_progress( ii_progress = li_progress
+          iv_current = zcl_abapgit_ortec_pack_stream=>c_progress_phase_prepare
           iv_text = 'Git: initializing repository from remote (cold start)' ).
 
         TRY.
@@ -561,7 +592,8 @@ CLASS ZCL_ABAPGIT_ORTEC_PORCELAIN IMPLEMENTATION.
               IMPORTING
                 et_tip_blob_sha1s = lt_tip_blob_sha1s ).
 
-            report_progress( ii_progress = li_progress iv_current = 1
+            report_progress( ii_progress = li_progress
+              iv_current = zcl_abapgit_ortec_pack_stream=>c_progress_phase_resolve
               iv_text = |Git: materializing tip snapshot ({ lines( lt_tip_blob_sha1s ) } blobs)| ).
 
             zcl_abapgit_ortec_cold_init=>materialize_tip_snapshot(
@@ -588,7 +620,8 @@ CLASS ZCL_ABAPGIT_ORTEC_PORCELAIN IMPLEMENTATION.
                                 iv_url      = iv_pull_url
                                 ii_progress = li_progress ).
 
-        report_progress( ii_progress = li_progress iv_current = 1
+        report_progress( ii_progress = li_progress
+          iv_current = zcl_abapgit_ortec_pack_stream=>c_progress_phase_complete
           iv_text = |Git: completed ({ lines( rs_result-files ) } files, cold start)| ).
         RETURN.
     ENDCASE.
@@ -598,7 +631,8 @@ CLASS ZCL_ABAPGIT_ORTEC_PORCELAIN IMPLEMENTATION.
     " cascade. zcl_abapgit_git_transport=>upload_pack_by_branch routes to
     " zcl_abapgit_ortec_fastpath=>upload_pack_by_branch when ORTEC is
     " active, which already applies C1's certified-have policy.
-    report_progress( ii_progress = li_progress iv_current = 1
+    report_progress( ii_progress = li_progress
+      iv_current = zcl_abapgit_ortec_pack_stream=>c_progress_phase_request
       iv_text = 'Git: requesting objects from remote' ).
 
     zcl_abapgit_git_transport=>upload_pack_by_branch(
@@ -611,7 +645,8 @@ CLASS ZCL_ABAPGIT_ORTEC_PORCELAIN IMPLEMENTATION.
         ev_branch       = rs_result-commit
         ev_deepen_used  = lv_deepen_used ).
 
-    report_progress( ii_progress = li_progress iv_current = 1
+    report_progress( ii_progress = li_progress
+      iv_current = zcl_abapgit_ortec_pack_stream=>c_progress_phase_extract
       iv_text = |Git: reconstructing files ({ lines( rs_result-objects ) } objects fetched)| ).
 
     TRY.
@@ -646,7 +681,8 @@ CLASS ZCL_ABAPGIT_ORTEC_PORCELAIN IMPLEMENTATION.
               COMMIT WORK.
 
               CLEAR rs_result.
-              report_progress( ii_progress = li_progress iv_current = 1
+              report_progress( ii_progress = li_progress
+                iv_current = zcl_abapgit_ortec_pack_stream=>c_progress_phase_request
                 iv_text = 'Git: retrying with full history (recovery)' ).
 
               zcl_abapgit_git_transport=>upload_pack_by_branch(
@@ -674,7 +710,8 @@ CLASS ZCL_ABAPGIT_ORTEC_PORCELAIN IMPLEMENTATION.
         RAISE EXCEPTION lx_pull.
     ENDTRY.
 
-    report_progress( ii_progress = li_progress iv_current = 1
+    report_progress( ii_progress = li_progress
+      iv_current = zcl_abapgit_ortec_pack_stream=>c_progress_phase_complete
       iv_text = |Git: completed ({ lines( rs_result-files ) } files)| ).
 
     " ORTEC: persist objects in persistent store after successful pull - this
@@ -743,8 +780,10 @@ CLASS ZCL_ABAPGIT_ORTEC_PORCELAIN IMPLEMENTATION.
     " Same singleton-reuse rationale as pull_by_branch - this is the true
     " orchestration boundary for pull-by-commit, no ii_progress is threaded
     " down from the standard (unmodified) caller.
-    DATA(li_progress) = zcl_abapgit_progress=>get_instance( 1 ).
-    report_progress( ii_progress = li_progress iv_current = 1
+    DATA(li_progress) = zcl_abapgit_progress=>get_instance(
+      zcl_abapgit_ortec_pack_stream=>c_progress_phase_total ).
+    report_progress( ii_progress = li_progress
+      iv_current = zcl_abapgit_ortec_pack_stream=>c_progress_phase_request
       iv_text = 'Git: requesting commit from remote' ).
 
     zcl_abapgit_git_transport=>upload_pack_by_commit(
@@ -762,7 +801,8 @@ CLASS ZCL_ABAPGIT_ORTEC_PORCELAIN IMPLEMENTATION.
       lv_ortec_repo_key = zcl_abapgit_ortec_repo_state=>get_repo_key_for_url( iv_url ).
     ENDIF.
 
-    report_progress( ii_progress = li_progress iv_current = 1
+    report_progress( ii_progress = li_progress
+      iv_current = zcl_abapgit_ortec_pack_stream=>c_progress_phase_extract
       iv_text = |Git: reconstructing files ({ lines( rs_result-objects ) } objects fetched)| ).
 
     rs_result-files = pull(
@@ -772,7 +812,8 @@ CLASS ZCL_ABAPGIT_ORTEC_PORCELAIN IMPLEMENTATION.
                           iv_url      = iv_pull_url
                           ii_progress = li_progress ).
 
-    report_progress( ii_progress = li_progress iv_current = 1
+    report_progress( ii_progress = li_progress
+      iv_current = zcl_abapgit_ortec_pack_stream=>c_progress_phase_complete
       iv_text = |Git: completed ({ lines( rs_result-files ) } files)| ).
   ENDMETHOD.
 
@@ -784,6 +825,7 @@ CLASS ZCL_ABAPGIT_ORTEC_PORCELAIN IMPLEMENTATION.
     DATA lv_sha1       TYPE zif_abapgit_git_definitions=>ty_sha1.
     DATA lt_stage      TYPE zif_abapgit_definitions=>ty_stage_tt.
     DATA lv_new_tree   TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA li_progress   TYPE REF TO zif_abapgit_progress.
 
     FIELD-SYMBOLS <ls_stage>   LIKE LINE OF lt_stage.
     FIELD-SYMBOLS <ls_updated> LIKE LINE OF rs_result-updated_files.
@@ -791,12 +833,30 @@ CLASS ZCL_ABAPGIT_ORTEC_PORCELAIN IMPLEMENTATION.
 
     lv_repo_key = zcl_abapgit_ortec_repo_state=>get_repo_key_for_url( iv_url ).
 
+    IF ii_progress IS BOUND.
+      li_progress = ii_progress.
+    ELSE.
+      li_progress = zcl_abapgit_progress=>get_instance(
+        zcl_abapgit_ortec_pack_stream=>c_progress_phase_total ).
+    ENDIF.
+
+    report_progress( ii_progress = li_progress
+      iv_current = zcl_abapgit_ortec_pack_stream=>c_progress_phase_resolve
+      iv_text = 'Git: walking file tree' ).
+
     lt_expanded = full_tree( it_objects  = it_old_objects
                              iv_parent   = iv_parent
-                             iv_repo_key = lv_repo_key ).
+                             iv_repo_key = lv_repo_key
+                             ii_progress = li_progress ).
 
     lt_stage = io_stage->get_all( ).
     LOOP AT lt_stage ASSIGNING <ls_stage>.
+
+      IF sy-tabix = 1 OR sy-tabix = lines( lt_stage ) OR sy-tabix MOD 100 = 0.
+        report_progress( ii_progress = li_progress
+          iv_current = zcl_abapgit_ortec_pack_stream=>c_progress_phase_build
+          iv_text = |Git: applying staged changes ({ sy-tabix } of { lines( lt_stage ) })| ).
+      ENDIF.
 
       APPEND INITIAL LINE TO rs_result-updated_files ASSIGNING <ls_updated>.
       MOVE-CORRESPONDING <ls_stage>-file TO <ls_updated>.
@@ -866,6 +926,7 @@ CLASS ZCL_ABAPGIT_ORTEC_PORCELAIN IMPLEMENTATION.
                       iv_sha1     = lv_new_tree
                       iv_path     = '/'
                       iv_repo_key = lv_repo_key
+                      ii_progress = li_progress
             CHANGING  ct_files    = rs_result-new_files ).
     ENDIF.
   ENDMETHOD.
@@ -1035,6 +1096,9 @@ CLASS ZCL_ABAPGIT_ORTEC_PORCELAIN IMPLEMENTATION.
           ls_file-data = ls_ortec_object-data.
           ls_file-sha1 = ls_ortec_object-sha1.
           APPEND ls_file TO ct_files.
+          report_progress( ii_progress = ii_progress
+            iv_current = zcl_abapgit_ortec_pack_stream=>c_progress_phase_extract
+            iv_text = |Git: walking files ({ lines( ct_files ) } files)| ).
           CONTINUE.
         ENDIF.
         CONTINUE.
@@ -1048,6 +1112,9 @@ CLASS ZCL_ABAPGIT_ORTEC_PORCELAIN IMPLEMENTATION.
         ls_file-data = <ls_blob>-data.
         ls_file-sha1 = <ls_blob>-sha1.
         APPEND ls_file TO ct_files.
+        report_progress( ii_progress = ii_progress
+          iv_current = zcl_abapgit_ortec_pack_stream=>c_progress_phase_extract
+          iv_text = |Git: walking files ({ lines( ct_files ) } files)| ).
         CONTINUE.
       ENDIF.
 
@@ -1062,6 +1129,9 @@ CLASS ZCL_ABAPGIT_ORTEC_PORCELAIN IMPLEMENTATION.
           ls_file-data = ls_ortec_object-data.
           ls_file-sha1 = ls_ortec_object-sha1.
           APPEND ls_file TO ct_files.
+          report_progress( ii_progress = ii_progress
+            iv_current = zcl_abapgit_ortec_pack_stream=>c_progress_phase_extract
+            iv_text = |Git: walking files ({ lines( ct_files ) } files)| ).
           CONTINUE.
         CATCH zcx_abapgit_ortec_git.
           zcx_abapgit_exception=>raise( |{ zcl_abapgit_ortec_git_switch=>c_walk_error_prefix } blob not found| ).
@@ -1081,6 +1151,7 @@ CLASS ZCL_ABAPGIT_ORTEC_PORCELAIN IMPLEMENTATION.
           iv_commit        = iv_commit
           it_blob_objects  = it_blob_objects
           it_blob_manifest = it_blob_manifest
+          ii_progress      = ii_progress
         CHANGING
           ct_files         = ct_files ).
     ENDLOOP.
@@ -1092,6 +1163,7 @@ CLASS ZCL_ABAPGIT_ORTEC_PORCELAIN IMPLEMENTATION.
     DATA ls_object       TYPE zif_abapgit_definitions=>ty_object.
     DATA ls_ortec_object TYPE zif_abapgit_definitions=>ty_object.
     DATA lt_expanded     TYPE zif_abapgit_git_definitions=>ty_expanded_tt.
+    DATA lv_expanded     TYPE i.
 
     FIELD-SYMBOLS <ls_node> LIKE LINE OF lt_nodes.
     FIELD-SYMBOLS <ls_exp>  LIKE LINE OF rt_expanded.
@@ -1126,12 +1198,19 @@ CLASS ZCL_ABAPGIT_ORTEC_PORCELAIN IMPLEMENTATION.
           <ls_exp>-name  = <ls_node>-name.
           <ls_exp>-sha1  = <ls_node>-sha1.
           <ls_exp>-chmod = <ls_node>-chmod.
+          lv_expanded = lv_expanded + 1.
+          IF lv_expanded = 1 OR lv_expanded MOD 100 = 0.
+            report_progress( ii_progress = ii_progress
+              iv_current = zcl_abapgit_ortec_pack_stream=>c_progress_phase_extract
+              iv_text = |Git: walking file tree ({ lines( rt_expanded ) } entries, { iv_base })| ).
+          ENDIF.
         WHEN zif_abapgit_git_definitions=>c_chmod-dir.
           lt_expanded = walk_tree(
                             it_objects  = it_objects
                             iv_tree     = <ls_node>-sha1
                             iv_base     = |{ iv_base }{ <ls_node>-name }/|
-                            iv_repo_key = iv_repo_key ).
+                            iv_repo_key = iv_repo_key
+                            ii_progress = ii_progress ).
           APPEND LINES OF lt_expanded TO rt_expanded.
         WHEN OTHERS.
           zcx_abapgit_exception=>raise( |walk_tree: unknown chmod { <ls_node>-chmod }| ).
