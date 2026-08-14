@@ -28,6 +28,15 @@ The completed serialization work is now fully documented in the repository memor
 TOPIC=WAPA_PAYLOAD_PERF
 STATUS=SAP_VALIDATED_COMPLETE
 SYSTEM=IT8 (productive source of truth); shared memory is this repository .memory tree
+SSFO_LOCAL_CACHE=SAP_VALIDATED_COMPLETE: persistent client-isolated full-result SSFO cache with active-only dependency signature, SHOW-lock effective language, validated replay, pre/post-publication signature comparison, bounded payload/eviction, and aRFC switch propagation.
+SSFO_PRODUCTIVE_OBJECTS=ZAOG_SSFO_CACHE (secondary index 001 LAST_USED_AT,FORMNAME);ZCL_ABAPGIT_ORTEC_SSFO_CACHE;ZCL_ABAPGIT_ORTEC_SER_CACHE;ZCL_ABAPGIT_ORTEC_GIT_SWITCH;ZCL_ABAPGIT_ORTEC_SER_ORCH;Z_ABAPGIT_ORTEC_SER_BATCH;ZCL_ABAPGIT_ORTEC_CACHE_ADMIN;ZABAPGIT_ORTEC_CACHE_ADMIN.
+SSFO_EVIDENCE=Owner tested the cache and verified correct cache updates. SSFO cache integration active source is syntax-clean; ORCH ABAP Unit 49/49; cache-admin ABAP Unit 16/16; DDIC table client dependency and active index 001 verified.
+SSFO_DESIGN=C:\Projects\abap\abapGit\.memory\logs\ssfo_local_cache_design.md
+SSFO_CORRECTNESS_REVIEW=C:\Projects\abap\abapGit\.memory\reviews\ssfo_local_cache_correctness_review.md
+SSFO_PERFORMANCE_DESIGN=C:\Projects\abap\abapGit\.memory\reviews\ssfo_local_cache_performance_design.md
+SSFO_IMPLEMENTATION=C:\Projects\abap\abapGit\.memory\handoffs\ssfo_local_cache_implementation.md
+SSFO_TEST_GAP=No direct SSFO cache ABAP Unit tests; testclasses include remains placeholder due local-friend/test-include tooling limitation. Treat the owner’s cache-update verification as runtime acceptance; retain focused parity/invalidation/SHOW-lock SAT trace as optional follow-up if regression evidence is needed.
+SSFO_NEXT=Closed for current scope.
 WAPA_PAYLOAD_DISCOVERY=C:\Projects\abap\abapGit\.memory\logs\wapa_payload_discovery.md
 WAPA_OPTION1=SAP_VALIDATED_COMPLETE: bounded raw O2PAGCON manifest/payload/verification path; page-local decode with raw-row release before IMPORT; contiguous bounded bisection with terminal reference-range fallback. WAPA remains singleton-batched.
 TUNED_CONSTANTS=C_RAW_PREFETCH_INITIAL_PAGES=6000;C_MAX_RAW_PREFETCH_ROWS=30000;C_MAX_RAW_MANIFEST_ROWS=40000;C_MAX_RAW_PAYLOAD_BYTES=104857600;C_MAX_RAW_SPLIT_DEPTH=5;C_MAX_DECODED_PAGE_BYTES=15728640.
